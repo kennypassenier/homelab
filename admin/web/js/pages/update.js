@@ -23,8 +23,17 @@
 
 import { act, onAct, send } from "../act.js";
 import { refusalCallout } from "../actui.js";
-import { ensureStyle, errorBox, fetchJson, h, slowRead } from "../dom.js";
-import { declare, declareField, drivable, fieldId } from "../drivable.js";
+import {
+  ensureStyle,
+  errorBox,
+  fetchJson,
+  h,
+  labelCells,
+  selectCell,
+  slowRead,
+  tableBlock,
+} from "../dom.js";
+import { declare, drivable } from "../drivable.js";
 import { diffBlocks } from "../editui.js";
 import { formatDateTime, humanDuration } from "../format.js";
 import { inboxNow } from "../inboxlist.js";
@@ -39,6 +48,7 @@ import {
   emptyState,
   pageHeader,
   section,
+  segSwitch,
   skeletonLines,
   stepper,
 } from "../ui.js";
@@ -59,15 +69,19 @@ import {
   whoNotices,
 } from "../updateflow.js";
 import { attachLogs } from "/static/kp/js/log.js";
+import { attachAckGates } from "/static/kp/js/ack-gate.js";
+import { attachDataTables } from "/static/kp/js/datatable.js";
+import { attachIdmarks } from "/static/kp/js/idmark.js";
+import { setPipeline, attachPipelines } from "/static/kp/js/pipeline.js";
+import { bindSelection } from "../selectbind.js";
+import { attachSteplists, buildSteplist } from "/static/kp/js/steplist.js";
+import {
+  attachVersionDeltas,
+  releaseUrl as kpReleaseUrl,
+  summarizeDeltas,
+  versionLevel,
+} from "/static/kp/js/version-delta.js";
 
-// review M5: every page field Live view may set is declared (drivable.js
-// `declareField`); the client and the dashboard refuse any other.
-const MAJOR_ACK = declareField({
-  id: "uf-ack",
-  page: "update",
-  row: "<item id, - for anything but a-z 0-9>",
-  what: "tick that a major version's release notes were read",
-});
 const PICK = declare({
   id: "update-pick",
   page: "update",
@@ -90,14 +104,37 @@ const BACK = declare({
   shows: "on step 2 (what changes)",
   reach: [{ do: "click", control: "update-see-impact" }],
 });
-const MAJOR = declare({
+const MAJOR_GATE = declare({
   id: "update-major-read",
   page: "update",
   opens: "view",
   row: "<pin:stack:app/service>",
-  what: "tick “I read the release notes” for a major version",
-  shows: "on step 2 (what changes)",
-  reach: [{ do: "click", control: "update-see-impact" }],
+  what: "tick “I read the release notes of …” for a major version (it can be ticked once the notes were opened, or after 4 seconds)",
+  shows: "under the list, once a major version is ticked",
+  reach: [{ do: "click", control: "update-pick", row: "*" }],
+});
+const UNTICK = declare({
+  id: "update-untick",
+  page: "update",
+  opens: "view",
+  what: "untick every ticked app of the Update flow's list",
+  shows: "while an app is ticked",
+  reach: [{ do: "click", control: "update-pick", row: "*" }],
+});
+const MAJORS = declare({
+  id: "update-majors",
+  page: "update",
+  opens: "view",
+  row: "alone|together",
+  what: "allow one major version at a time (the default), or several together, each with its own read",
+});
+const LAYOUT = declare({
+  id: "update-run-layout",
+  page: "update",
+  opens: "view",
+  row: "board|steps",
+  what: "show the running update as a board with a lane per step or as a list of steps",
+  shows: "while the update runs or after it",
 });
 const GO = declare({
   id: "update-go",
@@ -249,27 +286,125 @@ export function mount(root, scope) {
   const seeDesc = /** @type {HTMLElement} */ (
     see.el.querySelector(".nx-card__head p")
   );
-  const list = h("div", {
-    class: "uf-list",
-    role: "group",
-    "aria-label": "Apps to update",
+  // The list is one kp datatable with a selection bar over it; a major
+  // version holds the next step off until its release notes were read (kp
+  // acknowledge gate); the table loads, empties and fails the table's own way.
+  const table = tableBlock({
+    remember: "update-list",
+    caption: "Apps with a newer version; tick the ones to update",
+    captionHidden: true,
+    search: null,
+    nothing: "Everything is up to date.",
+    select: { label: "Select every update", actions: [] },
+    columns: [
+      { label: "App", sort: "text" },
+      { label: "Jump", sort: "number" },
+      { label: "Waiting", sort: "number", cls: "kp-text-end" },
+      { label: "Note", sort: null },
+    ],
   });
-  const chosenN = h("span", { class: "uf-hint", "aria-live": "polite" });
+  table.wrap.querySelector("[data-kp-datatable-actions]")?.remove();
+  table.wrap.id = "uf-table";
+  const summary = h("p", { class: "uf-summary", role: "status" });
+  const gates = h("div", { class: "uf-gates", "aria-live": "polite" });
   const next = drivable(
     h(
       "button",
       {
         type: "button",
         class: "kp-button kp-button--primary",
+        id: "uf-see",
+        "data-kp-selection-action": "see",
         title:
           "Show downtime, what restarts, who notices and the change to the files; nothing runs yet",
-        disabled: "",
       },
-      "See what this changes →",
+      "See what this changes",
     ),
     SEE,
   );
-  see.body.append(list, h("div", { class: "uf-foot" }, chosenN, next));
+  const bar = h(
+    "div",
+    {
+      class: "kp-selection uf-bar",
+      "data-kp-selection": "",
+      "data-kp-selection-for": "uf-table",
+      "data-kp-placement": "sticky-top",
+      id: "uf-bar",
+      "aria-label": "Apps to update",
+    },
+    h("div", { class: "kp-selection__actions" }, next),
+  );
+  // One major at a time is the default; several together, each read, is the
+  // other option (kept in this browser).
+  let majorsTogether = false;
+  try {
+    majorsTogether =
+      localStorage.getItem("homelab.update.majors") === "together";
+  } catch {
+    // the choice lasts for this visit
+  }
+  const majorsSeg = segSwitch({
+    label: "Major versions",
+    value: majorsTogether ? "together" : "alone",
+    items: [
+      {
+        value: "alone",
+        label: "One major at a time",
+        hint: "A major version is updated on its own, so its notes get a read of their own",
+      },
+      {
+        value: "together",
+        label: "Allowed together, each read",
+        hint: "Several majors in one run, each with its own tick",
+      },
+    ],
+    onChange: (v) => {
+      majorsTogether = v === "together";
+      try {
+        localStorage.setItem("homelab.update.majors", v);
+      } catch {
+        // kept for this visit only
+      }
+      // The rule is re-read from the ticks as they stand.
+      paintChosen();
+      sel.refresh();
+    },
+    mark: (b, v) => void drivable(b, MAJORS, v),
+  });
+  const majorsRow = h(
+    "div",
+    { class: "uf-ctl" },
+    h("b", { class: "uf-ctl__label" }, "Major versions"),
+    majorsSeg.el,
+  );
+  const list = h(
+    "div",
+    { class: "uf-list" },
+    summary,
+    majorsRow,
+    bar,
+    table.wrap,
+    gates,
+  );
+  see.body.append(list);
+  const detachTables = attachDataTables(list);
+
+  const detachMarks = attachIdmarks(list);
+  const detachGates = attachAckGates(list);
+  const detachDeltas = attachVersionDeltas(list);
+  const rules = () => ({
+    see: (/** @type {{key: string, label: string}[]} */ sel) => {
+      const majors = sel.filter(
+        (x) => items.find((i) => i.id === x.key)?.major,
+      );
+      return !majorsTogether && majors.length && sel.length > 1
+        ? `A major update needs its own read: update ${majors[0].label} on its own`
+        : "";
+    },
+  });
+  const sel = bindSelection(list, bar, rules, undefined, (c) =>
+    drivable(c, UNTICK),
+  );
 
   // ---- 2 · Impact ----------------------------------------------------
   const impact = section({
@@ -370,7 +505,64 @@ export function mount(root, scope) {
       ),
     ],
   });
-  const runList = h("div");
+  // The run is a kp pipeline board (a lane per step, a card per app) or a
+  // kp step list; the job reports its steps for the whole batch, so every
+  // card stands in the lane of the step the job is at, and one that failed
+  // stays in the lane it failed in.
+  const board = h("section", {
+    class: "kp-pipeline uf-board",
+    "data-kp-pipeline": "",
+    "data-kp-pipeline-share": "false",
+    "aria-label": "Updates in progress",
+  });
+  const stepsBox = h("div", { class: "uf-steps", hidden: "" });
+  /** @type {"board" | "steps"} */
+  let layout = "board";
+  try {
+    if (localStorage.getItem("homelab.update.layout") === "steps")
+      layout = "steps";
+  } catch {
+    // the choice lasts for this visit
+  }
+  const layoutSeg = segSwitch({
+    label: "Layout",
+    value: layout,
+    items: [
+      {
+        value: "board",
+        label: "A board with a lane per step",
+        hint: "Each app is a card that moves through Notes, Back up, Update, Verify and Done",
+      },
+      {
+        value: "steps",
+        label: "A step list",
+        hint: "The steps of the update with their times",
+      },
+    ],
+    onChange: (v) => {
+      layout = v === "steps" ? "steps" : "board";
+      try {
+        localStorage.setItem("homelab.update.layout", layout);
+      } catch {
+        // kept for this visit only
+      }
+      paintRun();
+    },
+    mark: (b, v) => void drivable(b, LAYOUT, v),
+  });
+  const runList = h(
+    "div",
+    { class: "uf-run" },
+    h(
+      "div",
+      { class: "uf-ctl" },
+      h("b", { class: "uf-ctl__label" }, "Layout"),
+      layoutSeg.el,
+    ),
+    board,
+    stepsBox,
+  );
+  const detachRun = [attachPipelines(runList), attachSteplists(runList)];
   // The kp log component, the same lines the job panel draws (gap-kplog-1).
   const log = h("div", {
     class: "kp-log uf-log",
@@ -427,149 +619,234 @@ export function mount(root, scope) {
   const chosenItems = () => items.filter((i) => chosen.has(i.id));
 
   // ---- step 1 ----------------------------------------------------------
+  /** @type {Map<string, string>} when each pin's newer version was released */
+  let releasedOf = new Map();
+  /** Whole days since a release date ("2026-09-30"), or null. @param {string | undefined} iso */
+  const daysSince = (iso) => {
+    const m = iso ? /^(\d{4})-(\d{2})-(\d{2})/.exec(iso) : null;
+    return m
+      ? Math.max(
+          0,
+          Math.floor(
+            (now() - Date.UTC(+m[1], +m[2] - 1, +m[3]) / 1000) / 86400,
+          ),
+        )
+      : null;
+  };
   const paintList = () => {
     head.title.textContent = flowTitle(items, scope);
+    const sum = summarizeDeltas(
+      items
+        .filter((i) => i.kind === "pin")
+        .map((i) => ({ from: i.from, to: i.to })),
+      {},
+    );
+    summary.textContent = items.length
+      ? `${items.length} ${items.length === 1 ? "update" : "updates"} waiting: ${sum.text}`
+      : "Everything is up to date.";
     if (!items.length) {
-      list.replaceChildren(
-        emptyState({
-          title: "Nothing has a newer version",
-          text: "The fleet check found no pinned app with a newer release. When one comes out it shows here and in the Inbox.",
-          action: drivable(
-            h(
-              "a",
-              {
-                class: "kp-button",
-                href: back,
-                title: "Nothing to update: go back",
-              },
-              fromStacks
-                ? "Back to Stacks"
-                : scope.all
-                  ? "Back to the Inbox"
-                  : "Back to the stack",
-            ),
-            AFTER,
-            "back",
-          ),
-        }),
-      );
-    } else
-      list.replaceChildren(
-        ...items.map((i) => {
-          // redesign-final-h1: an app that comes with a homelab release is
-          // listed (Stacks and the Inbox count it), says so, and has no
-          // tick: nothing here moves it.
-          if (i.kind === "release")
-            return h(
-              "div",
-              { class: "uf-item uf-item--release", "data-item": i.id },
-              h("span", { class: "uf-norow", "aria-hidden": "true" }, "—"),
-              h("strong", null, `${i.stack} / ${i.container}`),
-              h(
+      table.tbody.replaceChildren();
+      table.ready();
+      paintChosen();
+      return;
+    }
+    table.tbody.replaceChildren(
+      ...items.map((i) => {
+        const rel = i.kind === "release";
+        const tick = selectCell(i.id, `Include ${i.stack}/${i.container}`);
+        const box = /** @type {HTMLInputElement} */ (
+          tick.querySelector("input")
+        );
+        drivable(box, PICK, i.id);
+        if (rel) {
+          box.disabled = true;
+          box.title =
+            "Part of the homelab itself: it moves when the host is updated";
+        }
+        const level =
+          i.kind === "pin" ? versionLevel(i.from, i.to, {}) : "other";
+        const url =
+          i.notes ?? (i.kind === "pin" ? kpReleaseUrl("", i.to) : null);
+        const jump =
+          i.kind === "pin"
+            ? h("span", {
+                class: "kp-badge kp-badge--version",
+                "data-kp-version-from": i.from,
+                "data-kp-version-to": i.to,
+                "data-kp-version-app": i.container,
+                ...(url ? { "data-kp-version-href": url } : {}),
+              })
+            : h(
                 "span",
-                { class: "uf-ver" },
-                h("s", null, i.from),
-                ` → ${i.to}`,
-              ),
-              h(
-                "small",
-                null,
-                h("span", { class: "kp-badge" }, "with a homelab release"),
-                " part of the homelab itself: it moves when the host is updated (System › Host › Update the host…), not from here",
-              ),
-            );
-          const box = drivable(
-            h("input", {
-              type: "checkbox",
-              "aria-label": `Include ${i.stack}/${i.container}`,
-            }),
-            PICK,
-            i.id,
-          );
-          /** @type {HTMLInputElement} */ (box).checked = chosen.has(i.id);
-          box.addEventListener("change", () => {
-            if (/** @type {HTMLInputElement} */ (box).checked) chosen.add(i.id);
-            else chosen.delete(i.id);
-            paintChosen();
-          });
-          const kind =
-            i.kind === "pull"
-              ? h("span", { class: "kp-badge" }, "moving tag")
-              : i.major
-                ? h(
-                    "span",
-                    { class: "kp-badge kp-badge--warning" },
-                    "major version",
-                  )
-                : h("span", { class: "kp-badge" }, "minor version");
-          const what =
-            i.kind === "pull"
-              ? "apps that follow a tag such as :latest get whatever it points at now; one that is not healthy within 2 min is rolled back by itself"
-              : i.major
-                ? "may change settings or data — read the notes"
-                : "fixes and small features";
-          return h(
-            "label",
-            { class: "uf-item", "data-item": i.id },
-            box,
-            h("strong", null, `${i.stack} / ${i.container}`),
+                { class: "kp-badge" },
+                rel ? "with a homelab release" : "moving tag",
+              );
+        const waited = daysSince(releasedOf.get(i.id));
+        return h(
+          "tr",
+          {
+            "data-kp-row-key": i.id,
+            "data-kp-row-label": `${i.stack}/${i.container}`,
+          },
+          tick,
+          h(
+            "td",
+            { "data-kp-sort-value": `${i.stack}/${i.container}` },
             h(
               "span",
-              { class: "uf-ver" },
-              ...(i.kind === "pin"
-                ? [h("s", null, i.from), ` → ${i.to}`]
-                : ["newest"]),
+              { class: "uf-app" },
+              h("span", {
+                class: "kp-idmark kp-idmark--sm",
+                "data-kp-idmark": i.container,
+                "aria-hidden": "true",
+              }),
+              h("b", null, i.container),
+              h("span", { class: "kp-timestamp" }, i.stack),
             ),
-            h(
-              "small",
-              null,
-              kind,
-              ` ${what}`,
-              ...(i.notes
-                ? [
-                    " · ",
-                    drivable(
-                      h(
-                        "a",
-                        {
-                          href: i.notes,
-                          target: "_blank",
-                          rel: "noopener noreferrer",
-                          title: `The ${i.to} release notes, in a new tab`,
-                        },
-                        "release notes",
-                      ),
-                      NOTES,
-                      i.id,
-                    ),
-                  ]
-                : []),
-            ),
-          );
-        }),
-      );
+          ),
+          h(
+            "td",
+            {
+              "data-kp-sort-value": String(
+                { major: 3, minor: 2, patch: 1 }[
+                  /** @type {"major"} */ (level)
+                ] ?? 0,
+              ),
+            },
+            jump,
+          ),
+          h(
+            "td",
+            {
+              class: "kp-text-end",
+              "data-kp-sort-value": String(waited ?? -1),
+            },
+            waited == null ? "—" : `${waited} ${waited === 1 ? "day" : "days"}`,
+          ),
+          h(
+            "td",
+            null,
+            i.kind === "pull"
+              ? "A moving tag: it runs what the tag points at now; an app that is not healthy within 2 min is rolled back by itself."
+              : rel
+                ? "Part of the homelab itself: it moves when the host is updated (System › Host › Update the host…), not from here."
+                : i.major
+                  ? "Major: read the release notes first; a major release can change settings or move data."
+                  : "Fixes and small features.",
+          ),
+        );
+      }),
+    );
+    labelCells(table.tbody, () => ["", "App", "Jump", "Waiting", "Note"]);
+    attachVersionDeltas(table.tbody);
+    table.ready();
+    for (const b of /** @type {NodeListOf<HTMLInputElement>} */ (
+      table.tbody.querySelectorAll("input[data-kp-select-row]")
+    )) {
+      const want = chosen.has(b.value) && !b.disabled;
+      if (b.checked !== want) {
+        b.checked = want;
+        b.dispatchEvent(new Event("change", { bubbles: true }));
+      }
+    }
     paintChosen();
   };
+  bar.addEventListener("kp-selection-change", (e) => {
+    const ks = new Set(/** @type {CustomEvent} */ (e).detail.keys);
+    chosen = ks;
+    syncGates();
+    paintChosen();
+  });
+  bar.addEventListener("kp-selection-action", () => {
+    if (!chosenItems().length) return;
+    void toImpact().catch(() => {});
+  });
+  /** One kp acknowledge gate per ticked major version, kept in step with the ticks. */
+  const syncGates = () => {
+    const majors = chosenItems().filter((i) => i.major);
+    for (const g of /** @type {NodeListOf<HTMLElement>} */ (
+      gates.querySelectorAll("[data-kp-ack]")
+    ))
+      if (!majors.some((m) => m.id === g.dataset.kpAckKey)) {
+        acked.delete(g.dataset.kpAckKey ?? "");
+        g.remove();
+      }
+    for (const m of majors) {
+      if (gates.querySelector(`[data-kp-ack-key="${CSS.escape(m.id)}"]`))
+        continue;
+      gates.append(
+        h(
+          "div",
+          {
+            class: "kp-alert kp-alert--warning",
+            "data-kp-ack": "",
+            "data-kp-ack-for": "#uf-see",
+            "data-kp-ack-key": m.id,
+            "data-kp-ack-mode": "all",
+            "data-kp-ack-label": `I read the release notes of ${m.to}`,
+            "data-kp-ack-link": m.notes ?? "",
+            "data-kp-ack-min-ms": "4000",
+          },
+          h(
+            "div",
+            { class: "kp-alert__body" },
+            h(
+              "strong",
+              null,
+              `${m.stack}/${m.container} ${m.from} → ${m.to} is a major version. `,
+            ),
+            "It can change settings or move data.",
+          ),
+        ),
+      );
+    }
+    attachAckGates(gates);
+    for (const box of /** @type {NodeListOf<HTMLInputElement>} */ (
+      gates.querySelectorAll("[data-kp-ack] input[type=checkbox]")
+    )) {
+      const key =
+        box.closest("[data-kp-ack]")?.getAttribute("data-kp-ack-key") ?? "";
+      if (!box.dataset.drive) drivable(box, MAJOR_GATE, key);
+    }
+  };
+  gates.addEventListener("kp-ack-change", (e) => {
+    const d = /** @type {CustomEvent} */ (e).detail;
+    if (d.key) {
+      if (d.checked) acked.add(d.key);
+      else acked.delete(d.key);
+    }
+  });
   const paintChosen = () => {
-    const n = chosenItems().length;
-    const can = items.filter((i) => i.kind !== "release").length;
-    chosenN.textContent = `${n} of ${can} chosen · click a row to include or leave it out`;
-    /** @type {HTMLButtonElement} */ (next).disabled = n === 0;
+    sel.refresh();
   };
 
   /** @param {any} body */
   const got = (body) => {
     feedUpdates(body);
     items = itemsFor(body, scope);
+    releasedOf = new Map(
+      (body?.images ?? [])
+        .filter((/** @type {any} */ x) => x.key && x.released)
+        .map((/** @type {any} */ x) => [
+          `pin:${String(x.where_).split("/")[0]}:${x.key}`,
+          String(x.released),
+        ]),
+    );
     if (!picked) {
       chosen = firstChosen(items, scope);
+      // One major at a time: a list that opens with a major among others
+      // starts with the others; the major is one tick away.
+      if (!majorsTogether && chosen.size > 1)
+        chosen = new Set(
+          [...chosen].filter((id) => !items.find((i) => i.id === id)?.major),
+        );
       picked = true;
     } else
       chosen = new Set(
         [...chosen].filter((id) => items.some((i) => i.id === id)),
       );
     const at = Number(body?.measured_at) || 0;
-    seeDesc.textContent = `${at ? `Found by the fleet check at ${formatDateTime(at)}, which` : "The fleet check"} compares each pinned image with its upstream releases. Click a row to include or leave it out.`;
+    seeDesc.textContent = `${at ? `Found by the fleet check at ${formatDateTime(at)}, which` : "The fleet check"} compares each pinned image with its upstream releases. Tick the apps to update, read the notes of a major version, then see what it changes.`;
     if (step === 1) paintList();
   };
 
@@ -626,25 +903,12 @@ export function mount(root, scope) {
             "the snapshot from step 3 holds the data as it was",
           ),
     );
-    // A major version needs the release notes read (fix-231's rule).
+    // A major version's notes were read in step 1 (its gate); here it is
+    // named again with the way back.
     const majors = c.filter((i) => i.major);
     majorBox.replaceChildren(
-      ...majors.map((i) => {
-        const tick = drivable(
-          h("input", {
-            type: "checkbox",
-            id: fieldId(MAJOR_ACK, i.id.replace(/[^a-z0-9]/gi, "-")),
-          }),
-          MAJOR,
-          i.id,
-        );
-        /** @type {HTMLInputElement} */ (tick).checked = acked.has(i.id);
-        tick.addEventListener("change", () => {
-          if (/** @type {HTMLInputElement} */ (tick).checked) acked.add(i.id);
-          else acked.delete(i.id);
-          paintGo();
-        });
-        return h(
+      ...majors.map((i) =>
+        h(
           "section",
           {
             class: "kp-alert kp-alert--warning uf-major__item",
@@ -663,7 +927,7 @@ export function mount(root, scope) {
             h(
               "span",
               null,
-              "A major release can change its settings or move its data in a way the old version cannot read back. Restoring the backup from step 3 is then the way back.",
+              `Its release notes were read in step 1${acked.has(i.id) ? "" : " (not yet: go back and tick them)"}. A major release can change its settings or move its data in a way the old version cannot read back; restoring the backup from step 3 is then the way back.`,
               ...(i.notes
                 ? [
                     " ",
@@ -685,14 +949,8 @@ export function mount(root, scope) {
                 : []),
             ),
           ),
-          h(
-            "label",
-            { class: "uf-major__ack", for: tick.id },
-            tick,
-            " I read the release notes",
-          ),
-        );
-      }),
+        ),
+      ),
     );
     paintGo();
     // Who notices, from the fleet map's dependencies.
@@ -896,24 +1154,85 @@ export function mount(root, scope) {
     step = done ? 6 : Math.min(5, Math.max(3, Number(flow?.step) || 3));
     show();
     head.title.textContent = flowTitle(items, scope);
-    runList.replaceChildren(
-      checkList(
-        flowRows(
-          flow ?? {
-            rows: [
-              {
-                id: "backup",
-                step: 3,
-                title: "Queued",
-                desc: "the job starts as soon as the one before it ends",
-                state: "wait",
-              },
-            ],
+    const rows = flowRows(
+      flow ?? {
+        rows: [
+          {
+            id: "backup",
+            step: 3,
+            title: "Queued",
+            desc: "the job starts as soon as the one before it ends",
+            state: "wait",
           },
-          done ? logs : null,
-        ),
-      ),
+        ],
+      },
+      done ? logs : null,
     );
+    layoutSeg.set(layout);
+    board.hidden = layout !== "board";
+    stepsBox.hidden = layout !== "steps";
+    const failedRow = rows.find((r) => r.state === "bad");
+    const lane = failedRow
+      ? failedRow.step >= 5
+        ? "verify"
+        : failedRow.step === 4
+          ? "update"
+          : "backup"
+      : done
+        ? "done"
+        : step >= 5
+          ? "verify"
+          : step === 4
+            ? "update"
+            : "backup";
+    const jobItems = /** @type {any[]} */ (flow?.items ?? chosenItems());
+    setPipeline(board, {
+      lanes: [
+        { key: "notes", label: "Notes", tone: 1 },
+        { key: "backup", label: "Back up", tone: 2 },
+        { key: "update", label: "Update", tone: 3 },
+        { key: "verify", label: "Verify", tone: 4 },
+        { key: "done", label: "Done", tone: 5 },
+      ],
+      cards: jobItems.map((i) => ({
+        id: String(i.id ?? `${i.stack}/${i.container ?? i.key}`),
+        lane,
+        title: String(i.container ?? i.app ?? i.key ?? i.stack),
+        sub: String(i.stack),
+        meta: failedRow
+          ? `failed: ${failedRow.note ?? failedRow.title}`
+          : i.to
+            ? `to ${i.to}`
+            : "moving tag",
+        mark: String(i.container ?? i.stack)
+          .slice(0, 2)
+          .toUpperCase(),
+      })),
+    });
+    if (layout === "steps") {
+      stepsBox.replaceChildren(
+        buildSteplist(
+          rows.map((r) => ({
+            id: r.id,
+            title: r.title,
+            note: r.note ? `${r.desc} · ${r.note}` : r.desc,
+            state:
+              r.state === "ok"
+                ? "done"
+                : r.state === "run"
+                  ? "running"
+                  : r.state === "bad"
+                    ? "failed"
+                    : r.state === "skip"
+                      ? "skipped"
+                      : "pending",
+            time: r.time,
+          })),
+          { label: "Steps of the update" },
+        ),
+      );
+      attachSteplists(stepsBox);
+    }
     log.replaceChildren(
       ...(act.logs.get(j.job) ?? []).slice(-14).map(logLineEl),
     );
@@ -1116,10 +1435,6 @@ export function mount(root, scope) {
   };
 
   // ---- wiring ----------------------------------------------------------
-  next.addEventListener("click", () => {
-    if (!chosenItems().length) return;
-    void toImpact().catch(() => {});
-  });
   backBtn.addEventListener("click", () => {
     step = 1;
     show();
@@ -1180,9 +1495,7 @@ export function mount(root, scope) {
   );
 
   show();
-  list.replaceChildren(
-    skeletonLines(3, "Reading which apps have a newer version"),
-  );
+  table.loading({ words: "Reading which apps have a newer version" });
   void (async () => {
     const r = await slowRead(
       "/data/stale-images",
@@ -1195,14 +1508,13 @@ export function mount(root, scope) {
     else if (!items.length) {
       // The fleet check did not answer: one stack can still pull what
       // its moving tags point at; the reason stays on top.
-      const err = errorBox(r.error);
-      if (scope.all) list.replaceChildren(err);
+      if (scope.all) table.failed(r.error);
       else {
         items = itemsFor(null, scope);
         chosen = firstChosen(items, scope);
         picked = true;
         paintList();
-        list.prepend(err);
+        list.prepend(errorBox(r.error));
       }
     }
   })().catch(() => {});
@@ -1215,5 +1527,11 @@ export function mount(root, scope) {
     see.stop();
     impact.stop();
     runCard.stop();
+    detachTables();
+    sel.stop();
+    detachMarks();
+    detachGates();
+    detachDeltas();
+    for (const f of detachRun) f();
   };
 }

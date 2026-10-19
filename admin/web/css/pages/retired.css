@@ -1,0 +1,55 @@
+/* The Retired page on kp-themes 11 (feat-kp11demo-12.6): the key figure and
+   the share bar on one grid with the table's width, the age control on the
+   shared label and control tracks, the size bars in one column. */
+.rt-card .nx-card__body {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--kp-space-md, 1rem);
+  align-content: start;
+}
+.rt-head {
+  display: grid;
+  grid-template-columns: minmax(12rem, 16rem) minmax(0, 1fr);
+  gap: var(--kp-space-md, 1rem);
+  align-items: stretch;
+}
+@media (max-width: 40rem) {
+  .rt-head {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+.rt-head > .kp-stackbar {
+  align-self: stretch;
+  margin: 0;
+  padding: var(--kp-space-md, 1rem);
+  border: 1px solid var(--border);
+  border-radius: var(--radius, 0.5rem);
+  background: var(--card);
+}
+.rt-kpis {
+  display: grid;
+}
+.rt-ctl {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: var(--kp-space-md, 1rem);
+  align-items: center;
+}
+.rt-ctl__label {
+  font-weight: 600;
+}
+.rt-readout {
+  min-block-size: 1.75em;
+  margin: 0;
+  font-weight: 600;
+}
+.rt-name {
+  display: inline-grid;
+  grid-auto-flow: column;
+  align-items: center;
+  column-gap: var(--kp-space-sm, 0.5rem);
+  white-space: nowrap;
+}
+.rt-nowrap {
+  white-space: nowrap;
+}

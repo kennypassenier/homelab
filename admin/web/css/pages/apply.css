@@ -93,266 +93,76 @@
   border-color: var(--destructive);
   box-shadow: inset 0 0 0 1px var(--destructive);
 }
-.ap-body {
-  display: grid;
-  gap: 16px;
-  margin-block-start: 16px;
-}
-.ap-counts {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: var(--kp-space-md, 12px);
-}
-/* A plan tile is kp-themes' toggle key figure (ui.js kpi look): one
-   column, label, number, context; the Apps page's own `.ap-tile`
-   (stacks.css, an icon column beside the name) must not lay it out. */
-.ap-root button.ap-tile {
+/* The plan on kp-themes 11 (feat-kp11demo-13): the table, the sentence and the
+   file diffs on grids of their own. */
+.ap-root {
+  container: ap-plan / inline-size;
   display: grid;
   grid-template-columns: minmax(0, 1fr);
-  grid-template-rows: auto auto auto;
-  align-items: start;
-  min-inline-size: 0;
+  gap: var(--kp-space-md, 1rem);
+  align-content: start;
 }
-.ap-filter {
-  margin: 0;
-  font-size: var(--kp-text-sm);
-  color: var(--muted-foreground);
-}
-.ap-cols {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: var(--nx-gap, 16px);
-  align-items: start;
-}
-.ap-col[hidden] {
+.ap-root > [hidden] {
   display: none;
 }
-.ap-col h3 {
-  margin: 0 0 8px;
-  font-size: 1rem;
-  display: flex;
-  gap: 8px;
+.ap-name {
+  display: inline-grid;
+  grid-template-columns: auto minmax(0, 1fr);
   align-items: center;
+  gap: var(--kp-space-sm, 0.5rem);
 }
-.ap-col h3 .nx-sev {
+.ap-name b {
+  white-space: nowrap;
+}
+.ap-name a {
+  color: inherit;
+  text-decoration: none;
+}
+.ap-nowrap {
+  white-space: nowrap;
+}
+.ap-add {
+  color: var(--success);
+  font-weight: 600;
+}
+.ap-del {
+  color: var(--destructive);
+  font-weight: 600;
+}
+.ap-none {
   margin: 0;
-}
-.ap-hint {
-  margin: 0 0 10px;
-  font-size: var(--kp-text-sm);
   color: var(--muted-foreground);
 }
-.ap-empty {
-  margin: 0;
-  padding: 12px;
-  border: 1px dashed var(--border);
-  border-radius: 8px;
-  font-size: var(--kp-text-sm);
-  color: var(--muted-foreground);
-}
-.ap-item {
+.ap-broken {
   display: grid;
-  /* One column that never grows past the card: a long diff line scrolls
-     inside it instead of covering the next column (review item 1). */
-  grid-template-columns: minmax(0, 1fr);
-  gap: 8px;
-  padding: 12px;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  background: var(--card);
-  margin-block-end: 8px;
-  min-block-size: 3rem;
+  gap: var(--kp-space-sm, 0.5rem);
+  justify-items: start;
 }
-.ap-item__top {
+.ap-broken p {
+  margin: 0;
+}
+.ap-diffs {
   display: grid;
-  grid-template-columns: auto auto minmax(0, 1fr) auto;
-  gap: 8px;
-  align-items: center;
-}
-.ap-item__top .nx-sev {
-  margin: 0;
-  align-self: center;
-}
-/* An unarmed destroy: a neutral dot, not information (review item 12). */
-.nx-sev.ap-sev--none {
-  background: var(--muted-foreground);
-  opacity: 0.55;
-}
-.ap-item p {
-  margin: 0;
-  font-size: var(--kp-text-sm);
-  color: var(--muted-foreground);
-}
-.ap-item p strong {
-  color: var(--foreground);
-}
-.ap-item--destroy {
-  border-color: color-mix(in oklab, var(--destructive) 40%, var(--border));
-}
-.ap-item--destroy.armed {
-  background: color-mix(in oklab, var(--destructive) 8%, var(--card));
-  border-color: var(--destructive);
-}
-.ap-item--broken {
-  border-style: dashed;
-}
-.ap-item .kp-field__input {
-  max-inline-size: 16rem;
-}
-.ap-item .kp-button {
-  justify-self: start;
-}
-.ap-link {
-  all: unset;
-  cursor: pointer;
-  font-size: var(--kp-text-xs);
-  color: var(--primary);
-  justify-self: start;
-}
-.ap-link:focus-visible {
-  outline: 2px solid var(--ring);
-  border-radius: 4px;
+  gap: var(--kp-space-sm, 0.5rem);
+  padding-block: var(--kp-space-sm, 0.5rem);
 }
 .ap-diff {
   display: grid;
-  grid-template-columns: minmax(0, 1fr);
-  gap: 6px;
-  min-inline-size: 0;
-  max-inline-size: 100%;
-  overflow-x: auto;
+  gap: var(--kp-space-sm, 0.5rem);
 }
-.ap-col,
-.ap-item,
-.ap-diff > details {
-  min-inline-size: 0;
-}
-.ap-diff summary {
-  overflow-wrap: anywhere;
-}
-.ap-diff pre {
-  max-inline-size: 100%;
-  overflow-x: auto;
-}
-.ap-go {
+.ap-diff__file {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: var(--kp-space-md, 12px);
-  align-items: center;
-  margin-block-start: 16px;
-  padding: var(--kp-space-md, 12px) var(--nx-pad, 16px);
-  border-radius: var(--nx-radius, 10px);
-  border: 1px solid var(--border-strong, var(--border));
-  background: var(--card);
-}
-.ap-go p {
-  margin: 0;
+  grid-template-columns: minmax(0, 1fr) max-content max-content;
+  gap: var(--kp-space-sm, 0.5rem);
+  align-items: baseline;
   font-size: var(--kp-text-sm);
-  color: var(--muted-foreground);
 }
-.ap-go strong {
-  display: block;
-  font-size: 1.05rem;
-}
-.ap-go__acts {
-  display: flex;
-  gap: 8px;
-  align-items: center;
-}
-/* Kenny, 2026-10-04: the deploys' Skip the backups, off by default. */
-.ap-go__skip {
-  display: inline-flex;
-  gap: 6px;
-  align-items: center;
-  font-size: var(--kp-text-sm);
-  white-space: nowrap;
-}
-.ap-go .kp-button:disabled {
-  opacity: 0.55;
-}
-/* redesign-flows-5: the destroy, its own red step after the deploys. */
-.ap-destroy {
-  display: grid;
-  gap: 10px;
-  margin-block-start: 16px;
-  padding: var(--kp-space-md, 12px) var(--nx-pad, 16px);
-  border-radius: var(--nx-radius, 10px);
-  border: 1px solid var(--destructive);
-  background: color-mix(in oklab, var(--destructive) 5%, var(--card));
-}
-.ap-destroy[hidden] {
-  display: none;
-}
-.ap-destroy__head {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
-  gap: 2px 10px;
-  align-items: center;
-}
-.ap-destroy__head h3 {
+.ap-sentence {
+  min-block-size: 3rem;
   margin: 0;
-  font-size: 1rem;
-  color: var(--destructive);
-}
-.ap-destroy__head .nx-sev {
-  margin: 0;
-}
-.ap-destroy__head p {
-  grid-column: 2;
-  margin: 0;
-}
-.ap-destroy__ack {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
-  gap: 10px;
-  align-items: start;
-  font-size: var(--kp-text-sm);
-  color: var(--destructive);
-}
-.ap-destroy__ack input {
-  accent-color: var(--destructive);
-  margin-block-start: 3px;
-}
-.ap-destroy__go {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: 10px;
-  align-items: center;
-}
-.ap-destroy__go p {
-  margin: 0;
-}
-.ap-destroy .kp-button:disabled {
-  opacity: 0.55;
-}
-.ap-body .apply-row--skeleton {
-  min-block-size: 6rem;
-}
-/* redesign-final-c1: the plan lays itself out by its own width, not the
-   window's. The Deploy all changes sheet is narrower than the window, and
-   viewport queries squeezed four steps, four tiles and three columns into
-   it until words broke per letter. */
-.ap-root {
-  container: ap-plan / inline-size;
-}
-@container ap-plan (max-width: 66rem) {
-  .ap-cols {
-    grid-template-columns: minmax(0, 1fr);
-  }
 }
 @container ap-plan (max-width: 52rem) {
   .ap-steps {
     grid-template-columns: minmax(0, 1fr);
-  }
-  .ap-counts {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-}
-@container ap-plan (max-width: 36rem) {
-  .ap-go,
-  .ap-destroy__go {
-    grid-template-columns: minmax(0, 1fr);
-  }
-  .ap-go__acts {
-    flex-wrap: wrap;
   }
 }

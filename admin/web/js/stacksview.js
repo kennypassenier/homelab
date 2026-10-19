@@ -251,124 +251,6 @@ export function stackRows(fleet, ctx) {
   });
 }
 
-/** The "Only" chips of the toolbar, in the demo's order. */
-export const ONLY = /** @type {const} */ ([
-  {
-    value: "newer",
-    label: "Newer version",
-    hint: "Only stacks with an app that has a newer version; click again to show all",
-  },
-  {
-    value: "problems",
-    label: "Problems",
-    hint: "Only stacks that are down, degraded, missed a backup or carry a red flag; click again to show all",
-  },
-  {
-    value: "drift",
-    label: "Differs from files",
-    hint: "Only stacks whose running state differs from their files; click again to show all",
-  },
-]);
-
-/**
- * @param {Row} r
- * @param {string} only
- */
-const isOnly = (r, only) =>
-  only === "newer"
-    ? r.newer > 0
-    : only === "problems"
-      ? r.problem
-      : only === "drift"
-        ? r.drift
-        : true;
-
-/**
- * How many rows each "Only" chip would show.
- * @param {Row[]} rows
- * @returns {Record<string, number>}
- */
-export function onlyCounts(rows) {
-  return Object.fromEntries(
-    ONLY.map((o) => [o.value, rows.filter((r) => isOnly(r, o.value)).length]),
-  );
-}
-
-/**
- * The search box's words: plain words match a stack's name, vmid or one
- * of its apps; `state:` and `flag:` tokens match the state word and the
- * flags (`flag:noenv`, `flag:newer`, `flag:drift`, `flag:backup`).
- * @param {string} q
- * @returns {{words: string[], state: string[], flag: string[]}}
- */
-export function parseQuery(q) {
-  /** @type {{words: string[], state: string[], flag: string[]}} */
-  const out = { words: [], state: [], flag: [] };
-  for (const t of String(q ?? "")
-    .trim()
-    .toLowerCase()
-    .split(/\s+/)
-    .filter(Boolean)) {
-    const m = /^(state|flag):(.*)$/.exec(t);
-    if (m && m[1] === "state") out.state.push(m[2]);
-    else if (m) out.flag.push(m[2]);
-    else out.words.push(t);
-  }
-  return out;
-}
-
-/**
- * Whether a row stays in view: every search word matches, and when any
- * "Only" chip is on, the row is one of them (chips add up: "Newer version"
- * and "Problems" together show both kinds).
- * @param {Row} r
- * @param {ReturnType<typeof parseQuery>} q
- * @param {Set<string>} only
- */
-export function rowMatches(r, q, only) {
-  if (only.size > 0 && ![...only].some((o) => isOnly(r, o))) return false;
-  const hay = [r.name, String(r.vmid), ...r.apps].map((x) => x.toLowerCase());
-  for (const w of q.words) if (!hay.some((x) => x.includes(w))) return false;
-  for (const s of q.state) if (!r.state.label.startsWith(s)) return false;
-  for (const f of q.flag)
-    if (!r.flags.some((x) => x.key.startsWith(f) || x.label.startsWith(f)))
-      return false;
-  return true;
-}
-
-/** The cards' sort orders, cycled by the Sort button (the demo's three). */
-export const SORTS = /** @type {const} */ ([
-  { key: "vmid", label: "vmid ↑" },
-  { key: "name", label: "name ↑" },
-  { key: "cpu", label: "CPU ↓" },
-]);
-
-/** @typedef {(typeof SORTS)[number]["key"]} SortKey */
-
-/**
- * @param {Row[]} rows
- * @param {string} key
- * @returns {Row[]}
- */
-export function sortRows(rows, key) {
-  const out = [...rows];
-  if (key === "name") out.sort((a, b) => a.name.localeCompare(b.name));
-  else if (key === "cpu")
-    out.sort((a, b) => (b.cpuPct ?? -1) - (a.cpuPct ?? -1) || a.vmid - b.vmid);
-  else out.sort((a, b) => a.vmid - b.vmid);
-  return out;
-}
-
-/**
- * The next sort order after `key`.
- * @param {string} key
- * @returns {SortKey}
- */
-export function nextSort(key) {
-  const i = SORTS.findIndex((s) => s.key === key);
-  return SORTS[(i + 1) % SORTS.length].key;
-}
-
 /**
  * @typedef {{key: string, label: string, value: string, unit?: string,
  *   ctx: string, tone: "ok" | "warn" | "bad" | null, href: string,
@@ -406,9 +288,9 @@ export function hostStrip(fleet, trend, needs, newer = new Map()) {
           : `${c.stacks - c.online} not running`,
       dot: offline ? "bad" : "ok",
       tone: offline ? "bad" : null,
-      // Not all running: the list, only its problems; all running: the
+      // Not all running: the cards of the stacks that need attention; all running: the
       // Host page's containers, the detail behind the number.
-      href: c.online < c.stacks ? "/stacks?only=problems" : "/host",
+      href: c.online < c.stacks ? "/stacks?view=cards&show=attention" : "/host",
       title:
         c.online < c.stacks
           ? `Show the ${c.stacks - c.online} ${c.stacks - c.online === 1 ? "stack" : "stacks"} not running`

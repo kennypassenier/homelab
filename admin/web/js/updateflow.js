@@ -23,10 +23,12 @@ import { releaseUrl } from "./staleimages.js";
  *   `app` (pull only, redesign-openpoints-2): the one app the pull is for,
  *   when the opener picked an app on a moving tag (a hub app's Update…);
  *   absent: every app of the stack on a moving tag.
- * @typedef {{all: true, only?: string[]} |
+ * @typedef {{all: true, only?: string[], pick?: string[]} |
  *   {all: false, stack: string, app?: string | null}} Scope
  *   `only`: the stacks a Stacks batch ticked (every app of those stacks
- *   with a newer version; redesign-integrate-5)
+ *   with a newer version; redesign-integrate-5); `pick` (the Map's stale
+ *   images, feat-kp11demo-2): the `<stack>/<container>` apps ticked there,
+ *   the only ones that start ticked
  */
 
 /**
@@ -63,8 +65,11 @@ export function scopeOf(search) {
   const stack = q.get("stack");
   if (stack) return { all: false, stack, app: q.get("app") };
   const only = (q.get("only") ?? "").split(",").filter(Boolean);
+  const pick = (q.get("pick") ?? "").split(",").filter(Boolean);
   if (q.get("all") != null)
-    return only.length ? { all: true, only } : { all: true };
+    return only.length
+      ? { all: true, only, ...(pick.length ? { pick } : {}) }
+      : { all: true };
   return null;
 }
 
@@ -172,6 +177,13 @@ export function firstChosen(items, scope) {
     // here moves it, so nothing starts ticked.
     if (items.some((i) => i.kind === "release" && i.container === scope.app))
       return new Set();
+  }
+  if (scope.all && scope.pick?.length) {
+    const named = items.filter(
+      (i) =>
+        i.kind === "pin" && scope.pick?.includes(`${i.stack}/${i.container}`),
+    );
+    if (named.length) return new Set(named.map((i) => i.id));
   }
   const pins = items.filter((i) => i.kind === "pin");
   return new Set(

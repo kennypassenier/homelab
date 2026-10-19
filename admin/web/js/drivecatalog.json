@@ -308,18 +308,6 @@
       "twins": false
     },
     {
-      "id": "apps-group-fold",
-      "page": "home",
-      "what": "fold or unfold one group of apps by its title (remembered per group)",
-      "opens": "view",
-      "row": "<group>",
-      "href": "/apps",
-      "was": [],
-      "shows": null,
-      "reach": [],
-      "twins": false
-    },
-    {
       "id": "apps-open",
       "page": "home",
       "what": "open one app in a new tab",
@@ -329,6 +317,24 @@
       "was": [],
       "shows": null,
       "reach": [],
+      "twins": false
+    },
+    {
+      "id": "apps-open-all",
+      "page": "home",
+      "what": "open every app of this stack that answers, each in its own tab",
+      "opens": "run",
+      "row": "<stack>",
+      "href": "/apps",
+      "was": [],
+      "shows": "while a stack's Open menu is open",
+      "reach": [
+        {
+          "do": "click",
+          "control": "apps-stack-menu",
+          "row": "*"
+        }
+      ],
       "twins": false
     },
     {
@@ -368,6 +374,18 @@
       "twins": false
     },
     {
+      "id": "apps-stack-menu",
+      "page": "home",
+      "what": "open the Open menu of one stack's apps",
+      "opens": "view",
+      "row": "<stack>",
+      "href": "/apps",
+      "was": [],
+      "shows": null,
+      "reach": [],
+      "twins": false
+    },
+    {
       "id": "apps-stacks",
       "page": "home",
       "what": "the header's Stacks: every stack with its state and actions",
@@ -380,11 +398,11 @@
       "twins": false
     },
     {
-      "id": "apps-star",
+      "id": "apps-state-filter",
       "page": "home",
-      "what": "star or unstar one app, keeping it at the top under Starred",
+      "what": "keep only the apps in this state (turn the state on or off)",
       "opens": "view",
-      "row": "<tile host>",
+      "row": "answers|failing|down|deploying|not watched",
       "href": "/apps",
       "was": [],
       "shows": null,
@@ -969,14 +987,14 @@
       "twins": false
     },
     {
-      "id": "deploy-all-destroy",
+      "id": "deploy-all-apply",
       "page": "overview",
-      "what": "open the destroy of the armed gone stacks, a separate confirmed step after the deploys",
+      "what": "apply the ticked deploys: one confirmed batch, each stack backed up first unless skipped",
       "opens": "dialog",
       "row": null,
       "href": "/stacks",
       "was": [],
-      "shows": "in the Deploy all changes panel, once a destroy is armed and confirmed",
+      "shows": "in the Deploy all changes panel, while stacks are ticked",
       "reach": [
         {
           "do": "click",
@@ -986,14 +1004,14 @@
       "twins": false
     },
     {
-      "id": "deploy-all-destroy-confirm",
+      "id": "deploy-all-destroy",
       "page": "overview",
-      "what": "tick the destroy step's own red confirmation",
-      "opens": "view",
+      "what": "apply the ticked destroy on its own: the stack's name is typed, then the apply dialog confirms once more",
+      "opens": "dialog",
       "row": null,
       "href": "/stacks",
       "was": [],
-      "shows": "in the Deploy all changes panel, once a gone stack's name is typed",
+      "shows": "in the Deploy all changes panel, while only a destroy is ticked",
       "reach": [
         {
           "do": "click",
@@ -1005,7 +1023,7 @@
     {
       "id": "deploy-all-diff",
       "page": "overview",
-      "what": "show or hide what deploying one stack changes",
+      "what": "open or close the exact lines applying one stack changes",
       "opens": "view",
       "row": "<stack>",
       "href": "/stacks",
@@ -1022,10 +1040,27 @@
     {
       "id": "deploy-all-pick",
       "page": "overview",
-      "what": "include or leave out one stack of the deploy batch",
+      "what": "include or leave out one stack of the batch (a destroy is armed by ticking it)",
       "opens": "view",
       "selects": true,
       "row": "<stack>",
+      "href": "/stacks",
+      "was": [],
+      "shows": "in the Deploy all changes panel",
+      "reach": [
+        {
+          "do": "click",
+          "control": "stacks-deploy-all"
+        }
+      ],
+      "twins": false
+    },
+    {
+      "id": "deploy-all-pick-all",
+      "page": "overview",
+      "what": "tick every stack that can be applied",
+      "opens": "view",
+      "row": null,
       "href": "/stacks",
       "was": [],
       "shows": "in the Deploy all changes panel",
@@ -1055,36 +1090,14 @@
       "twins": false
     },
     {
-      "id": "deploy-all-show-all",
-      "page": "overview",
-      "what": "show every column of the plan again (Esc does the same)",
-      "opens": "view",
-      "row": null,
-      "href": "/stacks",
-      "was": [],
-      "shows": "in the Deploy all changes panel, while one column is shown",
-      "reach": [
-        {
-          "do": "click",
-          "control": "stacks-deploy-all"
-        },
-        {
-          "do": "click",
-          "control": "deploy-all-tile",
-          "row": "*"
-        }
-      ],
-      "twins": false
-    },
-    {
       "id": "deploy-all-skip-backups",
       "page": "overview",
-      "what": "tick Skip the backups for the ticked deploys (off by default; a destroy always backs up)",
+      "what": "choose, in the sentence under the table, whether the deploys back each stack up first or skip the backups (back up first is the default)",
       "opens": "view",
-      "row": null,
+      "row": "back-up-first|skip",
       "href": "/stacks",
       "was": [],
-      "shows": "in the Deploy all changes panel's Apply bar, once the plan is read",
+      "shows": "in the Deploy all changes panel, once the plan is read",
       "reach": [
         {
           "do": "click",
@@ -1111,14 +1124,14 @@
       "twins": false
     },
     {
-      "id": "deploy-all-tile",
+      "id": "deploy-all-untick",
       "page": "overview",
-      "what": "show only one column of the plan (a plain click; again shows all)",
+      "what": "untick every ticked stack of the plan",
       "opens": "view",
-      "row": "deploy|destroy|broken|same",
+      "row": null,
       "href": "/stacks",
       "was": [],
-      "shows": "in the Deploy all changes panel",
+      "shows": "in the Deploy all changes panel, while a stack is ticked",
       "reach": [
         {
           "do": "click",
@@ -2016,11 +2029,71 @@
       "twins": false
     },
     {
-      "id": "map-capacity-sort",
+      "id": "map-capacity-layout",
       "page": "fleetview",
-      "what": "sort the Capacity card busiest first by CPU, memory or disk",
+      "what": "show capacity as a table with three bar columns or as ranked bars for one measure",
       "opens": "view",
-      "row": "cpu|memory|disk",
+      "row": "table|bullets",
+      "href": "/map",
+      "was": [],
+      "shows": null,
+      "reach": [],
+      "twins": false
+    },
+    {
+      "id": "map-capacity-measure",
+      "page": "fleetview",
+      "what": "rank the stacks by memory, CPU or disk",
+      "opens": "view",
+      "row": "mem|cpu|disk",
+      "href": "/map",
+      "was": [],
+      "shows": "in the ranked bars layout",
+      "reach": [
+        {
+          "do": "click",
+          "control": "map-capacity-layout",
+          "row": "bullets"
+        }
+      ],
+      "twins": false
+    },
+    {
+      "id": "map-capacity-open",
+      "page": "fleetview",
+      "what": "open a ranked stack's hub",
+      "opens": "view",
+      "row": "<stack>",
+      "href": "/map",
+      "was": [],
+      "shows": "in the ranked bars layout",
+      "reach": [
+        {
+          "do": "click",
+          "control": "map-capacity-layout",
+          "row": "bullets"
+        }
+      ],
+      "twins": false
+    },
+    {
+      "id": "map-deplist-order",
+      "page": "fleetview",
+      "what": "list the connections in start order, numbered, or grouped by kind of connection",
+      "opens": "view",
+      "row": "numbers|kind",
+      "href": "/map",
+      "was": [],
+      "shows": null,
+      "reach": [],
+      "twins": false
+    },
+    {
+      "id": "map-disk-filesystem",
+      "page": "fleetview",
+      "what": "choose which filesystem the disk growth chart shows",
+      "opens": "view",
+      "row": null,
       "href": "/map",
       "was": [],
       "shows": null,
@@ -2070,6 +2143,24 @@
       "twins": false
     },
     {
+      "id": "map-matrix-show",
+      "page": "fleetview",
+      "what": "show every connection in the matrix, or only those the firewall does not enforce (open and named)",
+      "opens": "view",
+      "row": "all|open",
+      "href": "/map",
+      "was": [],
+      "shows": "in the Matrix view",
+      "reach": [
+        {
+          "do": "click",
+          "control": "map-view",
+          "row": "matrix"
+        }
+      ],
+      "twins": false
+    },
+    {
       "id": "map-node",
       "page": "fleetview",
       "what": "turn a stack (or an outside address) on or off in the Map's selection, showing its connections and details",
@@ -2094,11 +2185,11 @@
       "twins": false
     },
     {
-      "id": "map-release-notes",
+      "id": "map-panel-mode",
       "page": "fleetview",
-      "what": "a stale image's release notes, in a new tab",
+      "what": "show what the picked stack uses and who uses it, or what would stop if it stopped",
       "opens": "view",
-      "row": "<image>",
+      "row": "normal|blast",
       "href": "/map",
       "was": [],
       "shows": null,
@@ -2124,6 +2215,67 @@
       "twins": false
     },
     {
+      "id": "map-stale-tick",
+      "page": "fleetview",
+      "what": "tick one stale image to send it to the Update flow with the others",
+      "opens": "view",
+      "selects": true,
+      "row": "<stack>/<container>",
+      "href": "/map",
+      "was": [],
+      "shows": null,
+      "reach": [],
+      "twins": false
+    },
+    {
+      "id": "map-stale-tick-all",
+      "page": "fleetview",
+      "what": "tick every stale image the Update flow can move",
+      "opens": "view",
+      "row": null,
+      "href": "/map",
+      "was": [],
+      "shows": null,
+      "reach": [],
+      "twins": false
+    },
+    {
+      "id": "map-stale-untick",
+      "page": "fleetview",
+      "what": "untick every ticked stale image",
+      "opens": "view",
+      "row": null,
+      "href": "/map",
+      "was": [],
+      "shows": "while a stale image is ticked",
+      "reach": [
+        {
+          "do": "click",
+          "control": "map-stale-tick",
+          "row": "*"
+        }
+      ],
+      "twins": false
+    },
+    {
+      "id": "map-stale-update-selected",
+      "page": "fleetview",
+      "what": "open the Update flow with the ticked images chosen",
+      "opens": "view",
+      "row": null,
+      "href": "/map",
+      "was": [],
+      "shows": "while a stale image is ticked",
+      "reach": [
+        {
+          "do": "click",
+          "control": "map-stale-tick",
+          "row": "*"
+        }
+      ],
+      "twins": false
+    },
+    {
       "id": "map-traffic",
       "page": "fleetview",
       "what": "size each stack's ring by its measured network traffic, or stop",
@@ -2138,9 +2290,9 @@
     {
       "id": "map-view",
       "page": "fleetview",
-      "what": "show the topology as a graph or as a list",
+      "what": "show the topology as a graph, as a list or as a matrix of who reaches whom",
       "opens": "view",
-      "row": "graph|list",
+      "row": "graph|list|matrix",
       "href": "/map",
       "was": [],
       "shows": null,
@@ -2286,21 +2438,9 @@
       "twins": false
     },
     {
-      "id": "presets-card",
-      "page": "presets",
-      "what": "a preset's card: opens the New stack wizard on it",
-      "opens": "dialog",
-      "row": "<preset>",
-      "href": "/presets",
-      "was": [],
-      "shows": null,
-      "reach": [],
-      "twins": false
-    },
-    {
       "id": "presets-clear-search",
       "page": "presets",
-      "what": "clear the gallery's search",
+      "what": "clear the gallery's search and filters",
       "opens": "view",
       "row": null,
       "href": "/presets",
@@ -2310,11 +2450,29 @@
       "twins": false
     },
     {
-      "id": "presets-edit",
+      "id": "presets-compare",
       "page": "presets",
-      "what": "open the presets editor on one preset",
-      "opens": "dialog",
-      "row": "<preset>",
+      "what": "put the two or three ticked presets side by side, marking the settings that differ",
+      "opens": "view",
+      "row": null,
+      "href": "/presets",
+      "was": [],
+      "shows": "while two or three presets are ticked",
+      "reach": [
+        {
+          "do": "click",
+          "control": "presets-pick",
+          "row": "*"
+        }
+      ],
+      "twins": false
+    },
+    {
+      "id": "presets-cost-of",
+      "page": "presets",
+      "what": "choose the preset whose memory the share bar adds to the host's",
+      "opens": "view",
+      "row": null,
       "href": "/presets",
       "was": [],
       "shows": null,
@@ -2322,11 +2480,11 @@
       "twins": false
     },
     {
-      "id": "presets-empty-card",
+      "id": "presets-edit",
       "page": "presets",
-      "what": "the Empty stack card itself: the New stack wizard with no apps",
+      "what": "open the presets editor on one preset",
       "opens": "dialog",
-      "row": null,
+      "row": "<preset>",
       "href": "/presets",
       "was": [],
       "shows": null,
@@ -2354,6 +2512,18 @@
       "href": "/presets",
       "was": [],
       "shows": "while there is no preset",
+      "reach": [],
+      "twins": false
+    },
+    {
+      "id": "presets-needs",
+      "page": "presets",
+      "what": "keep only the presets that need a GPU or a VPN (both on: those that need both)",
+      "opens": "view",
+      "row": "all|gpu|vpn",
+      "href": "/presets",
+      "was": [],
+      "shows": null,
       "reach": [],
       "twins": false
     },
@@ -2406,6 +2576,31 @@
       "twins": false
     },
     {
+      "id": "presets-pick",
+      "page": "presets",
+      "what": "tick or untick one preset to compare it",
+      "opens": "view",
+      "selects": true,
+      "row": "<preset>",
+      "href": "/presets",
+      "was": [],
+      "shows": null,
+      "reach": [],
+      "twins": false
+    },
+    {
+      "id": "presets-pick-all",
+      "page": "presets",
+      "what": "tick every preset shown (click again to untick them)",
+      "opens": "view",
+      "row": null,
+      "href": "/presets",
+      "was": [],
+      "shows": null,
+      "reach": [],
+      "twins": false
+    },
+    {
       "id": "presets-search",
       "page": "presets",
       "what": "the gallery's search box (name, app or purpose)",
@@ -2418,11 +2613,11 @@
       "twins": false
     },
     {
-      "id": "presets-sort",
+      "id": "presets-search-mode",
       "page": "presets",
-      "what": "sort the gallery A–Z or largest first",
+      "what": "search the presets by meaning (gpu media finds the media preset) or by the letters of their name",
       "opens": "view",
-      "row": "name|ram",
+      "row": "intent|text",
       "href": "/presets",
       "was": [],
       "shows": null,
@@ -2451,6 +2646,24 @@
       "was": [],
       "shows": "after the presets could not be read",
       "reach": [],
+      "twins": false
+    },
+    {
+      "id": "presets-untick",
+      "page": "presets",
+      "what": "untick every ticked preset",
+      "opens": "view",
+      "row": null,
+      "href": "/presets",
+      "was": [],
+      "shows": "while a preset is ticked",
+      "reach": [
+        {
+          "do": "click",
+          "control": "presets-pick",
+          "row": "*"
+        }
+      ],
       "twins": false
     },
     {
@@ -2635,6 +2848,79 @@
       ],
       "shows": null,
       "reach": [],
+      "twins": false
+    },
+    {
+      "id": "retired-age",
+      "page": "retired",
+      "what": "show every retired stack, or only those retired more than 90 days ago",
+      "opens": "view",
+      "row": "all|old",
+      "href": "/backups?section=removed",
+      "was": [],
+      "shows": null,
+      "reach": [],
+      "twins": false
+    },
+    {
+      "id": "retired-tick",
+      "page": "retired",
+      "what": "tick or untick one retired entry to wipe it",
+      "opens": "view",
+      "selects": true,
+      "row": "<key>",
+      "href": "/backups?section=removed",
+      "was": [],
+      "shows": null,
+      "reach": [],
+      "twins": false
+    },
+    {
+      "id": "retired-tick-all",
+      "page": "retired",
+      "what": "tick every retired entry that can be wiped now",
+      "opens": "view",
+      "row": null,
+      "href": "/backups?section=removed",
+      "was": [],
+      "shows": null,
+      "reach": [],
+      "twins": false
+    },
+    {
+      "id": "retired-untick",
+      "page": "retired",
+      "what": "untick every ticked retired entry",
+      "opens": "view",
+      "row": null,
+      "href": "/backups?section=removed",
+      "was": [],
+      "shows": "while a retired entry is ticked",
+      "reach": [
+        {
+          "do": "click",
+          "control": "retired-tick",
+          "row": "*"
+        }
+      ],
+      "twins": false
+    },
+    {
+      "id": "retired-wipe",
+      "page": "retired",
+      "what": "wipe the ticked retired entries for good: one asks for its name, several for 'wipe N stacks'",
+      "opens": "dialog",
+      "row": null,
+      "href": "/backups?section=removed",
+      "was": [],
+      "shows": "while a retired entry is ticked",
+      "reach": [
+        {
+          "do": "click",
+          "control": "retired-tick",
+          "row": "*"
+        }
+      ],
       "twins": false
     },
     {
@@ -3077,6 +3363,18 @@
       "twins": false
     },
     {
+      "id": "stack-backup-restore-night",
+      "page": "stack",
+      "what": "after pressing a missed night: open Restore on the night before it",
+      "opens": "view",
+      "row": "<stack>/<app>",
+      "href": "/stacks/<stack>/backups",
+      "was": [],
+      "shows": "after a missed night is pressed",
+      "reach": [],
+      "twins": false
+    },
+    {
       "id": "stack-backup-row",
       "page": "stack",
       "what": "one app's Restore… or Verify… on the Backups tab",
@@ -3094,6 +3392,18 @@
       "what": "the Backups card's Back up now or Restore…",
       "opens": "dialog",
       "row": "<stack>/<backup|restore>",
+      "href": "/stacks/<stack>/backups",
+      "was": [],
+      "shows": null,
+      "reach": [],
+      "twins": false
+    },
+    {
+      "id": "stack-backups-view",
+      "page": "stack",
+      "what": "show the Backups tab as a strip of 14 nights per app or a grid of 30 nights",
+      "opens": "view",
+      "row": "<stack>/<strips|heat>",
       "href": "/stacks/<stack>/backups",
       "was": [],
       "shows": null,
@@ -3388,7 +3698,7 @@
     {
       "id": "stacks-batch",
       "page": "overview",
-      "what": "act on the ticked stacks: back up or deploy them in one batch dialog, or update them (each stack's Update dialog in turn)",
+      "what": "act on the ticked stacks: deploy them (ten seconds to undo, or a batch dialog that asks first), back them up in one batch dialog, or update them (the Update flow)",
       "opens": "dialog",
       "row": "backup|update|deploy",
       "href": "/stacks",
@@ -3416,9 +3726,21 @@
       "twins": false
     },
     {
+      "id": "stacks-deploy-asks",
+      "page": "overview",
+      "what": "choose how a batch Deploy asks for safety: ten seconds to undo it, or a dialog that asks first",
+      "opens": "view",
+      "row": "undo|confirm",
+      "href": "/stacks",
+      "was": [],
+      "shows": null,
+      "reach": [],
+      "twins": false
+    },
+    {
       "id": "stacks-empty-new",
       "page": "overview",
-      "what": "the empty fleet's New stack…",
+      "what": "the empty fleet's New stack",
       "opens": "dialog",
       "row": null,
       "href": "/stacks",
@@ -3428,11 +3750,11 @@
       "twins": false
     },
     {
-      "id": "stacks-hub-button",
+      "id": "stacks-group",
       "page": "overview",
-      "what": "a table row's › button: open that stack's hub",
+      "what": "group the table's rows by state (needs attention, running, parked) or not at all",
       "opens": "view",
-      "row": "<stack>",
+      "row": "state|none",
       "href": "/stacks",
       "was": [],
       "shows": "in the table view",
@@ -3443,6 +3765,30 @@
           "row": "table"
         }
       ],
+      "twins": false
+    },
+    {
+      "id": "stacks-hungry-measure",
+      "page": "overview",
+      "what": "rank the stacks by memory, CPU or disk",
+      "opens": "view",
+      "row": "ram|cpu|disk",
+      "href": "/stacks",
+      "was": [],
+      "shows": null,
+      "reach": [],
+      "twins": false
+    },
+    {
+      "id": "stacks-hungry-open",
+      "page": "overview",
+      "what": "open a ranked stack's hub",
+      "opens": "view",
+      "row": "<stack>",
+      "href": "/stacks",
+      "was": [],
+      "shows": null,
+      "reach": [],
       "twins": false
     },
     {
@@ -3470,11 +3816,35 @@
       "twins": false
     },
     {
-      "id": "stacks-only",
+      "id": "stacks-night-pick",
       "page": "overview",
-      "what": "turn one 'Only' filter on or off (newer version, problems, differs from files)",
+      "what": "pick one stack's night in the grid: the list under it shows that backup",
       "opens": "view",
-      "row": "newer|problems|drift",
+      "row": "<stack>/<night>",
+      "href": "/stacks",
+      "was": [],
+      "shows": null,
+      "reach": [],
+      "twins": false
+    },
+    {
+      "id": "stacks-night-stack",
+      "page": "overview",
+      "what": "press a stack's name in the nights grid: the list under it shows its last three backups",
+      "opens": "view",
+      "row": "<stack>",
+      "href": "/stacks",
+      "was": [],
+      "shows": null,
+      "reach": [],
+      "twins": false
+    },
+    {
+      "id": "stacks-nights-window",
+      "page": "overview",
+      "what": "show the last 14 or the last 30 nights of backups per stack",
+      "opens": "view",
+      "row": "14|30",
       "href": "/stacks",
       "was": [],
       "shows": null,
@@ -3484,7 +3854,7 @@
     {
       "id": "stacks-open",
       "page": "overview",
-      "what": "open one stack's hub (its name, its card or its › button)",
+      "what": "open one stack's hub (its name in the table or on its card)",
       "opens": "view",
       "row": "<stack>",
       "href": "/stacks",
@@ -3508,87 +3878,9 @@
     {
       "id": "stacks-row-action",
       "page": "overview",
-      "what": "a stack's one suggested action that opens its dialog: Deploy or Back up",
+      "what": "a card's Deploy or Back up now: open that stack's action dialog",
       "opens": "dialog",
       "row": "<stack>",
-      "href": "/stacks",
-      "was": [],
-      "shows": "in the table view",
-      "reach": [
-        {
-          "do": "click",
-          "control": "stacks-view",
-          "row": "table"
-        }
-      ],
-      "twins": false
-    },
-    {
-      "id": "stacks-row-logs",
-      "page": "overview",
-      "what": "a stack's suggested Logs: open its hub's Logs tab",
-      "opens": "view",
-      "row": "<stack>",
-      "href": "/stacks",
-      "was": [],
-      "shows": "in the table view",
-      "reach": [
-        {
-          "do": "click",
-          "control": "stacks-view",
-          "row": "table"
-        }
-      ],
-      "twins": false
-    },
-    {
-      "id": "stacks-row-update",
-      "page": "overview",
-      "what": "a stack's suggested Update: open the Update flow for that stack",
-      "opens": "view",
-      "row": "<stack>",
-      "href": "/stacks",
-      "was": [],
-      "shows": "in the table view",
-      "reach": [
-        {
-          "do": "click",
-          "control": "stacks-view",
-          "row": "table"
-        }
-      ],
-      "twins": false
-    },
-    {
-      "id": "stacks-search",
-      "page": "overview",
-      "what": "the search box: find a stack or app by name, vmid, state: or flag:",
-      "opens": "view",
-      "row": null,
-      "href": "/stacks",
-      "was": [],
-      "shows": null,
-      "reach": [],
-      "twins": false
-    },
-    {
-      "id": "stacks-show-all",
-      "page": "overview",
-      "what": "clear the search and the Only filters (the empty list's Show every stack)",
-      "opens": "view",
-      "row": null,
-      "href": "/stacks",
-      "was": [],
-      "shows": "when the search and the Only filters match no stack",
-      "reach": [],
-      "twins": false
-    },
-    {
-      "id": "stacks-sort",
-      "page": "overview",
-      "what": "order the cards by vmid, by name or busiest first",
-      "opens": "view",
-      "row": "vmid|name|cpu",
       "href": "/stacks",
       "was": [],
       "shows": "in the cards view",
@@ -3599,6 +3891,90 @@
           "row": "cards"
         }
       ],
+      "twins": false
+    },
+    {
+      "id": "stacks-row-logs",
+      "page": "overview",
+      "what": "a card's Logs: open the stack hub's Logs tab",
+      "opens": "view",
+      "row": "<stack>",
+      "href": "/stacks",
+      "was": [],
+      "shows": "in the cards view",
+      "reach": [
+        {
+          "do": "click",
+          "control": "stacks-view",
+          "row": "cards"
+        }
+      ],
+      "twins": false
+    },
+    {
+      "id": "stacks-row-update",
+      "page": "overview",
+      "what": "a card's Update: open the Update flow for that stack",
+      "opens": "view",
+      "row": "<stack>",
+      "href": "/stacks",
+      "was": [],
+      "shows": "in the cards view",
+      "reach": [
+        {
+          "do": "click",
+          "control": "stacks-view",
+          "row": "cards"
+        }
+      ],
+      "twins": false
+    },
+    {
+      "id": "stacks-search",
+      "page": "overview",
+      "what": "the table's search box: find a stack by name, state, backup or any column",
+      "opens": "view",
+      "row": null,
+      "href": "/stacks",
+      "was": [],
+      "shows": "in the table view",
+      "reach": [
+        {
+          "do": "click",
+          "control": "stacks-view",
+          "row": "table"
+        }
+      ],
+      "twins": false
+    },
+    {
+      "id": "stacks-show",
+      "page": "overview",
+      "what": "show every card, only the stacks that need attention, or only the parked ones",
+      "opens": "view",
+      "row": "all|attention|parked",
+      "href": "/stacks",
+      "was": [],
+      "shows": "in the cards view",
+      "reach": [
+        {
+          "do": "click",
+          "control": "stacks-view",
+          "row": "cards"
+        }
+      ],
+      "twins": false
+    },
+    {
+      "id": "stacks-show-all",
+      "page": "overview",
+      "what": "clear the table's search and filters (the empty table's Clear the search and filters)",
+      "opens": "view",
+      "row": null,
+      "href": "/stacks",
+      "was": [],
+      "shows": "when the search and the filters match no stack",
+      "reach": [],
       "twins": false
     },
     {
@@ -3861,18 +4237,31 @@
     {
       "id": "update-major-read",
       "page": "update",
-      "what": "tick “I read the release notes” for a major version",
+      "what": "tick “I read the release notes of …” for a major version (it can be ticked once the notes were opened, or after 4 seconds)",
       "opens": "view",
       "row": "<pin:stack:app/service>",
       "href": "/update",
       "was": [],
-      "shows": "on step 2 (what changes)",
+      "shows": "under the list, once a major version is ticked",
       "reach": [
         {
           "do": "click",
-          "control": "update-see-impact"
+          "control": "update-pick",
+          "row": "*"
         }
       ],
+      "twins": false
+    },
+    {
+      "id": "update-majors",
+      "page": "update",
+      "what": "allow one major version at a time (the default), or several together, each with its own read",
+      "opens": "view",
+      "row": "alone|together",
+      "href": "/update",
+      "was": [],
+      "shows": null,
+      "reach": [],
       "twins": false
     },
     {
@@ -3913,6 +4302,18 @@
       "twins": false
     },
     {
+      "id": "update-run-layout",
+      "page": "update",
+      "what": "show the running update as a board with a lane per step or as a list of steps",
+      "opens": "view",
+      "row": "board|steps",
+      "href": "/update",
+      "was": [],
+      "shows": "while the update runs or after it",
+      "reach": [],
+      "twins": false
+    },
+    {
       "id": "update-see-impact",
       "page": "update",
       "what": "the Update flow's step 1 → 2: see what the update changes",
@@ -3922,6 +4323,24 @@
       "was": [],
       "shows": null,
       "reach": [],
+      "twins": false
+    },
+    {
+      "id": "update-untick",
+      "page": "update",
+      "what": "untick every ticked app of the Update flow's list",
+      "opens": "view",
+      "row": null,
+      "href": "/update",
+      "was": [],
+      "shows": "while an app is ticked",
+      "reach": [
+        {
+          "do": "click",
+          "control": "update-pick",
+          "row": "*"
+        }
+      ],
       "twins": false
     },
     {
@@ -3953,16 +4372,9 @@
   ],
   "fields": [
     {
-      "id": "apply-destroy-ack",
-      "page": "overview",
-      "what": "the destroy step's own red confirmation (a tick)",
-      "was": [],
-      "row": null
-    },
-    {
       "id": "apply-skip-backups",
-      "page": "overview",
-      "what": "the deploys' Skip the backups (a tick, off by default)",
+      "page": "apply",
+      "what": "whether to back up the stacks first or skip the backups",
       "was": [],
       "row": null
     },
@@ -3972,13 +4384,6 @@
       "what": "filter the repositories by stack or app",
       "was": [],
       "row": null
-    },
-    {
-      "id": "deploy-all-destroy-name",
-      "page": "overview",
-      "what": "type a gone stack's name to include its destroy",
-      "was": [],
-      "row": "<stack>"
     },
     {
       "id": "drop-confirm",
@@ -4040,6 +4445,13 @@
       "id": "passkey-label",
       "page": "passkeys",
       "what": "the name a new passkey is kept under",
+      "was": [],
+      "row": null
+    },
+    {
+      "id": "ps-search",
+      "page": "presets",
+      "what": "the preset search: a name, an app or a purpose",
       "was": [],
       "row": null
     },
@@ -4147,13 +4559,6 @@
       "what": "the scope of a token to issue (Issue token dialog)",
       "was": [],
       "row": null
-    },
-    {
-      "id": "uf-ack",
-      "page": "update",
-      "what": "tick that a major version's release notes were read",
-      "was": [],
-      "row": "<item id, - for anything but a-z 0-9>"
     }
   ],
   "addresses": [
@@ -4226,6 +4631,7 @@
   "stack_slot": "{stack}",
   "stack_tabs": [
     "overview",
+    "resources",
     "logs",
     "apps",
     "backups",

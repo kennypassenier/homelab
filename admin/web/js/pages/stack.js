@@ -36,7 +36,9 @@ import {
   fetchReport,
   h,
   slowRead,
+  stateWord,
   tabRow,
+  tableBlock,
 } from "../dom.js";
 import { declare, drivable, viaForm } from "../drivable.js";
 import { driven } from "../drivehooks.js";
@@ -46,7 +48,7 @@ import {
   openPublishDialog,
   settingsTab,
 } from "../editpanels.js";
-import { formatDateTime, humanDuration } from "../format.js";
+import { formatDateTime, formatDay, humanDuration } from "../format.js";
 import { openIncident } from "../incident.js";
 import { inboxNow, onInbox } from "../inboxlist.js";
 import { finished } from "../jobs.js";
@@ -57,6 +59,20 @@ import { movesOf } from "../updateflow.js";
 import { openRollback } from "../rollbackdialog.js";
 import { STACK_TABS, stackHref } from "../router.js";
 import { incidentRows } from "../activity.js";
+import { addDays } from "../backupsview.js";
+import { resourcesTab } from "../hubresources.js";
+import {
+  depItems,
+  problemItems,
+  statusBlock,
+  statusRows,
+} from "../hubparts.js";
+import { attachCardStates, setCardState } from "/static/kp/js/card-state.js";
+import { setDeplist } from "/static/kp/js/deplist.js";
+import { setCode } from "/static/kp/js/code.js";
+import { HEAT_PICK_EVENT, setHeat } from "/static/kp/js/heat.js";
+import { UPTIME_PICK_EVENT, setUptime } from "/static/kp/js/uptime.js";
+import { setProblems } from "/static/kp/js/problems.js";
 import {
   DANGER,
   LEVELS,
@@ -97,7 +113,6 @@ import { watchTabOverflow } from "/static/kp/js/overlays.js";
 import { mount as mountSecrets } from "./secrets.js";
 import {
   countOf,
-  attentionBand,
   chip,
   dot,
   emptyState,
@@ -109,7 +124,6 @@ import {
   section,
   segSwitch,
   skeletonLines,
-  skeletonTable,
   stackMark,
   toolbar,
 } from "../ui.js";
@@ -345,6 +359,23 @@ const BACKUP_ROW = declare({
   row: "<stack>/<app>/<restore|verify>",
   at: at("backups"),
   what: "one app's Restore… or Verify… on the Backups tab",
+});
+const BACKUP_VIEW = declare({
+  id: "stack-backups-view",
+  page: "stack",
+  opens: "view",
+  row: "<stack>/<strips|heat>",
+  at: at("backups"),
+  what: "show the Backups tab as a strip of 14 nights per app or a grid of 30 nights",
+});
+const BACKUP_RESTORE_NIGHT = declare({
+  id: "stack-backup-restore-night",
+  page: "stack",
+  opens: "view",
+  row: "<stack>/<app>",
+  at: at("backups"),
+  what: "after pressing a missed night: open Restore on the night before it",
+  shows: "after a missed night is pressed",
 });
 const HISTORY_SEARCH = declare({
   id: "stack-history-search",
@@ -605,7 +636,7 @@ export function mount(root, params) {
     ["u", "update"],
     ["d", "deploy"],
     [".", "more"],
-    ["1–6", "tabs"],
+    ["1–7", "tabs"],
     ["Ctrl K", "do anything"],
   ]);
   root.replaceChildren(
@@ -715,6 +746,7 @@ export function mount(root, params) {
   /** @type {Record<string, (p: HTMLElement) => () => void>} */
   const panels = {
     overview: (p) => overviewTab(p, ctx),
+    resources: (p) => resourcesTab(p, ctx),
     logs: (p) => logsTab(p, ctx),
     apps: (p) => appsTab(p, ctx),
     backups: (p) => backupsTab(p, ctx),
@@ -828,7 +860,17 @@ function overviewTab(panel, c) {
   /** @type {(() => void)[]} */
   const stops = [];
   const running = h("div", { class: "sh-running" });
-  const band = attentionBand([]);
+  // What needs you: kp problems (what, why, the remedy, the command to
+  // copy and the fix button), in a card that carries the four data states.
+  const needsList = h("div", {
+    class: "kp-problems",
+    "data-kp-problems": "",
+    "data-kp-problems-mode": "fold",
+    "aria-live": "polite",
+  });
+  const needsStage = stage(needsList);
+  const depsList = h("div", { class: "kp-deplist", "data-kp-deplist": "" });
+  const depsStage = stage(depsList);
   const strip = kpiStrip(
     hubKpis({
       s: null,
@@ -887,15 +929,20 @@ function overviewTab(panel, c) {
     else plain.append(act);
   }
 
-  const checksList = h("ul", { class: "sh-checks", "aria-live": "polite" });
-  checksList.append(skeletonLines(6, "Reading the checks"));
+  const checksHost = h("div", { class: "sh-checks" });
+  const checksStage = stage(checksHost);
+  const checksCount = h("p", { class: "sh-checks__count", role: "status" });
+  const checks = statusBlock(checksHost, {
+    label: `Health checks of ${name}`,
+    onRetry: () => void readAll(),
+  });
   const checkedAt = h("span", null, "checking…");
   const healthy = section({
     id: "healthy",
     title: "Is it healthy?",
     desc: "Every check the host runs on this stack, in one place — the answer to “why is it red?” when it is.",
   });
-  healthy.body.append(checksList);
+  healthy.body.append(checksCount, checksStage);
   healthy.setFoot([
     checkedAt,
     link(
@@ -905,6 +952,20 @@ function overviewTab(panel, c) {
     ),
   ]);
   healthy.el.classList.add("sh-span-6");
+  const needs = section({
+    id: "needs",
+    title: "What needs you",
+    desc: "What is wrong with this stack, why, and what to do about it; the command is one press from your clipboard.",
+  });
+  needs.body.append(needsStage);
+  needs.el.classList.add("sh-span-6");
+  const deps = section({
+    id: "dependencies",
+    title: "Depends on and used by",
+    desc: "The stacks this one needs, in the order they must start, and the stacks that need it.",
+  });
+  deps.body.append(depsStage);
+  deps.el.classList.add("sh-span-6");
 
   const feedList = h("ul", { class: "sh-feed" });
   feedList.append(skeletonLines(4, "Reading the history"));
@@ -945,9 +1006,16 @@ function overviewTab(panel, c) {
       "div",
       { class: "sh-stack" },
       running,
-      band.el,
       strip.el,
-      h("div", { class: "sh-grid" }, healthy.el, recent.el, judged.el),
+      h(
+        "div",
+        { class: "sh-grid" },
+        healthy.el,
+        needs.el,
+        deps.el,
+        recent.el,
+        judged.el,
+      ),
     ),
   );
 
@@ -989,6 +1057,11 @@ function overviewTab(panel, c) {
   let restarts24;
   /** @type {import("../stackhub.js").WatchTarget[] | null} */
   let watch = null;
+  /** @type {{edges: {from: string, to: string, kind: string}[]} | null} */
+  let topo = null;
+  /** @type {string | null} */
+  let topoFailed = null;
+  let topoRead = false;
 
   const paint = () => {
     const now = nowS();
@@ -1033,39 +1106,46 @@ function overviewTab(panel, c) {
       compareBtn.removeAttribute("aria-busy");
     }
     const open = (manual ?? []).filter((m) => m.answer.tone !== "ok").length;
-    band.set(
-      attentionItems({
-        stack: name,
-        s: S.s,
-        drift: S.drift,
-        night: stand.night,
-        last: stand.last,
-        stale,
-        openChecks: open,
-        now,
-        inboxItems: inboxNow()
-          .items.filter((i) => i.stack === name)
-          .map((i) => {
-            // fix-ux-1: the notice's own fix and remedy ride with its row.
-            const n = act.notices?.notices.find((x) =>
-              (i.ids ?? []).includes(x.id),
-            );
-            return {
-              ...i,
-              ...(n?.remedy ? { remedy: n.remedy } : {}),
-              ...(n?.fixes?.[0] ? { fix: n.fixes[0] } : {}),
-            };
-          }),
-      })
-        .filter((p) => S.fleetRead || p.key !== "not-deployed")
-        .map((p) => ({
-          key: p.key,
-          tone: p.tone,
-          title: p.title,
-          text: p.text,
-          action: problemAction(c, p),
-        })),
-    );
+    const probs = attentionItems({
+      stack: name,
+      s: S.s,
+      drift: S.drift,
+      night: stand.night,
+      last: stand.last,
+      stale,
+      openChecks: open,
+      now,
+      inboxItems: inboxNow()
+        .items.filter((i) => i.stack === name)
+        .map((i) => {
+          // fix-ux-1: the notice's own fix and remedy ride with its row.
+          const n = act.notices?.notices.find((x) =>
+            (i.ids ?? []).includes(x.id),
+          );
+          return {
+            ...i,
+            ...(n?.remedy ? { remedy: n.remedy } : {}),
+            ...(n?.fixes?.[0] ? { fix: n.fixes[0] } : {}),
+          };
+        }),
+    }).filter((p) => S.fleetRead || p.key !== "not-deployed");
+    if (!S.fleetRead)
+      setCardState(needsStage, "loading", { words: "Reading what needs you" });
+    else if (!probs.length)
+      setCardState(needsStage, "empty", {
+        title: "Nothing needs you",
+        text: "This stack is fine as far as the host can tell.",
+      });
+    else {
+      setCardState(needsStage, "ready");
+      setProblems(
+        needsList,
+        problemItems(probs, name, (p) => problemAction(c, p)),
+        { mode: "fold", foldFrom: 3 },
+      );
+    }
+    if (!S.fleetRead)
+      setCardState(checksStage, "loading", { words: "Running the checks" });
     if (S.fleetRead) {
       const rows = healthChecks({
         s: S.s,
@@ -1076,26 +1156,40 @@ function overviewTab(panel, c) {
         watch,
         manual: manual ?? [],
       });
-      checksList.replaceChildren(
-        ...rows.map((r) =>
-          h(
-            "li",
-            { "data-key": r.key },
-            dot(r.tone === "unknown" ? "" : r.tone, r.text),
-            r.check
-              ? h(
-                  "span",
-                  { class: "sh-checks__act" },
-                  h("span", null, r.verdict),
-                  answerButton(name, r.check, () => void readChecks()),
-                )
-              : h("span", null, r.verdict),
-          ),
-        ),
-      );
+      const counted = checks.set(statusRows(rows), (id) => {
+        const r = rows.find((x) => x.key === id);
+        return r?.check
+          ? answerButton(name, r.check, () => void readChecks())
+          : null;
+      });
+      checksCount.textContent = `${counted.ok} of ${counted.total} ${counted.total === 1 ? "check passes" : "checks pass"}`;
+      setCardState(checksStage, "ready");
       checkedAt.textContent = checkedAtS
         ? `checked ${humanDuration(now - checkedAtS)} ago`
         : "checking…";
+    }
+    if (!topoRead)
+      setCardState(depsStage, "loading", { words: "Reading the topology" });
+    else if (topoFailed)
+      setCardState(depsStage, "error", {
+        title: "Could not read the topology",
+        text: topoFailed,
+        retry: false,
+      });
+    else {
+      const items = depItems(topo?.edges ?? [], name, (n) => {
+        const st = current().fleet?.stacks.find((x) => x.name === n);
+        return !st ? "unknown" : st.online ? "running" : "stopped";
+      });
+      if (!items.length)
+        setCardState(depsStage, "empty", {
+          title: "No connection known",
+          text: "Declare what this stack talks to in its firewall rules and it shows here.",
+        });
+      else {
+        setCardState(depsStage, "ready");
+        setDeplist(depsList, items);
+      }
     }
     if (history) {
       const rows = historyFeed(history).slice(0, 4);
@@ -1114,6 +1208,7 @@ function overviewTab(panel, c) {
   };
   stops.push(c.onChange(paint));
   stops.push(onInbox(paint));
+  stops.push(() => checks.stop());
 
   const readChecks = async () => {
     const r = await fetchReport(
@@ -1130,10 +1225,17 @@ function overviewTab(panel, c) {
   };
   stops.push(onAnswered(() => void readChecks().catch(() => {})));
 
-  void (async () => {
+  const readAll = async () => {
     const enc = encodeURIComponent(name);
     const tasks = [
       readChecks(),
+      (async () => {
+        const r = await fetchJson("/data/topology", "the topology", c.signal);
+        topo = r.ok ? (r.body.topology ?? null) : null;
+        topoFailed = r.ok ? null : r.error.why;
+        topoRead = true;
+        paint();
+      })(),
       (async () => {
         const [b, cal] = await Promise.all([
           fetchJson(`/data/backups/${enc}`, `${name}'s backups`, c.signal),
@@ -1201,11 +1303,33 @@ function overviewTab(panel, c) {
       })(),
     ];
     await Promise.allSettled(tasks);
-  })();
+  };
+  void readAll();
   paint();
+  stops.push(attachCardStates(panel));
   return () => {
     for (const s of stops.reverse()) s();
   };
+}
+
+/**
+ * `inner` inside a kp card that carries the four data states: its loading
+ * is the package's busy card over the whole footprint, its empty and failed
+ * plates fill the same box. A flat card (no frame of its own) so it can sit
+ * inside a section.
+ * @param {HTMLElement} inner
+ * @returns {HTMLElement}
+ */
+function stage(inner) {
+  return h(
+    "div",
+    { class: "kp-card hb-stage", "data-kp-state": "loading" },
+    h(
+      "div",
+      { class: "kp-card__stage" },
+      h("div", { class: "kp-card__data" }, inner),
+    ),
+  );
 }
 
 /**
@@ -1739,32 +1863,94 @@ function appsTab(panel, c) {
   const { name, S } = c;
   /** @type {import("../stackhub.js").Stale[] | null} */
   let stale = null;
-  const tbody = h("tbody");
-  const table = datatable({
+  /** The log lines each opened app showed, kept so a repaint does not read them again. @type {Map<string, string[]>} */
+  const lines = new Map();
+  const block = tableBlock({
     remember: "stack-apps",
+    caption: `The apps of ${name}; open one for its image, health and last log lines`,
+    captionHidden: true,
+    search: null,
+    nothing: "This stack declares no apps.",
     columns: [
       { label: "App", sort: "text" },
-      { label: "State", sort: "text" },
+      { label: "State", sort: "text", filter: "choice" },
       { label: "Version", sort: "text" },
       { label: "Newer", sort: "text" },
-      { label: "Actions", cls: "sh-right" },
+      { label: "Restarts", sort: "number", cls: "kp-text-end" },
+      { label: "Health", sort: "text" },
+      { label: "Actions", sort: null, cls: "sh-right" },
     ],
-    tbody,
   });
-  const body = h("div", null, skeletonTable(4, 5, "Reading the apps"));
+  for (const [k, v] of [
+    ["data-kp-expandable", ""],
+    ["data-kp-expand-single", ""],
+    ["data-kp-column-menu", ""],
+  ])
+    block.wrap.setAttribute(k, v);
+  // The density chooser sits in the table's bar, remembered with the table.
+  const densityBar = h(
+    "div",
+    { class: "kp-datatable__bar" },
+    h("select", {
+      class: "kp-field__input kp-datatable__select",
+      "data-kp-datatable-density": "",
+      "aria-label": "Row density",
+    }),
+  );
+  block.wrap.prepend(densityBar);
+  const ths = /** @type {HTMLElement[]} */ ([
+    ...block.wrap.querySelectorAll("thead th"),
+  ]);
+  ths[0].setAttribute("data-kp-column-locked", "");
+  ths[5].setAttribute("data-kp-column-hidden", "");
+  const stageEl = stage(block.wrap);
   const card = section({
     title: "Apps",
-    desc: "The containers this stack runs, the version each is on, and whether a newer one exists.",
+    desc: "The containers this stack runs, the version each is on, and whether a newer one exists; open one for its image, health and last log lines.",
   });
-  card.body.append(body);
+  card.body.append(stageEl);
   card.setFoot([
     "Versions from the stack's files; newer ones from the fleet check's last run.",
     link("/map", `${name}/apps/map`, "Every stale image in Map"),
   ]);
   panel.replaceChildren(card.el);
-  let attached = false;
-  /** @type {() => void} */
-  let detach = () => {};
+  const detachTables = attachDataTables(card.el);
+  const detachCards = attachCardStates(panel);
+  setCardState(stageEl, "loading", { words: "Reading the apps" });
+  let drawnKey = "";
+
+  /** @param {string} app */
+  const readLines = async (app) => {
+    const r = await fetchJson(
+      logsUrl(name, { since: "3600", app, q: "" }, 3),
+      `${app}'s last log lines`,
+      c.signal,
+    );
+    const got = r.ok
+      ? (r.body.lines ?? [])
+          .slice(-3)
+          .map(
+            (/** @type {any} */ l) =>
+              `${lineTime(l.ts ?? l.time ?? 0)}  ${l.line ?? l.text ?? l.msg ?? ""}`,
+          )
+      : [`Could not read the log lines: ${r.error.why}`];
+    lines.set(app, got);
+    const holder = block.tbody.querySelector(
+      `[data-hb-log="${CSS.escape(app)}"]`,
+    );
+    if (holder instanceof HTMLElement)
+      setCode(holder, {
+        title: "Last three log lines",
+        language: "log",
+        text: got.length ? got.join("\n") : "No line in the last hour.",
+        wrap: true,
+        copy: true,
+      });
+  };
+  block.wrap.addEventListener("kp-datatable-expand", (e) => {
+    const d = /** @type {CustomEvent} */ (e).detail;
+    if (d.open && d.key) void readLines(String(d.key)).catch(() => {});
+  });
 
   const paint = () => {
     if (!S.fleetRead) return;
@@ -1774,26 +1960,38 @@ function appsTab(panel, c) {
       images: S.edit?.images ?? null,
       stale: stale ?? [],
     });
-    if (rows.length === 0) {
-      detach();
-      attached = false;
-      body.replaceChildren(
-        emptyState({
-          title: "This stack declares no apps",
-          text: "An app is added in Settings ▸ Files (Add an app), from a preset or by hand.",
-          action: linkButton(
-            `${stackHref(name, "settings")}?section=files`,
-            "Open the files",
-            "Settings ▸ Files",
-            `${name}/settings/files`,
-            "",
-          ),
-        }),
-      );
+    if (!rows.length) {
+      setCardState(stageEl, "empty", {
+        title: "This stack declares no apps",
+        text: "An app is added in Settings ▸ Files (Add an app), from a preset or by hand.",
+        action: linkButton(
+          `${stackHref(name, "settings")}?section=files`,
+          "Open the files",
+          "Settings ▸ Files",
+          `${name}/settings/files`,
+          "",
+        ),
+      });
       return;
     }
-    tbody.replaceChildren(
-      ...rows.map((r) => {
+    setCardState(stageEl, "ready");
+    const sig = JSON.stringify([
+      rows.map((r) => [
+        r.name,
+        r.state,
+        r.version,
+        r.newer?.latest,
+        r.restarts,
+      ]),
+      stale == null,
+      S.inFleet,
+    ]);
+    if (sig === drawnKey) return;
+    drawnKey = sig;
+    const fleetApps = S.s?.apps ?? [];
+    block.tbody.replaceChildren(
+      ...rows.flatMap((r) => {
+        const health = fleetApps.find((a) => a.name === r.name)?.health ?? "";
         const logs = linkButton(
           `${stackHref(name, "logs")}?app=${encodeURIComponent(r.name)}`,
           "Logs",
@@ -1870,70 +2068,167 @@ function appsTab(panel, c) {
           pub.dataset.kpAction = "publish";
           acts.push(pub);
         }
-        return h(
-          "tr",
-          { "data-kp-row-key": r.name },
-          h("td", { class: "id" }, r.name),
+        const word =
+          r.state === "running"
+            ? "up"
+            : r.state === "stopped"
+              ? "down"
+              : r.extra
+                ? "sidecar"
+                : "not deployed";
+        const kv = (
+          /** @type {string} */ k,
+          /** @type {string} */ v,
+          mono = false,
+        ) =>
           h(
-            "td",
-            { "data-label": "State", "data-sort": r.state ?? "" },
-            r.state
-              ? dot(r.state === "running" ? "ok" : "bad", r.state)
-              : h(
-                  "span",
-                  { class: "sh-muted" },
-                  r.extra ? "a sidecar image" : "not deployed",
+            "div",
+            { class: "kp-kv__row" },
+            h("dt", null, k),
+            h("dd", mono ? { class: "kp-mono" } : null, v),
+          );
+        return [
+          h(
+            "tr",
+            { "data-kp-row-key": r.name },
+            h(
+              "td",
+              { "data-kp-sort-value": r.name },
+              h(
+                "span",
+                { class: "hb-app" },
+                h("span", {
+                  class: "kp-idmark kp-idmark--sm",
+                  "data-kp-idmark": r.name,
+                  "aria-hidden": "true",
+                }),
+                h("b", null, r.name),
+              ),
+            ),
+            h(
+              "td",
+              { "data-kp-sort-value": word, "data-kp-filter-value": word },
+              stateWord(word, ["up", "down", "sidecar", "not deployed"]),
+            ),
+            h(
+              "td",
+              {
+                class: "kp-mono",
+                title: r.image || null,
+                "data-kp-sort-value": r.version,
+              },
+              r.version || "—",
+            ),
+            h(
+              "td",
+              { "data-kp-sort-value": r.newer?.latest ?? "" },
+              r.newer
+                ? [
+                    h(
+                      "span",
+                      { class: "kp-badge kp-badge--info" },
+                      r.newer.latest,
+                    ),
+                    r.newer.major
+                      ? h(
+                          "span",
+                          {
+                            class: "kp-badge kp-badge--warning",
+                            title:
+                              "The first number changes: read the release notes first",
+                          },
+                          "major",
+                        )
+                      : null,
+                  ]
+                : stale == null
+                  ? "checking…"
+                  : "up to date",
+            ),
+            h(
+              "td",
+              {
+                class: "kp-text-end",
+                "data-kp-sort-value": String(r.restarts ?? -1),
+              },
+              r.restarts == null ? "—" : String(r.restarts),
+            ),
+            h("td", { "data-kp-sort-value": health }, health || "not declared"),
+            h(
+              "td",
+              { class: "row-actions" },
+              h("div", { class: "kp-row-actions" }, acts),
+            ),
+          ),
+          h(
+            "tr",
+            { "data-kp-row-detail": "" },
+            h(
+              "td",
+              { colspan: "7" },
+              h(
+                "div",
+                { class: "hb-detail" },
+                h(
+                  "dl",
+                  { class: "kp-kv" },
+                  kv("Image", r.image || "not known", true),
+                  kv("Version", r.version || "—", true),
+                  kv(
+                    "Newer",
+                    r.newer
+                      ? `${r.newer.latest}${r.newer.major ? " (major)" : ""}`
+                      : "none known",
+                  ),
+                  kv(
+                    "Restarts",
+                    r.restarts == null
+                      ? "not reported"
+                      : `${r.restarts} since the container started`,
+                  ),
+                  kv("Health", health || "no health check declared"),
                 ),
-          ),
-          h(
-            "td",
-            { "data-label": "Version", class: "mono", title: r.image || null },
-            r.version || h("span", { class: "sh-muted" }, "—"),
-          ),
-          h(
-            "td",
-            { "data-label": "Newer", "data-sort": r.newer?.latest ?? "" },
-            r.newer
-              ? [
-                  chip(r.newer.latest, { tone: "info" }),
-                  r.newer.major
-                    ? chip("major", {
-                        tone: "warn",
-                        title:
-                          "The first number changes: read the release notes first",
-                      })
-                    : null,
-                ]
-              : h(
-                  "span",
-                  { class: "sh-muted" },
-                  stale == null ? "checking…" : "up to date",
+                h(
+                  "figure",
+                  {
+                    class: "kp-code",
+                    "data-kp-code": "",
+                    "data-hb-log": r.name,
+                  },
+                  h("pre", { class: "kp-code__body" }, h("code")),
                 ),
+              ),
+            ),
           ),
-          h(
-            "td",
-            { class: "row-actions" },
-            h("div", { class: "kp-row-actions" }, acts),
-          ),
-        );
+        ];
       }),
     );
-    if (!attached) {
-      body.replaceChildren(table);
-      detach = attachDataTables(body);
-      attached = true;
+    for (const el of /** @type {NodeListOf<HTMLElement>} */ (
+      block.tbody.querySelectorAll("[data-hb-log]")
+    )) {
+      const app = el.dataset.hbLog ?? "";
+      setCode(el, {
+        title: "Last three log lines",
+        language: "log",
+        text: (lines.get(app) ?? ["Open the row to read them."]).join("\n"),
+        wrap: true,
+        copy: true,
+      });
     }
+    block.ready();
   };
   const stop = c.onChange(paint);
   void (async () => {
     const r = await slowRead("/data/stale-images", "stale images", c.signal);
     stale = r.ok ? staleFor(name, r.body.images ?? []) : [];
+    drawnKey = "";
     paint();
   })().catch(() => {});
   paint();
   return () => {
     stop();
-    detach();
+    detachTables();
+    detachCards();
   };
 }
 
@@ -2000,7 +2295,8 @@ function datatable(spec) {
  */
 function backupsTab(panel, c) {
   const { name, S } = c;
-  const body = h("div", null, skeletonTable(4, 5, "Reading the backups"));
+  const body = h("div", { class: "hb-backups" });
+  const stageEl = stage(body);
   const native = () => S.s?.native === true;
   const backupNow = actionButton(c, "backup", {
     label: "Back up now",
@@ -2018,7 +2314,7 @@ function backupsTab(panel, c) {
     desc: "One snapshot per app every night, kept as its retention says. Restore brings one app's data back to a chosen night.",
     tools: [backupNow, restore],
   });
-  card.body.append(body);
+  card.body.append(stageEl);
   card.setFoot([
     h(
       "span",
@@ -2039,6 +2335,8 @@ function backupsTab(panel, c) {
     ),
   ]);
   panel.replaceChildren(card.el);
+  const detachCards = attachCardStates(panel);
+  setCardState(stageEl, "loading", { words: "Reading the backups" });
   /** @type {any} */
   let read = null;
   /** @type {import("../doctor.js").RouteError | null} */
@@ -2046,6 +2344,14 @@ function backupsTab(panel, c) {
   let noBackup = false;
   /** @type {() => void} */
   let detach = () => {};
+  /** @type {"strips" | "heat"} */
+  let backupView = "strips";
+  try {
+    if (localStorage.getItem("homelab.hub.backups") === "heat")
+      backupView = "heat";
+  } catch {
+    // the choice lasts for this visit
+  }
 
   const paint = () => {
     const nat = native() || read?.native === true;
@@ -2058,122 +2364,253 @@ function backupsTab(panel, c) {
     }
     if (failed) {
       detach();
-      body.replaceChildren(
-        h(
-          "div",
-          { class: "kp-alert kp-alert--destructive", role: "alert" },
-          h("strong", null, "The backups did not read"),
-          h("p", null, `${failed.why}${failed.fix ? ` — ${failed.fix}` : ""}`),
-        ),
-      );
+      setCardState(stageEl, "error", {
+        title: "The backups did not read",
+        text: `${failed.why}${failed.fix ? ` — ${failed.fix}` : ""}`,
+        retry: false,
+      });
       return;
     }
     if (!read) return;
     if (noBackup || (read.repos ?? []).length === 0) {
       detach();
-      body.replaceChildren(
-        emptyState({
-          title: noBackup
-            ? `${name} keeps no data to back up`
-            : `${name} has no backup yet`,
-          text: noBackup
-            ? "It declares no app data, by design; there is nothing to snapshot."
-            : "The first snapshot is written tonight at the nightly round, or now with Back up now.",
-        }),
-      );
+      setCardState(stageEl, "empty", {
+        title: noBackup
+          ? `${name} keeps no data to back up`
+          : `${name} has no backup yet`,
+        text: noBackup
+          ? "It declares no app data, by design; there is nothing to snapshot."
+          : "The first snapshot is written tonight at the nightly round, or now with Back up now.",
+      });
       return;
     }
+    setCardState(stageEl, "ready");
     const rows = backupRows({ repos: read.repos ?? [], now: nowS() });
-    const tbody = h(
-      "tbody",
-      null,
-      rows.map((r) =>
+    const long = backupRows({
+      repos: read.repos ?? [],
+      now: nowS(),
+      nights: 30,
+    });
+    detach();
+    detach = () => {};
+    const dayLabel = (/** @type {string} */ night) => {
+      const [y, m, d] = night.split("-").map(Number);
+      return formatDay(Date.UTC(y, m - 1, d, 12) / 1000, { timeZone: "UTC" });
+    };
+    /** @param {string} app @param {string} night */
+    const restoreHref = (app, night) =>
+      `/restore?stack=${encodeURIComponent(name)}&app=${encodeURIComponent(app)}&snapshot=${encodeURIComponent(addDays(night, -1))}`;
+    /** @param {string} app @param {string} night */
+    const openRestore = (app, night) => {
+      history.pushState(null, "", restoreHref(app, night));
+      dispatchEvent(new PopStateEvent("popstate"));
+    };
+    const strips = h(
+      "div",
+      { class: "hb-strips" },
+      ...rows.map((r) => {
+        const el = h("div", {
+          class: "kp-uptime",
+          "data-kp-uptime": "",
+          "data-kp-uptime-count": String(r.cells.length),
+          "data-kp-uptime-label": r.app,
+          "data-hb-app": r.app,
+        });
+        const measured = r.cells.filter(
+          (x) => x.state === "ok" || x.state === "miss",
+        );
+        const ok = r.cells.filter((x) => x.state === "ok").length;
+        return h(
+          "div",
+          { class: "hb-strip" },
+          el,
+          h(
+            "p",
+            { class: "hb-strip__count" },
+            `${ok} of ${measured.length} nights`,
+          ),
+          h(
+            "div",
+            { class: "kp-row-actions" },
+            actionButton(c, nat ? "restore-native" : "restore", {
+              label: "Restore…",
+              title: `Bring ${r.app}'s data back from a snapshot`,
+              cls: "kp-button--sm",
+              slot: "restore",
+              preset: nat
+                ? r.newest?.short_id
+                  ? { snapshot: r.newest.short_id }
+                  : undefined
+                : {
+                    app: r.app,
+                    ...(r.newest?.short_id
+                      ? { snapshot: r.newest.short_id }
+                      : {}),
+                  },
+              drive: [BACKUP_ROW, `${name}/${r.app}/restore`],
+            }),
+            nat
+              ? null
+              : actionButton(c, "verify-restore", {
+                  label: "Verify…",
+                  title: `Prove ${r.app}'s newest snapshot restores, without touching live data`,
+                  cls: "kp-button--sm kp-button--ghost",
+                  slot: "verify",
+                  preset: { app: r.app },
+                  drive: [BACKUP_ROW, `${name}/${r.app}/verify`],
+                }),
+          ),
+        );
+      }),
+    );
+    const heat = h("div", {
+      class: "kp-heat hb-heat",
+      "data-kp-heat": "",
+      "data-kp-heat-latest": "end",
+    });
+    const views = segSwitch({
+      label: "View",
+      value: backupView,
+      items: [
+        {
+          value: "strips",
+          label: "A strip per app, 14 nights",
+          hint: "One strip of the last 14 nights for each app",
+        },
+        {
+          value: "heat",
+          label: "A grid of 30 nights",
+          hint: "Apps against the last 30 nights",
+        },
+      ],
+      onChange: (v) => {
+        backupView = v === "heat" ? "heat" : "strips";
+        try {
+          localStorage.setItem("homelab.hub.backups", backupView);
+        } catch {
+          // kept for this visit only
+        }
+        draw();
+      },
+      mark: (b, v) => void drivable(b, BACKUP_VIEW, `${name}/${v}`),
+    });
+    const legend = h(
+      "ul",
+      { class: "kp-heat__legend hb-legend", "aria-label": "Legend" },
+      ...[
+        ["ok", "backed up"],
+        ["bad", "missed"],
+        ["before", "before the oldest kept backup"],
+      ].map(([tone, words]) =>
         h(
-          "tr",
-          { "data-kp-row-key": r.app },
-          h("td", { class: "id" }, r.app),
-          h(
-            "td",
-            {
-              "data-label": "Newest",
-              "data-sort": String(r.newest?.time ?? 0),
-            },
-            r.newest
-              ? [
-                  h("span", { class: "mono" }, r.newest.short_id || "—"),
-                  ` · ${whenText(r.newest.time)}`,
-                ]
-              : h("span", { class: "sh-muted" }, r.error ?? "none yet"),
-          ),
-          h(
-            "td",
-            { "data-label": "14 nights", "data-sort": String(r.missed) },
-            nightStrip(r.cells),
-          ),
-          h("td", { class: "num", "data-label": "Kept" }, String(r.kept)),
-          h(
-            "td",
-            { class: "row-actions" },
-            h(
-              "div",
-              { class: "kp-row-actions" },
-              actionButton(c, nat ? "restore-native" : "restore", {
-                label: "Restore…",
-                title: `Bring ${r.app}'s data back from a snapshot`,
-                cls: "kp-button--sm",
-                slot: "restore",
-                preset: nat
-                  ? r.newest?.short_id
-                    ? { snapshot: r.newest.short_id }
-                    : undefined
-                  : {
-                      app: r.app,
-                      ...(r.newest?.short_id
-                        ? { snapshot: r.newest.short_id }
-                        : {}),
-                    },
-                drive: [BACKUP_ROW, `${name}/${r.app}/restore`],
-              }),
-              nat
-                ? null
-                : actionButton(c, "verify-restore", {
-                    label: "Verify…",
-                    title: `Prove ${r.app}'s newest snapshot restores, without touching live data`,
-                    cls: "kp-button--sm kp-button--ghost",
-                    slot: "verify",
-                    preset: { app: r.app },
-                    drive: [BACKUP_ROW, `${name}/${r.app}/verify`],
-                  }),
-            ),
-          ),
+          "li",
+          null,
+          h("span", { class: "kp-heat__swatch", "data-kp-tone": tone }),
+          words,
         ),
       ),
     );
-    detach();
+    const readout = h("p", { class: "hb-readout", role: "status" });
     body.replaceChildren(
-      datatable({
-        remember: "stack-backups",
-        columns: [
-          { label: "App", sort: "text" },
-          { label: "Newest snapshot", sort: "number" },
-          { label: "Last 14 nights", sort: "number" },
-          { label: "Kept", sort: "number", cls: "num" },
-          { label: "Actions", cls: "sh-right" },
-        ],
-        tbody,
-      }),
       h(
-        "p",
-        { class: "sh-legend" },
-        h("i", { class: "sh-strip__ok" }),
-        "snapshot that night",
-        h("i", { class: "sh-strip__miss" }),
-        "missed",
-        h("i", { class: "sh-strip__before" }),
-        "before its oldest kept snapshot",
+        "div",
+        { class: "hb-ctl" },
+        h("b", { class: "hb-ctl__label" }, "View"),
+        views.el,
       ),
+      strips,
+      heat,
+      legend,
+      readout,
     );
-    detach = attachDataTables(body);
+    const draw = () => {
+      views.set(backupView);
+      strips.hidden = backupView !== "strips";
+      heat.hidden = backupView !== "heat";
+      if (backupView === "heat")
+        setHeat(heat, {
+          label: "Backups per app per night",
+          columns: long[0].cells.map((x, i) => ({
+            key: x.night,
+            label: x.night.slice(8, 10) + "/" + x.night.slice(5, 7),
+            minor: i % 2 === 1,
+          })),
+          every: 5,
+          rows: long.map((r) => ({
+            key: r.app,
+            label: r.app,
+            cells: r.cells.map((x) => ({
+              tone:
+                x.state === "ok" ? "ok" : x.state === "miss" ? "bad" : "before",
+              label:
+                x.state === "ok"
+                  ? "backed up"
+                  : x.state === "miss"
+                    ? "missed"
+                    : "before the oldest kept backup",
+              tip: `${r.app}, ${dayLabel(x.night)}`,
+            })),
+          })),
+        });
+      else
+        for (const r of rows) {
+          const el = strips.querySelector(
+            `[data-hb-app="${CSS.escape(r.app)}"]`,
+          );
+          if (!(el instanceof HTMLElement)) continue;
+          setUptime(el, {
+            label: r.app,
+            periods: r.cells.map((x) => ({
+              key: x.night,
+              label: dayLabel(x.night),
+              state:
+                x.state === "ok" ? "up" : x.state === "miss" ? "down" : "none",
+              ...(x.state === "miss"
+                ? {
+                    details: [
+                      `Missed on ${dayLabel(x.night)}: no snapshot was written that night`,
+                      `Restore would open on ${dayLabel(addDays(x.night, -1))}`,
+                    ],
+                  }
+                : x.state === "before" ||
+                    x.state === "wait" ||
+                    x.state === "none"
+                  ? {
+                      tip: `${dayLabel(x.night)}: ${x.state === "wait" ? "tonight's round has not run yet" : "before the oldest kept backup: nothing to restore, nothing went wrong"}`,
+                    }
+                  : {}),
+            })),
+            from: "14 nights ago",
+            to: "Last night",
+            open: "info",
+          });
+        }
+    };
+    strips.addEventListener(UPTIME_PICK_EVENT, (e) => {
+      const d = /** @type {CustomEvent} */ (e).detail;
+      const app = /** @type {HTMLElement} */ (e.target)
+        .closest("[data-hb-app]")
+        ?.getAttribute("data-hb-app");
+      if (d.period?.state === "down" && app) {
+        readout.textContent = `Restore would open on ${dayLabel(addDays(d.period.key, -1))} for ${app}.`;
+        const go = h(
+          "button",
+          { type: "button", class: "kp-button kp-button--sm" },
+          "Restore from the night before",
+        );
+        drivable(go, BACKUP_RESTORE_NIGHT, `${name}/${app}`);
+        go.addEventListener("click", () => openRestore(app, d.period.key));
+        readout.append(" ", go);
+      } else readout.textContent = "";
+    });
+    heat.addEventListener(HEAT_PICK_EVENT, (e) => {
+      const d = /** @type {CustomEvent} */ (e).detail;
+      const cell = long
+        .find((r) => r.app === d.rowKey)
+        ?.cells.find((x) => x.night === d.colKey);
+      if (d.picked && cell?.state === "miss") openRestore(d.rowKey, d.colKey);
+    });
+    draw();
   };
   const stop = c.onChange(paint);
   void (async () => {
@@ -2196,6 +2633,7 @@ function backupsTab(panel, c) {
   return () => {
     stop();
     detach();
+    detachCards();
   };
 }
 
@@ -2962,32 +3400,6 @@ function sideFilters(spec) {
       return any;
     },
   };
-}
-
-/**
- * The 14-night strip of a backup row: one cell per night, oldest first.
- * @param {{night: string, state: string}[]} cells
- */
-function nightStrip(cells) {
-  const missed = cells.filter((c) => c.state === "miss").map((c) => c.night);
-  const got = cells.filter((c) => c.state === "ok").length;
-  return h(
-    "span",
-    {
-      class: "sh-strip",
-      role: "img",
-      "aria-label": `${got} of the last ${cells.length} nights backed up${missed.length ? `; missed ${missed.join(", ")}` : ""}`,
-      title: missed.length
-        ? `Missed: ${missed.join(", ")}`
-        : `${got} of ${cells.length} nights backed up`,
-    },
-    cells.map((c) =>
-      h("i", {
-        class: `sh-strip__${c.state}`,
-        title: `${c.night}: ${c.state}`,
-      }),
-    ),
-  );
 }
 
 /**

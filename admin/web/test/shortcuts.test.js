@@ -31,20 +31,20 @@ test("/ searches; digits and brackets move between a stack's tabs", () => {
   assert.deepEqual(keyAction(idle(), "/", 0, home).action, {
     focusSearch: true,
   });
-  // feat-shell-3: the hub's tabs, Overview · Logs · Apps · Backups ·
+  // The hub's tabs, Overview · Resources · Logs · Apps · Backups ·
   // History · Settings.
   const logs = route("/stacks/media/logs");
   assert.deepEqual(keyAction(idle(), "1", 0, logs).action, {
     navigate: "/stacks/media",
   });
   assert.deepEqual(keyAction(idle(), "[", 0, logs).action, {
-    navigate: "/stacks/media",
+    navigate: "/stacks/media/resources",
   });
   assert.deepEqual(keyAction(idle(), "]", 0, logs).action, {
     navigate: "/stacks/media/apps",
   });
-  assert.equal(keyAction(idle(), "2", 0, logs).action, null); // already there
-  assert.deepEqual(keyAction(idle(), "6", 0, logs).action, {
+  assert.equal(keyAction(idle(), "3", 0, logs).action, null); // already there
+  assert.deepEqual(keyAction(idle(), "7", 0, logs).action, {
     navigate: "/stacks/media/settings",
   });
   assert.equal(keyAction(idle(), "9", 0, logs).action, null);

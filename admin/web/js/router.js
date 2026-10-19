@@ -20,10 +20,11 @@ import { setParams } from "./urlstate.js";
 
 /**
  * The stack hub's tabs (feat-stacks-1; feat-shell-3 reorders them by use,
- * FLOWS.md §1.3): Overview · Logs · Apps · Backups · History · Settings.
+ * FLOWS.md §1.3): Overview · Resources · Logs · Apps · Backups · History · Settings.
  */
 export const STACK_TABS = /** @type {const} */ ([
   { tab: "overview", label: "Overview" },
+  { tab: "resources", label: "Resources" },
   { tab: "logs", label: "Logs" },
   { tab: "apps", label: "Apps" },
   { tab: "backups", label: "Backups" },

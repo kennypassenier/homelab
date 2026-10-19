@@ -163,7 +163,7 @@ test("feat-shell-1: every address the router knows is drivable, retired ones inc
 test("every hub tab has its own path and round-trips; the merged tabs redirect", () => {
   assert.deepEqual(
     STACK_TABS.map((t) => t.tab),
-    ["overview", "logs", "apps", "backups", "history", "settings"],
+    ["overview", "resources", "logs", "apps", "backups", "history", "settings"],
   );
   for (const { tab } of STACK_TABS) {
     const href = stackHref("odd name", tab);

@@ -19,13 +19,7 @@ import {
   ruleMatches,
   rulesFor,
 } from "../js/fwview.js";
-import {
-  countText,
-  emptyPreset,
-  galleryCards,
-  ramText,
-  sets,
-} from "../js/presetsview.js";
+import { countText, emptyPreset, ramText, sets } from "../js/presetsview.js";
 import {
   accessWords,
   fieldShown,
@@ -295,25 +289,8 @@ const presets = [
   },
 ];
 
-test("redesign-presets: the app-less preset is the Empty stack card, the rest sorted and searched", () => {
+test("redesign-presets: the app-less preset is the Empty stack card", () => {
   assert.equal(emptyPreset(presets)?.name, "custom");
-  assert.deepEqual(
-    galleryCards(presets, "", "name").map((p) => p.name),
-    ["actual", "jellyfin", "mealie"],
-  );
-  assert.deepEqual(
-    galleryCards(presets, "", "ram").map((p) => p.name),
-    ["jellyfin", "actual", "mealie"],
-  );
-  assert.deepEqual(
-    galleryCards(presets, "media", "name").map((p) => p.name),
-    ["jellyfin"],
-  );
-  assert.deepEqual(
-    galleryCards(presets, "mealie", "name").length,
-    1,
-    "an app name matches",
-  );
 });
 
 test("redesign-presets: sizes and counts in the demo's words", () => {

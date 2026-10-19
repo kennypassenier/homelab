@@ -132,17 +132,11 @@ if command -v node >/dev/null 2>&1; then
   fi
 fi
 
-# redesign-final-12: a merge runs the whole-screen cases of the pages it
-# changes (only on a merge: MERGE_HEAD; a plain commit's cases are its
-# author's own fail-first and pass runs).
-if [ "${HOMELAB_MERGE_COMMIT:-}" = 1 ] \
-   || git rev-parse -q --verify MERGE_HEAD >/dev/null; then
-  "$root/.githooks/merge-cases.sh" || exit 1
-else
-  # redesign-final (B): a plain commit runs its pages' cases too;
-  # redesign-final-49: a shared file only the one layout walk.
-  HOMELAB_CASES_MODE=commit "$root/.githooks/merge-cases.sh" || exit 1
-fi
+# ask-kp11gate-1 (Kenny, 2026-10-19 16:44, "ja"): a commit runs only the
+# fast checks (fmt, clippy, build, unit tests in gates.sh below). The
+# whole-screen cases (merge-cases.sh / scripts/invariants-run.sh) moved to
+# the release step (`make gate` / `make release`); they no longer run on a
+# commit or a merge. This replaces redesign-final-12 and redesign-final (B).
 
 # Single source of truth: the same script the session hook runs.
 gates="$root/.claude/hooks/gates.sh"

@@ -1,35 +1,35 @@
-// The Apps page (redesign-stacks, release 3.71.0; Kenny approved the demo
-// 2026-10-03: ~/.local/share/homelab/redesign-3.71/apps.html). Home when
-// the Inbox is empty (`/` sends there; main.js `landing`). Every app the
-// fleet runs, one click away: a header with the watch's own freshness, a
-// one-line verdict, the launch search (type, Enter opens the first match
-// in a new tab), then the tiles grouped as the stacks declare them, the
-// starred ones on top, and a legend of the dots.
+// The Apps page (redesign-stacks, release 3.71.0; rebuilt on the approved
+// kp-themes 11 demo, feat-kp11demo-12.4). Home when the Inbox is empty (`/`
+// sends there; main.js `landing`). Every app the fleet runs, one click away:
+// a header with the watch's own freshness, a one-line verdict, the launch
+// search (type, Enter opens the first match in a new tab), then the apps as
+// kp action tiles grouped by their stack, each with one state word (answers,
+// failing, down, deploying, not watched, the word is the legend), a hover
+// card that says why an app is amber or red, facets that keep only the apps
+// in a state, and a menu per stack that opens every app of it that answers.
 //
 // Everything on a tile is declared in the stack that owns the route
-// (`tiles:` in lxc-compose.yml); nothing here knows an app. The dot is the
+// (`tiles:` in lxc-compose.yml); nothing here knows an app. The state is the
 // minute watch (`/data/watch`): the tile's own probe, or its stack's
-// container when the tile has none. Stars are this browser's own (a
-// per-viewer convenience, never shared state).
+// container when the tile has none.
 
 import { fetchJson, h } from "../dom.js";
 import { formatDateTime } from "../format.js";
 import { declare, drivable } from "../drivable.js";
 import { agoEl, setAgo } from "../ago.js";
+import { appsVerdict, filterTiles, markParts, tileState } from "../appsview.js";
+import { ensureStyle, keyRow, pageHeader } from "../ui.js";
+import { attachCardStates, setCardState } from "/static/kp/js/card-state.js";
 import {
-  appsVerdict,
-  board,
-  filterTiles,
-  hueOf,
-  initials,
-  markParts,
-  packColumns,
-  packGroups,
-  packMinRem,
-  readStars,
-  tileState,
-} from "../appsview.js";
-import { art, emptyState, ensureStyle, keyRow, pageHeader } from "../ui.js";
+  FACET_EVENT,
+  attachFacets,
+  setFacetCounts,
+  setFacetItems,
+  setFacetValues,
+} from "/static/kp/js/facets.js";
+import { attachHoverCards } from "/static/kp/js/hovercard.js";
+import { attachIdmarks } from "/static/kp/js/idmark.js";
+import { attachMenuButtons } from "/static/kp/js/menu-button.js";
 
 /**
  * @typedef {{stack: string, host: string, url: string, name: string,
@@ -37,25 +37,9 @@ import { art, emptyState, ensureStyle, keyRow, pageHeader } from "../ui.js";
  *   error?: string}} Tile
  */
 
-/**
- * Tiles in page order, cut into their groups.
- * @param {Tile[]} tiles already sorted by the host
- * @returns {{group: string, tiles: Tile[]}[]}
- */
-export function grouped(tiles) {
-  /** @type {{group: string, tiles: Tile[]}[]} */
-  const out = [];
-  for (const t of tiles) {
-    const last = out[out.length - 1];
-    if (last && last.group === t.group) last.tiles.push(t);
-    else out.push({ group: t.group, tiles: [t] });
-  }
-  return out;
-}
-
 // Live view (invariant 39; coordinator rule 2026-10-03: every clickable
-// element carries a declared, stable id): the tiles, their stars, the
-// search, the Stacks link and the empty search's reset.
+// element carries a declared, stable id): the tiles, the search, the Stacks
+// link, the state facets, a stack's Open menu and the empty search's reset.
 const OPEN = declare({
   id: "apps-open",
   page: "home",
@@ -82,13 +66,6 @@ const RETRY = declare({
   what: "read the apps again after a failed read",
   shows: "after the apps could not be read",
 });
-const STAR = declare({
-  id: "apps-star",
-  page: "home",
-  opens: "view",
-  row: "<tile host>",
-  what: "star or unstar one app, keeping it at the top under Starred",
-});
 const SHOW_ALL = declare({
   id: "apps-show-all",
   page: "home",
@@ -96,23 +73,61 @@ const SHOW_ALL = declare({
   what: "clear the app search and show every app again",
   shows: "when the search matches no app",
 });
-
-const FOLD = declare({
-  id: "apps-group-fold",
+const FACET = declare({
+  id: "apps-state-filter",
   page: "home",
   opens: "view",
-  row: "<group>",
-  what: "fold or unfold one group of apps by its title (remembered per group)",
+  row: "answers|failing|down|deploying|not watched",
+  what: "keep only the apps in this state (turn the state on or off)",
 });
-
-/** Where this browser keeps the groups folded by their title. */
-const FOLDED_KEY = "homelab.apps.folded";
-
-/** Where this browser keeps its starred tiles. */
-const STARS_KEY = "homelab.apps.starred";
+const OPEN_MENU = declare({
+  id: "apps-stack-menu",
+  page: "home",
+  opens: "view",
+  row: "<stack>",
+  what: "open the Open menu of one stack's apps",
+});
+const OPEN_ALL = declare({
+  id: "apps-open-all",
+  page: "home",
+  opens: "run",
+  row: "<stack>",
+  what: "open every app of this stack that answers, each in its own tab",
+  shows: "while a stack's Open menu is open",
+  reach: [{ do: "click", control: "apps-stack-menu", row: "*" }],
+});
 
 /** How often the dots are read again (the watch runs every minute). */
 const EVERY_MS = 60_000;
+
+/** The words a tile's state can say; the longest sets the width. */
+const WORDS = "answers\nfailing\ndown\ndeploying\nnot watched";
+const STATE_ORDER = ["answers", "failing", "down", "deploying", "not watched"];
+
+/**
+ * The one word of a tile's state.
+ * @param {ReturnType<typeof tileState>} st
+ */
+export const wordOf = (st) =>
+  st.state === "up"
+    ? "answers"
+    : st.state === "flaky"
+      ? "failing"
+      : st.state === "unwatched"
+        ? "not watched"
+        : st.state;
+
+/**
+ * Tiles in page order, cut into their stacks.
+ * @param {Tile[]} tiles already sorted by the host
+ * @returns {{stack: string, tiles: Tile[]}[]}
+ */
+export function byStack(tiles) {
+  /** @type {Map<string, Tile[]>} */
+  const out = new Map();
+  for (const t of tiles) out.set(t.stack, [...(out.get(t.stack) ?? []), t]);
+  return [...out].map(([stack, list]) => ({ stack, tiles: list }));
+}
 
 /**
  * @param {HTMLElement} root
@@ -129,34 +144,8 @@ export function mount(root) {
   /** @type {string | null} why the tiles could not be read */
   let failed = null;
   let q = new URLSearchParams(location.search).get("q") ?? "";
-  /** @type {Set<string>} */
-  let stars = new Set();
-  try {
-    stars = readStars(localStorage.getItem(STARS_KEY));
-  } catch {
-    // a private window: no stars kept, every tile in its own group
-  }
-  /** @type {Set<string>} the groups folded by their title */
-  let folded = new Set();
-  try {
-    folded = readStars(localStorage.getItem(FOLDED_KEY));
-  } catch {
-    // a private window: every group starts unfolded
-  }
-  const saveFolded = () => {
-    try {
-      localStorage.setItem(FOLDED_KEY, JSON.stringify([...folded]));
-    } catch {
-      // the folds last as long as this page
-    }
-  };
-  const saveStars = () => {
-    try {
-      localStorage.setItem(STARS_KEY, JSON.stringify([...stars]));
-    } catch {
-      // the stars last as long as this page
-    }
-  };
+  /** @type {string[] | null} the states kept; null: all */
+  let kept = null;
 
   const stacksLink = drivable(
     h(
@@ -180,13 +169,12 @@ export function mount(root) {
   );
   const head = pageHeader({
     title: "Apps",
-    desc: "Every app the fleet runs, one click away. Type to find one, Enter opens it in a new tab; star the ones you use most.",
+    desc: "Every app the fleet runs, one click away. Type to find one, Enter opens it in a new tab; the word on a tile says whether it answers.",
     actions: [stacksLink],
   });
-  // As the demo: the live status beside the title, the link on the right.
   head.title.after(watched);
   head.el.classList.add("sk-head");
-  const verdictDot = h("span", { class: "sk-dot" });
+  const verdictDot = h("span", { class: "ap-dot" });
   const verdictText = h("strong", null, "Reading the apps…");
   const verdictAgo = agoEl("checked");
   const verdict = h(
@@ -218,379 +206,315 @@ export function mount(root) {
       [["/"], "find"],
       [["Enter"], "open"],
       [["←", "→", "↑", "↓"], "move"],
-      [["s"], "star"],
     ]),
   );
-  // Every group's tiles share one height across the board (kp-themes'
-  // tiles.js, `data-kp-tiles-set`), packed columns and folds included.
-  const body = h("div", {
-    class: "ap-board",
-    "aria-label": "Apps",
-    "data-kp-tiles-set": "apps",
-  });
-  const legend = h(
-    "p",
-    { class: "ap-legend", "aria-label": "What the dots mean" },
-    ...[
-      ["ok", "answers"],
-      ["warn", "failing, not yet down"],
-      ["bad", "down"],
-      ["info", "deploying"],
-      ["", "not watched"],
-    ].map(([tone, words]) =>
-      h("span", { class: `sk-dot${tone ? ` sk-dot--${tone}` : ""}` }, words),
+
+  // The launcher is a kp card with the four data states: its loading is the
+  // package's busy card over the whole footprint, its empty and failed
+  // plates fill the same box.
+  const facets = h(
+    "div",
+    {
+      class: "kp-facets kp-facets--row ap-facets",
+      "data-kp-facets": "",
+      "data-kp-facets-all": "Everything",
+      role: "group",
+      "aria-label": "State of the apps",
+    },
+    h("ul", { class: "kp-facets__list" }),
+  );
+  const body = h("div", { class: "ap-stacks" });
+  const data = h("div", { class: "ap-launcher" }, facets, body);
+  const card = h(
+    "section",
+    {
+      class: "kp-card ap-card",
+      "data-kp-state": "loading",
+      "aria-label": "Apps by stack",
+    },
+    h(
+      "div",
+      { class: "kp-card__stage" },
+      h("div", { class: "kp-card__data" }, data),
     ),
   );
-  root.replaceChildren(head.el, verdict, launch, body, legend);
+  root.replaceChildren(head.el, verdict, launch, card);
+  const detachFacets = attachFacets(root);
+  const detachCards = attachCardStates(root);
+  const detachMarks = attachIdmarks(root);
+  setFacetItems(
+    facets,
+    STATE_ORDER.map((v) => ({ value: v, label: v })),
+  );
+  facets.querySelectorAll("input[type=checkbox]").forEach((box) => {
+    if (box instanceof HTMLElement && box.getAttribute("value"))
+      drivable(box, FACET, box.getAttribute("value") ?? "");
+  });
 
   /** @param {string} text */
   const marked = (text) =>
     markParts(text, q).map((p) => (p.hit ? h("mark", null, p.text) : p.text));
+  const mark = (/** @type {string} */ name) =>
+    h("span", {
+      class: "kp-idmark kp-idmark--sm",
+      "data-kp-idmark": name,
+      "aria-hidden": "true",
+    });
 
-  /** @param {Tile} t */
-  const star = (t) => {
-    if (stars.has(t.host)) stars.delete(t.host);
-    else stars.add(t.host);
-    saveStars();
-    paint();
-    /** @type {HTMLElement | null} */ (
-      body.querySelector(`.ap-tile[data-host="${CSS.escape(t.host)}"]`)
-    )?.focus();
-  };
-
-  /**
-   * @param {Tile} t
-   * @param {boolean} first
-   */
+  /** @param {Tile} t @param {boolean} first */
   const tileEl = (t, first) => {
     const st = tileState(watch, t);
-    const pinned = stars.has(t.host);
-    const pin = drivable(
-      h(
-        "button",
-        {
-          type: "button",
-          class: "ap-tile__pin",
-          "aria-pressed": String(pinned),
-          "aria-label": pinned ? `Unstar ${t.name}` : `Star ${t.name}`,
-          title: pinned
-            ? "Remove from Starred (s)"
-            : "Keep at the top under Starred (s)",
-        },
-        pinned ? "★" : "☆",
-      ),
-      STAR,
-      t.host,
-    );
-    pin.addEventListener("click", (e) => {
-      e.preventDefault();
-      e.stopPropagation();
-      star(t);
-    });
-    const why =
-      st.via === "stack"
-        ? `its stack ${t.stack} ${st.state === "up" ? "runs" : `is ${st.word}`} (the tile has no probe of its own)`
-        : st.word;
     const a = h(
       "a",
       {
-        class: `ap-tile${first ? " is-first" : ""}`,
+        class: `kp-action ap-tile${first ? " is-first" : ""}`,
         href: t.url,
         target: "_blank",
         rel: "noopener",
         "data-host": t.host,
-        title: `Open ${t.name} in a new tab\n${t.host} · ${why}${st.checkedAt ? ` · checked ${formatDateTime(st.checkedAt)}` : ""}\nstack ${t.stack}`,
+        "data-kp-hovercard": "",
+        "data-ap-state": wordOf(st),
       },
       h(
-        "span",
-        { class: "ap-tile__icon", "aria-hidden": "true" },
-        initials(t.name),
+        "strong",
+        { class: "kp-action__title" },
+        mark(t.name),
+        ...marked(t.name),
       ),
+      h("span", { class: "kp-action__mark", "aria-hidden": "true" }),
       h(
         "span",
-        { class: "ap-tile__name" },
-        h("span", {
-          class: `sk-dot${st.tone ? ` sk-dot--${st.tone}` : ""}`,
-          role: "img",
-          "aria-label": st.word,
-        }),
-        h("span", null, ...marked(t.name)),
-      ),
-      pin,
-      h("span", { class: "ap-tile__desc" }, ...marked(t.description || t.host)),
-      h("span", { class: "ap-tile__go", "aria-hidden": "true" }, "↗"),
-      // fix-371-1: always the row's box; empty when the tile has no
-      // lines (stacks.css keeps the row on every tile of a board where
-      // any tile has lines).
-      h(
-        "span",
-        {
-          class: "ap-tile__lines",
-          ...(t.lines.length ? { title: t.lines.join(" · ") } : {}),
-        },
-        t.error ? "reading failed" : t.lines.join(" · "),
+        { class: "kp-action__text" },
+        h(
+          "span",
+          { class: "kp-state-word", "data-kp-words": WORDS },
+          wordOf(st),
+        ),
       ),
     );
-    a.style.setProperty("--c", `var(--chart-${hueOf(t.name)})`);
     drivable(a, OPEN, t.host);
-    a.addEventListener("keydown", (e) => {
-      if (e.key === "s" && !e.ctrlKey && !e.metaKey && !e.altKey) {
-        e.preventDefault();
-        star(t);
-      }
-    });
     return a;
   };
 
-  // Loading: the grouped board the page fills in (22rem columns, a label
-  // per group), so nothing moves when the tiles arrive (rule 6).
-  const paintLoading = () => {
-    place(
-      [],
-      [3, 2, 2].map((n, i) =>
-        h(
-          "section",
-          {
-            class: "ap-grp ap-grp--skeleton",
-            "aria-label": "Reading the apps",
-            role: "status",
-            "data-kp-state": "loading",
-            ...(i === 0 ? {} : { "aria-hidden": "true" }),
-          },
-          h("h2", null, h("span", { class: "kp-skeleton" })),
-          h(
-            "div",
-            { class: "ap-tiles kp-tiles" },
-            ...Array.from({ length: n }, () =>
-              h(
-                "div",
-                { class: "ap-tile ap-tile--skeleton" },
-                h("span", { class: "kp-skeleton" }),
-                h("span", { class: "kp-skeleton" }),
-                h("span", { class: "kp-skeleton" }),
+  /** What the hover card says about a tile. @param {HTMLElement} anchor */
+  const fill = (anchor) => {
+    const t = tiles?.find((x) => x.host === anchor.dataset.host);
+    if (!t) return null;
+    const st = tileState(watch, t);
+    const w = watch.get(`tile:${t.host}`) ?? watch.get(`stack:${t.stack}`);
+    const word = wordOf(st);
+    const now =
+      word === "failing" || word === "down"
+        ? `${word}${w?.failing_since ? ` since ${formatDateTime(w.failing_since)}` : ""}${w?.why ? `, ${w.why}` : ""}`
+        : word === "deploying"
+          ? `deploying${w?.why ? `: ${w.why}` : ""}`
+          : word === "not watched"
+            ? "No probe is configured for this app."
+            : `answers${st.checkedAt ? `, checked ${formatDateTime(st.checkedAt)}` : ""}`;
+    const row = (/** @type {string} */ k, /** @type {string} */ v) =>
+      h("div", { class: "kp-kv__row" }, h("dt", null, k), h("dd", null, v));
+    return h(
+      "div",
+      { class: "ap-hover" },
+      h("b", { class: "ap-hover__title" }, t.name),
+      h(
+        "dl",
+        { class: "kp-kv" },
+        row("Stack", t.stack),
+        row("Address", t.host),
+        row("Now", now),
+        ...(st.via === "stack"
+          ? [
+              row(
+                "Probe",
+                `none of its own: the stack ${t.stack} is asked instead`,
               ),
-            ),
-          ),
-        ),
+            ]
+          : []),
       ),
-      [3, 2, 2],
     );
+  };
+  const detachHover = attachHoverCards(root, { fill });
+
+  const visible = () => {
+    const base = tiles ? filterTiles(tiles, q) : [];
+    return kept
+      ? base.filter((t) => kept?.includes(wordOf(tileState(watch, t))))
+      : base;
   };
 
-  /** The groups placed in columns now, and how (to skip a no-op pass). */
-  /** @type {{wide: HTMLElement[], packed: HTMLElement[], tiles: number[]}} */
-  let placed = { wide: [], packed: [], tiles: [] };
-  let placedKey = "";
-  /**
-   * fix-371-1 (packed columns, Kenny approved the demo 2026-10-04): the
-   * wide blocks (Starred, a search's groups, an empty or failed state)
-   * span the board; every other group goes into the column that is
-   * shortest by tile count. Packs again when the board's width changes
-   * the column count.
-   * @param {HTMLElement[]} wide
-   * @param {HTMLElement[]} packed
-   * @param {number[]} tiles each packed group's tile count
-   */
-  const place = (wide, packed, tiles) => {
-    placed = { wide, packed, tiles };
-    placedKey = "";
-    arrange();
-  };
-  const arrange = () => {
-    const { wide, packed, tiles } = placed;
-    const cs = getComputedStyle(body);
-    const rem =
-      parseFloat(getComputedStyle(document.documentElement).fontSize) || 16;
-    const gap = parseFloat(cs.columnGap) || 24;
-    const w = body.clientWidth;
-    const cols = packed.length && w ? packColumns(w, gap, rem) : 1;
-    const plan = packGroups(
-      packed.map((el, i) => ({
-        tiles: tiles[i],
-        folded: el instanceof HTMLDetailsElement && !el.open,
-      })),
-      cols,
-    );
-    body.style.setProperty("--ap-min", `${packMinRem(w, rem)}rem`);
-    const key = `${cols}:${JSON.stringify(plan)}`;
-    if (key === placedKey && body.childElementCount) return;
-    placedKey = key;
-    const focused = /** @type {HTMLElement | null} */ (
-      body.contains(document.activeElement) ? document.activeElement : null
-    );
-    body.style.setProperty("--ap-cols", String(cols));
+  const paintBody = () => {
+    if (!tiles) return;
+    const shown = visible();
+    const groups = byStack(shown);
+    let first = q.trim() !== "";
     body.replaceChildren(
-      ...wide,
-      ...(packed.length
-        ? plan.map((ids) =>
-            h("div", { class: "ap-pack" }, ...ids.map((i) => packed[i])),
-          )
-        : []),
-    );
-    if (focused && focused !== document.activeElement)
-      focused.focus({ preventScroll: true });
-  };
-  let lastW = 0;
-  const resized = new ResizeObserver(() => {
-    const w = Math.round(body.clientWidth);
-    if (w === lastW) return;
-    lastW = w;
-    requestAnimationFrame(arrange);
-  });
-  resized.observe(body);
-
-  const paint = () => {
-    if (failed != null) {
-      place(
-        [
+      ...groups.map((g) => {
+        const ok = g.tiles.filter(
+          (t) => wordOf(tileState(watch, t)) === "answers",
+        );
+        const menu = h(
+          "div",
+          {
+            class: "kp-menu-button ap-group__menu",
+            "data-kp-menu-button": "",
+            "data-kp-key": `open-${g.stack}`,
+          },
+          drivable(
+            h(
+              "button",
+              { type: "button", class: "kp-button kp-button--sm" },
+              "Open ▾",
+            ),
+            OPEN_MENU,
+            g.stack,
+          ),
           h(
             "div",
             {
-              class: "kp-alert kp-alert--destructive ap-grp--wide",
-              role: "alert",
+              class: "kp-menu kp-menu--rich",
+              role: "menu",
+              "aria-label": `Apps of ${g.stack}`,
+              hidden: "",
             },
-            h("strong", null, "The apps could not be read"),
-            h(
-              "span",
-              null,
-              ` ${failed}. They come back by themselves once the host answers; or `,
-            ),
-            drivable(h("a", { href: "/apps" }, "try again now"), RETRY),
-            ".",
-          ),
-        ],
-        [],
-        [],
-      );
-      return;
-    }
-    if (tiles == null) {
-      paintLoading();
-      return;
-    }
-    const v = appsVerdict(tiles, watch);
-    verdictDot.className = `sk-dot${v.tone ? ` sk-dot--${v.tone}` : ""}`;
-    verdictText.textContent = tiles.length ? v.text : "No apps yet";
-    setAgo(verdictAgo, v.checkedAt);
-    if (!tiles.length) {
-      place(
-        [
-          h(
-            "section",
-            { class: "kp-card nx-card ap-grp--wide ap-empty" },
-            emptyState({
-              art: art.noTiles(),
-              title: "No app has a tile yet",
-              text: "A tile comes from the stack that owns the app's address: add tiles: to its lxc-compose.yml and deploy it.",
-              action: h(
-                "pre",
-                { class: "ap-example sk-mono" },
-                "tiles:\n  films.example.dev:\n    name: Films\n    group: Media\n    description: Films and series",
+            drivable(
+              h(
+                "button",
+                {
+                  type: "button",
+                  role: "menuitem",
+                  class: "kp-menu__item",
+                  tabindex: "-1",
+                  "data-kp-value": g.stack,
+                  ...(ok.length ? {} : { "aria-disabled": "true" }),
+                },
+                h(
+                  "span",
+                  { class: "kp-menu__label" },
+                  `Open the ${ok.length} ${ok.length === 1 ? "app" : "apps"} that answer`,
+                ),
+                h(
+                  "span",
+                  { class: "kp-menu__hint" },
+                  ok.length
+                    ? "each in its own tab"
+                    : "none of them answers now",
+                ),
               ),
-            }),
+              OPEN_ALL,
+              g.stack,
+            ),
           ),
-        ],
-        [],
-        [],
-      );
-      return;
-    }
-    const groups = board(tiles, stars, q);
-    let first = q.trim() !== "";
-    const shown = filterTiles(tiles, q);
-    // fix-371-1 (Kenny, 2026-10-04): a group's title folds and unfolds the
-    // whole group: kp-themes' bare accordion item (a <details>, its summary
-    // the whole title row), gliding open and shut the theme's way and
-    // remembered per group. A search shows every group open, so its first
-    // match is always on screen.
-    /** @type {HTMLElement[]} */
-    const sections = groups.map((g) => {
-      const open = q.trim() !== "" || !folded.has(g.group);
-      const title = drivable(
-        h(
-          "summary",
-          { class: "ap-grp__title", title: `Fold or unfold ${g.group}` },
+        );
+        menu.addEventListener("kp-menu-select", () => {
+          for (const t of ok) window.open(t.url, "_blank", "noopener");
+        });
+        return h(
+          "div",
+          { class: "ap-group", "data-stack": g.stack },
           h(
-            "h2",
-            null,
-            h("span", { class: "ap-grp__chev", "aria-hidden": "true" }, "›"),
-            g.group,
-            h("span", { class: "sk-chip" }, String(g.tiles.length)),
+            "h3",
+            { class: "ap-group__name" },
+            mark(g.stack),
+            g.stack,
+            h("span", { class: "kp-badge" }, String(g.tiles.length)),
           ),
-        ),
-        FOLD,
-        g.group,
-      );
-      const d = /** @type {HTMLDetailsElement} */ (
-        h(
-          "details",
-          {
-            class: `ap-grp kp-accordion__item kp-accordion__item--bare${g.wide ? " ap-grp--wide" : ""}`,
-            "aria-label": g.group,
-            ...(open ? { open: "" } : {}),
-          },
-          title,
+          menu,
           h(
             "div",
-            { class: "ap-tiles kp-tiles" },
+            {
+              class: "kp-actions",
+              role: "group",
+              "aria-label": `Apps of ${g.stack}`,
+            },
             ...g.tiles.map((t) => {
               const el = tileEl(t, first);
               first = false;
               return el;
             }),
           ),
-        )
+        );
+      }),
+    );
+    attachMenuButtons(body);
+    if (!groups.length) {
+      const all = h(
+        "button",
+        {
+          type: "button",
+          class: "kp-button",
+          title: "Clear the search and the state filter (Esc)",
+        },
+        "Show every app",
       );
-      d.addEventListener("toggle", () => {
-        if (q.trim()) return;
-        if (d.open) folded.delete(g.group);
-        else folded.add(g.group);
-        saveFolded();
-        // A fold changes the tile counts: the board packs again.
-        if (!g.wide) requestAnimationFrame(arrange);
+      drivable(all, SHOW_ALL);
+      all.addEventListener("click", () => {
+        kept = null;
+        setFacetValuesAll();
+        setQuery("");
       });
-      return d;
-    });
-    if (!shown.length) {
-      const all = drivable(
-        h(
-          "button",
-          {
-            type: "button",
-            class: "kp-button",
-            title: "Clear the search (Esc)",
-          },
-          "Show every app",
-        ),
-        SHOW_ALL,
+      setCardState(card, "empty", {
+        title: q.trim()
+          ? `No app matches “${q.trim()}”`
+          : "No app is in this state",
+        text: q.trim()
+          ? "Search looks at an app's name, address, description and stack."
+          : "Pick Everything to see all the apps again.",
+        action: all,
+      });
+    } else setCardState(card, "ready");
+  };
+
+  const setFacetValuesAll = () => {
+    import("/static/kp/js/facets.js").then((m) =>
+      m.setFacetValues(facets, null),
+    );
+  };
+  facets.addEventListener(FACET_EVENT, (e) => {
+    const values = /** @type {CustomEvent} */ (e).detail.values;
+    kept = values && values.length < STATE_ORDER.length ? values : null;
+    paintBody();
+  });
+  card.addEventListener("kp-card-retry", () => void load());
+
+  const paint = () => {
+    if (failed != null) {
+      verdictText.textContent = "The apps could not be read";
+      verdictDot.className = "ap-dot ap-dot--bad";
+      setCardState(card, "error", {
+        title: "The apps could not be read",
+        text: `${failed}. They come back by themselves once the host answers.`,
+      });
+      const retry = card.querySelector(
+        ".kp-card__note button, .kp-stateplate button",
       );
-      all.addEventListener("click", () => setQuery(""));
-      sections.push(
-        h(
-          "div",
-          { class: "ap-grp--wide sk-empty-slot" },
-          emptyState({
-            art: art.noMatch(),
-            title: `No app matches “${q.trim()}”`,
-            text: "Search looks at an app's name, address, description and stack.",
-            action: all,
-          }),
-        ),
-      );
+      if (retry instanceof HTMLElement && !retry.dataset.drive)
+        drivable(retry, RETRY);
+      return;
     }
-    // fix-371-1 (uniform tiles): one tile with live lines gives every tile
-    // that row.
-    body.classList.toggle(
-      "ap-board--lines",
-      tiles.some((t) => t.lines.length > 0 || Boolean(t.error)),
+    if (tiles == null) {
+      setCardState(card, "loading", { words: "Reading the apps" });
+      return;
+    }
+    const v = appsVerdict(tiles, watch);
+    verdictDot.className = `ap-dot${v.tone ? ` ap-dot--${v.tone}` : ""}`;
+    verdictText.textContent = tiles.length ? v.text : "No apps yet";
+    setAgo(verdictAgo, v.checkedAt);
+    if (!tiles.length) {
+      setCardState(card, "empty", {
+        title: "No app has a tile yet",
+        text: "A tile comes from the stack that owns the app's address: add tiles: to its lxc-compose.yml and deploy it.",
+      });
+      return;
+    }
+    const counts = Object.fromEntries(
+      STATE_ORDER.map((w) => [
+        w,
+        tiles?.filter((t) => wordOf(tileState(watch, t)) === w).length ?? 0,
+      ]),
     );
-    const isPacked = (/** @type {HTMLElement} */ el) =>
-      el.matches(".ap-grp:not(.ap-grp--wide)");
-    place(
-      sections.filter((el) => !isPacked(el)),
-      sections.filter(isPacked),
-      groups.filter((g) => !g.wide).map((g) => g.tiles.length),
-    );
+    setFacetCounts(facets, counts);
+    paintBody();
   };
 
   /** @param {string} next */
@@ -606,18 +530,18 @@ export function mount(root) {
       "",
       `${location.pathname}${s ? `?${s}` : ""}`,
     );
-    paint();
+    if (tiles) paintBody();
   };
   search.addEventListener("input", () => setQuery(search.value));
   search.addEventListener("keydown", (e) => {
     if (e.key === "Enter") {
-      const f = tiles ? filterTiles(tiles, q)[0] : undefined;
+      const f = visible()[0];
       if (f) window.open(f.url, "_blank", "noopener");
     } else if (e.key === "ArrowDown") {
       e.preventDefault();
-      /** @type {HTMLElement[]} */ ([...body.querySelectorAll(".ap-tile")])
-        .find((t) => t.offsetParent !== null)
-        ?.focus();
+      /** @type {HTMLElement | null} */ (
+        body.querySelector(".ap-tile")
+      )?.focus();
     } else if (e.key === "Escape" && search.value) {
       e.stopPropagation();
       setQuery("");
@@ -626,8 +550,8 @@ export function mount(root) {
   // Arrows move between tiles on the grid they sit in.
   body.addEventListener("keydown", (e) => {
     const all = /** @type {HTMLElement[]} */ ([
-      ...body.querySelectorAll(".ap-tile:not(.ap-tile--skeleton)"),
-    ]).filter((t) => t.offsetParent !== null);
+      ...body.querySelectorAll(".ap-tile"),
+    ]);
     const i = all.indexOf(/** @type {HTMLElement} */ (document.activeElement));
     if (i < 0) return;
     const grid = all[i].parentElement;
@@ -659,8 +583,10 @@ export function mount(root) {
     watch = new Map(targets.map((x) => [x.key, x]));
     paint();
   };
-  paint();
-  (async () => {
+  const load = async () => {
+    failed = null;
+    tiles = null;
+    paint();
     const [r] = await Promise.all([
       fetchJson("/data/tiles", "the apps", abort.signal),
       readWatch(),
@@ -673,13 +599,18 @@ export function mount(root) {
     }
     tiles = r.body.report?.tiles ?? [];
     paint();
-  })().catch(() => {});
+  };
+  paint();
+  void load().catch(() => {});
   const timer = setInterval(() => void readWatch().catch(() => {}), EVERY_MS);
   if (!matchMedia("(max-width: 48rem)").matches) search.focus();
   return () => {
     abort.abort();
     clearInterval(timer);
-    resized.disconnect();
+    detachFacets();
+    detachCards();
+    detachMarks();
+    detachHover();
     root.classList.remove("ap-page");
   };
 }

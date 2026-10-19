@@ -14,6 +14,7 @@ import { declare, declareField, drivable } from "../drivable.js";
 import { shellResult, shellTargets } from "../parity.js";
 import { current, subscribe } from "../store.js";
 import { ensureStyle, pageHeader } from "../ui.js";
+import { onPageKey } from "../shortcuts.js";
 import { setParams } from "../urlstate.js";
 import { mountHostLog } from "./log.js";
 
@@ -192,7 +193,7 @@ export function mount(root) {
       {
         type: "button",
         class: "kp-button kp-button--primary",
-        title: "Jump to the shell bar (Ctrl `)",
+        title: "Jump to the shell bar (:)",
       },
       "Run a command",
     ),
@@ -444,20 +445,15 @@ export function mount(root) {
       line.value = recallAt >= 0 ? recall[recallAt] : "";
     }
   });
-  /** @param {KeyboardEvent} e */
-  const onKey = (e) => {
-    if (e.key === "`" && e.ctrlKey) {
-      e.preventDefault();
-      line.focus();
-    }
-  };
-  document.addEventListener("keydown", onKey);
+  // fix-kp11-7 / feat-kp11demo-14: ":" focuses the prompt while this page is
+  // mounted (shortcuts.js shows it dimmed, with why, on every other page).
+  const stopKeys = onPageKey("prompt", () => line.focus());
   return () => {
     abort.abort();
     explorer.cleanup();
     unsub();
     offJobs();
-    document.removeEventListener("keydown", onKey);
+    stopKeys();
     root.classList.remove("con-page");
   };
 }

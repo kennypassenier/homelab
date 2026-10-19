@@ -95,15 +95,6 @@ export const foundText = (shown, total, narrowed) =>
   narrowed ? `${shown} of ${total} settings` : `${total} settings`;
 
 /**
- * The header's staged chip and primary button.
- * @param {number} n
- */
-export const stagedWords = (n) => ({
-  chip: n ? `${n} change${n === 1 ? "" : "s"} staged` : "nothing staged",
-  write: n ? `Check and write ${n}…` : "Check and write",
-});
-
-/**
  * The working copy against its remote, in words.
  * @param {{present: boolean, behind: number, unpushed: unknown[],
  *   dirty: unknown[], error: string | null}} r
@@ -141,48 +132,6 @@ export function sectionTarget(section, groups) {
   if (section === "sign-in" || section === "signin") return "signin";
   if (section === "repo" || section === "working-copy") return "wc";
   return groups.map(slug).find((g) => g === section) ?? null;
-}
-
-/** Where the tab keeps its staged host.toml changes (redesign-config-5). */
-export const STAGED_STORE = "homelab:settings-staged";
-
-/**
- * The staged changes as the tab keeps them while you look elsewhere
- * (redesign-config-5): key → value, with every secret left out (a secret
- * never goes to browser storage; leaving the page drops it, and says so).
- * @template {{key: string}} F
- * @param {Map<string, {field: F, value: unknown}>} changes
- * @param {(f: F) => boolean} secret
- * @returns {string}
- */
-export function keepStaged(changes, secret) {
-  /** @type {Record<string, unknown>} */
-  const out = {};
-  for (const [k, { field, value }] of changes)
-    if (!secret(field)) out[k] = value;
-  return JSON.stringify(out);
-}
-
-/**
- * The kept changes back, for the keys the host still reads; anything
- * broken restores nothing.
- * @param {string | null} raw
- * @param {{key: string}[]} fields
- * @returns {Record<string, unknown>}
- */
-export function restoreStaged(raw, fields) {
-  if (!raw) return {};
-  try {
-    const v = JSON.parse(raw);
-    if (!v || typeof v !== "object" || Array.isArray(v)) return {};
-    /** @type {Record<string, unknown>} */
-    const out = {};
-    for (const [k, x] of Object.entries(v))
-      if (fields.some((f) => f.key === k)) out[k] = x;
-    return out;
-  } catch {
-    return {};
-  }
 }
 
 /**

@@ -1,11 +1,13 @@
-// feat-overview-8: the keyboard shortcuts, as data. The same list draws the
-// help sheet ("?") and drives the keys, so the sheet cannot promise a key
-// that does nothing. Two-key shortcuts ("g o") wait `CHORD_MS` for the
-// second key.
+// feat-overview-8, feat-kpadopt-2 (feat-kp11demo-14): the dashboard's keys,
+// as data for kp-themes' shortcut engine (js/shortcuts.js). The engine
+// handles the chords ("g s" waits for its second key, the small cap says
+// so, "No shortcut on g x" says when none is), warns about a key that needs
+// AltGr on an AZERTY keyboard, dims a key that does nothing on this page
+// with its reason, and fills the help sheet from the same list, so the sheet
+// cannot promise a key that does nothing. What stays here is only what is
+// this dashboard's: where each letter goes, and the stack hub's tab keys.
 
 import { STACK_TABS, stackHref } from "./router.js";
-
-export const CHORD_MS = 1500;
 
 /**
  * Where "g" + a letter goes, and what the help sheet calls it. A fixed,
@@ -33,15 +35,8 @@ const PAGES = {
   deployall: { href: "/stacks?deploy-all=1", label: "Deploy all changes" },
 };
 
-/**
- * @typedef {{keys: string, what: string}} Shortcut
- * @typedef {{group: string, shortcuts: Shortcut[]}} ShortcutGroup
- * @typedef {{navigate: string} | {focusSearch: true} | null} KeyAction
- * @typedef {{prefix: string | null, at: number}} ChordState
- */
-
 /** @type {Record<string, string>} second key after "g" → page */
-const GO = {
+export const GO = {
   u: "home",
   i: "needs-you",
   s: "stacks",
@@ -60,63 +55,147 @@ const GO = {
   d: "deployall",
 };
 
-/** @type {ShortcutGroup[]} */
-export const SHORTCUTS = [
-  {
-    group: "Anywhere",
-    shortcuts: [
-      { keys: "Ctrl K", what: "Open the command palette" },
-      { keys: "?", what: "Show these shortcuts" },
-      { keys: "/", what: "Search the first table on the page" },
-      ...Object.entries(GO).map(([k, page]) => ({
-        keys: `g ${k}`,
-        what: `Go to ${PAGES[page]?.label}`,
-      })),
-    ],
-  },
-  {
-    group: "On a stack's page",
-    shortcuts: [
-      {
-        keys: `1 … ${STACK_TABS.length}`,
-        what: `Open a tab (${STACK_TABS.map((t) => t.label).join(", ")})`,
-      },
-      { keys: "[ ]", what: "The previous or next tab" },
-    ],
-  },
-];
-
-/** @returns {ChordState} */
-export const idle = () => ({ prefix: null, at: 0 });
+/** The sheet's group names; the engine lists the scope's own group first. */
+export const GROUP_ANYWHERE = "Anywhere";
+export const GROUP_STACK = "On a stack's page";
+export const GROUP_CONSOLE = "On the Console page";
+export const GROUP_SECRETS = "On the Secrets page";
 
 /**
- * What one key press does. `route` is the page the key was pressed on.
- * @param {ChordState} state
- * @param {string} key KeyboardEvent.key
- * @param {number} now milliseconds
- * @param {import("./router.js").Route} route
- * @returns {{state: ChordState, action: KeyAction}}
+ * The address "g" + a letter goes to.
+ * @param {string} letter
+ * @returns {string | null}
  */
-export function keyAction(state, key, now, route) {
-  const chord = state.prefix != null && now - state.at <= CHORD_MS;
-  if (chord && state.prefix === "g") {
-    const page = GO[key.toLowerCase()];
-    const n = page ? PAGES[page] : undefined;
-    return { state: idle(), action: n ? { navigate: n.href } : null };
-  }
-  if (key === "g") return { state: { prefix: "g", at: now }, action: null };
-  if (key === "/") return { state: idle(), action: { focusSearch: true } };
-  if (route.page === "stack") {
-    const i = STACK_TABS.findIndex((t) => t.tab === route.tab);
-    let next = -1;
-    if (/^[1-9]$/.test(key)) next = Number(key) - 1;
-    else if (key === "[") next = i - 1;
-    else if (key === "]") next = i + 1;
-    if (next >= 0 && next < STACK_TABS.length && next !== i)
-      return {
-        state: idle(),
-        action: { navigate: stackHref(route.name, STACK_TABS[next].tab) },
-      };
-  }
-  return { state: idle(), action: null };
+export function goTarget(letter) {
+  const page = GO[letter.toLowerCase()];
+  return page ? PAGES[page].href : null;
+}
+
+/**
+ * Where a stack-hub tab key goes: tab number `n` (1-based) or, with `step`,
+ * the tab before (-1) or after (+1) the open one. Null when there is no such
+ * tab, it is the open one, or the page is not a stack's.
+ * @param {import("./router.js").Route} route
+ * @param {{n: number} | {step: -1 | 1}} how
+ * @returns {string | null}
+ */
+export function tabTarget(route, how) {
+  if (route.page !== "stack") return null;
+  const here = STACK_TABS.findIndex((t) => t.tab === route.tab);
+  const to = "n" in how ? how.n - 1 : here + how.step;
+  if (to < 0 || to >= STACK_TABS.length || to === here) return null;
+  return stackHref(route.name, STACK_TABS[to].tab);
+}
+
+/**
+ * The digit of a physical `Alt+digit` press, or null. Alt + a digit is named
+ * by the physical key (`Digit3`): on a Belgian AZERTY keyboard the unshifted
+ * digit row types symbols, so the engine (which reads `event.key`) never
+ * sees "3" there. No other modified press is ours (fix-kp11-7: no shortcut
+ * may need AltGr, which is Ctrl+Alt).
+ * @param {{key: string, code: string, altKey: boolean, ctrlKey: boolean,
+ *   metaKey: boolean, shiftKey: boolean}} e
+ * @returns {number | null}
+ */
+export function altDigit(e) {
+  if (!e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return null;
+  const m = /^(?:Digit|Numpad)([1-9])$/.exec(e.code);
+  return m ? Number(m[1]) : null;
+}
+
+/**
+ * A key that belongs to one page: the page says what it does while it is
+ * mounted (`onPageKey`), and the engine shows the key dimmed, with its
+ * reason, on every other page.
+ * @type {Map<string, () => void>}
+ */
+const PAGE_KEYS = new Map();
+
+/**
+ * Take a page's key while that page is mounted.
+ * @param {"prompt" | "reveal"} name
+ * @param {() => void} run
+ * @returns {() => void} give it back
+ */
+export function onPageKey(name, run) {
+  PAGE_KEYS.set(name, run);
+  return () => {
+    if (PAGE_KEYS.get(name) === run) PAGE_KEYS.delete(name);
+  };
+}
+
+/**
+ * Every key of the app, as kp's engine takes them.
+ * @param {{navigate: (href: string) => void,
+ *   route: () => import("./router.js").Route, focusSearch: () => void}} ctx
+ * @returns {import("/static/kp/js/shortcuts.js").Shortcut[]}
+ */
+export function appShortcuts(ctx) {
+  const onStack = () => ctx.route().page === "stack";
+  const reason = "Only on a stack's page";
+  return [
+    {
+      keys: "/",
+      what: "Search the first table on the page",
+      group: GROUP_ANYWHERE,
+      run: () => ctx.focusSearch(),
+    },
+    ...Object.entries(GO).map(([k, page]) => ({
+      keys: `g ${k}`,
+      what: `Go to ${PAGES[page].label}`,
+      group: GROUP_ANYWHERE,
+      run: () => ctx.navigate(PAGES[page].href),
+    })),
+    ...STACK_TABS.map((t, i) => ({
+      keys: `Alt ${i + 1}`,
+      what: `Open the ${t.label} tab`,
+      group: GROUP_STACK,
+      when: onStack,
+      reason,
+      run: () => {
+        const to = tabTarget(ctx.route(), { n: i + 1 });
+        if (to) ctx.navigate(to);
+      },
+    })),
+    {
+      keys: "t p",
+      what: "The previous tab",
+      group: GROUP_STACK,
+      when: onStack,
+      reason,
+      run: () => {
+        const to = tabTarget(ctx.route(), { step: -1 });
+        if (to) ctx.navigate(to);
+      },
+    },
+    {
+      keys: "t n",
+      what: "The next tab",
+      group: GROUP_STACK,
+      when: onStack,
+      reason,
+      run: () => {
+        const to = tabTarget(ctx.route(), { step: 1 });
+        if (to) ctx.navigate(to);
+      },
+    },
+    // fix-kp11-7: ":" is unshifted on a Belgian AZERTY keyboard; the old
+    // Ctrl ` needed AltGr there.
+    {
+      keys: ":",
+      what: "Focus the console prompt",
+      group: GROUP_CONSOLE,
+      when: () => PAGE_KEYS.has("prompt"),
+      reason: "Console: only on the Console page",
+      run: () => PAGE_KEYS.get("prompt")?.(),
+    },
+    {
+      keys: "r",
+      what: "Reveal the chosen secret",
+      group: GROUP_SECRETS,
+      when: () => PAGE_KEYS.has("reveal"),
+      reason: "Reveal: only on a stack's Secrets section",
+      run: () => PAGE_KEYS.get("reveal")?.(),
+    },
+  ];
 }

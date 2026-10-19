@@ -432,7 +432,7 @@ test("redesign-flows-3: the tour is six steps (search, then the areas), shown on
   );
   assert.match(
     steps[4].phone,
-    /data-area="more"/,
+    /data-kp-tab="more"/,
     "Backups is under More on a phone",
   );
   assert.equal(shouldTour({ search: "", toured: false, automated: false }), 0);

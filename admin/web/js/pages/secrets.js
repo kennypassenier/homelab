@@ -1,47 +1,46 @@
-// Secrets (redesign 3.71, Kenny's approved demo `secrets.html`, 2026-10-03,
-// plus "Alle drie"). Three panes: every stack with its exact count (a
-// warning chip, with the reason and the fix, on a stack whose file does not
-// read), the chosen stack's secrets with a masked value, Reveal, Copy and
-// Change…, and the change drawer in three steps (paste → stage → write and
-// restart, with Undo). feat-secrets-1/2 still hold: a value is fetched only
-// on a press, lives only in this page's memory, hides itself after 30
-// seconds (and at once on Hide all, Esc or leaving the page), and every
-// reveal and copy is written to the host's audit trail with who asked —
-// Activity reads "Kenny revealed gateway/traefik/.env". The write rides
-// `ActionKind::ChangeSecret` (stage the value, then press), so it gets the
-// same job trail as every other dashboard write; the value never becomes a
-// URL, a query parameter or part of `ActionArgs`.
+// Secrets (redesign 3.71, Kenny's approved demo `secrets.html`, 2026-10-03;
+// rebuilt on the approved kp-themes 11 demo `app-homelab-settings`,
+// feat-kp11demo-6, Kenny 2026-10-19). What a stack declares as latch secrets
+// and latch files: each a masked field (kp-themes' `secret`: Reveal reads it
+// from the host and shows it for 30 s with a draining rule, Copy copies it
+// without showing it), the audit sentence the host wrote for the read, the
+// restart order and which file feeds which app, and the change drawer: paste,
+// stage, write, with a 5 s Undo that survives leaving the page.
+// feat-secrets-1/2 still hold: a value is fetched only on a press, lives only
+// in this page's memory while it is shown, hides itself after 30 seconds (and
+// at once on Hide all, Esc or leaving the page), and every reveal and copy is
+// written to the host's audit trail with who asked. The write rides
+// `ActionKind::ChangeSecret` (stage the value, then press), so it gets the same
+// job trail as every other dashboard write; the value never becomes a URL, a
+// query parameter or part of `ActionArgs`.
 //
-// The header, the three cards, the hover card, the toast and the stack
-// colour square are ui.js's (`pageHeader` in its split look, `section`,
-// `hoverCard`, `toast`, `swatch`); secrets.css, loaded with the page, holds
-// only what is this page's own.
+// The fleet-wide page (stack list, keys, drawer on one grid: kp-themes'
+// master-detail) has no address since 3.71.0; each stack's Settings shows its
+// own (`opts.stack`), without the list.
 
 import { act, onAct, send } from "../act.js";
 import { fetchJson, h } from "../dom.js";
 import { declare, declareField, drivable } from "../drivable.js";
+import { formatDateTime } from "../format.js";
 import { stackHref } from "../router.js";
 import {
-  createReveals,
   secretRows,
   splitReason,
   stackCount,
   stackKind,
   stackLine,
 } from "../secretsview.js";
+import { onPageKey } from "../shortcuts.js";
 import { current, listen, subscribe } from "../store.js";
-import {
-  chartColour,
-  chip,
-  kbd,
-  dot,
-  hoverCard,
-  liveStatus,
-  pageHeader,
-  section,
-  swatch,
-  toast,
-} from "../ui.js";
+import { esc } from "../settingsform.js";
+import { liveStatus, pageHeader, toast } from "../ui.js";
+import { attachAll } from "/static/kp/js/auto.js";
+import { setCardState } from "/static/kp/js/card-state.js";
+import { deplist } from "/static/kp/js/deplist.js";
+import { setMatrix } from "/static/kp/js/heat.js";
+import { setPaneState } from "/static/kp/js/master-detail.js";
+import { hideSecret } from "/static/kp/js/patterns.js";
+import { undoToast } from "/static/kp/js/undo-toast.js";
 
 // review M5: every page field Live view may set is declared (drivable.js
 // `declareField`); the client and the dashboard refuse any other.
@@ -76,7 +75,6 @@ const REVEAL_SECRET = declare({
   page: "secrets",
   opens: "run",
   row: "<stack>/<secret>",
-  // feat-shell-1: the secrets live in each stack hub's Settings.
   at: secretsAt,
   what: "show one secret's value for 30 seconds (once more hides it again); audited",
 });
@@ -85,7 +83,6 @@ const COPY_SECRET = declare({
   page: "secrets",
   opens: "run",
   row: "<stack>/<secret>",
-  // feat-shell-1: the secrets live in each stack hub's Settings.
   at: secretsAt,
   what: "copy one secret's value to the clipboard without showing it; audited",
 });
@@ -94,7 +91,6 @@ const EDIT_SECRET = declare({
   page: "secrets",
   opens: "run",
   row: "<stack>/<secret>",
-  // feat-shell-1: the secrets live in each stack hub's Settings.
   at: secretsAt,
   what: "open the change drawer for one secret",
 });
@@ -181,18 +177,6 @@ const UNDO_MS = 5000;
 /** The clipboard is cleared this long after a copy. */
 const CLIPBOARD_MS = 30_000;
 
-/** @param {HTMLElement} el @param {Record<string, string>} props */
-function styled(el, props) {
-  for (const [k, v] of Object.entries(props)) el.style.setProperty(k, v);
-  return el;
-}
-
-/** A skeleton bar (kp's `.kp-skeleton`). @param {string} w */
-const sk = (w) =>
-  styled(h("span", { class: "kp-skeleton", "aria-hidden": "true" }), {
-    "inline-size": w,
-  });
-
 /**
  * A plain message at the foot of the screen (ui.js `toast`, drawn the
  * page's way); a newer one replaces it.
@@ -256,6 +240,55 @@ function deployAfter(job, stack) {
 }
 
 /**
+ * The restart plan of a stack: what each file restarts when it changes.
+ * @param {string} stack
+ * @param {import("../secretsview.js").Declared} d
+ * @returns {{from: string, to: string, state: "unknown"}[]}
+ */
+export function restartItems(stack, d) {
+  return d.files
+    .filter((f) => !!f.restarts)
+    .map((f) => ({
+      from: f.from,
+      to: /** @type {string} */ (f.restarts),
+      state: /** @type {const} */ ("unknown"),
+    }));
+}
+
+/**
+ * Which file feeds which app: a stack's `.env` secrets feed the app they
+ * are named for; a file feeds what it restarts. Files that feed nothing are
+ * drawn as unused.
+ * @param {string} stack
+ * @param {import("../secretsview.js").Declared} d
+ */
+export function usesOf(stack, d) {
+  /** @type {{key: string, label: string, sub: string, ghost?: boolean}[]} */
+  const files = [];
+  /** @type {Map<string, string[]>} */
+  const uses = new Map();
+  const apps = new Set();
+  for (const app of d.secrets) {
+    const key = `${app}/.env`;
+    files.push({ key, label: key, sub: "latch secret" });
+    uses.set(key, [app]);
+    apps.add(app);
+  }
+  for (const f of d.files) {
+    files.push({
+      key: f.from,
+      label: f.from,
+      sub: `written to ${f.dest}`,
+      ghost: !f.restarts,
+    });
+    uses.set(f.from, f.restarts ? [f.restarts] : []);
+    if (f.restarts) apps.add(f.restarts);
+  }
+  void stack;
+  return { files, apps: [...apps], uses };
+}
+
+/**
  * The fleet's Secrets page, or with `opts.stack` one stack's secrets
  * without the stack list and page header (the stack hub's Settings,
  * `?section=secrets`).
@@ -266,12 +299,12 @@ function deployAfter(job, stack) {
 export function mount(root, opts = {}) {
   const one = opts.stack ?? null;
   const abort = new AbortController();
-  const tip = hoverCard();
+  /** @type {(() => void)[]} */
+  const stops = [];
 
   /** @type {{stack: string | null, reading: boolean,
    *   summary: Record<string, import("../secretsview.js").Declared> | null,
    *   failed: import("../doctor.js").RouteError | null,
-   *   busy: Set<string>, errors: Map<string, string>,
    *   change: import("../secretsview.js").SecretRow | null,
    *   stage: 0 | 1, value: string, token: string | null, restart: boolean,
    *   staging: boolean, stageError: string | null}} */
@@ -280,8 +313,6 @@ export function mount(root, opts = {}) {
     reading: false,
     summary: null,
     failed: null,
-    busy: new Set(),
-    errors: new Map(),
     change: null,
     stage: 0,
     value: "",
@@ -290,9 +321,8 @@ export function mount(root, opts = {}) {
     staging: false,
     stageError: null,
   };
-  const reveals = createReveals({ onChange: () => paintDetail() });
 
-  /** The stacks the left pane lists: the host's fleet, else the repository's. */
+  /** The stacks the list pane lists: the host's fleet, else the repository's. */
   const fleet = () => {
     const f = current().fleet?.stacks?.map((s) => s.name);
     if (f && f.length) return f;
@@ -300,11 +330,12 @@ export function mount(root, opts = {}) {
   };
   const entry = (/** @type {string} */ s) => S.summary?.[s];
 
+  // ── the controls the header carries ──────────────────────────────────
   const hideAllBtn = drivable(
     h(
       "button",
       {
-        class: "kp-button kp-button--secondary",
+        class: "kp-button",
         type: "button",
         title: "Hide every revealed value now (Esc)",
       },
@@ -312,7 +343,10 @@ export function mount(root, opts = {}) {
     ),
     HIDE_ALL,
   );
-  hideAllBtn.addEventListener("click", () => reveals.hideAll());
+  const hideAll = () => {
+    for (const f of root.querySelectorAll("[data-kp-secret]")) hideSecret(f);
+  };
+  hideAllBtn.addEventListener("click", hideAll);
   const changeBtn = drivable(
     h(
       "button",
@@ -332,49 +366,54 @@ export function mount(root, opts = {}) {
     else say(`${S.stack ?? "This stack"} declares no secret to change`);
   });
 
-  const listCard = section({
-    tag: "nav",
-    label: "Stacks",
-    plain: true,
-    cls: "sx-stacks",
-  });
-  const list = listCard.body;
-  const openStack = h(
-    "a",
-    {
-      class: "kp-button kp-button--sm kp-button--ghost",
-      title: "Open this stack's page",
-    },
-    "Open stack",
-  );
-  // redesign-stackhub review 5: inside the stack hub the hub's Secrets
-  // section is the card — the pane is no second card inside it, names no
-  // stack (the page is that stack's), links to no other and has no other
-  // stack to move to.
+  // ── the cards: keys (detail) and the change drawer ───────────────────
+  /** @param {string} id @param {string | null} title @param {string} desc */
+  const card = (id, title, desc) => {
+    const data = h("div", { class: "kp-card__data" });
+    // Inside a stack hub the hub's own section carries the heading: the pane
+    // says what it is for in its sentence and names itself for a screen reader.
+    const titleEl = h(
+      title == null ? "span" : "h2",
+      title == null
+        ? { class: "kp-sr-only", id: `${id}-t` }
+        : { class: "kp-card__title", id: `${id}-t` },
+      title ?? "Secrets",
+    );
+    const lede = h("p", { class: "kp-lede" }, desc);
+    const tools = h("div", { class: "kp-card__actions" });
+    const el = h(
+      "section",
+      {
+        class: "kp-card nx-card sx-card",
+        id,
+        "data-kp-state": "loading",
+        "aria-labelledby": `${id}-t`,
+      },
+      h("div", { class: "kp-card__header" }, titleEl, tools),
+      lede,
+      h("div", { class: "kp-card__stage" }, data),
+    );
+    return { el, data, titleEl, lede, tools };
+  };
   const audit = "Every reveal and change is written to the host's audit log";
-  const detailCard =
+  const detailCard = card(
+    "sd",
+    one != null ? null : "Secrets",
     one != null
-      ? section({
-          id: "sd",
-          label: `${one}'s secrets`,
-          foot: [audit, [kbd("Esc"), " hide all"]],
-          plain: true,
-          cls: "sx-one-detail",
-        })
-      : section({
-          id: "sd",
-          title: "Secrets",
-          desc: "What this stack's lxc-compose.yml lists under latch_secrets and latch_files.",
-          tools: [openStack],
-          foot: [audit, [kbd("↑ ↓"), " stack · ", kbd("Esc"), " hide all"]],
-          plain: true,
-        });
-  const detail = detailCard.body;
+      ? `${audit}. Esc hides every value.`
+      : `What this stack's lxc-compose.yml lists under latch_secrets and latch_files. ${audit}.`,
+  );
+  const drawerCard = card(
+    "ch",
+    "Change a secret",
+    "Pick Change… on a secret to stage a new value here. Nothing is written until you press Write.",
+  );
+  drawerCard.el.classList.add("sx-drawer");
   const closeBtn = drivable(
     h(
       "button",
       {
-        class: "kp-button kp-button--sm kp-button--ghost",
+        class: "kp-button kp-button--sm",
         type: "button",
         "aria-label": "Close",
         title: "Close without writing (Esc)",
@@ -384,16 +423,15 @@ export function mount(root, opts = {}) {
     ),
     CLOSE_DRAWER,
   );
-  const drawerCard = section({
-    tag: "aside",
-    id: "ch",
-    title: "Change a secret",
-    desc: "Pick Change… on a secret to stage a new value here. Nothing is written until you press Write.",
-    tools: [closeBtn],
-    plain: true,
-    cls: one != null ? "sx-drawer sx-drawer--one" : "sx-drawer",
-  });
-  const drawer = drawerCard.body;
+  drawerCard.tools.append(closeBtn);
+  const openStack = h(
+    "a",
+    { class: "kp-button kp-button--sm", title: "Open this stack's page" },
+    "Open stack",
+  );
+  if (one == null) detailCard.tools.append(openStack);
+  const detail = detailCard.data;
+  const drawer = drawerCard.data;
 
   const head = pageHeader({
     title: "Secrets",
@@ -406,6 +444,13 @@ export function mount(root, opts = {}) {
   const live = /** @type {ReturnType<typeof liveStatus>} */ (head.live);
   live.set(null, "reading…");
 
+  /** The stack list pane (fleet page only). */
+  const listEl = h("ul", {
+    class: "kp-pane__list",
+    role: "listbox",
+    "aria-label": "Stacks",
+  });
+  const readsLine = h("p", { class: "kp-lede", "aria-live": "polite" });
   if (one != null) {
     // In the hub the hub carries the header; Hide all and Change a secret
     // stay as this section's own row.
@@ -413,379 +458,299 @@ export function mount(root, opts = {}) {
       h(
         "div",
         { class: "sx sx--one" },
-        h("div", { class: "sx-actions" }, hideAllBtn, changeBtn),
+        h(
+          "div",
+          { class: "sx-actions kp-formgrid__buttons" },
+          hideAllBtn,
+          changeBtn,
+        ),
         h("div", { class: "sx-md sx-md--one" }, detailCard.el, drawerCard.el),
       ),
     );
-  } else
+  } else {
     root.replaceChildren(
       h(
         "div",
         { class: "sx" },
         head.el,
-        h("div", { class: "sx-md" }, listCard.el, detailCard.el, drawerCard.el),
-      ),
-    );
-
-  // ---- left pane -------------------------------------------------------
-  function paintList() {
-    const names = fleet();
-    if (!S.summary || names.length === 0) {
-      list.replaceChildren(
-        ...Array.from({ length: Math.max(names.length, 4) }, () =>
+        h(
+          "div",
+          {
+            class: "kp-split kp-split--panes sx-md",
+            "data-kp-master-detail": "",
+            "data-kp-pane-widths": "15rem 1fr 22rem",
+            "data-kp-pane-history": "off",
+            id: "sx-panes",
+          },
           h(
-            "div",
-            { class: "sx-skrow", "aria-hidden": "true" },
-            sk("10px"),
-            h("span", null, sk("60%"), h("small", null, sk("80%"))),
-            sk("18px"),
+            "section",
+            {
+              class: "kp-split__pane",
+              "data-kp-pane": "list",
+              "aria-label": "Stacks",
+            },
+            readsLine,
+            listEl,
+          ),
+          h(
+            "section",
+            {
+              class: "kp-split__pane",
+              "data-kp-pane": "detail",
+              "aria-label": "Secrets of the stack",
+            },
+            h("h3", { "data-kp-pane-heading": "", tabindex: "-1" }),
+            h("div", { class: "kp-pane__body" }, detailCard.el),
+          ),
+          h(
+            "aside",
+            {
+              class: "kp-split__pane",
+              "data-kp-pane": "aside",
+              "aria-label": "Change a secret",
+            },
+            drawerCard.el,
           ),
         ),
-      );
-      if (S.failed)
-        list.prepend(
-          h(
-            "div",
-            { class: "kp-alert kp-alert--destructive", role: "alert" },
-            h(
-              "div",
-              { class: "kp-alert__body" },
-              h("strong", null, "Could not read the stacks' secrets"),
-              h("p", null, S.failed.why),
-              S.failed.fix ? h("p", null, `Fix: ${S.failed.fix}`) : "",
-            ),
-          ),
-        );
-      return;
-    }
-    list.replaceChildren(
+      ),
+    );
+  }
+  const attached = attachAll(root);
+  stops.push(() => attached());
+  setCardState(detailCard.el, "loading", { words: "Reading the secrets…" });
+  setCardState(drawerCard.el, "ready");
+
+  // ── the list pane ─────────────────────────────────────────────────────
+  function paintList() {
+    if (one != null) return;
+    const names = fleet();
+    const read = names.filter(
+      (n) => entry(n) && stackKind(entry(n)) !== "unreadable",
+    ).length;
+    const bad = names.filter(
+      (n) => entry(n) && stackKind(entry(n)) === "unreadable",
+    ).length;
+    readsLine.textContent = S.summary
+      ? `${read} of ${names.length} stacks read${bad ? `, ${bad} failed` : ""}`
+      : "Reading the stacks…";
+    listEl.replaceChildren(
       ...names.map((s) => {
         const d = entry(s);
         const k = stackKind(d);
-        const badge =
-          k === "unreadable"
-            ? chip("!", { tone: "warn", label: "unreadable" })
-            : chip(String(stackCount(d)));
-        // The fleet-wide list (no address draws it since 3.71.0: each
-        // stack's Settings shows its own) is no Live view control.
-        const b = h(
-          "button",
+        return h(
+          "li",
           {
-            type: "button",
-            "aria-current": String(s === S.stack),
-            "aria-label": `${s}: ${stackLine(d)}`,
+            role: "option",
+            "data-kp-pane-key": s,
+            "aria-selected": String(s === S.stack),
+            title: stackLine(d),
           },
-          swatch(chartColour(s, names)),
-          h("span", null, s, h("small", null, stackLine(d))),
-          badge,
-        );
-        b.addEventListener("click", () => pick(s));
-        tip.attach(b, () => {
-          const e = entry(s);
-          const kk = stackKind(e);
-          return [
+          h(
+            "span",
+            { class: "sx-pane-item" },
+            h("span", {
+              class: "kp-idmark kp-idmark--sm",
+              "data-kp-idmark": s,
+              "aria-hidden": "true",
+            }),
             h("b", null, s),
-            kk === "ok" && e
-              ? h(
-                  "span",
-                  null,
-                  secretRows(s, e)
-                    .map((r) => r.name)
-                    .join(", "),
-                )
-              : kk === "unreadable" && e?.unreadable
-                ? dot("warn", splitReason(e.unreadable).why)
-                : h("span", null, "No latch_secrets or latch_files declared."),
             h(
               "span",
-              { class: "nx-tip__hint" },
-              "Click to open · ↑ ↓ move between stacks",
+              {
+                class: `kp-badge${k === "unreadable" ? " kp-badge--warning" : ""}`,
+              },
+              k === "unreadable" ? "unreadable" : String(stackCount(d)),
             ),
-          ];
-        });
-        return b;
+          ),
+        );
       }),
     );
+    void attachAll(listEl);
   }
 
-  // ---- middle pane -----------------------------------------------------
-  /** @param {import("../secretsview.js").SecretRow} row */
-  function secRow(row) {
-    const s = /** @type {string} */ (S.stack);
-    const value = reveals.value(row.key);
-    const shown = value != null;
-    const err = S.errors.get(row.key);
-    const busy = S.busy.has(row.key);
-    const left = Math.ceil(reveals.left(row.key) / 1000);
-    const mask = h(
-      "div",
-      {
-        class: `sx-mask${shown ? " sx-mask--shown" : ""}${err && !shown ? " sx-mask--error" : ""}`,
-        "aria-live": "polite",
-      },
-      h(
-        "span",
-        {
-          "data-secret-value": row.key,
-          // redesign-final (layout audit): the mask is eight dots, short
-          // enough for a phone's column; a narrower one says what it hides.
-          ...(shown || err || busy ? {} : { title: "The value is hidden" }),
-        },
-        shown
-          ? value
-          : err
-            ? `could not read: ${err}`
-            : busy
-              ? "reading…"
-              : "••••••••",
-      ),
-      h(
-        "span",
-        { class: "hint", "data-left": shown ? row.key : "" },
-        shown ? `hides in ${left} s` : err ? "" : "hidden",
-      ),
-    );
-    if (shown) {
-      // The bar drains over the full 30 s; a repaint continues it where it
-      // was instead of starting over.
-      const bar = h("i", { class: "sx-mask__timer", "aria-hidden": "true" });
-      styled(bar, {
-        "--sx-ttl": `${reveals.ttl}ms`,
-        "animation-delay": `-${reveals.ttl - reveals.left(row.key)}ms`,
-      });
-      mask.append(bar);
-    }
-    const reveal = drivable(
-      h(
-        "button",
-        {
-          class: "kp-button kp-button--sm",
-          type: "button",
-          "aria-pressed": String(shown),
-          title: shown ? "Hide it again now" : "Show the value for 30 seconds",
-        },
-        shown ? "Hide" : busy ? "Reading…" : "Reveal",
-      ),
-      REVEAL_SECRET,
-      row.key,
-    );
-    if (busy) reveal.setAttribute("disabled", "");
-    reveal.addEventListener("click", async (e) => {
-      if (reveals.value(row.key) != null) {
-        // Hiding never asks the host: the value is dropped from memory.
-        reveals.hide(row.key);
-        return;
-      }
-      S.busy.add(row.key);
-      S.errors.delete(row.key);
-      paintDetail();
-      const r = await readValue(s, row.ref, "reveal", !e.isTrusted);
-      S.busy.delete(row.key);
-      if (r.ok) reveals.reveal(row.key, String(r.body?.value ?? ""));
-      else {
-        S.errors.set(row.key, r.error.why);
-        paintDetail();
-      }
-    });
-    const copy = drivable(
-      h(
-        "button",
-        {
-          class: "kp-button kp-button--sm kp-button--ghost",
-          type: "button",
-          title: "Copy the value to the clipboard without showing it",
-        },
-        "Copy",
-      ),
-      COPY_SECRET,
-      row.key,
-    );
-    copy.addEventListener("click", (e) => copyValue(row, !e.isTrusted));
-    const change = drivable(
-      h(
-        "button",
-        {
-          class: "kp-button kp-button--sm",
-          type: "button",
-          title: "Stage a new value for this secret",
-        },
-        "Change…",
-      ),
-      EDIT_SECRET,
-      row.key,
-    );
-    change.addEventListener("click", () => openChange(row));
-    return h(
-      "div",
-      { class: "sx-sec", "aria-current": String(S.change?.key === row.key) },
-      h(
-        "div",
-        { class: "sx-sec__name" },
-        h("strong", null, row.name),
-        h("small", null, row.note),
-      ),
-      mask,
-      h("div", { class: "sx-sec__btns" }, reveal, copy, change),
-    );
+  // ── the keys of the stack on screen ───────────────────────────────────
+  /** The audit sentence of a read, in the row's value track. @param {HTMLElement} rowEl @param {string} what @param {string} name */
+  const written = (rowEl, what, name) => {
+    const p = rowEl.querySelector("[data-audit]");
+    if (p)
+      p.textContent = `You ${what} ${name} on ${formatDateTime(Date.now() / 1000)}. The host wrote it to its audit log.`;
+  };
+
+  /** @param {string} s @param {import("../secretsview.js").Declared} d */
+  function keysHtml(s, d) {
+    const rows = secretRows(s, d);
+    return `<div class="kp-formgrid sx-keys" data-kp-formgrid-label="wide" data-kp-formgrid-lines="lines" style="--kp-secret-min: 9rem">${rows
+      .map(
+        (r, i) =>
+          `<div class="kp-formgrid__row" data-sx-row="${i}" data-key="${esc(r.key)}"><div class="kp-formgrid__label"><span class="sx-what"><span class="kp-idmark kp-idmark--sm" data-kp-idmark="${esc(r.name)}" aria-hidden="true"></span><b>${esc(r.name)}</b></span><small>${esc(r.note)}</small></div><div class="kp-formgrid__control"><div class="kp-secret" data-kp-secret data-kp-secret-ttl="30" data-kp-secret-mask="12" data-kp-secret-label="${esc(s)}/${esc(r.name)}" data-sx-i="${i}"></div></div><p class="kp-formgrid__value" data-audit></p><div class="kp-formgrid__actions"><button type="button" class="kp-button kp-button--sm" data-sx-change="${i}" title="Stage a new value for this secret">Change…</button></div></div>`,
+      )
+      .join("")}</div>`;
   }
 
-  /**
-   * Copy: the clipboard write starts inside the click (a ClipboardItem
-   * whose content is the host's answer, so the browser still counts the
-   * click), and the value is never put on screen. Where the clipboard is
-   * refused, the value is revealed and selected so Ctrl C copies it.
-   * @param {import("../secretsview.js").SecretRow} row
-   * @param {boolean} driven
-   */
-  function copyValue(row, driven) {
-    const s = /** @type {string} */ (S.stack);
-    /** @type {string | null} */
-    let failure = null;
-    /** @type {string | null} */
-    let got = null;
-    const asked = readValue(s, row.ref, "copy", driven).then((r) => {
-      if (!r.ok) {
-        failure = r.error.why;
-        throw new Error(failure);
-      }
-      got = String(r.body?.value ?? "");
-      return got;
-    });
-    const done = () => {
-      S.errors.delete(row.key);
-      paintDetail();
-      say(`Copied ${row.name} · the clipboard clears in 30 s`);
-      setTimeout(() => {
-        if (document.hasFocus())
-          navigator.clipboard?.writeText("").catch(() => {});
-      }, CLIPBOARD_MS);
-    };
-    const fallback = async () => {
-      const v = got ?? (await asked.catch(() => null));
-      if (v == null) {
-        S.errors.set(row.key, failure ?? "the host did not answer");
-        paintDetail();
-        return;
-      }
-      try {
-        await navigator.clipboard.writeText(v);
-        done();
-        return;
-      } catch {
-        // The browser refused the clipboard: show the value and select it.
-      }
-      reveals.reveal(row.key, v);
-      const span = detail.querySelector(
-        `[data-secret-value="${CSS.escape(row.key)}"]`,
+  /** @param {string} s @param {import("../secretsview.js").Declared} d */
+  function drawKeys(s, d) {
+    const rows = secretRows(s, d);
+    detail.innerHTML = keysHtml(s, d);
+    const parts = [];
+    const restarts = restartItems(s, d);
+    if (restarts.length) {
+      parts.push(
+        `<section class="st-sub" aria-labelledby="sx-restarts-h"><h3 id="sx-restarts-h">What restarts when a file changes</h3><p class="kp-lede">A changed file restarts what reads it, so nothing is restarted blind.</p><div class="kp-deplist" data-kp-deplist id="sx-restarts" data-kp-dep-order="none" data-kp-dep-direction="from-reaches-to" data-kp-dep-heading="{n} restarts when ${esc(s)}'s files change" data-kp-dep-empty="Nothing restarts when a file changes."></div></section>`,
       );
-      const sel = getSelection();
-      if (span && sel) {
-        const range = document.createRange();
-        range.selectNodeContents(span);
-        sel.removeAllRanges();
-        sel.addRange(range);
+    }
+    const u = usesOf(s, d);
+    if (u.files.length) {
+      parts.push(
+        `<section class="st-sub" aria-labelledby="sx-uses-h"><h3 id="sx-uses-h">Which file feeds which app</h3><p class="kp-lede">If you change a file, the apps on its lines notice.</p><div class="kp-matrix sx-uses" data-kp-matrix data-kp-view="lines" data-kp-matrix-owned aria-label="Which file feeds which app" id="sx-uses"></div></section>`,
+      );
+    }
+    detail.insertAdjacentHTML("beforeend", parts.join(""));
+    const off = attachAll(detail);
+    void off.ready.then(() => {
+      for (const field of detail.querySelectorAll("[data-kp-secret]")) {
+        const i = Number(field.getAttribute("data-sx-i"));
+        const row = rows[i];
+        const reveal = field.querySelector(".kp-secret__reveal");
+        const copy = field.querySelector(".kp-secret__copy");
+        if (reveal)
+          drivable(/** @type {HTMLElement} */ (reveal), REVEAL_SECRET, row.key);
+        if (copy)
+          drivable(/** @type {HTMLElement} */ (copy), COPY_SECRET, row.key);
+        field.addEventListener(
+          "click",
+          (e) => {
+            /** @type {any} */ (field).__trusted = e.isTrusted;
+          },
+          true,
+        );
       }
-      say(`Press Ctrl C to copy ${row.name} · it hides in 30 s`);
-    };
-    if (typeof ClipboardItem !== "undefined" && navigator.clipboard?.write) {
-      const blob = asked.then((v) => new Blob([v], { type: "text/plain" }));
-      navigator.clipboard
-        .write([new ClipboardItem({ "text/plain": blob })])
-        .then(done, fallback);
-    } else void fallback();
+      for (const b of detail.querySelectorAll("[data-sx-change]")) {
+        const row = rows[Number(b.getAttribute("data-sx-change"))];
+        drivable(/** @type {HTMLElement} */ (b), EDIT_SECRET, row.key);
+        b.addEventListener("click", () => openChange(row));
+      }
+      const dep = detail.querySelector("#sx-restarts");
+      if (dep) {
+        const handle = deplist(dep);
+        handle?.set(restarts);
+        handle?.setState("ready");
+      }
+      const uses = /** @type {HTMLElement | null} */ (
+        detail.querySelector("#sx-uses")
+      );
+      if (uses) {
+        setMatrix(uses, {
+          view: "lines",
+          corner: "file ↓ app →",
+          rows: u.files.map((f) => ({
+            key: f.key,
+            label: f.label,
+            sub: f.sub,
+            glyph: "text",
+            ghost: f.ghost,
+            dashed: f.ghost,
+          })),
+          columns: u.apps.map((a) => ({ key: a, label: a })),
+          cell: (r, c) =>
+            u.uses.get(r)?.includes(c)
+              ? { tone: "ok", label: "reads it" }
+              : { tone: "none" },
+          countLabel: (n) => `${n} ${n === 1 ? "app" : "apps"}`,
+          sourcesLabel: "Files",
+          usersLabel: "Apps",
+        });
+      }
+    });
+    stops.push(() => off());
   }
+
+  /** Every secret field asks for its value through this one listener. */
+  detail.addEventListener("kp-secret-request", (e) => {
+    const s = S.stack;
+    const field = /** @type {HTMLElement} */ (e.target);
+    const d = s ? entry(s) : null;
+    if (!s || !d) return;
+    const row = secretRows(s, d)[Number(field.getAttribute("data-sx-i"))];
+    const { respond, fail, purpose } = /** @type {CustomEvent} */ (e).detail;
+    e.preventDefault();
+    const driven = /** @type {any} */ (field).__trusted === false;
+    void readValue(s, row.ref, purpose, driven).then((r) => {
+      if (!r.ok) {
+        fail(new Error(r.error.why));
+        return;
+      }
+      respond(String(r.body?.value ?? ""));
+      const rowEl = /** @type {HTMLElement} */ (field.closest("[data-sx-row]"));
+      written(
+        rowEl,
+        purpose === "copy" ? "copied" : "revealed",
+        `${s}/${row.name}`,
+      );
+      if (purpose === "copy")
+        setTimeout(() => {
+          if (document.hasFocus())
+            navigator.clipboard?.writeText("").catch(() => {});
+        }, CLIPBOARD_MS);
+    });
+  });
 
   function paintDetail() {
     const s = S.stack;
-    const names = fleet();
-    const title = detailCard.title;
     if (!s) {
-      title?.replaceChildren(sk("8rem"));
+      setCardState(detailCard.el, S.summary ? "empty" : "loading", {
+        title: "Pick a stack",
+        text: "Choose one in the list to read its keys.",
+        words: "Reading the secrets…",
+      });
       openStack.hidden = true;
-      detail.replaceChildren(...skRows());
       return;
     }
     const d = entry(s);
     const k = stackKind(d);
-    /** @type {(Node | string)[]} */
-    let body;
-    if (S.reading || !S.summary) body = skRows();
-    else if (k === "ok" && d)
-      body = [
-        ...secretRows(s, d).map(secRow),
-        d.files.length
-          ? ""
-          : h("p", { class: "hint" }, `${s} declares no latch_files.`),
-      ];
-    else if (k === "unreadable" && d?.unreadable) {
-      const { why, fix } = splitReason(d.unreadable);
-      const again = drivable(
-        h(
-          "button",
-          { class: "kp-button kp-button--sm", type: "button" },
-          "Try again",
-        ),
-        RETRY_STACK,
-      );
-      again.addEventListener("click", () => pick(s));
-      body = [
-        h(
-          "div",
-          { class: "kp-alert kp-alert--warning", role: "alert" },
-          h(
-            "div",
-            { class: "kp-alert__body" },
-            h("strong", null, `${s}'s secrets cannot be read`),
-            h("p", null, `${why}.`.replace(/\.\.$/, ".")),
-            fix ? h("p", null, `Fix: ${fix}`.replace(/\.?$/, ".")) : "",
-            again,
-          ),
-        ),
-      ];
-    } else
-      body = [
-        h(
-          "div",
-          { class: "sx-empty" },
-          h("strong", null, `${s} declares no secrets`),
-          h(
-            "span",
-            null,
-            "Add latch_secrets or latch_files to its lxc-compose.yml to keep a value out of the repository.",
-          ),
-          h(
-            "a",
-            {
-              class: "sx-linkbtn",
-              href: `${stackHref(s, "settings")}?section=files`,
-            },
-            "Open its stack file",
-          ),
-        ),
-      ];
-    const hintP = body.find(
-      (x) => x instanceof HTMLElement && x.classList.contains("hint"),
-    );
-    if (hintP instanceof HTMLElement) hintP.style.margin = "12px 0 0";
-    title?.replaceChildren(
-      h("span", { class: "sx-row" }, swatch(chartColour(s, names)), s),
-    );
+    if (one == null) detailCard.titleEl.textContent = s;
     openStack.hidden = false;
     openStack.setAttribute("href", stackHref(s));
-    openStack.title = `Open ${s}'s page`;
-    detail.replaceChildren(...body);
-  }
-  const skRows = () =>
-    [1, 2].map(() =>
-      h(
-        "div",
-        { class: "sx-sec", "aria-hidden": "true" },
-        h("div", { class: "sx-sec__name" }, sk("60%"), sk("80%")),
-        h("div", { class: "sx-mask" }, sk("90%"), h("span")),
-        h("div", { class: "sx-sec__btns" }, sk("12rem")),
-      ),
+    if (S.reading || !S.summary) {
+      setCardState(detailCard.el, "loading", { words: "Reading the secrets…" });
+      return;
+    }
+    if (k === "ok" && d) {
+      drawKeys(s, d);
+      setCardState(detailCard.el, "ready");
+      return;
+    }
+    detail.replaceChildren();
+    if (k === "unreadable" && d?.unreadable) {
+      const { why, fix } = splitReason(d.unreadable);
+      setCardState(detailCard.el, "error", {
+        title: `${s}'s secrets cannot be read`,
+        text: `${why}${fix ? `. ${fix}` : ""}`.replace(/\.\.$/, "."),
+      });
+      return;
+    }
+    const open = h(
+      "a",
+      { class: "kp-button", href: `${stackHref(s, "settings")}?section=files` },
+      "Open its stack file",
     );
-  // ---- right pane: the change drawer -------------------------------------
+    setCardState(detailCard.el, "empty", {
+      title: `${s} declares no secrets`,
+      text: "Add latch_secrets or latch_files to its lxc-compose.yml to keep a value out of the repository.",
+      action: open,
+    });
+  }
+  detailCard.el.addEventListener("kp-card-retry", () => {
+    if (S.stack) void pick(S.stack);
+    else void load();
+  });
+  // The unreadable state's Try again carries the Live view control.
+  new MutationObserver(() => {
+    const b = detailCard.el.querySelector(".kp-card__retry");
+    if (b && !b.hasAttribute("data-drive"))
+      drivable(/** @type {HTMLElement} */ (b), RETRY_STACK);
+  }).observe(detailCard.el, { childList: true, subtree: true });
+
+  // ── the change drawer: paste → stage → write ─────────────────────────
   /** @param {import("../secretsview.js").SecretRow} row */
   function openChange(row) {
     S.change = row;
@@ -794,7 +759,6 @@ export function mount(root, opts = {}) {
     S.token = null;
     S.restart = true;
     S.stageError = null;
-    paintDetail();
     paintDrawer();
     setTimeout(() => drawer.querySelector("textarea")?.focus(), 0);
   }
@@ -802,145 +766,79 @@ export function mount(root, opts = {}) {
     S.change = null;
     S.value = "";
     S.token = null;
-    paintDetail();
     paintDrawer();
   }
 
+  /** @param {("done" | "running" | "pending")[]} st @param {string} app */
+  const steps = (st, app) =>
+    `<ol class="kp-steplist" aria-label="Writing the secret">${[
+      ["paste", "Paste", "The new value, into the box below"],
+      ["stage", "Stage", "Kept in the dashboard until you write"],
+      ["write", "Write", `Through latch, then ${app} restarts when ticked`],
+    ]
+      .map(
+        ([id, t, n], i) =>
+          `<li class="kp-steplist__item" data-state="${st[i]}" data-kp-step-id="${id}"><span class="kp-steplist__mark" aria-hidden="true"></span><span class="kp-steplist__body"><span class="kp-steplist__title">${t}</span><span class="kp-steplist__note">${esc(n)}</span></span></li>`,
+      )
+      .join("")}</ol>`;
+
   function paintDrawer() {
-    const dTitle = /** @type {HTMLElement} */ (drawerCard.title);
-    const dDesc = /** @type {HTMLElement} */ (drawerCard.desc);
     closeBtn.hidden = !S.change;
     if (!S.change) {
-      dTitle.textContent = "Change a secret";
-      dDesc.textContent =
+      drawerCard.titleEl.textContent = "Change a secret";
+      drawerCard.lede.textContent =
         "Pick Change… on a secret to stage a new value here. Nothing is written until you press Write.";
-      drawer.replaceChildren(
-        h(
-          "ol",
-          { class: "sx-steps" },
-          h("li", null, "Paste the new value"),
-          h("li", null, "Stage it: nothing is written yet"),
-          h("li", null, "Write it through latch, then restart the app"),
-        ),
-      );
+      drawer.innerHTML = steps(["pending", "pending", "pending"], "the app");
+      void attachAll(drawer);
       return;
     }
     const row = S.change;
     const stack = /** @type {string} */ (S.stack);
     const app = row.ref.kind === "env" ? row.ref.app : stack;
+    drawerCard.titleEl.textContent = `Change ${row.name}`;
+    drawerCard.lede.textContent =
+      "The new value never enters a URL or the job's arguments; latch stores it.";
+    drawer.innerHTML = `${steps(S.stage ? ["done", "running", "pending"] : ["running", "pending", "pending"], app)}<div class="kp-formgrid sx-change" data-kp-formgrid-label="wide" data-kp-formgrid-lines="none"><div class="kp-formgrid__row"><label class="kp-formgrid__label" for="${SECRET_VALUE}">New value<small>KEY=value, one per line</small></label><div class="kp-formgrid__control"><textarea class="kp-field__input" id="${SECRET_VALUE}" name="secret-value" rows="5" placeholder="KEY=value" autocomplete="off" spellcheck="false"${S.stage ? " disabled" : ""}></textarea></div></div><div class="kp-formgrid__row"><div class="kp-formgrid__label">After writing</div><div class="kp-formgrid__control"><label class="kp-switch" title="After the write, deploy ${esc(stack)} so ${esc(app)} reads the new value"><input class="kp-switch__input" type="checkbox" role="switch" id="${SECRET_RESTART}" name="secret-restart"${S.restart ? " checked" : ""} /><span>Restart ${esc(app)}</span></label></div></div>${S.stageError ? `<div class="kp-formgrid__row"><p class="kp-formgrid__control" data-kp-formgrid-span="all" role="alert">Could not stage it: ${esc(S.stageError)}</p></div>` : ""}<div class="kp-formgrid__row kp-formgrid__row--buttons"><div class="kp-formgrid__control" data-kp-formgrid-span="control-value"><div class="kp-formgrid__buttons"><button type="button" class="kp-button" data-sx-back>${S.stage ? "Edit value" : "Cancel"}</button><button type="button" class="kp-button kp-button--primary" data-sx-next>${S.stage ? "Write and restart" : S.staging ? "Staging…" : "Stage"}</button></div></div></div></div>`;
     const ta = /** @type {HTMLTextAreaElement} */ (
-      h("textarea", {
-        class: "kp-field__input",
-        id: SECRET_VALUE,
-        name: "secret-value",
-        placeholder: "KEY=value, one per line",
-        "aria-label": "New value",
-        autocomplete: "off",
-        spellcheck: "false",
-      })
+      drawer.querySelector("textarea")
     );
     ta.value = S.value;
-    if (S.stage > 0) ta.disabled = true;
-    const next = drivable(
-      h(
-        "button",
-        {
-          class: "kp-button kp-button--primary",
-          type: "button",
-          title: S.stage
-            ? "Write the staged value through latch, then restart the app"
-            : "Keep the value ready; nothing is written yet",
-        },
-        S.stage ? "Write and restart" : S.staging ? "Staging…" : "Stage",
-      ),
-      S.stage ? WRITE_SECRET : STAGE_SECRET,
+    const next = /** @type {HTMLButtonElement} */ (
+      drawer.querySelector("[data-sx-next]")
     );
+    const back = /** @type {HTMLElement} */ (
+      drawer.querySelector("[data-sx-back]")
+    );
+    const restart = /** @type {HTMLInputElement} */ (
+      drawer.querySelector(`#${SECRET_RESTART}`)
+    );
+    drivable(next, S.stage ? WRITE_SECRET : STAGE_SECRET);
     if (S.stage) next.dataset.action = "change-secret";
-    next.disabled = S.staging || (!S.stage && !S.value.trim());
+    drivable(back, S.stage ? EDIT_STAGED : CLOSE_DRAWER);
+    const sync = () => {
+      const off = S.staging || (!S.stage && !S.value.trim());
+      next.disabled = off;
+      if (off && !S.staging && !S.stage)
+        next.setAttribute(
+          "data-kp-disabled-reason",
+          "Paste or type the new value first",
+        );
+      else next.removeAttribute("data-kp-disabled-reason");
+    };
+    sync();
     ta.addEventListener("input", () => {
       S.value = ta.value;
-      next.disabled = !S.value.trim();
+      sync();
     });
-    next.addEventListener("click", () => (S.stage ? write() : stage()));
-    const restart = /** @type {HTMLInputElement} */ (
-      h("input", {
-        type: "checkbox",
-        id: SECRET_RESTART,
-        name: "secret-restart",
-      })
-    );
-    restart.checked = S.restart;
     restart.addEventListener("change", () => (S.restart = restart.checked));
-    const back = S.stage
-      ? drivable(
-          h(
-            "button",
-            {
-              class: "kp-button kp-button--secondary",
-              type: "button",
-              title: "Back to editing the value",
-            },
-            "Edit value",
-          ),
-          EDIT_STAGED,
-        )
-      : drivable(
-          h(
-            "button",
-            {
-              class: "kp-button kp-button--secondary",
-              type: "button",
-              title: "Close without writing",
-            },
-            "Cancel",
-          ),
-          CLOSE_DRAWER,
-        );
+    next.addEventListener("click", () => (S.stage ? write() : void stage()));
     back.addEventListener("click", () => {
       if (!S.stage) return closeChange();
       S.stage = 0;
       S.token = null;
       paintDrawer();
     });
-    dTitle.textContent = `Change ${row.name}`;
-    dDesc.textContent =
-      "The new value never enters a URL or the job's arguments; latch stores it.";
-    drawer.replaceChildren(
-      h(
-        "ol",
-        { class: "sx-steps" },
-        h("li", { class: S.stage ? "done" : "on" }, "Paste the new value"),
-        h(
-          "li",
-          { class: S.stage === 1 ? "on" : "" },
-          "Staged: nothing is written yet",
-        ),
-        h("li", null, `Write through latch and restart ${app}`),
-      ),
-      h(
-        "label",
-        { class: "kp-field" },
-        h("span", { class: "kp-field__label" }, "New value"),
-        ta,
-      ),
-      h(
-        "label",
-        {
-          class: "kp-field kp-field--check",
-          title: `After the write, deploy ${stack} so ${app} reads the new value`,
-        },
-        restart,
-        ` Restart ${app} after writing`,
-      ),
-      S.stageError
-        ? h(
-            "p",
-            { class: "hint", role: "alert" },
-            `Could not stage it: ${S.stageError}`,
-          )
-        : "",
-      h("div", { class: "sx-row sx-drawer__btns" }, back, next),
-    );
+    void attachAll(drawer);
   }
 
   /** Step 2: the value goes to the dashboard's memory; nothing is written. */
@@ -963,50 +861,58 @@ export function mount(root, opts = {}) {
     paintDrawer();
   }
 
-  /** Step 3: after a 5 s Undo window, the write job; then the restart. */
+  /**
+   * Step 3: after a 5 s Undo window, the write job; then the restart. Leaving
+   * the page inside the window writes it (leave: "commit"), never loses it.
+   */
   function write() {
     const row = S.change;
     const stack = S.stack;
     const token = S.token;
     const restart = S.restart;
     if (!row || !stack || !token) return;
+    const was = { stage: S.stage, value: S.value };
     closeChange();
-    const timer = setTimeout(async () => {
-      dismiss();
-      const r = await send(
-        "POST",
-        `/data/actions/${encodeURIComponent(stack)}/change-secret`,
-        { secret_ref: JSON.stringify(row.ref), stage_token: token },
-        "change the secret",
-      );
-      if (!r.ok) {
-        say(`Could not write ${row.name}: ${r.error.why}`, 10000);
-        return;
-      }
-      say(`Writing ${row.name} through latch · job queued`, 6000);
-      if (restart && typeof r.body?.job === "number")
-        deployAfter(r.body.job, stack);
-    }, UNDO_MS);
-    const dismiss = toast(`Writing ${row.name} through latch in 5 s`, {
+    const t = undoToast(`Writing ${row.name} through latch`, {
+      mode: "defer",
       ms: UNDO_MS,
-      action: {
-        label: "Undo",
-        drive: { id: UNDO_WRITE },
-        run: () => {
-          clearTimeout(timer);
-          say("Write cancelled before it ran");
-        },
+      clock: "ring",
+      key: "Mod+Z",
+      leave: "commit",
+      failed: "Not written: the host refused the change.",
+      commit: async () => {
+        const r = await send(
+          "POST",
+          `/data/actions/${encodeURIComponent(stack)}/change-secret`,
+          { secret_ref: JSON.stringify(row.ref), stage_token: token },
+          "change the secret",
+        );
+        if (!r.ok) throw new Error(r.error.why);
+        say(`Writing ${row.name} through latch · job queued`, 6000);
+        if (restart && typeof r.body?.job === "number")
+          deployAfter(r.body.job, stack);
+      },
+      undo: () => say("Write cancelled before it ran"),
+      // A refused write brings the staged value back.
+      restore: () => {
+        if (S.stack !== stack) return;
+        S.change = row;
+        S.stage = /** @type {0 | 1} */ (was.stage);
+        S.value = was.value;
+        S.token = token;
+        paintDrawer();
       },
     });
+    const undo = t.toast.querySelector("[data-kp-undo-button]");
+    if (undo) drivable(/** @type {HTMLElement} */ (undo), UNDO_WRITE);
   }
 
-  // ---- data --------------------------------------------------------------
+  // ── data ──────────────────────────────────────────────────────────────
   /** @param {string} s */
   async function pick(s) {
     chosen = true;
     S.stack = s;
-    reveals.hideAll();
-    S.errors.clear();
+    hideAll();
     if (S.change) S.change = null;
     S.reading = true;
     if (one == null) {
@@ -1034,6 +940,7 @@ export function mount(root, opts = {}) {
   }
 
   async function load() {
+    S.failed = null;
     const r = await fetchJson(
       "/data/secrets",
       "the stacks' secrets",
@@ -1043,11 +950,13 @@ export function mount(root, opts = {}) {
     if (!r.ok) {
       S.failed = r.error;
       live.fail("not read");
-      paintAll();
+      setCardState(detailCard.el, "error", {
+        title: "The stacks' secrets could not be read",
+        text: `${r.error.why}${r.error.fix ? `. ${r.error.fix}` : ""}`,
+      });
       return;
     }
     S.summary = r.body.stacks ?? {};
-    S.failed = null;
     live.set(Date.now() / 1000);
     choose();
     paintAll();
@@ -1065,7 +974,6 @@ export function mount(root, opts = {}) {
       names.find((n) => stackKind(entry(n)) === "ok") ?? names[0] ?? null;
     if (first === S.stack) return;
     S.stack = first;
-    if (first && S.summary) paintAll();
   }
 
   function paintAll() {
@@ -1074,14 +982,26 @@ export function mount(root, opts = {}) {
     paintDrawer();
   }
 
-  // The "hides in N s" words tick each second, without a repaint.
-  const ticker = setInterval(() => {
-    detail.querySelectorAll("[data-left]").forEach((e) => {
-      const key = /** @type {HTMLElement} */ (e).dataset.left;
-      if (key)
-        e.textContent = `hides in ${Math.ceil(reveals.left(key) / 1000)} s`;
-    });
-  }, 1000);
+  // The master-detail's own selection reads the stack.
+  root.addEventListener("kp-pane-select", (e) => {
+    const key = /** @type {CustomEvent} */ (e).detail?.key;
+    if (key && key !== S.stack) void pick(key);
+  });
+  root.addEventListener("kp-pane-retry", () => {
+    if (S.stack) void pick(S.stack);
+  });
+  void setPaneState;
+
+  // r reveals the chosen secret (the first, or the row the focus is in).
+  stops.push(
+    onPageKey("reveal", () => {
+      const focused = document.activeElement?.closest?.("[data-sx-row]");
+      const field = (
+        focused ?? detail.querySelector("[data-sx-row]")
+      )?.querySelector(".kp-secret__reveal");
+      /** @type {HTMLElement | null} */ (field)?.click();
+    }),
+  );
 
   /** @param {KeyboardEvent} e */
   const onKey = (e) => {
@@ -1093,19 +1013,8 @@ export function mount(root, opts = {}) {
       return;
     }
     if (e.key === "Escape") {
-      reveals.hideAll();
+      hideAll();
       if (S.change) closeChange();
-    }
-    if (
-      one == null &&
-      (e.key === "ArrowDown" || e.key === "ArrowUp") &&
-      S.summary
-    ) {
-      const names = fleet();
-      if (!names.length) return;
-      e.preventDefault();
-      const i = names.indexOf(S.stack ?? "") + (e.key === "ArrowDown" ? 1 : -1);
-      void pick(names[(i + names.length) % names.length]);
     }
   };
   document.addEventListener("keydown", onKey);
@@ -1115,6 +1024,7 @@ export function mount(root, opts = {}) {
       chosen = true;
       S.stack = null;
       choose();
+      paintDetail();
     }
     paintList();
   });
@@ -1131,11 +1041,10 @@ export function mount(root, opts = {}) {
   });
   return () => {
     abort.abort();
-    reveals.clear();
-    clearInterval(ticker);
+    hideAll();
     document.removeEventListener("keydown", onKey);
     off();
     offJobs();
-    tip.stop();
+    for (const s of stops) s();
   };
 }

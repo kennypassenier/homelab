@@ -2743,32 +2743,14 @@
       "twins": false
     },
     {
-      "id": "settings-cancel-edit",
-      "page": "settings",
-      "what": "close the open editor and keep the old value",
-      "opens": "view",
-      "row": null,
-      "href": "/settings",
-      "was": [],
-      "shows": "in an open editor",
-      "reach": [
-        {
-          "do": "click",
-          "control": "settings-edit",
-          "row": "*"
-        }
-      ],
-      "twins": false
-    },
-    {
       "id": "settings-check-and-write",
       "page": "settings",
-      "what": "open the review of the staged changes (Check and write)",
-      "opens": "dialog",
+      "what": "write the staged host.toml changes (Save)",
+      "opens": "run",
       "row": null,
       "href": "/settings",
       "was": [],
-      "shows": "while a person has staged a change on this page",
+      "shows": "while a change is staged on this page",
       "reach": [],
       "twins": false
     },
@@ -2792,18 +2774,28 @@
       "row": null,
       "href": "/settings",
       "was": [],
-      "shows": "while a person has staged a change on this page",
+      "shows": "while a change is staged on this page",
       "reach": [],
       "twins": false
     },
     {
       "id": "settings-edit",
       "page": "settings",
-      "what": "open the inline editor of one host.toml key",
+      "what": "go to one host.toml key and put the cursor in its editor",
       "opens": "view",
       "row": "<key>",
       "href": "/settings",
-      "was": [],
+      "was": [
+        {
+          "id": "settings-stage"
+        },
+        {
+          "id": "settings-use-default"
+        },
+        {
+          "id": "settings-cancel-edit"
+        }
+      ],
       "shows": null,
       "reach": [],
       "twins": false
@@ -2849,7 +2841,7 @@
       "page": "settings",
       "what": "jump to a section from the side list",
       "opens": "view",
-      "row": "wc|signin|<group slug>",
+      "row": "wc|signin|browser|<group slug>",
       "href": "/settings",
       "was": [],
       "shows": null,
@@ -2881,31 +2873,17 @@
       "twins": false
     },
     {
-      "id": "settings-stage",
-      "page": "settings",
-      "what": "stage the value typed in the open editor (nothing is written yet)",
-      "opens": "view",
-      "row": null,
-      "href": "/settings",
-      "was": [],
-      "shows": "in an open editor",
-      "reach": [
-        {
-          "do": "click",
-          "control": "settings-edit",
-          "row": "*"
-        }
-      ],
-      "twins": false
-    },
-    {
       "id": "settings-staged",
       "page": "settings",
-      "what": "the header's staged-change chip; focus or hover lists the staged changes",
+      "what": "the Save bar's count of staged changes; it lists them, each with its own Revert",
       "opens": "view",
       "row": null,
       "href": "/settings",
-      "was": [],
+      "was": [
+        {
+          "id": "settings-undo"
+        }
+      ],
       "shows": null,
       "reach": [],
       "twins": false
@@ -2920,36 +2898,6 @@
       "was": [],
       "shows": "after the settings could not be read",
       "reach": [],
-      "twins": false
-    },
-    {
-      "id": "settings-undo",
-      "page": "settings",
-      "what": "drop one staged change",
-      "opens": "view",
-      "row": "<key>",
-      "href": "/settings",
-      "was": [],
-      "shows": "while a person has staged a change on this page",
-      "reach": [],
-      "twins": false
-    },
-    {
-      "id": "settings-use-default",
-      "page": "settings",
-      "what": "stage the open key's removal: the host takes its default",
-      "opens": "view",
-      "row": null,
-      "href": "/settings",
-      "was": [],
-      "shows": "in an open editor",
-      "reach": [
-        {
-          "do": "click",
-          "control": "settings-edit",
-          "row": "*"
-        }
-      ],
       "twins": false
     },
     {
@@ -3981,13 +3929,6 @@
       "row": "<stack>"
     },
     {
-      "id": "drop-confirm",
-      "page": "settings",
-      "what": "type to confirm dropping unpushed commits",
-      "was": [],
-      "row": null
-    },
-    {
       "id": "fleetview-traffic",
       "page": "fleetview",
       "what": "show the measured traffic on the map",
@@ -4007,13 +3948,6 @@
       "what": "the token just issued, to copy (read only)",
       "was": [],
       "row": null
-    },
-    {
-      "id": "key",
-      "page": "settings",
-      "what": "one host.toml key in its edit dialog (-<key>), and its typed confirmation (-<key>-confirm)",
-      "was": [],
-      "row": "<key with - for _>[-confirm]"
     },
     {
       "id": "mute",

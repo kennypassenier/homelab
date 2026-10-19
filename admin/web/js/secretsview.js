@@ -5,9 +5,6 @@
 // after 30 seconds. No DOM, no fetch; the clock comes in, so `node --test`
 // drives every line with fake timers.
 
-/** How long a revealed value stays on screen. */
-export const REVEAL_MS = 30_000;
-
 /**
  * @typedef {{from: string, dest: string, mode?: string,
  *   owner?: string | null, restarts?: string | null}} LatchFile
@@ -89,60 +86,4 @@ export function secretRows(stack, d) {
       note: `latch file · written to ${f.dest}`,
     })),
   ];
-}
-
-/**
- * The revealed values, each hidden again `ttlMs` after it was shown. A
- * value lives only here, in memory, never in the URL, storage or the DOM
- * once hidden; `clear()` on leaving the page drops them all.
- * @param {{onChange: () => void, ttlMs?: number,
- *   setTimer?: (f: () => void, ms: number) => any,
- *   clearTimer?: (t: any) => void, now?: () => number}} opts
- */
-export function createReveals(opts) {
-  const ttl = opts.ttlMs ?? REVEAL_MS;
-  const setTimer = opts.setTimer ?? ((f, ms) => setTimeout(f, ms));
-  const clearTimer = opts.clearTimer ?? ((t) => clearTimeout(t));
-  const now = opts.now ?? (() => Date.now());
-  /** @type {Map<string, {value: string, until: number, timer: any}>} */
-  const shown = new Map();
-  const drop = (/** @type {string} */ key) => {
-    const s = shown.get(key);
-    if (!s) return false;
-    clearTimer(s.timer);
-    shown.delete(key);
-    return true;
-  };
-  return {
-    /** Show `value` for `key` for the next `ttl` ms. @param {string} key @param {string} value */
-    reveal(key, value) {
-      drop(key);
-      const timer = setTimer(() => {
-        if (shown.delete(key)) opts.onChange();
-      }, ttl);
-      shown.set(key, { value, until: now() + ttl, timer });
-      opts.onChange();
-    },
-    /** @param {string} key */
-    hide(key) {
-      if (drop(key)) opts.onChange();
-    },
-    hideAll() {
-      if (shown.size === 0) return;
-      for (const k of [...shown.keys()]) drop(k);
-      opts.onChange();
-    },
-    /** Drop every value without telling anyone (the page is going). */
-    clear() {
-      for (const k of [...shown.keys()]) drop(k);
-    },
-    /** @param {string} key @returns {string | null} */
-    value: (key) => shown.get(key)?.value ?? null,
-    /** Milliseconds until `key` hides, 0 when hidden. @param {string} key */
-    left: (key) => Math.max(0, (shown.get(key)?.until ?? 0) - now()),
-    get size() {
-      return shown.size;
-    },
-    ttl,
-  };
 }

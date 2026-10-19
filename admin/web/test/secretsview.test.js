@@ -1,10 +1,8 @@
 // redesign-3.71 secrets: the Secrets page's pure half (secretsview.js).
-import { mock, test } from "node:test";
+import { test } from "node:test";
 import assert from "node:assert/strict";
 
 import {
-  REVEAL_MS,
-  createReveals,
   secretRows,
   splitReason,
   stackCount,
@@ -12,56 +10,24 @@ import {
   stackLine,
 } from "../js/secretsview.js";
 import { historyRows } from "../js/activity.js";
+import { restartItems, usesOf } from "../js/pages/secrets.js";
 
-test("redesign-371: a revealed value hides itself after 30 seconds", () => {
-  mock.timers.enable({ apis: ["setTimeout", "Date"], now: 0 });
-  try {
-    let changes = 0;
-    const r = createReveals({ onChange: () => (changes += 1) });
-    assert.equal(REVEAL_MS, 30_000);
-    r.reveal("gateway/traefik/.env", "TOKEN=abc");
-    assert.equal(r.value("gateway/traefik/.env"), "TOKEN=abc");
-    assert.equal(r.left("gateway/traefik/.env"), 30_000);
-    mock.timers.tick(29_999);
-    assert.equal(r.value("gateway/traefik/.env"), "TOKEN=abc", "not yet");
-    assert.equal(r.left("gateway/traefik/.env"), 1);
-    mock.timers.tick(1);
-    assert.equal(r.value("gateway/traefik/.env"), null, "hidden at 30 s");
-    assert.equal(r.left("gateway/traefik/.env"), 0);
-    assert.equal(r.size, 0);
-    assert.equal(changes, 2, "shown, then hidden: the page repaints twice");
-  } finally {
-    mock.timers.reset();
-  }
-});
-
-test("redesign-371: revealing again restarts the 30 seconds; Hide and Hide all act at once", () => {
-  mock.timers.enable({ apis: ["setTimeout", "Date"], now: 0 });
-  try {
-    const r = createReveals({ onChange: () => {} });
-    r.reveal("a", "1");
-    mock.timers.tick(20_000);
-    r.reveal("a", "1");
-    mock.timers.tick(20_000);
-    assert.equal(r.value("a"), "1", "the second reveal counts from itself");
-    mock.timers.tick(10_000);
-    assert.equal(r.value("a"), null);
-    r.reveal("a", "1");
-    r.reveal("b", "2");
-    r.hide("a");
-    assert.equal(r.value("a"), null);
-    assert.equal(r.value("b"), "2");
-    r.hideAll();
-    assert.equal(r.size, 0);
-    // A timer of a hidden value never fires into a later reveal.
-    r.reveal("b", "3");
-    mock.timers.tick(29_000);
-    assert.equal(r.value("b"), "3");
-    r.clear();
-    assert.equal(r.value("b"), null);
-  } finally {
-    mock.timers.reset();
-  }
+test("feat-kp11demo-6: what restarts and which file feeds which app", () => {
+  const d = {
+    secrets: ["traefik"],
+    files: [
+      { from: "a/a.env", dest: "/x/a.env", restarts: "traefik" },
+      { from: "a/b.env", dest: "/x/b.env", restarts: null },
+    ],
+  };
+  assert.deepEqual(restartItems("gateway", d), [
+    { from: "a/a.env", to: "traefik", state: "unknown" },
+  ]);
+  const u = usesOf("gateway", d);
+  assert.deepEqual(u.apps, ["traefik"]);
+  assert.deepEqual(u.uses.get("traefik/.env"), ["traefik"]);
+  assert.deepEqual(u.uses.get("a/b.env"), [], "a file nothing reads");
+  assert.equal(u.files.find((f) => f.key === "a/b.env")?.ghost, true);
 });
 
 test("redesign-371: the left pane's kinds, exact counts and lines", () => {

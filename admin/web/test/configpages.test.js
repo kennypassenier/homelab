@@ -36,10 +36,7 @@ import {
   sectionTarget,
   shortRemote,
   slug,
-  stagedWords,
   failSummary,
-  keepStaged,
-  restoreStaged,
 } from "../js/settingsview.js";
 import { highlight, typingTarget } from "../js/ui.js";
 import { ruleIntent, toggleRuleOff } from "../js/editforms.js";
@@ -371,7 +368,7 @@ test("redesign-settings: the search and the Show choice pick the rows", () => {
   assert.ok(!fieldShown(locked, "", "here", ed, none));
 });
 
-test("redesign-settings: groups, chips, counts and the staged words", () => {
+test("redesign-settings: groups, chips, counts and ", () => {
   assert.deepEqual(
     groupsOf([field({}), field({ group: "Logging" }), field({ key: "b" })]),
     ["Nightly round and backups", "Logging"],
@@ -382,14 +379,6 @@ test("redesign-settings: groups, chips, counts and the staged words", () => {
   assert.equal(groupChip(1, 1, 0), "1 key");
   assert.equal(foundText(64, 64, false), "64 settings");
   assert.equal(foundText(5, 64, true), "5 of 64 settings");
-  assert.deepEqual(stagedWords(0), {
-    chip: "nothing staged",
-    write: "Check and write",
-  });
-  assert.deepEqual(stagedWords(2), {
-    chip: "2 changes staged",
-    write: "Check and write 2…",
-  });
   assert.equal(accessWords(field({}))?.[0] ?? null, null);
   assert.equal(
     accessWords(field({ access: "locked" }))?.[0],
@@ -494,24 +483,6 @@ test("review 12: only fields, buttons and links keep j/k and Enter to themselves
     assert.ok(typingTarget(t), t);
   for (const t of ["TR", "ARTICLE", "SPAN", "TABLE", "LABEL", "DIV"])
     assert.ok(!typingTarget(t), t);
-});
-
-test("review 5: staged Settings changes survive leaving the page, never a secret", () => {
-  const fields = [
-    { key: "backup_hour", secret: false },
-    { key: "notify_webhook", secret: true },
-  ];
-  const changes = new Map([
-    ["backup_hour", { field: fields[0], value: 3 }],
-    ["notify_webhook", { field: fields[1], value: "https://x" }],
-  ]);
-  const raw = keepStaged(changes, (f) => f.secret);
-  assert.ok(!raw.includes("https://x"), "a secret went to browser storage");
-  assert.deepEqual(restoreStaged(raw, fields), { backup_hour: 3 });
-  // A key the host no longer reads, or a broken record, restores nothing.
-  assert.deepEqual(restoreStaged(raw, [{ key: "other" }]), {});
-  assert.deepEqual(restoreStaged("{nope", fields), {});
-  assert.deepEqual(restoreStaged(null, fields), {});
 });
 
 test("review 11: one failed read of the host is one message, naming every part it took out", () => {

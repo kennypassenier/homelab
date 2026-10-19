@@ -13,14 +13,8 @@ import {
   registerCommands,
   stackCommands,
 } from "../js/commands.js";
-import {
-  MAX_SHOWN,
-  matchIntent,
-  noMatchText,
-  rankCommands,
-  score,
-  words,
-} from "../js/intent.js";
+import { MAX_SHOWN, noMatch, rankPalette } from "../js/intent.js";
+import { matchIntent } from "/static/kp/js/intent.js";
 
 /** @param {string} action @param {Partial<import("../js/actionforms.js").CatalogEntry>} [o] */
 const entry = (action, o = {}) =>
@@ -105,19 +99,9 @@ const shown = (
   /** @type {string} */ q,
   here = /** @type {string | null} */ (null),
 ) =>
-  rankCommands(commandsFor(here), q, { here }).flatMap((g) =>
+  rankPalette(commandsFor(here), q, { here }).flatMap((g) =>
     g.commands.map((c) => `${g.group}: ${c.label}`),
   );
-
-test("words: lower case, hyphenated words also by their parts", () => {
-  assert.deepEqual(words("Update · kp-soft"), [
-    "update",
-    "kp-soft",
-    "kp",
-    "soft",
-  ]);
-  assert.deepEqual(words("Restore (native)"), ["restore", "native"]);
-});
 
 test("feat-shell-2: every typed word must start a word of the command, in any order", () => {
   assert.equal(matchIntent("Update · jellyfin", "update jellyfin"), true);
@@ -149,7 +133,7 @@ test("feat-shell-2: Ctrl K finds an action by intent — the cases that answered
 });
 
 test("feat-shell-2: groups run Inbox → Do → Go to, the open stack's own first", () => {
-  const groups = rankCommands(commandsFor("gateway"), "gateway", {
+  const groups = rankPalette(commandsFor("gateway"), "gateway", {
     here: "gateway",
   }).map((g) => g.group);
   assert.deepEqual(groups, ["Inbox", "Do", "Go to"]);
@@ -177,31 +161,17 @@ test("feat-shell-2: nothing typed shows a short start, never every stack's actio
   assert.ok(shown("").length <= MAX_SHOWN);
 });
 
-test("feat-shell-2: a label word outranks a hidden one", () => {
-  const want = ["update"];
-  const label = score(
-    { id: "a", group: "Do", label: "Update · x", words: "" },
-    want,
-  );
-  const hidden = score(
-    { id: "b", group: "Do", label: "Pull · x", words: "update" },
-    want,
-  );
-  assert.ok(label > hidden && hidden > 0);
-  assert.equal(score({ id: "c", group: "Do", label: "Deploy" }, want), -1);
-});
-
 test("feat-shell-2: when nothing matches it says why, naming what the verb works on", () => {
   assert.deepEqual(shown("update nosuchstack"), []);
   assert.equal(
-    noMatchText("update nosuchstack", {
+    noMatch("update nosuchstack", {
       verbs: ["Update", "Back up"],
       stacks: ["admin", "gateway"],
     }),
     'There is no stack called "nosuchstack". Update works on: admin, gateway.',
   );
   assert.match(
-    noMatchText("zzz", { verbs: ["Update"], stacks: ["admin"] }),
+    noMatch("zzz", { verbs: ["Update"], stacks: ["admin"] }),
     /Nothing matches/,
   );
 });

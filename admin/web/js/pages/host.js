@@ -219,7 +219,12 @@ function trendTile(fig) {
       setTrendData(figure, {
         points: t.points.map(([s, v]) => [s * 1000, v]),
         step: 600_000,
-        digits: 1,
+        // The reading chip and tooltip print the figure's own unit.
+        ...(fig.rate
+          ? { unitKind: "bytes/s" }
+          : fig.unit === "%"
+            ? { unitKind: "percent" }
+            : { unit: fig.unit, digits: fig.digits ?? 1 }),
       });
       attachTrendCharts(document);
     },

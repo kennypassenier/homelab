@@ -436,7 +436,9 @@ export function mount(root, ctx) {
     below.replaceChildren();
     if (status === "loading") {
       count.textContent = "";
-      setEntityGridState(grid, "loading", { count: 6 });
+      // No skeleton cards: each would be a card of its own with no busy card
+      // in it; the gallery loads as one busy card over its whole area.
+      setEntityGridState(grid, "loading", { count: 0 });
       return;
     }
     if (status === "failed") {

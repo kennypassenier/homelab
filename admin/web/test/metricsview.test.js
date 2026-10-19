@@ -11,12 +11,19 @@ import {
   changeText,
   count,
   drives,
+  extremes,
   fill,
+  heatColumns,
+  hostHeat,
+  machinesOf,
   nowValue,
   peak,
   poweredOn,
+  ribbonRuns,
   statusClasses,
+  statusParts,
   trafficFigures,
+  usualMachines,
 } from "../js/metricsview.js";
 
 /** @param {string} title @param {[string, [number, number][]][]} series */
@@ -129,6 +136,13 @@ test("redesign-371-metrics: Drives names each drive's state and since when it is
   assert.equal(d[1].pending, 12);
   assert.equal(d[1].realloc, 3);
   assert.equal(d[0].temp, 34);
+  // The two lines in a drive's detail are the readings over the window.
+  assert.deepEqual(d[1].pendPoints, [
+    [1, 7],
+    [3, 12],
+  ]);
+  assert.deepEqual(d[0].tempPoints, [[3, 34]]);
+  assert.deepEqual(d[2].pendPoints, []);
   assert.equal(poweredOn(12000), "12,000 h · 1.4 y");
   assert.equal(poweredOn(null), "not reported");
 });
@@ -189,6 +203,48 @@ test("redesign-371-metrics: what the host did becomes event markers, failures re
   );
   assert.match(a[1].label, /back up notes failed \(repository locked\)/);
   assert.equal(a[2].label, "deploy films (Kenny)");
+  // The kind names what it was (kp's key words it); work that took a
+  // minute or more is a window (until), a failure stays a line.
+  assert.deepEqual(
+    a.map((x) => [x.kind, x.until]),
+    [
+      ["operation", 200],
+      ["failure", undefined],
+      ["operation", 540],
+      ["update", 670],
+    ],
+  );
+  const quick = annotations(
+    /** @type {any[]} */ ([
+      {
+        kind: "op",
+        start: 100,
+        end: 130,
+        label: "deploy",
+        subject: "deploy x",
+        ok: true,
+        steps: [],
+      },
+      {
+        kind: "op",
+        start: 200,
+        end: 0,
+        label: "update",
+        subject: "update y",
+        ok: false,
+        steps: [],
+      },
+    ]),
+    { from: 50, to: 1000 },
+  );
+  assert.deepEqual(
+    quick.map((x) => [x.kind, x.until]),
+    [
+      ["operation", undefined],
+      ["update", undefined],
+    ],
+    "30 s is a line, and a running operation has no end yet",
+  );
   const films = annotations(entries, { from: 50, to: 1000, stack: "films" });
   assert.deepEqual(
     films.map((x) => x.at),
@@ -258,4 +314,154 @@ test("redesign-371-metrics: status codes fold into four classes, with the figure
   assert.equal(changeText(null, "24h"), "no earlier window to compare with");
   // Counters are exact, never 38.1k (Kenny, 2026-10-03).
   assert.equal(count(38112), "38,112");
+});
+
+test("kp11-metrics: the ribbon lists the same work in lanes, a failure as a failed bar, a running one without an end", () => {
+  /** @type {any[]} */
+  const entries = [
+    { kind: "phase", start: 100, end: 2600, name: "backup", count: 6 },
+    {
+      kind: "op",
+      start: 3000,
+      end: 3100,
+      label: "update",
+      subject: "update gateway",
+      ok: true,
+      steps: [],
+    },
+    {
+      kind: "op",
+      start: 4000,
+      end: 4005,
+      label: "scheduled-backup",
+      subject: "back up notes",
+      ok: false,
+      error: "repository locked",
+      steps: [],
+    },
+    {
+      kind: "op",
+      start: 5000,
+      end: 0,
+      label: "deploy",
+      subject: "deploy films",
+      ok: false,
+      steps: [],
+    },
+  ];
+  const runs = ribbonRuns(entries, { from: 0, to: 9000 });
+  assert.deepEqual(
+    runs.map((r) => [r.lane, r.state]),
+    [
+      ["rounds", "ok"],
+      ["updates", "ok"],
+      ["host", "failed"],
+      ["host", "running"],
+    ],
+  );
+  // Milliseconds (kp's unit); an instant gets two minutes to be pressed.
+  assert.equal(runs[0].start, 100_000);
+  assert.equal(runs[2].end, 4_120_000);
+  assert.equal(runs[3].end, null);
+  assert.match(runs[2].label, /failed \(repository locked\)/);
+  assert.deepEqual(
+    ribbonRuns(entries, { from: 0, to: 9000, stack: "films" }).map(
+      (r) => r.lane,
+    ),
+    ["host"],
+    "a stack's ribbon holds what named that stack",
+  );
+});
+
+test("kp11-metrics: a key figure rests on its highest and lowest reading", () => {
+  assert.equal(extremes([]), null);
+  assert.deepEqual(
+    extremes([
+      [1, 4],
+      [2, 9],
+      [3, 2],
+      [4, 5],
+    ]),
+    { high: { at: 2, value: 9 }, low: { at: 3, value: 2 } },
+  );
+});
+
+test("kp11-metrics: the status mix is four parts with exact counts, 4xx warning and 5xx destructive", () => {
+  assert.deepEqual(
+    statusParts([
+      { label: "2xx", n: 170 },
+      { label: "3xx", n: 10 },
+      { label: "4xx", n: 14 },
+      { label: "5xx", n: 6 },
+    ]),
+    [
+      { key: "2xx", label: "2xx", value: 170 },
+      { key: "3xx", label: "3xx", value: 10 },
+      { key: "4xx", label: "4xx", value: 14, tone: "warning" },
+      { key: "5xx", label: "5xx", value: 6, tone: "destructive" },
+    ],
+  );
+});
+
+test("kp11-metrics: the heat grid cuts any window into about two dozen cells and sums the requests in each", () => {
+  assert.deepEqual(heatColumns(3600), { bucket: 300, every: 3, unit: "clock" });
+  assert.deepEqual(heatColumns(86400), {
+    bucket: 3600,
+    every: 3,
+    unit: "clock",
+  });
+  assert.deepEqual(heatColumns(30 * 86400), {
+    bucket: 86400,
+    every: 5,
+    unit: "day",
+  });
+  const to = 1_000_000;
+  const from = to - 86400;
+  const h = hostHeat(
+    [
+      {
+        label: "a.example",
+        points: [
+          [to - 100, 7],
+          [to - 200, 3],
+          [to - 4000, 5],
+          [from - 10, 99],
+        ],
+      },
+    ],
+    from,
+    to,
+  );
+  assert.equal(h.columns.length, 24);
+  assert.equal(h.columns[23].at, to - 3600);
+  // The newest cell is whole: the two readings inside the last hour add up,
+  // the one an hour and more back lands in the cell before, the one before
+  // the window is left out.
+  assert.equal(h.rows[0].counts[23], 10);
+  assert.equal(h.rows[0].counts[22], 5);
+  assert.equal(
+    h.rows[0].counts.reduce((a, b) => a + b, 0),
+    15,
+  );
+});
+
+test("kp11-metrics: the picker lists the host and the three heaviest stacks first; the address holds at most three machines", () => {
+  assert.deepEqual(
+    usualMachines([
+      { name: "a", ram_used_mb: 100 },
+      { name: "b", ram_used_mb: 900 },
+      { name: "c", ram_used_mb: 500 },
+      { name: "d", ram_used_mb: 700 },
+      { name: "e" },
+    ]),
+    ["host", "b", "d", "c"],
+  );
+  assert.deepEqual(machinesOf(null), ["host"]);
+  assert.deepEqual(machinesOf(""), ["host"]);
+  assert.deepEqual(machinesOf("kyu"), ["kyu"]);
+  assert.deepEqual(machinesOf("host,kyu,kyu, almanac,inbox"), [
+    "host",
+    "kyu",
+    "almanac",
+  ]);
 });

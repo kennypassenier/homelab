@@ -19,7 +19,10 @@ import { entryWhat } from "./activity.js";
  * @typedef {{key: string, panel: string, title: string, desc: string,
  *   span: 1 | 2 | 3, unit?: Unit, now?: "first" | "max" | null,
  *   threshold?: "committed" | "allowance" | number, yMax?: number,
- *   kind?: "chart" | "drives"}} Card where one chart sits and what it says
+ *   typical?: boolean, sources?: number,
+ *   kind?: "chart" | "drives"}} Card where one chart sits
+ *   and what it says; `typical`: it also draws its typical level and rings
+ *   the runs (kp's `median` and `runs`)
  * @typedef {{title: string, desc: string, cards: Card[]}} Section
  */
 
@@ -42,6 +45,7 @@ export const HOST_SECTIONS = [
         span: 1,
         unit: "percent",
         now: "first",
+        typical: true,
       },
       {
         key: "mem",
@@ -61,14 +65,17 @@ export const HOST_SECTIONS = [
         span: 1,
         unit: "count",
         now: "first",
+        typical: true,
       },
       {
         key: "ctmem",
+        sources: 6,
         panel: "Memory per container (as Proxmox counts it)",
         title: "Memory per container",
         desc: "Each guest's RAM as Proxmox counts it.",
         span: 2,
         unit: "bytes",
+        typical: true,
       },
       // fix-371-1: the Host page's Swap tile lands here.
       {
@@ -83,6 +90,7 @@ export const HOST_SECTIONS = [
       },
       {
         key: "net",
+        sources: 3,
         panel: "Network in",
         title: "Network in",
         desc: "Received per second on the uplink and each container.",
@@ -94,6 +102,7 @@ export const HOST_SECTIONS = [
       // lands here, both directions drawn.
       {
         key: "netio",
+        sources: 2,
         panel: "Network in and out",
         title: "Network in and out",
         desc: "Received and sent per second on the host's Proxmox bridges.",
@@ -109,6 +118,7 @@ export const HOST_SECTIONS = [
     cards: [
       {
         key: "disk",
+        sources: 3,
         panel: "Disk used per filesystem",
         title: "Disk used per filesystem",
         desc: "How full each of the host's own filesystems is.",
@@ -120,6 +130,7 @@ export const HOST_SECTIONS = [
       // fix-371-1: the Host page's Disk traffic tile lands here.
       {
         key: "diskio",
+        sources: 2,
         panel: "Disk traffic",
         title: "Disk traffic",
         desc: "Bytes the host's disks read and write per second.",
@@ -129,6 +140,7 @@ export const HOST_SECTIONS = [
       },
       {
         key: "temp",
+        sources: 2,
         panel: "Temperature (hottest sensor per chip)",
         title: "Chip temperature",
         desc: "The hottest sensor of each chip on the motherboard.",
@@ -165,6 +177,7 @@ export const STACK_SECTIONS = [
         span: 1,
         unit: "percent",
         now: "first",
+        typical: true,
       },
       {
         key: "mem",
@@ -283,9 +296,10 @@ const lastOf = (pts) => (pts?.length ? pts[pts.length - 1][1] : null);
 
 /**
  * @typedef {{name: string, ok: boolean, since: number | null,
- *   temp: number | null, tempTrend: number[], pending: number | null,
- *   pendTrend: number[], realloc: number | null, hours: number | null}}
- *   Drive one row of the Drives table
+ *   temp: number | null, tempPoints: Point[], pending: number | null,
+ *   pendPoints: Point[], realloc: number | null, hours: number | null}}
+ *   Drive one row of the Drives table; the two `…Points` are the readings
+ *   over the window, the two lines in a drive's detail
  */
 
 /**
@@ -318,9 +332,9 @@ export function drives(P) {
       ok,
       since,
       temp: lastOf(temp),
-      tempTrend: (temp ?? []).map((p) => p[1]),
+      tempPoints: temp ?? [],
       pending: lastOf(pend),
-      pendTrend: (pend ?? []).map((p) => p[1]),
+      pendPoints: pend ?? [],
       realloc: lastOf(find("Drive reallocated sectors", s.label)),
       hours: lastOf(find("Drive power-on hours", s.label)),
     };
@@ -344,11 +358,16 @@ export function windowText(from, to) {
   return `${formatDateTime(from)} → ${formatDateTime(to)}`;
 }
 
+/** A stretch of work at least this long (seconds) is drawn as a window. */
+const WINDOW_MIN_S = 60;
+
 /**
  * What the host did in the window, as event markers on every chart
  * (DESIGN_LANGUAGE §9.3): each operation and nightly round from
- * `/data/history`. A failure is red, an update amber, the rest blue; on a
- * stack's charts only what named that stack. Each opens Activity.
+ * `/data/history`. The kind says what it was (an operation, an update, a
+ * failure: kp's key names the three); work that took a minute or more
+ * carries its `until`, so it is drawn as a window, while a failure stays a
+ * line. On a stack's charts only what named that stack. Each opens Activity.
  * @param {import("./activity.js").Entry[]} entries
  * @param {{from: number, to: number, stack?: string}} w
  * @returns {Annotation[]}
@@ -356,14 +375,19 @@ export function windowText(from, to) {
 export function annotations(entries, w) {
   /** @type {Annotation[]} */
   const out = [];
+  /** @param {number} start @param {number} end @returns {{until?: number}} */
+  const lasting = (start, end) =>
+    end - start >= WINDOW_MIN_S ? { until: end } : {};
   for (const e of entries) {
     if (!e || e.start < w.from || e.start > w.to) continue;
     if (e.kind === "phase") {
       if (w.stack) continue;
       out.push({
         at: e.start,
+        ...lasting(e.start, e.end),
         label: `Nightly round: ${entryWhat(e)}`,
         tone: "info",
+        kind: "operation",
         href: "/activity",
       });
       continue;
@@ -377,18 +401,80 @@ export function annotations(entries, w) {
         at: e.start,
         label: `${what} failed${e.error ? ` (${e.error})` : ""}`,
         tone: "bad",
+        kind: "failure",
         href: "/activity",
       });
       continue;
     }
+    const update = /^(update|pin|release)/.test(e.label);
     out.push({
       at: e.start,
+      ...(e.end > 0 ? lasting(e.start, e.end) : {}),
       label: `${what}${by}`,
-      tone: /^(update|pin|release)/.test(e.label) ? "warn" : "info",
+      tone: update ? "warn" : "info",
+      kind: update ? "update" : "operation",
       href: "/activity",
     });
   }
   return out.sort((a, b) => a.at - b.at);
+}
+
+/** The lanes of the operations ribbon, in the order it lists them. */
+export const RIBBON_LANES = [
+  { id: "rounds", label: "Nightly round" },
+  { id: "updates", label: "Updates" },
+  { id: "host", label: "Host work" },
+];
+
+/**
+ * The same work as bars in lanes (kp's `kp-gantt`): the nightly round, the
+ * updates and the rest of the host's work, a failed operation as a failed
+ * bar. A run still going has no end, and an instant gets two minutes so it
+ * can be seen and pressed. Times in milliseconds (kp's unit). A stack's
+ * ribbon holds what named that stack, like its charts.
+ * @param {import("./activity.js").Entry[]} entries
+ * @param {{from: number, to: number, stack?: string}} w
+ * @returns {{id: string, lane: string, label: string, start: number,
+ *   end: number | null, state: "ok" | "failed" | "running",
+ *   detail: string}[]}
+ */
+export function ribbonRuns(entries, w) {
+  /** @type {ReturnType<typeof ribbonRuns>} */
+  const out = [];
+  for (const e of entries) {
+    if (!e || e.start < w.from || e.start > w.to) continue;
+    const what = entryWhat(e);
+    if (e.kind === "phase") {
+      if (w.stack) continue;
+      out.push({
+        id: `phase-${e.start}-${e.name}`,
+        lane: "rounds",
+        label: `Nightly round: ${what}`,
+        start: e.start * 1000,
+        end: Math.max(e.end, e.start + 120) * 1000,
+        state: "ok",
+        detail: `${formatDateTime(e.start)} to ${formatDateTime(e.end)}`,
+      });
+      continue;
+    }
+    if (e.kind !== "op") continue;
+    if (w.stack && !` ${what} `.includes(` ${w.stack} `)) continue;
+    const running = e.end === 0 || e.end < e.start;
+    const failed = !running && !e.ok && !e.deferred;
+    const update = /^(update|pin|release)/.test(e.label);
+    out.push({
+      id: `op-${e.start}-${e.label}-${e.subject ?? ""}`,
+      lane: update ? "updates" : "host",
+      label: `${what}${failed && e.error ? ` failed (${e.error})` : ""}`,
+      start: e.start * 1000,
+      end: running ? null : Math.max(e.end, e.start + 120) * 1000,
+      state: running ? "running" : failed ? "failed" : "ok",
+      detail: running
+        ? `${formatDateTime(e.start)}, still running`
+        : `${formatDateTime(e.start)} to ${formatDateTime(e.end)}`,
+    });
+  }
+  return out.sort((a, b) => a.start - b.start);
 }
 
 // ---------- Traffic ----------
@@ -497,4 +583,133 @@ export function hostLegend(series, rows) {
       n: Math.round(n ?? s.points.reduce((a, p) => a + p[1], 0)),
     };
   });
+}
+
+// ---------- the window, the tiles, the hostnames' heat grid ----------
+
+/** The windows the dashboard's data routes know (`chart_window`), in seconds. */
+export const RANGE_SECONDS = /** @type {const} */ ({
+  "1h": 3600,
+  "6h": 6 * 3600,
+  "24h": 86400,
+  "7d": 7 * 86400,
+  "30d": 30 * 86400,
+});
+
+/**
+ * The highest and the lowest reading of a series and when each was, for a
+ * key figure's hover card. Null for no readings.
+ * @param {Point[]} points
+ * @returns {{high: {at: number, value: number}, low: {at: number, value: number}} | null}
+ */
+export function extremes(points) {
+  if (!points.length) return null;
+  let high = points[0];
+  let low = points[0];
+  for (const p of points) {
+    if (p[1] > high[1]) high = p;
+    if (p[1] < low[1]) low = p;
+  }
+  return {
+    high: { at: high[0], value: high[1] },
+    low: { at: low[0], value: low[1] },
+  };
+}
+
+/**
+ * The status mix as the parts of kp's share bar: the four classes with
+ * their exact counts, 4xx on the warning colour and 5xx on the destructive
+ * one (each also with its own pattern in kp).
+ * @param {{label: string, n: number}[]} classes from statusClasses()
+ * @returns {{key: string, label: string, value: number,
+ *   tone?: "warning" | "destructive"}[]}
+ */
+export const statusParts = (classes) =>
+  classes.map((c) => ({
+    key: c.label,
+    label: c.label,
+    value: c.n,
+    ...(c.label === "5xx"
+      ? { tone: /** @type {const} */ ("destructive") }
+      : c.label === "4xx"
+        ? { tone: /** @type {const} */ ("warning") }
+        : {}),
+  }));
+
+/**
+ * How the heat grid cuts a window into columns: about two dozen cells a row,
+ * whatever the window (5 minutes for an hour, an hour for a day, a day for a
+ * month), and how often the axis names one.
+ * @param {number} span seconds
+ * @returns {{bucket: number, every: number, unit: "clock" | "day"}}
+ */
+export function heatColumns(span) {
+  if (span <= 3600) return { bucket: 300, every: 3, unit: "clock" };
+  if (span <= 6 * 3600) return { bucket: 900, every: 4, unit: "clock" };
+  if (span <= 86400) return { bucket: 3600, every: 3, unit: "clock" };
+  if (span <= 7 * 86400) return { bucket: 21600, every: 4, unit: "clock" };
+  return { bucket: 86400, every: 5, unit: "day" };
+}
+
+/**
+ * The hostnames' requests per column of the heat grid: each series' points
+ * (requests in one step) summed into the column they fall in. Columns are
+ * aligned to the window's end so the newest is whole.
+ * @param {{label: string, points: Point[]}[]} series
+ * @param {number} from @param {number} to unix seconds
+ * @returns {{columns: {at: number}[], bucket: number, every: number,
+ *   unit: "clock" | "day", rows: {host: string, counts: number[]}[]}}
+ */
+export function hostHeat(series, from, to) {
+  const { bucket, every, unit } = heatColumns(to - from);
+  const n = Math.max(1, Math.round((to - from) / bucket));
+  const start = to - n * bucket;
+  const columns = Array.from({ length: n }, (_, i) => ({
+    at: start + i * bucket,
+  }));
+  const rows = series.map((s) => {
+    const counts = Array(n).fill(0);
+    for (const [t, v] of s.points) {
+      const i = Math.floor((t - start) / bucket);
+      if (i >= 0 && i < n) counts[i] += v;
+    }
+    return { host: s.label, counts: counts.map((c) => Math.round(c)) };
+  });
+  return { columns, bucket, every, unit, rows };
+}
+
+/**
+ * The machines the picker lists first (kp's `data-kp-usual`): the host, then
+ * the three stacks using the most RAM, which are the ones looked at most.
+ * @param {{name: string, ram_used_mb?: number | null}[]} stacks
+ * @returns {string[]} option values: "host" or a stack's name
+ */
+export const usualMachines = (stacks) => [
+  "host",
+  ...[...stacks]
+    .sort(
+      (a, b) =>
+        (b.ram_used_mb ?? 0) - (a.ram_used_mb ?? 0) ||
+        a.name.localeCompare(b.name),
+    )
+    .slice(0, 3)
+    .map((s) => s.name),
+];
+
+/**
+ * The machines in the address (`?stack=host,kyu,almanac`), in order, at most
+ * three, each once. The host is `host`; an empty address is the host.
+ * @param {string | null | undefined} text
+ * @returns {string[]}
+ */
+export function machinesOf(text) {
+  const seen = [
+    ...new Set(
+      (text ?? "")
+        .split(",")
+        .map((x) => x.trim())
+        .filter(Boolean),
+    ),
+  ].slice(0, 3);
+  return seen.length ? seen : ["host"];
 }

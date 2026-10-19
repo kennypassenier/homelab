@@ -1354,20 +1354,23 @@ export function mount(root, opts = {}) {
     const title = existing ? "Edit schedule" : "New schedule";
     const dlg = h(
       "dialog",
-      { class: "sch-drawer", "aria-labelledby": "sched-drawer-title" },
+      {
+        class: "kp-drawer kp-dialog sch-drawer",
+        "aria-labelledby": "sched-drawer-title",
+      },
       h(
-        "div",
-        { class: "sch-drawer__h" },
+        "header",
+        { class: "kp-drawer__head" },
         h("h2", { id: "sched-drawer-title", class: "kp-dialog__title" }, title),
         h(
           "p",
-          null,
+          { class: "kp-drawer__desc" },
           "Read it as a sentence; the preview shows exactly when it will run.",
         ),
       ),
       h(
         "div",
-        { class: "sch-drawer__b" },
+        { class: "kp-drawer__body sch-drawer__b" },
         sentence,
         daysField,
         argBox,
@@ -1390,7 +1393,7 @@ export function mount(root, opts = {}) {
         ),
         formErr,
       ),
-      h("div", { class: "sch-drawer__f" }, cancel, save),
+      h("footer", { class: "kp-drawer__foot" }, cancel, save),
     );
     dlg.addEventListener("close", () => dlg.remove());
     // A click on the backdrop (the dialog itself, outside its box) closes it.

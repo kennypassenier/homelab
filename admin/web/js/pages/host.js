@@ -65,6 +65,7 @@ import {
   toggleGroup,
 } from "../ui.js";
 import { attachTrendCharts, setTrendData } from "/static/kp/js/chart.js";
+import { attachPatterns } from "/static/kp/js/patterns.js";
 
 /** Seconds between two readings of the container list and the ping. */
 const EVERY_S = 30;
@@ -848,26 +849,38 @@ export function mount(root, ctx) {
     lat,
     h("p", { class: "hk-ping-out", role: "status" }, pingDot, pingOut),
   );
-  const copyBtn = drivable(
-    h(
-      "button",
-      {
-        type: "button",
-        class: "hk-copy",
-        title: "Copy the whole fingerprint",
-        onclick: () => {
-          const pin = lineFacts?.pin;
-          if (pin)
-            void navigator.clipboard?.writeText(pin).then(
-              () => (copyBtn.textContent = "Copied"),
-              () => {},
-            );
-        },
-      },
-      "Copy",
-    ),
-    COPY_PIN,
-  );
+  /**
+   * The pinned fingerprint, shortened, with kp's copy button for the whole.
+   * @param {string} pin
+   */
+  const pinCell = (pin) => {
+    const cell = h(
+      "span",
+      { class: "kp-copyable" },
+      h(
+        "span",
+        { class: "kp-copyable__value mono", title: pin },
+        `${pin.slice(0, 20)}…`,
+      ),
+      drivable(
+        h(
+          "button",
+          {
+            type: "button",
+            class:
+              "kp-button kp-button--ghost kp-button--sm kp-copyable__button",
+            "data-kp-copy": "",
+            "data-kp-copy-value": pin,
+            "aria-label": "Copy the whole fingerprint",
+          },
+          "Copy",
+        ),
+        COPY_PIN,
+      ),
+    );
+    attachPatterns(cell);
+    return cell;
+  };
   const paintLine = () => {
     const f = current().fleet;
     /** @type {[string, Node | string][]} */
@@ -880,18 +893,7 @@ export function mount(root, ctx) {
       rows.push(["Set in", lineFacts.address_source ?? "—"]);
       rows.push([
         "Pinned",
-        lineFacts.pin
-          ? h(
-              "span",
-              null,
-              h(
-                "span",
-                { class: "mono", title: lineFacts.pin },
-                `${lineFacts.pin.slice(0, 26)}…`,
-              ),
-              copyBtn,
-            )
-          : "no pin compiled in",
+        lineFacts.pin ? pinCell(lineFacts.pin) : "no pin compiled in",
       ]);
     }
     rows.push([

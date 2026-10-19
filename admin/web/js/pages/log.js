@@ -71,6 +71,7 @@ import {
   setHeatRows,
 } from "/static/kp/js/heat.js";
 import { attachHoverCards } from "/static/kp/js/hovercard.js";
+import { attachFootprints } from "/static/kp/js/footprint.js";
 
 /** Lines kept in the page, as the server's ring. */
 const KEEP = 2000;
@@ -350,6 +351,8 @@ export function mountHostLog(root, opts) {
     "hl-levelsrow",
   );
   const qualify = (/** @type {number} */ ts) => formatDateTime(ts);
+  let lastStrip = "";
+  let lastHeat = "";
   const paintDensity = () => {
     const buckets = loaded && !failure ? densityBuckets(lines) : [];
     const sources = allSources();
@@ -357,6 +360,7 @@ export function mountHostLog(root, opts) {
     gridEl.hidden = picture !== "grid";
     pictureRetry.hidden = !failure;
     setSegmentedValues(pictureSeg, [picture]);
+    /** @type {"loading" | "error" | "ready" | "empty"} */
     const state = !loaded
       ? "loading"
       : failure
@@ -366,7 +370,8 @@ export function mountHostLog(root, opts) {
           : "empty";
     const every = Math.max(1, Math.round(buckets.length / 12));
     const colour = (/** @type {number} */ i) => `var(--chart-${(i % 5) + 1})`;
-    setUptime(stripEl, {
+    /** @type {import("/static/kp/js/uptime.js").UptimeSpec} */
+    const stripSpec = {
       label: "Lines in the window",
       periods: buckets.map((b) => ({
         key: String(b.start),
@@ -388,8 +393,15 @@ export function mountHostLog(root, opts) {
       count: Math.max(buckets.length, 1),
       state,
       error: failure ?? undefined,
-    });
-    setHeat(gridEl, {
+    };
+    // Drawn only when what it shows changed: a live line that moves nothing
+    // here must not repaint the picture (and a state the package drew in it).
+    const stripKey = JSON.stringify(stripSpec);
+    if (stripKey !== lastStrip) {
+      lastStrip = stripKey;
+      setUptime(stripEl, stripSpec);
+    }
+    const heatSpec = {
       columns: buckets.map((b, i) => ({
         key: String(b.start),
         label: i % every === 0 ? formatClock(b.start) : "",
@@ -427,7 +439,12 @@ export function mountHostLog(root, opts) {
       skeleton: { rows: Math.max(sources.length, 3), columns: 24 },
       label: "Sources against five-minute columns",
       picked: range == null ? null : String(range),
-    });
+    };
+    const heatKey = JSON.stringify(heatSpec);
+    if (heatKey !== lastHeat) {
+      lastHeat = heatKey;
+      setHeat(gridEl, heatSpec);
+    }
     // sources shown, as the side column says
     setHeatRows(
       gridEl,
@@ -487,6 +504,8 @@ export function mountHostLog(root, opts) {
     attachUptimes(root),
     attachHeats(root),
     attachHoverCards(root),
+    // the heat grid and the strip keep their loaded height in every state
+    attachFootprints(root),
   ];
 
   const fleetNames = () => (current().fleet?.stacks ?? []).map((s) => s.name);

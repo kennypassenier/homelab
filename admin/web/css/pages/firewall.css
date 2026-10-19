@@ -130,3 +130,52 @@
 .fw-panel .kp-formgrid__row[hidden] {
   display: none;
 }
+
+/* A stack's CT number keeps a margin from its name. */
+.fw-ct {
+  margin-inline-start: var(--kp-space-xs, 0.25rem);
+}
+
+/* A reading beside a control is set in the label's own size, so its baseline
+   is the label's. */
+.fw-panel .kp-formgrid__value .measured {
+  font-size: inherit;
+  line-height: inherit;
+}
+
+/* The page header's buttons share the title's centre line. */
+@media (min-width: 48rem) {
+  .fw-page .nx-head .kp-page-header__actions {
+    align-items: center;
+    min-block-size: calc(min(var(--kp-text-display, 2.25rem), 2.25rem) * 1.1);
+  }
+}
+
+/* On a phone a key-figure toggle's label wraps inside its tile instead of
+   running under the neighbour (kp-gaps/homelab.md 78), two lines kept for
+   every label so the figures stay on one line. */
+@media (max-width: 48rem) {
+  .fw-panel .kp-kpis > .kp-kpi > .kp-kpi__label {
+    white-space: normal;
+    min-inline-size: 0;
+    min-block-size: calc(
+      2 * var(--kp-text-xs, 0.75rem) * var(--kp-line-height, 1.5)
+    );
+  }
+}
+
+/* A trace step's words wrap inside the step's own column instead of running
+   under its verdict (kp-gaps/homelab.md 79). */
+.fw-tracebox .kp-steplist__body {
+  grid-template-columns: minmax(0, 1fr);
+  min-inline-size: 0;
+}
+.fw-tracebox .kp-steplist__body > * {
+  min-inline-size: 0;
+  max-inline-size: 100%;
+}
+.fw-tracebox .kp-trace__rule {
+  white-space: normal;
+  text-align: start;
+  justify-self: start;
+}

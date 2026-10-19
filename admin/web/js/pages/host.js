@@ -22,7 +22,7 @@ import { act, catalogReady, onAct } from "../act.js";
 import { openAction } from "../actiondialog.js";
 import { agoEl, setAgo } from "../ago.js";
 import { doctorRows } from "../doctor.js";
-import { fetchJson, h, slowReport } from "../dom.js";
+import { fetchJson, h, labelCells, slowReport, tableBlock } from "../dom.js";
 import { declare, declareField, drivable, viaForm } from "../drivable.js";
 import { humanDuration } from "../format.js";
 import {
@@ -57,7 +57,6 @@ import {
   pageHeader,
   section,
   segSwitch,
-  sortableTable,
   skeleton,
   swatch,
   toggleGroup,
@@ -477,30 +476,8 @@ export function mount(root, ctx) {
         "aria-label": "Search the containers (press / to jump here)",
       }),
     ),
-    h(
-      "div",
-      {
-        class: "kp-alert kp-alert--destructive",
-        "data-kp-datatable-failed": "",
-        role: "alert",
-        hidden: "",
-      },
-      h(
-        "p",
-        { class: "kp-alert__label kp-stateplate__title" },
-        "The guests could not be read",
-      ),
-      h("p", { "data-kp-datatable-failed-reason": "" }),
-      h(
-        "button",
-        {
-          type: "button",
-          class: "kp-button",
-          "data-kp-datatable-retry": "",
-        },
-        "Try again",
-      ),
-    ),
+    // The failed plate is the package's own: fail(reason) draws the reason
+    // at heading size with its Retry, filling the table's footprint.
     h(
       "div",
       { class: "kp-table-wrap" },
@@ -1164,6 +1141,7 @@ export function mount(root, ctx) {
     attachPatterns(cell);
     return cell;
   };
+  let lastUptime = "";
   const paintLine = () => {
     const f = current().fleet;
     /** @type {[string, Node | string][]} */
@@ -1197,7 +1175,8 @@ export function mount(root, ctx) {
         h("div", { class: "kp-kv__row" }, h("dt", null, k), h("dd", null, v)),
       ),
     );
-    setUptime(lat, {
+    /** @type {import("/static/kp/js/uptime.js").UptimeSpec} */
+    const uptimeSpec = {
       label: "Line to the host",
       periods: pings.map((ms, i) => ({
         key: `p${i}`,
@@ -1212,13 +1191,31 @@ export function mount(root, ctx) {
       from: `${Math.max(pings.length, 1)} pings ago`,
       to: "Now",
       count: PINGS,
-      state: pings.length ? "ready" : pingedOnce ? "empty" : "loading",
+      // Every ping unanswered is a failed read, drawn as the package's
+      // failed plate; a mix of answers and silences is the strip itself.
+      state: pings.length
+        ? pings.every((ms) => ms == null)
+          ? "error"
+          : "ready"
+        : pingedOnce
+          ? "empty"
+          : "loading",
+      error: "The host did not answer over the pinned line.",
       open: "info",
-    });
+    };
+    // The strip is redrawn only when what it shows changed: a store event
+    // that moves nothing here must not repaint it (and with it a state the
+    // package or a reader has put it in).
+    const uptimeKey = JSON.stringify(uptimeSpec);
+    if (uptimeKey !== lastUptime) {
+      lastUptime = uptimeKey;
+      setUptime(lat, uptimeSpec);
+    }
     pingCount.textContent = pings.length
       ? `last ${pings.length} ping${pings.length === 1 ? "" : "s"}`
       : "no ping yet";
   };
+  lat.addEventListener("kp-uptime-retry", () => void ping().catch(() => {}));
   const ping = async () => {
     pingBtn.setAttribute("disabled", "");
     pingOut.textContent = "Pinging…";
@@ -1559,7 +1556,6 @@ export function mount(root, ctx) {
   /** @type {import("../host.js").SettingRow[]} */
   let sRows = [];
   let sAll = false;
-  let sQ = "";
   const sDesc = h(
     "span",
     null,
@@ -1578,44 +1574,36 @@ export function mount(root, ctx) {
     ],
     onChange: (v) => {
       sAll = v === "all";
-      filterSettings();
+      paintSettings();
     },
     drive: { id: SETTINGS_VIEW },
   });
-  const sSearch = h("input", {
-    class: "hk-search",
-    type: "search",
-    placeholder: "Search settings",
-    "aria-label": "Search settings",
-    oninput: (/** @type {Event} */ e) => {
-      sQ = /** @type {HTMLInputElement} */ (e.target).value;
-      filterSettings();
-    },
-  });
-  const sBody = h("tbody", { id: "host-settings" });
-  const sTable = /** @type {HTMLTableElement} */ (
-    h(
-      "table",
-      { class: "hk-tbl" },
-      h(
-        "thead",
-        null,
-        h(
-          "tr",
-          null,
-          h("th", null, "Setting"),
-          h("th", { class: "hk-hide-phone" }, "Group"),
-          h("th", null, "Value"),
-          h("th", { class: "hk-hide-phone" }, "Default"),
-        ),
-      ),
-      sBody,
-    )
-  );
-  const sSort = sortableTable(sTable, {
-    drive: { id: SORT_SETTINGS },
+  // The settings are the dashboard's data table: its own search, its own
+  // sort keys (Live view reaches each header) and the package's loading,
+  // empty and failed states.
+  const sBlock = tableBlock({
     remember: "host-settings",
+    caption: "Host settings as host.toml sets them",
+    captionHidden: true,
+    search: "Search settings",
+    state: "loading",
+    nothing: "host.toml changes nothing: every setting is at its default.",
+    columns: [
+      { label: "Setting", sort: "text" },
+      { label: "Group", sort: "text" },
+      { label: "Value", sort: "text" },
+      { label: "Default", sort: "text" },
+    ],
   });
+  const sBody = sBlock.tbody;
+  sBody.id = "host-settings";
+  [...sBlock.wrap.querySelectorAll("thead th")].forEach((th, i) =>
+    drivable(
+      /** @type {HTMLElement} */ (th),
+      SORT_SETTINGS,
+      ["setting", "group", "value", "default"][i] ?? "setting",
+    ),
+  );
   const settingsCard = section({
     id: "host-settings-card",
     title: "Host settings",
@@ -1638,60 +1626,13 @@ export function mount(root, ctx) {
     settingsCard.el.querySelector(".section-head__desc")
   ).replaceChildren(sDesc);
   settingsCard.body.append(
-    h("div", { class: "hk-filters" }, sView.el, sSearch),
-    sSort.line,
-    h("div", { class: "hk-scroll" }, sTable),
+    h("div", { class: "hk-filters" }, sView.el),
+    sBlock.wrap,
   );
-  sBody.dataset.kpState = "loading";
-  sBody.replaceChildren(
-    ...skeletonRows(3).map((r) => {
-      r.querySelectorAll("td").forEach((td, i) => {
-        if (i > 3) td.remove();
-      });
-      return r;
-    }),
-  );
-  const filterSettings = () => {
-    const vis = settingVisible(sRows, { all: sAll, q: sQ });
-    [...sBody.querySelectorAll("tr[data-key]")].forEach((tr, i) => {
-      /** @type {HTMLElement} */ (tr).hidden = !vis[i];
-    });
-  };
-  const loadSettings = async () => {
-    const r = await fetchJson(
-      "/data/host-settings",
-      "the host settings",
-      abort.signal,
-    );
-    if (!r.ok) {
-      sBody.replaceChildren(
-        h(
-          "tr",
-          null,
-          h(
-            "td",
-            { colspan: 4 },
-            h(
-              "div",
-              { class: "kp-alert kp-alert--destructive error", role: "alert" },
-              h("strong", null, `Could not read ${r.error.what}`),
-              h("p", null, `Why: ${r.error.why}`),
-            ),
-          ),
-        ),
-      );
-      return;
-    }
-    delete sBody.dataset.kpState;
-    const v = hostSettingsView(r.body.page);
-    sRows = v.rows;
-    sDesc.textContent = `host.toml as the host reads it: ${v.changed} of ${v.rows.length} settings changed from their default. Read-only here; Settings changes them.`;
-    // redesign-final (exact counts): the changed settings are the table's
-    // rows marked changed.
-    countOf(sDesc, sBody, ':scope > tr[data-set="1"]');
-    sView.counts({ changed: v.changed, all: v.rows.length });
+  const paintSettings = () => {
+    const shown = sRows.filter((x) => sAll || x.set);
     sBody.replaceChildren(
-      ...sRows.map((x) =>
+      ...shown.map((x) =>
         h(
           "tr",
           {
@@ -1709,27 +1650,34 @@ export function mount(root, ctx) {
               h("small", { class: "mono" }, x.key),
             ),
           ),
-          h("td", { class: "hk-hide-phone hk-muted" }, x.group),
+          h("td", { class: "hk-muted" }, x.group),
           h("td", { class: x.set ? "mono" : "mono hk-muted" }, x.value),
-          h("td", { class: "hk-hide-phone mono hk-muted" }, x.def),
-        ),
-      ),
-      h(
-        "tr",
-        { class: "hk-empty-row", "data-none": "" },
-        h(
-          "td",
-          { colspan: 4 },
-          "host.toml changes nothing: every setting is at its default.",
+          h("td", { class: "mono hk-muted" }, x.def),
         ),
       ),
     );
-    const none = /** @type {HTMLElement} */ (
-      sBody.querySelector("[data-none]")
+    labelCells(sBody, () => ["Setting", "Group", "Value", "Default"]);
+    sBlock.ready();
+  };
+  const loadSettings = async () => {
+    sBlock.loading({ words: "Reading host.toml from the host…" });
+    const r = await fetchJson(
+      "/data/host-settings",
+      "the host settings",
+      abort.signal,
     );
-    none.hidden = v.changed > 0;
-    sSort.apply();
-    filterSettings();
+    if (!r.ok) {
+      sBlock.failed(r.error);
+      return;
+    }
+    const v = hostSettingsView(r.body.page);
+    sRows = v.rows;
+    sDesc.textContent = `host.toml as the host reads it: ${v.changed} of ${v.rows.length} settings changed from their default. Read-only here; Settings changes them.`;
+    paintSettings();
+    // redesign-final (exact counts): the changed settings are the table's
+    // rows marked changed.
+    countOf(sDesc, sBody, ':scope > tr[data-set="1"]');
+    sView.counts({ changed: v.changed, all: v.rows.length });
   };
 
   // ── one refresh control (feat-kp11demo-11) ────────────────────────────
@@ -1809,6 +1757,7 @@ export function mount(root, ctx) {
     ]),
   );
 
+  const settingsTables = attachDataTables(settingsCard.body, {});
   const tableDetach = attachDataTables(guestsCard.body, {
     detail: (row) => {
       const g = guests
@@ -1860,6 +1809,7 @@ export function mount(root, ctx) {
     },
   });
   stops.push(
+    settingsTables,
     tableDetach,
     attachSegmented(root),
     attachBarCells(root),
@@ -1945,7 +1895,13 @@ export function mount(root, ctx) {
   void loadGrowth().catch(() => {});
   // The first read of the figures, the containers and the line goes through
   // the refresh control, so its "updated … ago" is true from the start.
+  // Every data area wears its reading state from the first frame, before any
+  // answer: the package's busy card, never a blank.
+  paintGuests();
   refreshOf(refreshEl)?.now();
+  // The doctor's host checks read as the page opens (about 30 s; the card
+  // carries the busy card meanwhile and keeps the result until you leave).
+  void loadChecks().catch(() => {});
   // redesign-final-h5: `/host?section=doctor` (the old Doctor's address)
   // opens this page on its Host checks card and reads them, instead of
   // mounting the retired Doctor page inside it.
@@ -1953,7 +1909,6 @@ export function mount(root, ctx) {
     requestAnimationFrame(() =>
       checksCard.el.scrollIntoView({ block: "start" }),
     );
-    void loadChecks().catch(() => {});
   }
   return () => {
     abort.abort();

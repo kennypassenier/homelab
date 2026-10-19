@@ -495,3 +495,11 @@ main.shell.hk-page > [hidden] {
   flex-wrap: wrap;
   overflow-wrap: normal;
 }
+
+/* The page header's buttons share the title's centre line. */
+@media (min-width: 48rem) {
+  .hk-page .nx-head .kp-page-header__actions {
+    align-items: center;
+    min-block-size: calc(min(var(--kp-text-display, 2.25rem), 2.25rem) * 1.1);
+  }
+}

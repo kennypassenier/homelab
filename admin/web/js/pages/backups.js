@@ -1112,6 +1112,11 @@ export function mount(root) {
   };
 
   const fleetReady = () => !!current().fleet;
+  // The fleet read itself failed (store.js writes "could not read the fleet"
+  // into the link text and keeps `fleet` null): the page says failed, not
+  // "reading" for ever.
+  const fleetFailed = () =>
+    !current().fleet && /could not read the fleet/.test(current().link ?? "");
   const nn = () => nightsNow(nowS());
 
   /** Decorate what the package drew in the grid so Live view reaches it. @param {HTMLElement} grid */
@@ -1141,8 +1146,11 @@ export function mount(root) {
 
   /** The state of the whole coverage card, from what is known. */
   const coverageState = () => {
-    if (!fleetReady()) return "loading";
+    if (!fleetReady()) return fleetFailed() ? "error" : "loading";
     if (names.length === 0) return "empty";
+    // Nothing has answered yet: the card reads, with its busy card; the grids
+    // fill in as the first stacks answer.
+    if (names.every((n) => reads[n]?.status === "pending")) return "loading";
     const settled = names.every((n) => reads[n]?.status !== "pending");
     if (settled && names.every((n) => reads[n]?.status === "failed"))
       return "error";
@@ -1172,6 +1180,44 @@ export function mount(root) {
     });
     if (state !== "ready") {
       setCalendarState(calendar, state === "loading" ? "loading" : "ready");
+      // Both grids carry the card's state themselves (the package's busy card
+      // while it reads, its plate when empty or failed), never their last
+      // face.
+      const gridState = (
+        /** @type {string[]} */ nights,
+        /** @type {number} */ every,
+      ) => ({
+        ...nightsSpec({
+          names: [],
+          reads: {},
+          now,
+          nights,
+          every,
+          weekend: S.weekend,
+          markOf,
+          fleetReady: false,
+          shown: S.stacks,
+          label: "Backups per stack",
+          state,
+          message:
+            state === "empty"
+              ? "No stack has a backup history yet."
+              : "The backup history could not be read.",
+        }),
+        skeleton: {
+          rows: Math.max(names.length, 3),
+          columns: nights.length,
+        },
+      });
+      const range = RANGES[S.range];
+      setHeat(
+        nightsHeat,
+        gridState(nightRange(now.current, range.n, S.offset), range.every),
+      );
+      setHeat(
+        monthHeat,
+        gridState(monthNights(S.cursor.year, S.cursor.month), 5),
+      );
       return;
     }
     const range = RANGES[S.range];
@@ -1369,6 +1415,17 @@ export function mount(root) {
             ? "The first nightly round fills this view."
             : "None of the stacks answered. Nothing was changed.",
       });
+      // The week stands in the same card: it carries the card's state too, so
+      // it never shows its stale or blank face while the card reads or fails.
+      setWeekState(
+        weekEl,
+        state,
+        state === "loading"
+          ? "Reading the stacks…"
+          : state === "empty"
+            ? "No stack has a backup history yet"
+            : "The stacks could not be read",
+      );
       nightSummaryEl.textContent = "…";
       return;
     }
@@ -1415,6 +1472,7 @@ export function mount(root) {
       setWeekState(weekEl, "loading", "Reading the stack…");
     else if (r.status === "failed")
       setWeekState(weekEl, "error", `${stack} could not be read: ${r.reason}`);
+    else setWeekState(weekEl, "ready");
   };
 
   // ── repositories ──────────────────────────────────────────────────────
@@ -1537,7 +1595,10 @@ export function mount(root) {
     const settled =
       names.length > 0 && names.every((n) => reads[n]?.status !== "pending");
     const anyOk = names.some((n) => reads[n]?.status === "ok");
-    if (!fleetReady() || (!anyOk && !settled)) {
+    if (fleetFailed()) {
+      dt.busy(null);
+      dt.fail("The fleet could not be read. Nothing was changed.");
+    } else if (!fleetReady() || (!anyOk && !settled)) {
       dt.busy({ text: "Reading the repositories…", overlay: true });
       dt.state("loading");
     } else if (settled && !anyOk && names.length) {
@@ -1921,13 +1982,20 @@ export function mount(root) {
   /** @type {ReturnType<typeof retiredKit> | null} */
   let retiredKitInstance = null;
   const paintRetired = () => {
+    // The kit (its key figure, share bar and table) is drawn when the fold
+    // is first opened, so a folded section holds no table that is laid out
+    // out of sight; until then the badge counts from the read itself.
+    const folded =
+      !retiredKitInstance && !(/** @type {HTMLDetailsElement} */ (ret.el).open);
     // redesign-final (exact counts): "N entries" is the retired table's rows.
-    countOf(retiredCount, ret.body, "tbody > tr:not([data-kp-skeleton-row])");
+    if (!folded)
+      countOf(retiredCount, ret.body, "tbody > tr:not([data-kp-skeleton-row])");
     retiredCount.textContent = retired
       ? `${retired.length} ${retired.length === 1 ? "entry" : "entries"}`
       : retiredError
         ? "not read"
         : "reading…";
+    if (folded) return;
     // feat-kp11demo-12.6: the retired kit (retired.js) draws the key figure,
     // the share bar, the age control, the table and Wipe, and its own
     // loading, empty and failed states.
@@ -2107,11 +2175,18 @@ export function mount(root) {
       .sort()
       .join(",");
   let lastNames = namesKey();
+  let lastFailed = fleetFailed();
   const off = subscribe(() => {
     const k = namesKey();
     if (k !== lastNames) {
       lastNames = k;
       void loadAll(false);
+    }
+    // The fleet read itself failed (or came back): every area says so now.
+    const failed = fleetFailed();
+    if (failed !== lastFailed) {
+      lastFailed = failed;
+      paintAll();
     }
   });
   cleanups.push(off);

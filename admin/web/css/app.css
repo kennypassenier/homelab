@@ -1288,21 +1288,12 @@ td.stack-flags {
 .kp-datatable__bar.kp-datatable__sort-line {
   padding-block: 0 0.125rem;
 }
-/* kp's failed slot and empty box inside the table's frame; the failed
-   slot's reason is three lines (what, why, what to do: tablestate.js
+/* The failed plate and the empty plate of a table are the package's own
+   (css/components.css: they fill the table's footprint, words centred); the
+   failed reason is up to three lines (what, why, what to do: tablestate.js
    failReason). */
-.kp-datatable > [data-kp-datatable-failed] {
-  margin: var(--kp-space-sm, 0.5rem) var(--kp-space-md, 0.75rem);
-}
 [data-kp-datatable-failed-reason] {
-  margin: 0;
   white-space: pre-line;
-}
-.kp-datatable > .kp-empty {
-  margin: var(--kp-space-sm, 0.5rem) var(--kp-space-md, 0.75rem);
-}
-.kp-datatable > .kp-empty p {
-  margin: 0 0 6px;
 }
 /* The busy overlay is kp-themes' own (`data-kp-busy-overlay`, dom.js
    tableBlock; in a narrow table its panel lies flat since 9.2.0).
@@ -1991,32 +1982,6 @@ td.stack-flags {
   );
 }
 
-/* fix-230 (Kenny, 2026-10-02): kp's failed slot — "Could not read the
-   capacity map…" with its Try again — is a flex row, and at 390 px the
-   reason's long words pushed the button past the box's right edge. One
-   grid instead: the reason takes the room (and may break anywhere), Try
-   again sits beside it on a wide screen and under it on a phone, inside
-   the box in every width. The standard error box (`dom.js` errorBox) gets
-   the same one-column grid. */
-.kp-datatable > [data-kp-datatable-failed]:not([hidden]) {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  align-items: start;
-  column-gap: var(--kp-space-md, 0.75rem);
-  row-gap: var(--kp-space-sm, 0.5rem);
-}
-.kp-datatable > [data-kp-datatable-failed] [data-kp-datatable-failed-reason] {
-  min-width: 0;
-  overflow-wrap: anywhere;
-}
-@media (max-width: 40rem) {
-  .kp-datatable > [data-kp-datatable-failed]:not([hidden]) {
-    grid-template-columns: minmax(0, 1fr);
-  }
-  .kp-datatable > [data-kp-datatable-failed] [data-kp-datatable-retry] {
-    justify-self: start;
-  }
-}
 .kp-alert.error {
   display: grid;
   grid-template-columns: minmax(0, 1fr);

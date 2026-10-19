@@ -84,30 +84,8 @@ export function reposShell(id, filterId) {
         autocomplete: "off",
       }),
     ),
-    h(
-      "div",
-      {
-        class: "kp-alert kp-alert--destructive",
-        "data-kp-datatable-failed": "",
-        role: "alert",
-        hidden: "",
-      },
-      h(
-        "p",
-        { class: "kp-alert__label kp-stateplate__title" },
-        "The repositories could not be read",
-      ),
-      h("p", { "data-kp-datatable-failed-reason": "" }),
-      h(
-        "button",
-        {
-          type: "button",
-          class: "kp-button",
-          "data-kp-datatable-retry": "",
-        },
-        "Try again",
-      ),
-    ),
+    // The failed plate is the package's own: fail(reason) draws the reason
+    // at heading size with its Retry, filling the table's footprint.
     h(
       "div",
       { class: "kp-table-wrap" },

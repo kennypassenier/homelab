@@ -289,7 +289,9 @@
 }
 .hl-opt {
   display: grid;
-  grid-template-columns: auto auto minmax(0, 1fr) auto;
+  /* the count column is one fixed width, so every count ends and starts on
+     the same edges */
+  grid-template-columns: auto auto minmax(0, 1fr) 5ch;
   gap: 8px;
   align-items: center;
   padding: 5px 8px;
@@ -301,6 +303,7 @@
   background: color-mix(in oklab, var(--muted) 60%, transparent);
 }
 .hl-opt small {
+  text-align: end;
   color: var(--muted-foreground);
   font-variant-numeric: tabular-nums;
 }
@@ -757,4 +760,10 @@
 }
 .con-pane .kp-console__output {
   white-space: pre-wrap;
+}
+
+/* A grid that loads is covered by the package's busy card over the whole
+   footprint (kp-gaps/homelab.md 80). */
+.hl-grid > .kp-heat__busy {
+  min-block-size: calc(100% - var(--kp-busy-overlay-top, 0px));
 }

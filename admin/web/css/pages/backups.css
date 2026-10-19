@@ -318,3 +318,33 @@
 .bk-table button[data-kp-action="restore"] {
   min-inline-size: 4.75rem;
 }
+
+/* The foot line's words keep a margin from the card's edge (the repositories'
+   read state and key hints). */
+.bk-page .nx-card__foot {
+  padding-inline: var(--kp-space-md, 0.75rem);
+  padding-block: var(--kp-space-sm, 0.5rem);
+}
+
+/* The page header's buttons share the title's centre line (the title is one
+   line of 2.25 rem x 1.1; a 36 px button would sit 1.8 px high). */
+@media (min-width: 48rem) {
+  .bk-page .nx-head .kp-page-header__actions {
+    align-items: center;
+    min-block-size: calc(min(var(--kp-text-display, 2.25rem), 2.25rem) * 1.1);
+  }
+}
+
+/* A reading beside a control is set in the label's own size, so its baseline
+   is the label's. */
+.bk-page .kp-formgrid__value .measured {
+  font-size: inherit;
+  line-height: inherit;
+}
+
+/* A grid that loads is covered by the package's busy card over the whole
+   footprint (the card is otherwise only as tall as the skeleton's rows;
+   kp-gaps/homelab.md 80). */
+.bk-card .kp-heat > .kp-heat__busy {
+  min-block-size: calc(100% - var(--kp-busy-overlay-top, 0px));
+}

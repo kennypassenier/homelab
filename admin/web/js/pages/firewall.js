@@ -596,26 +596,7 @@ export function mount(root) {
         "aria-label": "Search the stacks",
       }),
     ),
-    h(
-      "div",
-      {
-        class: "kp-alert kp-alert--destructive",
-        "data-kp-datatable-failed": "",
-        role: "alert",
-        hidden: "",
-      },
-      h(
-        "p",
-        { class: "kp-alert__label kp-stateplate__title" },
-        "The firewalls could not be read",
-      ),
-      h("p", { "data-kp-datatable-failed-reason": "" }),
-      h(
-        "button",
-        { type: "button", class: "kp-button", "data-kp-datatable-retry": "" },
-        "Try again",
-      ),
-    ),
+    // The failed plate is the package's own: fail(reason) draws it with its Retry.
     h(
       "div",
       { class: "kp-table-wrap" },
@@ -1685,30 +1666,7 @@ export function mount(root) {
             RULE_SEARCH,
           ),
         ),
-        h(
-          "div",
-          {
-            class: "kp-alert kp-alert--destructive",
-            "data-kp-datatable-failed": "",
-            role: "alert",
-            hidden: "",
-          },
-          h(
-            "p",
-            { class: "kp-alert__label kp-stateplate__title" },
-            "The rules could not be read",
-          ),
-          h("p", { "data-kp-datatable-failed-reason": "" }),
-          h(
-            "button",
-            {
-              type: "button",
-              class: "kp-button",
-              "data-kp-datatable-retry": "",
-            },
-            "Try again",
-          ),
-        ),
+        // The failed plate is the package's own: fail(reason) draws it with its Retry.
         h(
           "div",
           { class: "kp-table-wrap" },

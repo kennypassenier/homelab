@@ -35,7 +35,7 @@
   display: none;
 }
 
-/* ── segmented switches: the header's Window, History's Show ─────────
+/* ── segmented switch: the header's Window ───────────────────────────
    ui.js's segSwitch draws `.nx-seg` (hostkit's `.hk-seg` until the 3.71.0
    merge); this page gives it its own look, scoped, over app.css's. */
 :is(.ac-page, .con-page) .nx-seg {
@@ -94,9 +94,6 @@
   border-block-start: 1px solid var(--ac-line);
   font-size: var(--kp-text-xs);
   color: var(--muted-foreground);
-}
-.ac-hint {
-  text-align: end;
 }
 .ac-muted {
   color: var(--muted-foreground);
@@ -228,64 +225,57 @@
   visibility: hidden;
 }
 
-/* ── Timeline ────────────────────────────────────────────────────────── */
-.ac-tl {
+/* ── Timeline, grid and History: the kp parts, laid out on shared tracks ─ */
+/* The filter bar keeps one line of room whether or not a tag is on. */
+.ac-bar {
+  min-block-size: 3.25rem;
+}
+.ac-bar .kp-toolbar__state {
+  min-inline-size: 0;
+  white-space: normal;
+}
+/* A data area covered by the theme's empty or failed plate: the plate
+   fills the area's whole footprint, so no state moves what is around it. */
+.ac-cover {
+  position: relative;
+  min-inline-size: 0;
+}
+.ac-plate {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  display: grid;
+  background: var(--card);
+}
+.ac-plate > * {
+  min-block-size: 100%;
+}
+/* The figures under a timeline: labels in one column as wide as the longest. */
+.ac-facts {
+  max-inline-size: 40rem;
   margin: 0;
-  overflow: hidden;
-  cursor: crosshair;
-  touch-action: pan-y;
-  min-block-size: 94px;
 }
-.ac-tl svg {
-  inline-size: 100%;
-  block-size: auto;
+/* The grid keeps the height of every stack plus the fleet row, loading,
+   empty and failed too. */
+.ac-heat {
+  min-block-size: calc(var(--ac-heat-rows, 21) * 1.95rem + 1.5rem);
 }
-.ac-tl .lane {
-  fill: var(--ac-soft);
-  opacity: 1;
+.ac-legend {
+  margin: var(--kp-space-sm, 8px) 0 0;
 }
-.ac-tl .tick {
-  stroke: var(--ac-line);
-}
-.ac-tl__today {
-  fill: color-mix(in oklab, var(--chart-1, var(--primary)) 8%, transparent);
-}
-.ac-tl__brush {
-  fill: color-mix(in oklab, var(--chart-1, var(--primary)) 14%, transparent);
-  stroke: var(--chart-1, var(--primary));
-  stroke-dasharray: 3 3;
-}
-.ac-tl .timeline-legend,
-.ac-foot .timeline-legend {
-  gap: 6px 16px;
-  font-size: var(--kp-text-xs);
+/* Six stack lanes, two of them with a second row for a running or waiting
+   job, all in view without a scroll. */
+.ac-jobs-gantt {
+  --kp-gantt-height: 26rem;
 }
 
 /* ── History ─────────────────────────────────────────────────────────── */
-.ac-count {
-  font-variant-numeric: tabular-nums;
+/* The scroll box keeps one height, so loading, empty and failed stand in
+   the same footprint. */
+.ac-history .kp-table-wrap {
+  min-block-size: 30rem;
+  max-block-size: 30rem;
 }
-.ac-range {
-  display: inline-flex;
-  gap: 4px;
-  align-items: center;
-  white-space: nowrap;
-}
-.ac-range[hidden] {
-  display: none;
-}
-.ac-feed {
-  margin: var(--kp-space-md, 12px) calc(-1 * var(--nx-pad))
-    calc(-1 * var(--nx-pad));
-  min-inline-size: 0;
-}
-.ac-feed > .nx-skeleton,
-.ac-feed > .nx-empty,
-.ac-feed > .kp-alert {
-  margin: var(--nx-pad);
-}
-/* History's pager (DESIGN_LANGUAGE §12): the count left, the next page
-   right, at the foot of the card. */
 .ac-stale {
   margin: 0 0 var(--kp-space-sm, 8px);
   padding: 6px 10px;
@@ -293,109 +283,6 @@
   font-size: var(--kp-text-sm);
   color: var(--warning-foreground);
   background: color-mix(in oklab, var(--warning) 18%, transparent);
-}
-.ac-more {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: 12px;
-  align-items: center;
-  padding: 12px var(--nx-pad);
-  font-size: var(--kp-text-sm);
-  color: var(--muted-foreground);
-}
-.ac-dayhead {
-  position: sticky;
-  top: var(--nx-sticky-top, 52px);
-  z-index: 2;
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: 12px;
-  padding: 10px var(--nx-pad);
-  background: var(--card);
-  border-block: 1px solid var(--ac-line);
-  font-size: var(--kp-text-sm);
-}
-.ac-dayhead b {
-  font-weight: 600;
-}
-.ac-dayhead > span {
-  color: var(--muted-foreground);
-}
-.ac-bad {
-  color: var(--destructive);
-  font-weight: 600;
-}
-.ac-row {
-  display: grid;
-  grid-template-columns: 56px 112px minmax(0, 1fr) 10rem 88px 24px;
-  gap: 12px;
-  align-items: center;
-  padding: 9px var(--nx-pad);
-  border-block-end: 1px solid var(--ac-line);
-  font-size: var(--kp-text-sm);
-  cursor: pointer;
-}
-.ac-row:hover {
-  background: color-mix(in oklab, var(--muted) 45%, transparent);
-}
-.ac-row:focus-visible {
-  outline: 2px solid var(--ring);
-  outline-offset: -2px;
-}
-.ac-row[data-tone="bad"] {
-  box-shadow: inset 3px 0 0 var(--destructive);
-}
-.ac-row[data-tone="bad"] .ac-st {
-  color: var(--destructive);
-  font-weight: 600;
-}
-.ac-row--phase .ac-w {
-  color: var(--muted-foreground);
-}
-.ac-t,
-.ac-took {
-  font-variant-numeric: tabular-nums;
-  color: var(--muted-foreground);
-}
-.ac-took {
-  text-align: end;
-}
-.ac-st {
-  display: inline-flex;
-  gap: 6px;
-  align-items: center;
-}
-.ac-dot {
-  inline-size: 8px;
-  block-size: 8px;
-  border-radius: 50%;
-  flex: none;
-  background: var(--muted-foreground);
-}
-.ac-dot--ok {
-  background: var(--success-foreground);
-}
-.ac-dot--bad {
-  background: var(--destructive);
-}
-.ac-dot--warn {
-  background: var(--warning-foreground);
-}
-.ac-dot--info {
-  background: var(--chart-1, var(--primary));
-}
-.ac-w {
-  min-inline-size: 0;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.ac-w a {
-  font-weight: 500;
-}
-.ac-by {
-  justify-self: start;
-  min-inline-size: 0;
 }
 .ac-by-chip {
   display: inline-block;
@@ -417,96 +304,20 @@
   );
   color: var(--foreground);
 }
-.ac-chev {
-  color: var(--muted-foreground);
-  transition: transform 150ms var(--ac-ease);
-}
-.ac-row[aria-expanded="true"] .ac-chev {
-  transform: rotate(90deg);
-}
-@media (prefers-reduced-motion: reduce) {
-  .ac-chev {
-    transition: none;
-  }
-}
+/* The detail of an opened row: facts on one track, the steps on the next,
+   the error and the actions across both; one column on a phone. */
 .ac-detail {
   display: grid;
-  gap: 12px;
-  padding: 8px var(--nx-pad) 16px calc(var(--nx-pad) + 68px);
-  border-block-end: 1px solid var(--ac-line);
-  background: color-mix(in oklab, var(--muted) 30%, transparent);
+  grid-template-columns: minmax(0, 22rem) minmax(0, 1fr);
+  gap: var(--kp-space-md, 1rem) var(--kp-space-xl, 2rem);
+  padding: var(--kp-space-sm, 0.5rem) 0;
 }
-.ac-gantt {
-  display: grid;
-  gap: 4px;
-  font-size: var(--kp-text-xs);
+.ac-detail > .ac-detail__wide {
+  grid-column: 1 / -1;
 }
-.ac-gantt > div {
-  display: grid;
-  grid-template-columns: minmax(0, 180px) minmax(0, 1fr) 64px;
-  gap: 10px;
-  align-items: center;
-}
-.ac-gantt > div > span:first-child {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.ac-gantt i {
-  display: block;
-  block-size: 8px;
-  border-radius: 4px;
-  background: var(--chart-1, var(--primary));
-}
-.ac-gantt i.bad {
-  background: var(--destructive);
-}
-.ac-gantt em {
-  font-style: normal;
-  text-align: end;
-  color: var(--muted-foreground);
-  font-variant-numeric: tabular-nums;
-}
-.ac-err {
-  padding: 8px 10px;
-  border-radius: calc(var(--radius, 0.5rem) * 0.6);
-  border: 1px solid color-mix(in oklab, var(--destructive) 40%, var(--border));
-  background: color-mix(in oklab, var(--destructive) 6%, var(--card));
-  font-size: 0.8125rem;
-  overflow-wrap: anywhere;
-}
-@media (max-width: 47.5rem) {
-  .ac-row {
-    grid-template-columns: 48px minmax(0, 1fr) auto;
-    grid-template-areas:
-      "t w took"
-      "t st by";
-    row-gap: 2px;
-  }
-  .ac-t {
-    grid-area: t;
-  }
-  .ac-w {
-    grid-area: w;
-  }
-  .ac-st {
-    grid-area: st;
-  }
-  .ac-by {
-    grid-area: by;
-    justify-self: end;
-  }
-  .ac-took {
-    grid-area: took;
-  }
-  .ac-chev {
-    display: none;
-  }
+@media (max-width: 48rem) {
   .ac-detail {
-    padding-inline-start: var(--nx-pad);
-  }
-  .ac-gantt > div {
-    grid-template-columns: minmax(0, 110px) minmax(0, 1fr) 52px;
+    grid-template-columns: minmax(0, 1fr);
   }
 }
 @media (max-width: 40rem) {
@@ -518,9 +329,6 @@
   }
   .ac-foot {
     grid-template-columns: minmax(0, 1fr);
-  }
-  .ac-hint {
-    text-align: start;
   }
   .ac-page .nx-seg {
     grid-auto-columns: minmax(0, 1fr);

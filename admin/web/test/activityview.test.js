@@ -11,13 +11,17 @@ import {
   feedRows,
   filterFromParams,
   filterToParams,
+  heatModel,
+  inRange,
   incidentFor,
   kpis,
   openFailures,
+  outcomeWord,
   ownerOf,
-  rowMatches,
-  showCounts,
+  showFilters,
   stackOf,
+  stackWord,
+  timelineModel,
   stepSegments,
   verbOf,
   windowDays,
@@ -85,7 +89,7 @@ test("redesign-activity: an operation reads as a verb and a stack", () => {
   assert.equal(r.took, 100);
 });
 
-test("redesign-activity: Failed, Nightly and By Claude filter with a plain click, several at once", () => {
+test("kp11-activity: an old ?show= reaches the table as its own filters, the timeline's range narrows rows", () => {
   const rows = feedRows(
     [
       op({ start: NOW - 10, end: NOW - 5, ok: false, error: "boom" }),
@@ -102,24 +106,24 @@ test("redesign-activity: Failed, Nightly and By Claude filter with a plain click
     ],
     { stacks: STACKS },
   );
-  const shown = (/** @type {string[]} */ show, q = "") =>
-    rows
-      .filter((r) => rowMatches(r, { show: new Set(show), q, range: null }))
-      .map((r) => r.start);
-  assert.equal(shown([]).length, 4, "nothing on shows everything");
-  assert.deepEqual(shown(["failed"]), [NOW - 10]);
-  assert.deepEqual(shown(["claude"]), [NOW - 20]);
-  assert.deepEqual(shown(["failed", "nightly"]), [NOW - 10, NOW - 30]);
-  assert.deepEqual(shown([], "boom"), [NOW - 10]);
-  assert.deepEqual(shown([], "notes back"), [NOW - 30], "words in any order");
-  const ranged = rows.filter((r) =>
-    rowMatches(r, {
-      show: new Set(),
-      q: "",
-      range: { from: NOW - 25, to: NOW },
-    }),
+  assert.deepEqual(showFilters(rows, new Set()), { outcome: [], by: [] });
+  assert.deepEqual(showFilters(rows, new Set(["failed"])).outcome, ["Failed"]);
+  assert.deepEqual(showFilters(rows, new Set(["claude"])).by, [
+    "Claude (Live view)",
+  ]);
+  assert.deepEqual(showFilters(rows, new Set(["nightly"])).by, [
+    "nightly round",
+  ]);
+  assert.deepEqual(
+    rows.map((r) => outcomeWord(r)),
+    ["Failed", "Done", "Done", "Done"],
   );
-  assert.equal(ranged.length, 2);
+  assert.equal(rows.filter((r) => inRange(r, null)).length, 4);
+  assert.equal(
+    rows.filter((r) => inRange(r, { from: NOW - 25, to: NOW })).length,
+    2,
+  );
+  assert.equal(stackWord(rows[0]), rows[0].stack ?? "host");
 });
 
 test("redesign-activity: the filter lives in the address", () => {
@@ -301,23 +305,83 @@ test("redesign-activity: a token reads as its owner", () => {
   });
 });
 
-// Senior review finding 7: the Show switch is All / Failed / Nightly /
-// By Claude, All and Failed with their exact counts, as the demo.
-test("redesign-activity: the Show switch counts All and Failed exactly", () => {
+test("kp11-activity: the timeline draws the nightly round once, a schedule's day as one bar, a failure as a mark", () => {
+  const today = dayStart(NOW);
   const rows = feedRows(
     [
-      op({ start: NOW - 10, end: NOW - 5, ok: false, error: "boom" }),
-      op({ start: NOW - 20, end: NOW - 15, by: "Claude (Live view)" }),
-      op({ start: NOW - 30, end: NOW - 25, ok: false, error: "late" }),
-      op({ start: NOW - 40, end: NOW - 35 }),
+      {
+        kind: "phase",
+        start: today + 100,
+        end: today + 600,
+        name: "backup",
+        count: 2,
+      },
+      op({
+        start: today + 120,
+        end: today + 200,
+        req: null,
+        by: null,
+        label: "scheduled-backup",
+        subject: "backup-notes",
+        ok: false,
+        error: "boom",
+      }),
+      op({
+        start: today + 300,
+        end: today + 320,
+        req: null,
+        by: "schedule tuesday",
+        label: "scheduled-update",
+        subject: "update-notes",
+      }),
+      op({ start: today + 400, end: today + 410 }),
     ],
     { stacks: STACKS },
   );
-  const f = { show: new Set(["claude"]), q: "", range: null };
-  assert.deepEqual(showCounts(rows, f), { all: 4, failed: 2 });
+  const m = timelineModel(rows, { from: today - 86400, now: today + 1000 });
   assert.deepEqual(
-    showCounts(rows, { ...f, q: "boom" }),
-    { all: 1, failed: 1 },
-    "the search and the days still narrow the counts",
+    m.runs.map((r) => [r.lane, r.series, r.state]).sort(),
+    [
+      ["nightly", 1, "ok"],
+      ["nightly", 2, "ok"],
+      ["ops", 3, "ok"],
+    ],
+    "the round's own ops are inside its bar",
   );
+  assert.equal(m.points.length, 1);
+  assert.equal(m.points[0].lane, "nightly");
+  assert.equal(m.rounds.size, 1);
+});
+
+test("kp11-activity: the stack-by-day grid counts per stack and day, and the fleet's failed share", () => {
+  const today = dayStart(NOW);
+  const rows = feedRows(
+    [
+      op({ start: today + 60, end: today + 90, subject: "update-notes" }),
+      op({
+        start: today + 30,
+        end: today + 50,
+        ok: false,
+        subject: "update-notes",
+      }),
+      op({
+        start: today - 86400 + 60,
+        end: today - 86400 + 90,
+        subject: "update-gateway",
+      }),
+    ],
+    { stacks: STACKS },
+  );
+  const m = heatModel(rows, { stacks: STACKS, days: 3, now: NOW });
+  assert.equal(m.columns.length, 3);
+  const last = m.columns[2].key;
+  assert.deepEqual(
+    m.cell("notes", last) && [
+      m.cell("notes", last)?.n,
+      m.cell("notes", last)?.f,
+    ],
+    [2, 1],
+  );
+  assert.equal(m.cell("kp-soft", last), null, "not touched");
+  assert.deepEqual(m.fleet(last), { ran: 1, bad: 1 });
 });

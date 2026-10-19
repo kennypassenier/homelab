@@ -1946,101 +1946,11 @@ test("invariants: a running job's log scrolls inside its dialog and never makes 
   }
 });
 
-// fix-251 (design review, 2026-10-03): a mark drawn on a chart or the
-// timeline is coloured with a foreground-strength token, never with a
-// kp-themes background token (`--success`, `--warning`, `--info` are the
-// pale/dark plates text sits on): in dark, "succeeded" was hsl(155 40% 16%)
-// on a near-black page, all but invisible. Every timeline mark and legend
-// swatch must stand out from the page by WCAG's 3:1 for graphics.
-test("invariants: every timeline mark and legend swatch contrasts at least 3:1 with the page, in light and dark", async () => {
-  const browser = await launch();
-  try {
-    const context = await browser.newContext({
-      viewport: { width: 1600, height: 1000 },
-    });
-    const page = await freshPage(context);
-    const bad = [];
-    for (const theme of ["dark", "formal"]) {
-      await page.evaluate((t) => localStorage.setItem("theme", t), theme);
-      await page.goto(`${BASE}/timeline`);
-      await page.waitForSelector(".timeline-legend .swatch", {
-        timeout: 8000,
-      });
-      await page
-        .waitForSelector(".timeline svg", { timeout: 8000 })
-        .catch(() => {});
-      await page.waitForTimeout(300);
-      const found = await page.evaluate(() => {
-        /** @param {string} c */
-        const rgb = (c) => {
-          const probe = document.createElement("canvas").getContext("2d");
-          if (!probe) return [0, 0, 0];
-          probe.fillStyle = "#000";
-          probe.fillStyle = c;
-          probe.fillRect(0, 0, 1, 1);
-          const d = probe.getImageData(0, 0, 1, 1).data;
-          return [d[0], d[1], d[2]];
-        };
-        /** @param {number[]} c */
-        const lum = (c) => {
-          const [r, g, b] = c.map((v) => {
-            const s = v / 255;
-            return s <= 0.03928 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4;
-          });
-          return 0.2126 * r + 0.7152 * g + 0.0722 * b;
-        };
-        let bgEl = /** @type {Element | null} */ (
-          document.querySelector(".timeline")
-        );
-        let bg = "rgb(255, 255, 255)";
-        while (bgEl) {
-          const c = getComputedStyle(bgEl).backgroundColor;
-          if (c && c !== "transparent" && !/^rgba\(.*,\s*0\)$/.test(c)) {
-            bg = c;
-            break;
-          }
-          bgEl = bgEl.parentElement;
-        }
-        const lb = lum(rgb(bg));
-        const ratio = (/** @type {string} */ c) => {
-          const l = lum(rgb(c));
-          return (Math.max(l, lb) + 0.05) / (Math.min(l, lb) + 0.05);
-        };
-        const out = [];
-        for (const sw of document.querySelectorAll(
-          ".timeline-legend .swatch",
-        )) {
-          const c = getComputedStyle(sw).backgroundColor;
-          const r = ratio(c);
-          if (r < 3)
-            out.push(
-              `swatch ${sw.className} ${c} is ${r.toFixed(2)}:1 on ${bg}`,
-            );
-        }
-        for (const m of document.querySelectorAll(
-          ".timeline .mark rect, .timeline .mark path",
-        )) {
-          const c = getComputedStyle(m).fill;
-          const r = ratio(c);
-          if (r < 3)
-            out.push(
-              `mark ${m.parentElement?.getAttribute("data-kind")} ${c} is ${r.toFixed(2)}:1 on ${bg}`,
-            );
-        }
-        return out;
-      });
-      for (const f of found) bad.push(`${theme}: ${f}`);
-    }
-    assert.deepEqual(bad, [], `marks too faint:\n${bad.join("\n")}`);
-  } finally {
-    await browser.close();
-  }
-});
-
 // fix-252 (design review, 2026-10-03): the charts' axis labels were drawn
 // in a fixed 560-wide viewBox that a phone scales down to ~5 px text; every
-// chart and timeline label must render at 11 px or more at 390 px.
-test("invariants: every chart and timeline axis label renders at 11 px or more on a 390 px phone", async () => {
+// chart label must render at 11 px or more at 390 px (the Activity timeline
+// is kp's gantt now, HTML text, not scaled SVG).
+test("invariants: every chart axis label renders at 11 px or more on a 390 px phone", async () => {
   const browser = await launch();
   try {
     const context = await browser.newContext({
@@ -2049,10 +1959,10 @@ test("invariants: every chart and timeline axis label renders at 11 px or more o
     const page = await freshPage(context);
     const bad = [];
     let seen = 0;
-    for (const path of ["charts", "charts?tab=traffic", "timeline"]) {
+    for (const path of ["charts", "charts?tab=traffic"]) {
       await page.goto(`${BASE}/${path}`);
       await page
-        .waitForSelector(".kp-chart__plot svg text, .timeline svg text", {
+        .waitForSelector(".kp-chart__plot svg text", {
           timeout: 8000,
         })
         .catch(() => {});
@@ -2060,9 +1970,7 @@ test("invariants: every chart and timeline axis label renders at 11 px or more o
       const found = await page.evaluate(() => {
         const out = [];
         let n = 0;
-        for (const t of document.querySelectorAll(
-          ".kp-chart__plot svg text, .timeline svg text",
-        )) {
+        for (const t of document.querySelectorAll(".kp-chart__plot svg text")) {
           const svg = /** @type {SVGSVGElement | null} */ (t.closest("svg"));
           if (!svg) continue;
           const vb = svg.viewBox.baseVal;
@@ -2079,7 +1987,7 @@ test("invariants: every chart and timeline axis label renders at 11 px or more o
       if (found.out.length)
         bad.push(`/${path}: ${found.out.slice(0, 4).join(", ")}`);
     }
-    assert.ok(seen > 0, "no chart or timeline label found to measure");
+    assert.ok(seen > 0, "no chart label found to measure");
     assert.deepEqual(bad, [], `labels too small at 390 px:\n${bad.join("\n")}`);
   } finally {
     await browser.close();
@@ -5583,7 +5491,7 @@ test("invariants: Activity is one page with Now and history, Planned and Host lo
       for (const [from, view, mark] of [
         ["/activity", "Now and history", "#history .ac-row"],
         ["/jobs", "Now and history", "#running"],
-        ["/timeline", "Now and history", "#timeline .timeline svg"],
+        ["/timeline", "Now and history", "#timeline .kp-gantt"],
         ["/log", "Host log", ".hl-side .hl-opt"],
         // The kit (redesign-kit-1) drew the header with ui.js pageHeader;
         // .sch-ph is gone. Hosted, it is a section (redesign-final-h5).
@@ -5593,7 +5501,7 @@ test("invariants: Activity is one page with Now and history, Planned and Host lo
         const found = await page
           .locator(mark)
           .first()
-          .waitFor({ timeout: 10000 })
+          .waitFor({ state: "attached", timeout: 10000 })
           .then(() => true)
           .catch(() => false);
         const r = await page.evaluate(() => ({
@@ -5619,7 +5527,7 @@ test("invariants: Activity is one page with Now and history, Planned and Host lo
       await page
         .locator("#history .ac-row")
         .first()
-        .waitFor({ timeout: 10000 });
+        .waitFor({ state: "attached", timeout: 10000 });
       const k = await page.evaluate(() => ({
         tiles: [...document.querySelectorAll(".kp-kpi .kp-kpi__label")].map(
           (e) => (e.textContent ?? "").trim(),
@@ -5647,57 +5555,51 @@ test("invariants: Activity is one page with Now and history, Planned and Host lo
   }
 });
 
-// redesign-activity: History's Show filter is the demo's one-of switch
-// (All, Failed, Nightly, By Claude) with a plain click, kept in the
-// address (senior review, finding 7); a failed row
-// opens in place with its error and its fixes.
-test("invariants: Activity's History filters with a plain click, keeps it in the address, and a failed row opens with its fixes", async () => {
+// kp11 (the approved Activity demo): History is kp's data table. An old
+// address's ?show=failed becomes the table's own Outcome filter (and leaves
+// the address), the table sorts and filters as tags, and a failed row opens
+// in place with its steps, its error and its fixes.
+test("invariants: Activity's History takes an old ?show= as a table filter, and a failed row opens with its steps, its error and its fixes", async () => {
   const browser = await launch();
   try {
     const context = await browser.newContext({
       viewport: { width: 1894, height: 1000 },
     });
     const page = await freshPage(context);
-    await page.goto(`${BASE}/activity`);
-    await page.locator("#history .ac-row").first().waitFor({ timeout: 10000 });
-    const count = () =>
-      page.locator("#history .ac-count").textContent({ timeout: 2000 });
-    const all = await count();
-    const pick = (/** @type {string} */ v) =>
-      page
-        .locator(`#history [data-drive="activity-show"][data-drive-row="${v}"]`)
-        .click();
-    await pick("claude");
-    const claude = await page.evaluate(() =>
-      [...document.querySelectorAll("#history .ac-row .ac-by-chip")].map((c) =>
-        (c.textContent ?? "").trim(),
-      ),
+    await page.goto(`${BASE}/activity?show=failed`);
+    await page
+      .locator("#history .ac-row")
+      .first()
+      .waitFor({ state: "attached", timeout: 10000 });
+    await page.waitForTimeout(500);
+    assert.doesNotMatch(page.url(), /[?&]show=/);
+    assert.match(page.url(), /history\.f\d+=Failed/);
+    // The table hides the rows its filter drops; they stay in the markup.
+    const tones = await page.evaluate(() =>
+      [...document.querySelectorAll("#history .ac-row")]
+        .filter((r) => /** @type {HTMLElement} */ (r).offsetParent)
+        .map((r) => /** @type {HTMLElement} */ (r).dataset.tone),
     );
-    assert.ok(claude.length > 0, "By Claude shows no row");
+    assert.ok(tones.length > 0, "Failed shows no row");
     assert.ok(
-      claude.every((c) => /Claude/.test(c)),
-      `By Claude shows ${[...new Set(claude)]}`,
+      tones.every((t) => t === "bad"),
+      "Failed shows a row that did not fail",
     );
-    assert.match(page.url(), /show=claude/);
-    await pick("failed");
-    assert.match(page.url(), /show=failed(&|$)/);
-    const onlyFailed = await page.evaluate(() =>
-      [...document.querySelectorAll("#history .ac-row")].every(
-        (r) => /** @type {HTMLElement} */ (r).dataset.tone === "bad",
-      ),
-    );
-    assert.ok(onlyFailed, "Failed shows a row that did not fail");
-    // All shows everything again.
-    await pick("all");
-    assert.equal(await count(), all);
+    // A day older than three is folded: unfold the failed row's day first.
     const failed = page.locator('#history .ac-row[data-tone="bad"]').first();
-    await failed.click();
+    const group = await failed.getAttribute("data-kp-group-of");
+    if (!(await failed.isVisible()))
+      await page
+        .locator(
+          `#history tr[data-kp-row-group="${group}"] .kp-datatable__group-toggle`,
+        )
+        .click();
+    await failed.locator(".kp-datatable__expand").click();
     const detail = page.locator("#history .ac-detail").first();
     await detail.waitFor({ timeout: 3000 });
-    assert.equal(await failed.getAttribute("aria-expanded"), "true");
     const d = await detail.evaluate((el) => ({
-      err: (el.querySelector(".ac-err")?.textContent ?? "").trim(),
-      steps: el.querySelectorAll(".ac-gantt > div").length,
+      err: (el.querySelector(".kp-code")?.textContent ?? "").trim(),
+      steps: el.querySelectorAll(".kp-steplist > li").length,
       buttons: [...el.querySelectorAll("button, a.kp-button")].map((b) =>
         (b.textContent ?? "").trim(),
       ),
@@ -5708,6 +5610,11 @@ test("invariants: Activity's History filters with a plain click, keeps it in the
       d.buttons.includes("Open the incident") &&
         d.buttons.includes("Charts at this time"),
       `the failed row offers ${d.buttons}`,
+    );
+    // The table's own tools: + Add filter and the search box.
+    assert.equal(
+      await page.locator('#history [data-drive="activity-add-filter"]').count(),
+      1,
     );
   } finally {
     await browser.close();
@@ -6225,11 +6132,10 @@ test("invariants: review-activity: Console's header and shell bar are the demo's
   }
 });
 
-// Findings 7, 8, 9, 10, 13: History's Show switch (All and Failed with
-// exact counts), owners instead of tokens, the Host log's Pause and
-// Download together and its key hints once, its description true on a
-// phone, and a cancelled touch leaves no brush on the timeline.
-test("invariants: review-activity: History's Show switch counts, By names owners, the Host log groups its buttons, the brush never sticks", async () => {
+// Findings 8, 9, 10: owners instead of tokens in History's By column, the
+// Host log's Pause and Download together and its key hints once, its
+// description true on a phone.
+test("invariants: review-activity: History's By names owners, the Host log groups its buttons", async () => {
   const browser = await launch();
   try {
     const context = await browser.newContext({
@@ -6237,61 +6143,22 @@ test("invariants: review-activity: History's Show switch counts, By names owners
     });
     const page = await freshPage(context);
     await page.goto(`${BASE}/activity`);
-    await page.locator("#history .ac-row").first().waitFor({ timeout: 10000 });
-    const sw = await page.evaluate(() =>
-      [
-        ...document.querySelectorAll('#history [data-drive="activity-show"]'),
-      ].map((b) => (b.textContent ?? "").trim()),
-    );
-    const total = Number(
-      /of (\d+)/.exec(
-        (await page.locator("#history .ac-count").textContent()) ?? "",
-      )?.[1] ?? -1,
-    );
-    assert.equal(sw.length, 4, `the Show switch has ${sw}`);
-    assert.match(sw[0], /^All\s*(\d+)$/);
-    assert.equal(Number(/(\d+)$/.exec(sw[0])?.[1]), total, "All's count");
-    assert.match(sw[1], /^Failed\s*\d+$/);
-    assert.deepEqual(sw.slice(2), ["Nightly", "By Claude"]);
     await page
-      .locator('#history [data-drive="activity-show"][data-drive-row="failed"]')
-      .click();
-    assert.match(page.url(), /show=failed/);
-    const tones = await page.evaluate(() =>
-      [...document.querySelectorAll("#history .ac-row")].map(
-        (r) => /** @type {HTMLElement} */ (r).dataset.tone,
-      ),
-    );
-    assert.ok(
-      tones.every((t) => t === "bad"),
-      "Failed shows a row that did not fail",
-    );
-    await page.locator("body").press("f");
-    assert.doesNotMatch(page.url(), /show=/);
+      .locator("#history .ac-row")
+      .first()
+      .waitFor({ state: "attached", timeout: 10000 });
     const by = await page.evaluate(() =>
       [...document.querySelectorAll("#history .ac-by-chip")].map((c) =>
         (c.textContent ?? "").trim(),
       ),
     );
+    assert.ok(by.length > 0, "History names nobody");
     const raw = by.filter((b) => /^[a-z0-9][a-z0-9._-]*$/.test(b));
     assert.deepEqual([...new Set(raw)], [], "By shows a raw token");
-    // The timeline: a touch scroll ends in pointercancel; no brush stays.
-    const tl = page.locator("#timeline .timeline");
-    const b = await tl.boundingBox();
-    assert.ok(b, "no timeline");
-    await page.mouse.move(b.x + 100, b.y + 40);
-    await page.mouse.down();
-    await page.mouse.move(b.x + 260, b.y + 40, { steps: 4 });
-    await tl.evaluate((el) =>
-      el.dispatchEvent(
-        new PointerEvent("pointercancel", { pointerId: 1, bubbles: true }),
-      ),
-    );
-    await page.mouse.move(b.x + 300, b.y + 40);
-    await page.waitForTimeout(100);
-    const brushes = await page.locator("#timeline .ac-tl__brush").count();
-    await page.mouse.up();
-    assert.equal(brushes, 0, "the brush stayed after pointercancel");
+    await page.locator("body").press("f");
+    assert.match(page.url(), /history\.f\d+=Failed/, "F filters to Failed");
+    await page.locator("body").press("f");
+    assert.doesNotMatch(page.url(), /history\.f\d+=/, "F again lifts it");
     // The Host log: Pause and Download in the card's head, hints once.
     await page.goto(`${BASE}/activity?view=host-log`);
     await page
@@ -6328,16 +6195,16 @@ test("invariants: review-activity: a failed History reread keeps the rows and th
       viewport: { width: 1894, height: 1000 },
     });
     const page = await freshPage(context);
-    await page.clock.install();
+    await page.clock.install({ time: clockNow() });
     let reads = 0;
     await page.route("**/data/history*", (route) =>
       ++reads > 1 ? route.abort() : route.continue(),
     );
     await page.goto(`${BASE}/activity`);
-    const row = page.locator("#history .ac-row").nth(2);
+    const row = page.locator("#history .ac-row:visible").nth(1);
     await row.waitFor({ timeout: 10000 });
     const key = await row.getAttribute("data-key");
-    await row.focus();
+    await row.locator(".kp-datatable__expand").focus();
     const before = await page.locator("#history .ac-row").count();
     await page.clock.fastForward(61_000);
     await page
@@ -6347,13 +6214,16 @@ test("invariants: review-activity: a failed History reread keeps the rows and th
       .catch(() => {});
     const r = await page.evaluate(() => ({
       rows: document.querySelectorAll("#history .ac-row").length,
-      alert: !!document.querySelector("#history .kp-alert--destructive"),
+      alert: [
+        ...document.querySelectorAll("#history .kp-alert--destructive"),
+      ].some((a) => /** @type {HTMLElement} */ (a).offsetParent),
       stale: (
         document.querySelector("#history .ac-stale")?.textContent ?? ""
       ).trim(),
       focus:
-        /** @type {HTMLElement} */ (document.activeElement)?.dataset?.key ??
-        null,
+        /** @type {HTMLElement} */ (
+          document.activeElement?.closest("tr[data-key]")
+        )?.dataset?.key ?? null,
     }));
     assert.ok(reads > 1, "the minute's reread never ran");
     assert.equal(r.alert, false, "the rows were replaced by the error");
@@ -6901,7 +6771,7 @@ test("invariants: review metrics — a pointer resting on a chart keeps that cha
   try {
     const context = await browser.newContext();
     const page = await freshPage(context);
-    await page.clock.install();
+    await page.clock.install({ time: clockNow() });
     await page.setViewportSize({ width: 1894, height: 1000 });
     await page.goto(`${BASE}/charts`);
     await page.waitForSelector("#chart-cpu .kp-chart__plot");
@@ -9325,12 +9195,12 @@ test("invariants: redesign-final-c2: the running pill's drawer is named after it
       const pr = panel.getBoundingClientRect();
       return {
         title: d.querySelector("h2")?.textContent ?? "",
-        steps: d.querySelectorAll(".nx-check li").length,
-        out: [...d.querySelectorAll(".job-facts dd")]
+        steps: d.querySelectorAll(".kp-steplist > li").length,
+        out: [...d.querySelectorAll(".job-figures dd")]
           .filter((dd) => dd.getBoundingClientRect().right > pr.right + 1)
           .map((dd) => dd.textContent),
         lefts: new Set(
-          [...d.querySelectorAll(".job-facts dt")].map((dt) =>
+          [...d.querySelectorAll(".job-figures dt")].map((dt) =>
             Math.round(dt.getBoundingClientRect().left),
           ),
         ).size,
@@ -9707,7 +9577,7 @@ test("invariants: redesign-final-h3: Restore… opens the Restore flow page, Bac
       "Restore stays held after the name",
     );
     await go.click();
-    await page.locator("#restore-run .nx-check li").first().waitFor({
+    await page.locator("#restore-run .kp-steplist > li").first().waitFor({
       timeout: 10000,
     });
     assert.ok(

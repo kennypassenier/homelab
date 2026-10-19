@@ -5,10 +5,12 @@
 //
 //   /activity                 Now and history: the KPI strip, the open
 //                             incidents, Running now (each job live, its log
-//                             scrolling inside its own box), the 14-day
-//                             timeline and the History feed grouped by day,
-//                             who started each operation on every row; every
-//                             job of the dashboard folded at the end
+//                             scrolling inside its own box), the timeline
+//                             (kp gantt), the stack-by-day grid (kp heat)
+//                             and the History (kp data table, grouped by
+//                             day, who started each operation on every row);
+//                             every job of the dashboard, with its own
+//                             timeline, folded at the end
 //   /activity?view=planned    the Schedules page, hosted as a view
 //   /activity?view=host-log   the host-log explorer (log.js)
 //
@@ -27,28 +29,39 @@ import {
 } from "../act.js";
 import { openAction, reopenBatch } from "../actiondialog.js";
 import { notify } from "../actui.js";
-import { fetchReport, h, progressBar } from "../dom.js";
+import {
+  fetchReport,
+  h,
+  progressBar,
+  tableBlock,
+  bindTableUrl,
+} from "../dom.js";
 import { declare, drivable, viaForm } from "../drivable.js";
 import {
-  SHOW,
+  TIMELINE_LANES,
   WINDOWS,
-  byDay,
   clock,
-  dayLabel,
   dayStart,
   dayWord,
-  feedRows,
   filterFromParams,
   filterToParams,
+  feedRows,
+  heatModel,
   incidentFor,
+  inRange,
   kpis,
   openFailures,
-  rowMatches,
-  showCounts,
+  showFilters,
   stepSegments,
+  timelineModel,
   windowDays,
 } from "../activityview.js";
 import { formatDay, humanDuration } from "../format.js";
+import {
+  HISTORY_COLUMNS,
+  historyBody,
+  historyDetail,
+} from "../historytable.js";
 import { openIncident } from "../incident.js";
 import {
   elapsedS,
@@ -60,9 +73,10 @@ import {
   stepText,
 } from "../jobs.js";
 import { levelShown } from "../logs.js";
+import { narrowBar } from "../narrowbar.js";
+import { cover } from "../statecover.js";
 import { current, subscribe } from "../store.js";
 import {
-  countOf,
   attentionBand,
   emptyState,
   ensureStyle,
@@ -71,9 +85,7 @@ import {
   pageHeader,
   section,
   segSwitch,
-  skeletonBlock,
   skeletonLines,
-  toolbar,
 } from "../ui.js";
 import { logLineEl, mountLogTools, openJobDialog } from "../jobpanel.js";
 import { setParams } from "../urlstate.js";
@@ -81,12 +93,27 @@ import { tabRow } from "../dom.js";
 import { mountJobsTable } from "./jobs.js";
 import { mountHostLog } from "./log.js";
 import { mount as mountSchedules } from "./schedules.js";
+import { attachDataTables, dataTable } from "/static/kp/js/datatable.js";
+import {
+  attachGantts,
+  setGanttKinds,
+  setGanttLegend,
+  setGanttPoints,
+  setGanttRuns,
+  setGanttSelection,
+  setGanttState,
+} from "/static/kp/js/gantt.js";
+import {
+  attachHeats,
+  setHeat,
+  setHeatPick,
+  setHeatRows,
+} from "/static/kp/js/heat.js";
+import { attachSteplists } from "/static/kp/js/steplist.js";
+import { attachTicks, tickTo } from "/static/kp/js/tick.js";
+import { attachToolbars } from "/static/kp/js/toolbar.js";
 import { attachLogs } from "/static/kp/js/log.js";
 import { leave } from "/static/kp/js/motion.js";
-
-const SVG = "http://www.w3.org/2000/svg";
-/** History rows drawn per page (the demo drew about forty). */
-const PAGE = 50;
 
 // Live view (invariant 39): every control on this page that opens a dialog
 // or runs something. "Run it again" reaches its dialog as a catalog form.
@@ -143,13 +170,6 @@ const WINDOW = declare({
   opens: "view",
   row: "1|7|14|30",
   what: "show the last 1, 7, 14 or 30 days",
-});
-const SHOW_CHIP = declare({
-  id: "activity-show",
-  page: "activity",
-  opens: "view",
-  row: "all|failed|nightly|claude",
-  what: "show All of History, or only Failed, Nightly or By Claude",
 });
 const ROW = declare({
   id: "activity-row",
@@ -232,7 +252,54 @@ const MARK = declare({
   page: "activity",
   opens: "view",
   row: "<row key>",
-  what: "open a timeline mark's operation in History",
+  what: "open a timeline bar's operation in History",
+  // A failed operation is a bar and a mark: both open the same row.
+  twins: true,
+});
+const ADD_FILTER = declare({
+  id: "activity-add-filter",
+  page: "activity",
+  opens: "view",
+  what: "add a History filter: stack, operation, by or outcome",
+  was: ["activity-show", "activity-show-more"],
+});
+const DAY = declare({
+  id: "activity-day",
+  page: "activity",
+  opens: "view",
+  row: "<day>",
+  what: "fold or unfold one day of History",
+});
+const TAG_REMOVE = declare({
+  id: "activity-filter-remove",
+  page: "activity",
+  opens: "view",
+  row: "<range|day|stack:name>",
+  what: "drop one pick made on the timeline or the grid",
+  shows: "while a range, a day or a stack narrows History",
+  was: ["activity-show-every-day"],
+});
+const TAGS_CLEAR = declare({
+  id: "activity-filters-clear",
+  page: "activity",
+  opens: "view",
+  what: "drop every pick made on the timeline and the grid",
+  shows: "while a range, a day or a stack narrows History",
+});
+const HEAT_DAY = declare({
+  id: "activity-heat-day",
+  page: "activity",
+  opens: "view",
+  row: "<day>",
+  what: "pick a day in the stack-by-day grid: History narrows to it",
+  twins: true,
+});
+const HEAT_STACK = declare({
+  id: "activity-heat-stack",
+  page: "activity",
+  opens: "view",
+  row: "<stack>",
+  what: "pick a stack in the stack-by-day grid: History narrows to it",
 });
 const SEARCH = declare({
   id: "activity-search",
@@ -240,25 +307,12 @@ const SEARCH = declare({
   opens: "view",
   what: "History's search box",
 });
-const EVERY_DAY = declare({
-  id: "activity-show-every-day",
-  page: "activity",
-  opens: "view",
-  what: "drop the days picked on the timeline",
-  shows: "while days picked on the timeline narrow History",
-});
 const CLEAR = declare({
   id: "activity-clear-filters",
   page: "activity",
   opens: "view",
-  what: "clear every History filter",
-  shows: "when the filters match no row",
-});
-const MORE = declare({
-  id: "activity-show-more",
-  page: "activity",
-  opens: "view",
-  what: "draw the next 50 older History rows",
+  what: "clear the History's search and filters",
+  shows: "when the search and filters match no row",
 });
 const RETRY = declare({
   id: "activity-retry",
@@ -536,11 +590,11 @@ function mountNow(body, x) {
    * (senior review, finding 4). @type {string | null} */
   let stale = null;
   let readAt = 0;
-  /** @type {Set<string>} */
-  const open = new Set();
-  /** How many History rows are drawn; "Show more" adds a page. */
-  let limit = PAGE;
+  /** The host's own words for a failed first read (kp's failed slot). @type {import("../doctor.js").RouteError | null} */
+  let historyFail = null;
   let firstPaint = true;
+  /** Whether the address's old `?show=` / `?q=` reached the table yet. */
+  let urlApplied = false;
   const now = () => Date.now() / 1000;
   const t0 = () => dayStart(now()) - (days - 1) * 86400;
   const stackNames = () => (current().fleet?.stacks ?? []).map((s) => s.name);
@@ -624,91 +678,112 @@ function mountNow(body, x) {
     ),
   );
 
-  // ── Timeline ──────────────────────────────────────────────────────────
-  const tlBox = h("div", {
-    class: "timeline ac-tl",
-    tabindex: "-1",
+  // ── Timeline (kp gantt) ────────────────────────────────────────────────
+  // The days the gantt offers: 24 h, 7 d, 14 d, 30 d up to the window.
+  const rangeWords = [
+    "24h",
+    ...[7, 14, 30].filter((d) => d <= days).map((d) => `${d}d`),
+  ];
+  const narrow = narrowBar({
+    label: "Filters set from the timeline and the grid",
+    markRemove: (b, id) => void drivable(b, TAG_REMOVE, id),
+    markClear: (b) => void drivable(b, TAGS_CLEAR),
   });
-  tlBox.append(skeletonBlock("94px", "Reading the history"));
+  const tlEl = h("section", {
+    class: "kp-gantt",
+    "data-kp-gantt": "",
+    "data-kp-gantt-days": "",
+    "data-kp-gantt-ranges": rangeWords.join(" "),
+    "data-kp-gantt-range": rangeWords[rangeWords.length - 1],
+    "data-kp-gantt-ghosts": "2 3",
+    id: "timeline-chart",
+    "aria-label": `Operations of the last ${days === 1 ? "day" : `${days} days`}`,
+  });
+  const tlCover = h("div", { class: "ac-cover" }, tlEl);
+  const tlOps = h("b", { "data-kp-tick": "" }, "0");
+  const tlFailed = h("b", { "data-kp-tick": "" }, "0");
+  const fact = (/** @type {string} */ k, /** @type {Node} */ v) =>
+    h("div", { class: "kp-kv__row" }, h("dt", null, k), h("dd", null, v));
   const timeline = section({
-    title: "Timeline",
-    desc: "Each operation placed in time, so a gap in the nightly backups or a cluster of failures stands out.",
+    title: `The timeline: what ran in the last ${days === 1 ? "day" : `${days} days`}`,
+    desc: "Draws every operation as a bar on a time axis, so you see when things ran, how long they took and which failed; drag across it to pick a range that narrows the History, press a bar to open that operation.",
     id: "timeline",
   });
   timeline.body.append(
-    tlBox,
+    narrow.el,
+    tlCover,
     h(
-      "div",
-      { class: "ac-foot" },
-      h(
-        "ul",
-        { class: "timeline-legend" },
-        ...[
-          ["ok", "succeeded"],
-          ["bad", "failed"],
-          ["warn", "running"],
-          ["info", "nightly round"],
-        ].map(([t, l]) =>
-          h("li", null, h("span", { class: `swatch ${t}` }), l),
+      "dl",
+      { class: "kp-kv ac-facts", "aria-label": "What the timeline holds" },
+      fact("Operations in view", tlOps),
+      fact("Failed in view", tlFailed),
+    ),
+  );
+
+  // ── Stacks by day (kp heat) ───────────────────────────────────────────
+  const heatEl = h("div", {
+    class: "kp-heat",
+    "data-kp-heat": "",
+    "data-kp-heat-toggle": "",
+    id: "heat-grid",
+    "aria-label": "Operations per stack per day",
+  });
+  const heatCover = h("div", { class: "ac-cover ac-heat" }, heatEl);
+  const heatCard = section({
+    title: "Which stack is flaky: stacks by day",
+    desc: "Shows every stack against every day, coloured by whether it ran cleanly, so a stack that keeps failing stands out at a glance; press a day or a stack name to narrow the History below.",
+    id: "heat",
+  });
+  heatCard.body.append(
+    heatCover,
+    h(
+      "ul",
+      { class: "kp-heat__legend ac-legend" },
+      ...[
+        ["ok", "everything ran fine"],
+        ["bad", "something failed"],
+        ["none", "not touched that day"],
+      ].map(([tone, words]) =>
+        h(
+          "li",
+          null,
+          h("span", { class: "kp-heat__swatch", "data-kp-tone": tone }),
+          ` ${words}`,
         ),
-      ),
-      h(
-        "span",
-        { class: "ac-hint" },
-        "Click a mark to open it below · drag across days to show only those · click a day to jump to it",
       ),
     ),
   );
 
-  // ── History ───────────────────────────────────────────────────────────
-  const count = h("span", { class: "ac-count", role: "status" });
-  const rangeChip = h("span", { class: "ac-range", hidden: "" });
-  // The demo's one-of Show switch (senior review, finding 7): All and
-  // Failed with their exact counts, Nightly, By Claude.
-  const chips = segSwitch({
-    label: "Show",
-    items: [
-      { value: "all", label: "All", hint: "Every operation" },
-      ...SHOW.map((x) => ({ value: x.value, label: x.label, hint: x.hint })),
-    ],
-    value: [...filter.show][0] ?? "all",
-    onChange: (v) => {
-      filter = { ...filter, show: new Set(v === "all" ? [] : [v]) };
-      changed();
-    },
-    mark: (b, v) => void drivable(b, SHOW_CHIP, v),
+  // ── History (kp data table) ───────────────────────────────────────────
+  const stale$ = h("p", { class: "ac-stale", role: "status", hidden: "" });
+  const t = tableBlock({
+    remember: "activity-history",
+    caption:
+      "Operations on the stacks, newest first, a heading per day. Each row opens to its steps.",
+    captionHidden: true,
+    search: "Search the history",
+    state: "loading",
+    pageSize: 25,
+    pageSizes: "10,25,50",
+    nothing: `Nothing ran in the last ${days === 1 ? "day" : `${days} days`}. Every operation the host runs, asked for or on its own, is listed here as soon as it starts, with who started it.`,
+    columns: HISTORY_COLUMNS.map((c) => ({ ...c })),
   });
-  /** Pick one of the switch's values as a click would. @param {string} v */
-  const pickShow = (v) =>
-    /** @type {HTMLElement | null} */ (
-      chips.el.querySelector(`button[data-v="${v}"]`)
-    )?.click();
-  const tb = toolbar({
-    search: {
-      placeholder: "Search: stack, action, error",
-      label: "Search history",
-      value: filter.q,
-      onInput: (q) => {
-        filter = { ...filter, q };
-        changed();
-      },
-    },
-    groups: [chips.el],
-    state: [count, rangeChip],
-  });
-  if (tb.search) drivable(tb.search, SEARCH);
-  const feed = h("div", { class: "ac-feed", id: "history-feed" });
+  t.tbody.id = "history-table";
+  t.wrap.setAttribute("data-kp-expandable", "");
+  t.wrap.setAttribute("data-kp-expand-single", "");
+  t.wrap.setAttribute("data-kp-filter-mode", "add");
+  t.wrap.classList.add("ac-history");
   const historyCard = section({
-    title: "History",
-    desc: "Every operation, newest first, grouped by day; open a row for its steps, its error and what to do.",
+    title: "History: every operation, grouped by day",
+    desc: "Lists every operation in the order it happened, a heading per day, so you can find one by stack, kind or outcome and open it to see its steps.",
     id: "history",
   });
-  historyCard.body.append(tb.el, feed);
+  historyCard.body.append(stale$, t.wrap);
 
   // ── every job (folded) ────────────────────────────────────────────────
   const jobsCard = section({
     title: "Every job",
-    desc: "The last 200 jobs this dashboard sent to the host, whatever came of them; click one to follow it.",
+    desc: "Draws every job on a lane of its stack, with the time it waited in the queue before it started, and lists the last 200 jobs this dashboard sent to the host; press a bar or a row to follow one.",
     id: "jobs",
     collapsible: true,
     open: false,
@@ -727,6 +802,7 @@ function mountNow(body, x) {
     band.el,
     running.el,
     timeline.el,
+    heatCard.el,
     historyCard.el,
     jobsCard.el,
     keyRow([
@@ -1171,267 +1247,401 @@ function mountNow(body, x) {
     cancelAll.hidden = queued === 0 || cancelGone;
   };
 
-  // ── timeline ──────────────────────────────────────────────────────────
-  /** @type {{a: number, b: number, target: Element} | null} */
-  let drag = null;
-  /** @type {(px: number) => number} */
-  let inv = () => 0;
-  /**
-   * A timeline mark Live view can click: an SVG element has no `click()`,
-   * so the mark gets one that does what a person's click does.
-   * @param {Element} g
-   * @param {string} key
-   */
-  const clickable = (g, key) => {
-    /** @type {any} */ (g).click = () => openRow(key);
-    return g;
-  };
-  const paintTimeline = () => {
-    if (!historyRead) return;
-    const W = Math.max(240, Math.round(tlBox.clientWidth || 1200));
-    const L = W < 600 ? 72 : 104;
-    const lanes = /** @type {const} */ ([
-      ["Operations", 30],
-      ["Nightly", 22],
-      ["Failures", 22],
-    ]);
-    const H = 4 + lanes.reduce((a, l) => a + l[1] + 6, 0) + 22;
-    const T0 = t0();
-    const T1 = now() + 3600;
-    const xOf = (/** @type {number} */ t) =>
-      L + ((t - T0) / (T1 - T0)) * (W - L - 8);
-    inv = (px) => T0 + ((px - L) / (W - L - 8)) * (T1 - T0);
-    const svg = svgEl("svg", {
-      viewBox: `0 0 ${W} ${H}`,
-      width: W,
-      height: H,
-      role: "img",
-      "aria-label": `Timeline of the last ${days} days`,
-    });
-    const today = dayStart(now());
-    svg.append(
-      svgEl("rect", {
-        class: "ac-tl__today",
-        x: xOf(today),
-        y: 0,
-        width: Math.max(0, W - 8 - xOf(today)),
-        height: H - 22,
-      }),
+  // ── kp parts the page carries ─────────────────────────────────────────
+  const detachKp = [
+    attachToolbars(timeline.body),
+    attachTicks(timeline.body),
+    attachGantts(timeline.body, {
+      // Every bar opens its operation: one control, a row per operation.
+      decorate: (part, info) => {
+        if (info.kind === "bar" && info.id) drivable(part, MARK, info.id);
+      },
+    }),
+    attachHeats(heatCard.body),
+    attachDataTables(historyCard.body, {
+      expandSingle: true,
+      filterMode: "add",
+      decorate: (part, info) => {
+        if (info.kind === "row-toggle" && info.value)
+          drivable(part, ROW, info.value);
+        else if (info.kind === "row-group-toggle")
+          drivable(part, DAY, info.value ?? "");
+      },
+    }),
+  ];
+  setGanttState(tlEl, "loading");
+  // The narrowing the timeline, the grid and the table share ──────────
+  /** The day picked in the grid: a dayStart, as text. @type {string | null} */
+  let pickDay = null;
+  /** The stacks picked in the grid. @type {Set<string>} */
+  const pickStacks = new Set();
+  const count = (
+    /** @type {number} */ n,
+    /** @type {string} */ one,
+    /** @type {string} */ many,
+  ) => `${n} ${n === 1 ? one : many}`;
+  const narrowed = () =>
+    filter.range != null || pickDay != null || pickStacks.size > 0;
+  /** The rows the picks leave, before the table's own search and filters. */
+  const visibleRows = () =>
+    rows.filter(
+      (r) =>
+        inRange(r, filter.range) &&
+        (pickDay == null || String(dayStart(r.start)) === pickDay) &&
+        (!pickStacks.size || (r.stack != null && pickStacks.has(r.stack))),
     );
-    /** @type {Record<string, [number, number]>} */
-    const ly = {};
-    let y = 4;
-    for (const [name, hh] of lanes) {
-      svg.append(
-        svgEl("rect", {
-          class: "lane",
-          x: L,
-          y,
-          width: W - L - 8,
-          height: hh,
-          rx: 4,
-        }),
-        svgEl("text", { class: "lane-label", x: 0, y: y + hh / 2 + 4 }, name),
-      );
-      ly[name] = [y, hh];
-      y += hh + 6;
-    }
-    for (let d = 0; d <= days; d++) {
-      const t = T0 + d * 86400;
-      const xx = xOf(t);
-      svg.append(
-        svgEl("line", { class: "tick", x1: xx, x2: xx, y1: 0, y2: H - 22 }),
-      );
-      const every = W > 900 ? 1 : W > 600 ? 2 : days > 7 ? 4 : 2;
-      if (
-        d < days &&
-        (d % every === 0 || d === days - 1) &&
-        !(d !== days - 1 && days - 1 - d < every)
-      )
-        svg.append(
-          svgEl(
-            "text",
-            { class: "tick-label", x: xx + 4, y: H - 6 },
-            d === days - 1 ? "today" : formatDay(t),
-          ),
-        );
-    }
-    const FILL = {
-      ok: "var(--success-foreground)",
-      warn: "var(--warning-foreground)",
-      bad: "var(--destructive)",
-      info: "var(--chart-1, var(--primary))",
-    };
-    for (const r of [...rows].reverse()) {
-      if (r.start < T0) continue;
-      const [yy, hh] = r.entry.kind === "phase" ? ly.Nightly : ly.Operations;
-      const end = r.took == null ? now() : r.start + r.took;
-      const w = Math.max(3, xOf(end) - xOf(r.start));
-      const tone = r.entry.kind === "phase" ? "info" : r.tone;
-      const g = svgEl("g", {
-        class: "mark",
-        tabindex: 0,
-        role: "button",
-        "data-kind": tone,
-        "data-key": r.key,
-        "aria-label": `${r.what}, ${dayLabel(dayStart(r.start), now())} ${clock(r.start)}, ${r.state}. Enter opens it below.`,
-      });
-      g.append(
-        svgEl("title", {}, `${r.what} · ${clock(r.start)} · ${r.state}`),
-        svgEl("rect", {
-          x: xOf(r.start),
-          y: yy + 4,
-          width: w,
-          height: hh - 8,
-          rx: 2,
-          style: `fill: ${FILL[tone]}`,
-        }),
-      );
-      drivable(
-        /** @type {HTMLElement} */ (/** @type {unknown} */ (g)),
-        MARK,
-        r.key,
-      );
-      svg.append(clickable(g, r.key));
-      if (r.state === "failed") {
-        const [fy, fh] = ly.Failures;
-        const fx = xOf(r.start);
-        const fg = svgEl("g", {
-          class: "mark",
-          tabindex: 0,
-          role: "button",
-          "data-kind": "bad",
-          "data-key": r.key,
-          "aria-label": `${r.what} failed. Enter opens it below.`,
-        });
-        fg.append(
-          svgEl("path", {
-            d: `M${fx},${fy + 3} l6,${fh / 2 - 3} l-6,${fh / 2 - 3} l-6,-${fh / 2 - 3}z`,
-            style: `fill: ${FILL.bad}`,
-          }),
-        );
-        drivable(
-          /** @type {HTMLElement} */ (/** @type {unknown} */ (fg)),
-          MARK,
-          r.key,
-        );
-        svg.append(clickable(fg, r.key));
-      }
-    }
-    const [ry, rh] = ly.Operations;
-    for (const j of runningJobs())
-      if (j.started_at != null)
-        svg.append(
-          svgEl("rect", {
-            class: "ac-tl__run",
-            x: xOf(j.started_at),
-            y: ry + 4,
-            width: 6,
-            height: rh - 8,
-            rx: 2,
-            style: `fill: ${FILL.warn}`,
-          }),
-        );
-    const brush = (/** @type {number} */ a, /** @type {number} */ b) =>
-      svgEl("rect", {
-        class: "ac-tl__brush",
-        x: Math.min(a, b),
-        y: 0,
-        width: Math.max(2, Math.abs(b - a)),
-        height: H - 22,
-      });
-    if (filter.range)
-      svg.append(brush(xOf(filter.range.from), xOf(filter.range.to)));
-    if (drag) svg.append(brush(drag.a, drag.b));
-    tlBox.replaceChildren(svg);
+  const syncNarrow = () => {
+    const tags = [
+      ...(filter.range
+        ? [
+            {
+              id: "range",
+              label: `From the timeline: ${stamp(filter.range.from)} to ${stamp(filter.range.to)}`,
+            },
+          ]
+        : []),
+      ...(pickDay != null
+        ? [{ id: "day", label: `Day: ${formatDay(Number(pickDay))}` }]
+        : []),
+      ...[...pickStacks].map((s) => ({
+        id: `stack:${s}`,
+        label: `Stack: ${s}`,
+      })),
+    ];
+    narrow.set(tags);
+    // While the history is read the components show their own loading.
+    narrow.state.textContent = !historyRead
+      ? ""
+      : narrowed()
+        ? `${count(visibleRows().length, "operation", "operations")} of ${rows.length} are listed in the History`
+        : `${count(rows.length, "operation", "operations")} in the last ${days === 1 ? "day" : `${days} days`}. Drag across the timeline, or press a day or a stack, to narrow the History.`;
   };
-  const px = (/** @type {PointerEvent} */ e) =>
-    e.clientX - tlBox.getBoundingClientRect().left;
-  tlBox.addEventListener("pointerdown", (e) => {
-    if (!historyRead || e.button !== 0) return;
-    drag = { a: px(e), b: px(e), target: /** @type {Element} */ (e.target) };
-    tlBox.setPointerCapture(e.pointerId);
-  });
-  tlBox.addEventListener("pointermove", (e) => {
-    if (!drag) return;
-    drag.b = px(e);
-    paintTimeline();
-  });
-  // A touch scroll that starts on the timeline ends in pointercancel, not
-  // pointerup: drop the drag, or the brush stays stuck (finding 13).
-  tlBox.addEventListener("pointercancel", () => {
-    if (!drag) return;
-    drag = null;
-    paintTimeline();
-  });
-  tlBox.addEventListener("pointerup", () => {
-    const d = drag;
-    drag = null;
-    if (!d) return;
-    if (Math.abs(d.b - d.a) > 6) {
-      filter = {
-        ...filter,
-        range: { from: inv(Math.min(d.a, d.b)), to: inv(Math.max(d.a, d.b)) },
-      };
-      changed();
+  /** @param {number} unix */
+  const stamp = (unix) => `${formatDay(unix)} ${clock(unix)}`;
+
+  // ── timeline ──────────────────────────────────────────────────────────
+  /** The rounds the timeline draws as one bar: its id → the rows. @type {Map<string, import("../activityview.js").FeedRow[]>} */
+  let tlRounds = new Map();
+  const retryRead = () => void loadHistory();
+  const paintTimeline = () => {
+    cover(tlCover, null);
+    if (!historyRead) {
+      setGanttState(tlEl, "loading");
       return;
     }
-    const mk = d.target.closest?.(".mark");
-    const key = mk?.getAttribute("data-key");
-    if (key) openRow(key);
-    else {
-      // fix-ux-1: a click on a day opens only that day's group, not every
-      // day between it and today: History narrows to the day (the same
-      // range a drag across it makes; Show every day lifts it).
-      const day = dayStart(inv(d.a));
-      filter = {
-        ...filter,
-        range: { from: day, to: dayStart(day + 36 * 3600) - 1 },
-      };
-      limit = PAGE;
-      changed();
+    if (historyError) {
+      setGanttRuns(tlEl, [], TIMELINE_LANES);
+      setGanttPoints(tlEl, [], TIMELINE_LANES);
+      setGanttState(tlEl, "error", "The history could not be read");
+      cover(tlCover, "error", {
+        title: "The history could not be read",
+        text: historyError,
+        retry: retryRead,
+      });
+      return;
+    }
+    const m = timelineModel(rows, { from: t0(), now: now() });
+    tlRounds = m.rounds;
+    if (!m.runs.length && !m.points.length) {
+      setGanttRuns(tlEl, [], TIMELINE_LANES);
+      setGanttPoints(tlEl, [], TIMELINE_LANES);
+      setGanttState(tlEl, "empty", "Nothing ran in this window");
+      cover(tlCover, "empty", {
+        title: `Nothing has run in the last ${days === 1 ? "day" : `${days} days`}`,
+        text: "Every update, apply, restart and backup is drawn here as soon as it starts.",
+      });
+    } else {
+      setGanttRuns(tlEl, m.runs, TIMELINE_LANES);
+      setGanttPoints(tlEl, m.points, TIMELINE_LANES);
+      setGanttKinds(tlEl, [
+        {
+          kind: "failed",
+          label: "A stack failed",
+          shape: "diamond",
+          tone: "destructive",
+        },
+      ]);
+      setGanttLegend(tlEl, [
+        { series: 1, label: "Nightly round" },
+        { series: 2, label: "Scheduled operations" },
+        { series: 3, label: "Operator action" },
+      ]);
+    }
+    paintTimelineFacts(false);
+  };
+  const paintTimelineFacts = (/** @type {boolean} */ animate) => {
+    const list = rows.filter(
+      (r) =>
+        r.entry.kind === "op" && r.start >= t0() && inRange(r, filter.range),
+    );
+    const failed = list.filter((r) => r.state === "failed").length;
+    for (const [el, n] of /** @type {const} */ ([
+      [tlOps, list.length],
+      [tlFailed, failed],
+    ])) {
+      if (animate) tickTo(el, String(n));
+      else el.textContent = String(n);
+    }
+  };
+  tlEl.addEventListener("kp-gantt-select", (e) => {
+    const { from, to, source } = /** @type {CustomEvent} */ (e).detail;
+    filter = {
+      ...filter,
+      range:
+        from != null && to != null
+          ? { from: from / 1000, to: to / 1000 }
+          : null,
+    };
+    syncNarrow();
+    paintTimelineFacts(true);
+    paintFeed();
+    changed();
+    if (source === "day" && filter.range)
       historyCard.el.scrollIntoView({ behavior: "smooth", block: "start" });
-    }
-    paintTimeline();
   });
-  tlBox.addEventListener("keydown", (e) => {
-    const mk = /** @type {Element} */ (e.target).closest?.(".mark");
-    if (mk && e.key === "Enter") {
-      const key = mk.getAttribute("data-key");
-      if (key) openRow(key);
-    }
+  tlEl.addEventListener("kp-gantt-open", (e) => {
+    const id = String(/** @type {CustomEvent} */ (e).detail.id);
+    const round = tlRounds.get(id);
+    const row = round
+      ? (round.find((r) => r.state === "failed") ?? round[0])
+      : rows.find((r) => r.key === id);
+    if (row) openRow(row.key);
   });
 
-  // ── History feed ──────────────────────────────────────────────────────
+  // ── stacks by day ─────────────────────────────────────────────────────
+  const paintHeat = () => {
+    cover(heatCover, null);
+    const names = [
+      ...new Set([
+        ...stackNames(),
+        ...rows.map((r) => r.stack).filter((s) => s != null),
+      ]),
+    ];
+    // The frame keeps the height of every stack plus the fleet row.
+    heatCover.style.setProperty(
+      "--ac-heat-rows",
+      String(Math.max(names.length, 4) + 1),
+    );
+    if (!historyRead) {
+      setHeat(heatEl, {
+        state: "loading",
+        skeleton: { rows: Math.max(names.length, 4), columns: days },
+        label: "Operations per stack per day, loading",
+      });
+      return;
+    }
+    if (historyError) {
+      setHeat(heatEl, {
+        state: "error",
+        message: "The history could not be read.",
+        label: "Operations per stack per day",
+      });
+      cover(heatCover, "error", {
+        title: "The history could not be read",
+        text: historyError,
+        retry: retryRead,
+      });
+      return;
+    }
+    if (!rows.some((r) => r.entry.kind === "op")) {
+      setHeat(heatEl, {
+        state: "empty",
+        message: "Nothing has run yet, so there is nothing to compare.",
+        label: "Operations per stack per day",
+      });
+      cover(heatCover, "empty", {
+        title: "Nothing has run yet",
+        text: "Once stacks have been updated or backed up, each day shows here.",
+      });
+      return;
+    }
+    const m = heatModel(rows, { stacks: names, days, now: now() });
+    const every =
+      window.innerWidth < 700 ? (days > 14 ? 7 : 3) : days > 14 ? 3 : 1;
+    // The axis names every `every`-th day counting back from today, so the
+    // last label is always today; an unnamed day has no label at all.
+    const columns = m.columns.map((c, i) => ({
+      key: c.key,
+      label:
+        (m.columns.length - 1 - i) % every !== 0
+          ? ""
+          : String(Number(formatDay(c.day + 3600).slice(0, 2))),
+      minor: (m.columns.length - 1 - i) % every !== 0,
+    }));
+    const said = (/** @type {string} */ stack, /** @type {number} */ day) => {
+      const c = m.cell(stack, String(day));
+      return c
+        ? `${count(c.n, "operation", "operations")}${c.f ? `, ${c.f} failed (${[...c.kinds].join(", ")})` : ", all fine"}`
+        : "not touched";
+    };
+    /** @type {import("/static/kp/js/heat.js").HeatSpec} */
+    const spec = {
+      columns,
+      rows: names.map((s) => ({
+        key: s,
+        label: s,
+        cells: m.columns.map((c) => {
+          const cell = m.cell(s, c.key);
+          const words = said(s, c.day);
+          const date = formatDay(c.day + 3600);
+          return {
+            tone: cell ? (cell.f ? "bad" : "ok") : "none",
+            label: words,
+            aria: `${s}, ${date}: ${words}`,
+            ...(cell ? { tip: `${s}, ${date}: ${words}.` } : {}),
+          };
+        }),
+      })),
+      summary: {
+        key: "fleet",
+        label: "Fleet",
+        cells: m.columns.map((c) => {
+          const date = formatDay(c.day + 3600);
+          const f = m.fleet(c.key);
+          if (!f.ran)
+            return {
+              tone: "none",
+              label: "nothing ran",
+              aria: `Fleet, ${date}: nothing ran`,
+            };
+          const words = f.bad
+            ? `${f.bad} of ${f.ran} stacks that ran had a failure`
+            : `all ${f.ran} stacks that ran were fine`;
+          return {
+            tone: f.bad ? "bad" : "ok",
+            share: f.bad ? Math.max(f.bad / f.ran, 0.18) : 1,
+            label: words,
+            aria: `Fleet, ${date}: ${words}`,
+          };
+        }),
+      },
+      every: 1,
+      toggle: true,
+      picked: pickDay,
+      label: `Operations per stack per day, last ${days === 1 ? "day" : `${days} days`}`,
+    };
+    setHeat(heatEl, spec);
+    setHeatRows(heatEl, [...pickStacks]);
+    for (const b of /** @type {NodeListOf<HTMLElement>} */ (
+      heatEl.querySelectorAll(".kp-heat__label-button")
+    ))
+      drivable(b, HEAT_STACK, b.dataset.key ?? "");
+    for (const b of /** @type {NodeListOf<HTMLElement>} */ (
+      heatEl.querySelectorAll('.kp-heat__cell[data-row-key="fleet"]')
+    ))
+      drivable(b, HEAT_DAY, b.dataset.colKey ?? "");
+  };
+  heatEl.addEventListener("kp-heat-pick", (e) => {
+    const d = /** @type {CustomEvent} */ (e).detail;
+    pickDay = d.picked ? d.colKey : null;
+    syncNarrow();
+    paintFeed();
+  });
+  heatEl.addEventListener("kp-heat-row", (e) => {
+    pickStacks.clear();
+    for (const k of /** @type {CustomEvent} */ (e).detail.keys)
+      pickStacks.add(k);
+    syncNarrow();
+    paintFeed();
+  });
+  narrow.el.addEventListener("kp-toolbar-remove", (e) => {
+    const id = String(/** @type {CustomEvent} */ (e).detail?.id ?? "");
+    if (id === "range") {
+      filter = { ...filter, range: null };
+      setGanttSelection(tlEl, null);
+    } else if (id === "day") {
+      pickDay = null;
+      setHeatPick(heatEl, null);
+    } else if (id.startsWith("stack:")) {
+      pickStacks.delete(id.slice(6));
+      setHeatRows(heatEl, [...pickStacks]);
+    }
+    afterNarrow();
+  });
+  narrow.el.addEventListener("kp-toolbar-clear", () => {
+    filter = { ...filter, range: null };
+    pickDay = null;
+    pickStacks.clear();
+    setGanttSelection(tlEl, null);
+    setHeatPick(heatEl, null);
+    setHeatRows(heatEl, []);
+    afterNarrow();
+  });
+  const afterNarrow = () => {
+    syncNarrow();
+    paintTimelineFacts(true);
+    paintFeed();
+    changed();
+  };
+
+  // ── History feed (kp data table) ──────────────────────────────────────
+  const dt = dataTable(t.wrap);
+  /** A column's place in the table's header (kp adds a column for the row toggle). @param {string} name */
+  const columnOf = (name) =>
+    [...t.wrap.querySelectorAll("thead th")].findIndex(
+      (th) => (th.textContent ?? "").trim() === name,
+    );
+  /** Wire the table's own controls for Live view, once it is attached. */
+  const markTable = () => {
+    const add = t.wrap.querySelector("[data-kp-datatable-add-filter]");
+    if (add instanceof HTMLElement && !add.dataset.drive)
+      drivable(add, ADD_FILTER);
+    const search = t.wrap.querySelector("[data-kp-datatable-search]");
+    if (search instanceof HTMLElement) drivable(search, SEARCH);
+    const clear = t.wrap.querySelector("[data-kp-datatable-clear]");
+    if (clear instanceof HTMLElement) drivable(clear, CLEAR);
+  };
+  /** @param {string} key */
+  const rowOf = (key) =>
+    t.tbody.querySelector(`tr[data-kp-row-key="${CSS.escape(key)}"]`);
+  /** @param {string} key */
+  const fillDetail = (key) => {
+    const r = rows.find((x) => x.key === key);
+    const cell = rowOf(key)?.nextElementSibling?.querySelector("td");
+    if (!r || !cell) return;
+    const d = detail(r);
+    cell.replaceChildren(d);
+    attachSteplists(d);
+  };
+  t.wrap.addEventListener("kp-datatable-expand", (e) => {
+    const { key, open } = /** @type {CustomEvent} */ (e).detail;
+    if (open) fillDetail(key);
+  });
+  t.wrap.addEventListener("kp-datatable-retry", retryRead);
+
   /** @param {string} key */
   const openRow = (key) => {
-    open.add(key);
-    if (filter.show.size || filter.q) {
-      filter = { ...filter, show: new Set(), q: "" };
-      if (tb.search) tb.search.value = "";
-      pickShow("all");
+    const r = rows.find((x) => x.key === key);
+    if (!r || !dt) return;
+    // A row the picks or the table's filters hide is brought back first.
+    if (!visibleRows().includes(r)) {
+      filter = { ...filter, range: null };
+      pickDay = null;
+      pickStacks.clear();
+      setGanttSelection(tlEl, null);
+      setHeatPick(heatEl, null);
+      setHeatRows(heatEl, []);
+      syncNarrow();
+      changed();
     }
-    const idx = rows.findIndex((r) => r.key === key);
-    if (idx >= limit) limit = idx + PAGE;
-    changed();
-    const el = feed.querySelector(`[data-key="${CSS.escape(key)}"]`);
-    el?.scrollIntoView({ block: "center", behavior: "smooth" });
-    /** @type {HTMLElement | null} */ (el)?.focus({ preventScroll: true });
+    dt.clearFilters();
+    dt.query("");
+    paintFeed();
+    const group = String(dayStart(r.start));
+    dt.fold(dt.view().folded.filter((k) => k !== group));
+    const at = dt.view().keys.indexOf(key);
+    if (at >= 0) dt.page(Math.floor(at / dt.view().pageSize));
+    dt.expand([key]);
+    const row = rowOf(key);
+    row?.scrollIntoView({ block: "center", behavior: "smooth" });
+    /** @type {HTMLElement | null | undefined} */ (
+      row?.querySelector(".kp-datatable__expand")
+    )?.focus({ preventScroll: true });
   };
 
   /** @param {import("../activityview.js").FeedRow} r */
   const detail = (r) => {
     const e = r.entry;
-    /** @type {[string, number | null, boolean][]} */
-    const steps =
-      e.kind === "op" && e.steps.length
-        ? e.steps.map((s) => [
-            s.step,
-            s.end > 0 && s.end >= s.start ? s.end - s.start : null,
-            !(r.state === "failed" && s === e.steps[e.steps.length - 1]),
-          ])
-        : [[r.what, r.took, r.state !== "failed"]];
-    const total = steps.reduce((a, s) => a + (s[1] ?? 0), 0) || 1;
     const job =
       e.kind === "op" && e.req != null
         ? act.jobs.find((j) => j.reqs?.includes(e.req ?? -1))
@@ -1490,262 +1700,64 @@ function mountNow(body, x) {
         r.key,
       ),
     ].filter((b) => b != null);
-    return h(
-      "div",
-      { class: "ac-detail" },
-      h(
-        "div",
-        { class: "ac-gantt", "aria-label": "Steps" },
-        ...steps.map(([n, d, ok]) =>
-          h(
-            "div",
-            null,
-            h("span", null, n),
-            h(
-              "span",
-              null,
-              h("i", {
-                class: ok ? "" : "bad",
-                style: `inline-size:${ok ? Math.max(2, ((d ?? 0) / total) * 100) : 100}%`,
-              }),
-            ),
-            h("em", null, ok ? (d == null ? "—" : humanDuration(d)) : "failed"),
-          ),
-        ),
-      ),
-      r.error ? h("div", { class: "ac-err mono" }, r.error) : "",
-      h("div", { class: "ac-acts" }, ...acts),
-    );
+    return historyDetail(r, { actions: /** @type {HTMLElement[]} */ (acts) });
   };
 
+  /** What was painted last, so a reread that changed nothing repaints nothing. */
+  let sig = "";
   const paintFeed = () => {
+    syncNarrow();
     if (!historyRead) {
-      feed.replaceChildren(skeletonLines(8, "Reading the history"));
-      count.textContent = "";
+      t.loading({ words: "Reading the history…" });
       return;
     }
     if (historyError) {
-      const again = h(
-        "button",
-        { type: "button", class: "kp-button kp-button--sm" },
-        "Try again",
-      );
-      drivable(again, RETRY);
-      again.addEventListener("click", () => void loadHistory());
-      feed.replaceChildren(
-        h(
-          "div",
-          { class: "kp-alert kp-alert--destructive", role: "alert" },
-          h(
-            "span",
-            { class: "kp-alert__body" },
-            `The history could not be read: ${historyError}`,
-          ),
-          again,
-        ),
+      t.failed(
+        historyFail ?? { what: "the history", why: historyError, fix: "" },
       );
       return;
     }
-    // The row that had focus gets it back after the repaint (finding 4):
-    // the minute's reread and a job's end no longer drop it on <body>.
-    const had = /** @type {HTMLElement | null} */ (
-      document.activeElement instanceof Element &&
-      feed.contains(document.activeElement)
-        ? document.activeElement.closest("[data-key]")
-        : null
-    );
-    const focusKey = had?.dataset.key ?? null;
-    const refocus = () => {
-      if (focusKey == null) return;
-      /** @type {HTMLElement | null} */ (
-        feed.querySelector(`.ac-row[data-key="${CSS.escape(focusKey)}"]`)
-      )?.focus({ preventScroll: true });
-    };
-    const shown = rows.filter((r) => rowMatches(r, filter));
-    // redesign-final (exact counts): the rows drawn, of all there are —
-    // "Show more" draws the next page.
-    count.textContent = `${Math.min(shown.length, limit)} of ${rows.length} shown`;
-    countOf(count, feed, ".ac-row");
-    chips.counts(showCounts(rows, filter));
-    rangeChip.hidden = !filter.range;
-    if (filter.range) {
-      const clear = h(
-        "button",
-        { type: "button", class: "link-button" },
-        "Show every day",
-      );
-      drivable(clear, EVERY_DAY);
-      clear.addEventListener("click", () => {
-        filter = { ...filter, range: null };
-        changed();
-      });
-      rangeChip.replaceChildren(
-        `From the timeline: ${dayWord(filter.range.from, now())} ${clock(filter.range.from)} → ${dayWord(filter.range.to, now())} ${clock(filter.range.to)} · `,
-        clear,
-      );
-    }
-    if (!shown.length) {
-      const clear = h(
-        "button",
-        { type: "button", class: "kp-button kp-button--sm" },
-        "Clear the filters",
-      );
-      drivable(clear, CLEAR);
-      clear.addEventListener("click", () => {
-        filter = { ...filter, q: "", range: null };
-        if (tb.search) tb.search.value = "";
-        pickShow("all");
-        changed();
-      });
-      feed.replaceChildren(
-        emptyState(
-          rows.length
-            ? {
-                title: "Nothing matches",
-                text: "No operation of this window passes the filter.",
-                action: clear,
-              }
-            : {
-                title: `Nothing ran in the last ${days === 1 ? "day" : `${days} days`}`,
-                text: "Every operation the host runs, asked for or on its own, lands here with who started it.",
-              },
-        ),
-      );
-      return;
-    }
-    const out = [];
+    stale$.hidden = !stale;
     if (stale) {
-      const again = h(
-        "button",
-        { type: "button", class: "link-button" },
-        "Read it again",
+      const again = drivable(
+        h("button", { type: "button", class: "link-button" }, "Read it again"),
+        RETRY,
       );
-      drivable(again, RETRY);
-      again.addEventListener("click", () => void loadHistory());
-      out.push(
-        h(
-          "p",
-          { class: "ac-stale", role: "status" },
-          `Not refreshed: ${stale}. These rows are from ${clock(readAt)}. `,
-          again,
-        ),
+      again.addEventListener("click", retryRead);
+      stale$.replaceChildren(
+        `Not refreshed: ${stale}. These rows are from ${clock(readAt)}. `,
+        again,
       );
     }
-    for (const d of byDay(shown.slice(0, limit))) {
-      out.push(
-        h(
-          "div",
-          { class: "ac-dayhead", id: `day-${d.day}` },
-          h("b", null, dayLabel(d.day, now())),
-          h(
-            "span",
-            null,
-            `${d.ops} ${d.ops === 1 ? "operation" : "operations"}`,
-            d.failed
-              ? h("span", { class: "ac-bad" }, ` · ${d.failed} failed`)
-              : " · all ok",
-          ),
-        ),
+    const shown = visibleRows();
+    const next = JSON.stringify([
+      dayStart(now()),
+      shown.map((r) => [r.key, r.state, r.took]),
+    ]);
+    const changedRows = next !== sig;
+    if (changedRows) {
+      sig = next;
+      // The row that had focus gets it back after the repaint.
+      const had =
+        document.activeElement instanceof Element &&
+        t.tbody.contains(document.activeElement)
+          ? document.activeElement.closest("tr[data-kp-row-key]")
+          : null;
+      const focusKey = had?.getAttribute("data-kp-row-key") ?? null;
+      const onToggle = !!document.activeElement?.closest(
+        ".kp-datatable__expand",
       );
-      for (const r of d.rows) {
-        const isOpen = open.has(r.key);
-        const row = drivable(
-          h(
-            "div",
-            {
-              class: `ac-row${r.entry.kind === "phase" ? " ac-row--phase" : ""}`,
-              role: "button",
-              tabindex: "0",
-              "aria-expanded": String(isOpen),
-              "data-key": r.key,
-              "data-tone": r.state === "failed" ? "bad" : "",
-              title: "Open for its steps, its error and what to do (Enter)",
-            },
-            h("span", { class: "ac-t" }, clock(r.start)),
-            h(
-              "span",
-              { class: "ac-st" },
-              h("span", {
-                class: `ac-dot ac-dot--${r.tone}`,
-                "aria-hidden": "true",
-              }),
-              r.state,
-            ),
-            h(
-              "span",
-              { class: "ac-w" },
-              ...(r.stack && r.entry.kind === "op"
-                ? [`${r.verb} `, stackLink(r.stack)]
-                : [r.what]),
-            ),
-            h(
-              "span",
-              { class: "ac-by" },
-              h(
-                "span",
-                { class: `ac-by-chip ac-by-chip--${r.actor.kind}` },
-                r.actor.text,
-              ),
-            ),
-            h(
-              "span",
-              { class: "ac-took" },
-              r.took == null ? "—" : humanDuration(r.took),
-            ),
-            h("span", { class: "ac-chev", "aria-hidden": "true" }, "›"),
-          ),
-          ROW,
-          r.key,
-        );
-        const toggle = () => {
-          if (open.has(r.key)) open.delete(r.key);
-          else open.add(r.key);
-          paintFeed();
-          /** @type {HTMLElement | null} */ (
-            feed.querySelector(`[data-key="${CSS.escape(r.key)}"]`)
-          )?.focus({ preventScroll: true });
-        };
-        row.addEventListener("click", (ev) => {
-          if (!(/** @type {Element} */ (ev.target).closest("a, button")))
-            toggle();
-        });
-        row.addEventListener("keydown", (ev) => {
-          if (ev.target !== row) return;
-          if (ev.key === "Enter" || ev.key === " ") {
-            ev.preventDefault();
-            toggle();
-          }
-        });
-        out.push(row);
-        if (isOpen) out.push(detail(r));
+      t.tbody.replaceChildren(...historyBody(shown, { now: now(), stackLink }));
+      t.ready();
+      for (const k of dt?.view().expanded ?? []) fillDetail(k);
+      if (focusKey != null) {
+        const row = rowOf(focusKey);
+        /** @type {HTMLElement | null | undefined} */ (
+          onToggle ? row?.querySelector(".kp-datatable__expand") : row
+        )?.focus({ preventScroll: true });
       }
-    }
-    if (shown.length > limit) {
-      const more = h(
-        "button",
-        {
-          type: "button",
-          class: "kp-button kp-button--sm",
-          title: "Draw the next older operations of this window",
-        },
-        `Show ${Math.min(PAGE, shown.length - limit)} more`,
-      );
-      drivable(more, MORE);
-      more.addEventListener("click", () => {
-        limit += PAGE;
-        paintFeed();
-      });
-      out.push(
-        h(
-          "div",
-          { class: "ac-more" },
-          h("span", null, `Showing 1–${limit} of ${shown.length}`),
-          more,
-        ),
-      );
-    }
-    feed.replaceChildren(...out);
-    refocus();
+    } else t.ready({ refresh: false });
+    markTable();
   };
 
   const changed = () => {
@@ -1754,12 +1766,37 @@ function mountNow(body, x) {
       "",
       location.pathname + setParams(location.search, filterToParams(filter)),
     );
-    // The days picked on the timeline show in the toolbar's state zone
-    // (rangeChip, with Show every day), so the active-filter row stays
-    // absent: one place per filter, never two.
-    paintFeed();
-    paintTimeline();
   };
+
+  /**
+   * An older address's `?show=failed|nightly|claude` and `?q=` reach the
+   * table as its own filters and search, once the rows are in.
+   */
+  const applyAddress = () => {
+    urlApplied = true;
+    const unbind = bindTableUrl(dt, "history");
+    unbinds.push(unbind);
+    const f = showFilters(rows, filter.show);
+    if (dt) {
+      if (f.outcome.length) dt.filter(columnOf("Outcome"), f.outcome);
+      if (f.by.length) dt.filter(columnOf("By"), f.by);
+      if (filter.q) dt.query(filter.q);
+    }
+    if (filter.show.size || filter.q) {
+      filter = { ...filter, show: new Set(), q: "" };
+      changed();
+    }
+    if (filter.range) {
+      setGanttSelection(tlEl, {
+        from: filter.range.from * 1000,
+        to: filter.range.to * 1000,
+      });
+      syncNarrow();
+      paintFeed();
+    }
+  };
+  /** @type {(() => void)[]} */
+  const unbinds = [];
 
   const paintAll = () => {
     rebuild();
@@ -1767,7 +1804,9 @@ function mountNow(body, x) {
     paintAttention();
     paintRunning();
     paintTimeline();
+    paintHeat();
     paintFeed();
+    if (historyRead && !historyError && !urlApplied) applyAddress();
     if (firstPaint && historyRead) {
       firstPaint = false;
       const p = new URLSearchParams(location.search);
@@ -1805,9 +1844,13 @@ function mountNow(body, x) {
       // Keep what the last good read showed; only a first read that fails
       // replaces the feed with the error.
       if (readAt) stale = r.error.why;
-      else historyError = r.error.why;
+      else {
+        historyError = r.error.why;
+        historyFail = r.error;
+      }
     } else {
       historyError = null;
+      historyFail = null;
       stale = null;
       readAt = now();
       entries = r.report?.entries ?? [];
@@ -1852,15 +1895,18 @@ function mountNow(body, x) {
   const unsub = subscribe(() => {
     const before = rows.length;
     rebuild();
-    if (rows.length !== before) paintFeed();
+    if (rows.length !== before) {
+      paintHeat();
+      paintFeed();
+    }
   });
   void catalogReady().then(() => paintAttention());
   const tick = setInterval(() => {
     for (const b of blocks.values()) b.update();
   }, 1000);
   const reread = setInterval(() => void loadHistory(), 60_000);
-  const ro = new ResizeObserver(() => paintTimeline());
-  ro.observe(tlBox);
+  const heatQuery = window.matchMedia("(max-width: 700px)");
+  heatQuery.addEventListener("change", paintHeat);
 
   /** @param {KeyboardEvent} e */
   const onKey = (e) => {
@@ -1870,12 +1916,21 @@ function mountNow(body, x) {
     if (/INPUT|TEXTAREA|SELECT/.test(a?.tagName ?? "")) return;
     if (e.key === "/") {
       e.preventDefault();
-      tb.search?.focus();
+      /** @type {HTMLElement | null} */ (
+        t.wrap.querySelector("[data-kp-datatable-search]")
+      )?.focus();
     } else if (e.key === "f" || e.key === "F") {
-      pickShow(filter.show.has("failed") ? "all" : "failed");
+      const at = columnOf("Outcome");
+      const on = dt?.view().filters[at];
+      dt?.filter(
+        at,
+        Array.isArray(on) && on.includes("Failed") ? null : ["Failed"],
+      );
     } else if (e.key === "j" || e.key === "k") {
       const list = /** @type {HTMLElement[]} */ ([
-        ...feed.querySelectorAll(".ac-row"),
+        ...t.tbody.querySelectorAll(
+          "tr[data-kp-row-key] .kp-datatable__expand",
+        ),
       ]);
       const i = list.indexOf(/** @type {HTMLElement} */ (a));
       const n =
@@ -1884,10 +1939,8 @@ function mountNow(body, x) {
         ];
       n?.focus();
       n?.scrollIntoView({ block: "nearest" });
-    } else if (e.key === "Escape" && (filter.show.size || filter.range)) {
-      filter = { ...filter, range: null };
-      pickShow("all");
-      changed();
+    } else if (e.key === "Escape" && narrowed()) {
+      narrow.el.dispatchEvent(new CustomEvent("kp-toolbar-clear"));
     }
   };
   document.addEventListener("keydown", onKey);
@@ -1903,21 +1956,11 @@ function mountNow(body, x) {
     unsub();
     clearInterval(tick);
     clearInterval(reread);
-    ro.disconnect();
+    heatQuery.removeEventListener("change", paintHeat);
+    for (const off of unbinds) off();
+    for (const off of detachKp) off();
     document.removeEventListener("keydown", onKey);
   };
-}
-
-/**
- * @param {string} tag
- * @param {Record<string, string | number>} attrs
- * @param {...(Node | string)} children
- */
-function svgEl(tag, attrs, ...children) {
-  const e = document.createElementNS(SVG, tag);
-  for (const [k, v] of Object.entries(attrs)) e.setAttribute(k, String(v));
-  e.append(...children);
-  return e;
 }
 
 /**

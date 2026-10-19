@@ -693,19 +693,6 @@
   border-block-end: 1px solid var(--border);
   font-size: var(--kp-text-sm);
 }
-.hl-meter {
-  display: block;
-  block-size: 6px;
-  border-radius: 3px;
-  background: var(--muted);
-  overflow: hidden;
-}
-.hl-meter > span {
-  display: block;
-  block-size: 100%;
-  background: var(--primary);
-  border-radius: 3px;
-}
 /* The lines are kp's log grid (time, source, level, message); the line is
    `display: contents`, so hover and the open plate paint its cells. The
    message cell is the button that opens the detail. */
@@ -777,18 +764,6 @@
   font-family: var(--theme-font, inherit);
   font-size: var(--kp-text-sm);
 }
-.hl-kv {
-  display: grid;
-  grid-template-columns: max-content minmax(0, 1fr);
-  gap: 2px 12px;
-  margin: 0;
-}
-.hl-kv dt {
-  color: var(--muted-foreground);
-}
-.hl-kv dd {
-  margin: 0;
-}
 .hl-more__acts {
   display: flex;
   flex-wrap: wrap;
@@ -836,7 +811,7 @@
   .hl-xfer {
     grid-template-columns: minmax(0, 1fr) auto;
   }
-  .hl-xfer .hl-meter {
+  .hl-xfer .hl-xfer__bar {
     grid-column: 1 / -1;
     grid-row: 2;
   }

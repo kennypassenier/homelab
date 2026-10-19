@@ -18,7 +18,8 @@ import { levelBadge } from "./notices.js";
  * @typedef {"bad" | "warn" | "info"} Severity
  * @typedef {{key: string, severity: Severity, title: string, why: string,
  *   href: string, stack: string | null, at: number, source: string,
- *   count?: number, first_at?: number, ids?: number[]}} InboxItem
+ *   count?: number, first_at?: number, ids?: number[],
+ *   problem?: {what: string, why?: string, remedy?: string}}} InboxItem
  *   `key`: stable over reads; `source`: which list it came from; `count`
  *   and `first_at`: how often the same thing was said and since when, for
  *   a row that stands for several notices; `ids`: the notices a row stands
@@ -92,6 +93,16 @@ export function inboxItems(src) {
       count: 1,
       ids: [n.id],
       source: "notices",
+      // kp11: the failure's fold ("What went wrong") reads these.
+      ...(n.remedy
+        ? {
+            problem: {
+              what: n.body || n.title,
+              ...(n.consequence ? { why: n.consequence } : {}),
+              remedy: n.remedy,
+            },
+          }
+        : {}),
     };
     same.set(group, row);
     out.push(row);

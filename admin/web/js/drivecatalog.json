@@ -1256,7 +1256,8 @@
       "reach": [
         {
           "do": "click",
-          "control": "snooze"
+          "control": "snooze-for",
+          "row": "1h"
         }
       ],
       "twins": false
@@ -1879,14 +1880,62 @@
       "twins": false
     },
     {
+      "id": "inbox-answer-all-stop",
+      "page": "needs-you",
+      "what": "answer every open question with its safe answer, leave it stopped",
+      "opens": "run",
+      "row": null,
+      "href": "/inbox",
+      "was": [],
+      "shows": "while the host asks a question",
+      "reach": [],
+      "twins": false
+    },
+    {
       "id": "inbox-answer-check",
       "page": "needs-you",
-      "what": "answer a manual check: it passes, it fails, or not now (asks again in 7 days)",
-      "opens": "dialog",
+      "what": "answer a manual check: it works, it fails, or not now (asks again in 7 days)",
+      "opens": "run",
       "row": "<check id>:pass|fail|later",
       "href": "/inbox",
       "was": [],
       "shows": "while a manual check waits for an answer",
+      "reach": [],
+      "twins": false
+    },
+    {
+      "id": "inbox-bulk-fix",
+      "page": "needs-you",
+      "what": "fix every ticked notice as one batch, with one confirm",
+      "opens": "dialog",
+      "row": null,
+      "href": "/inbox",
+      "was": [],
+      "shows": "while a notice of the last 24 hours is ticked",
+      "reach": [],
+      "twins": false
+    },
+    {
+      "id": "inbox-bulk-seen",
+      "page": "needs-you",
+      "what": "mark every ticked notice seen, after a 6 s window to take it back",
+      "opens": "run",
+      "row": null,
+      "href": "/inbox",
+      "was": [],
+      "shows": "while a notice of the last 24 hours is ticked",
+      "reach": [],
+      "twins": false
+    },
+    {
+      "id": "inbox-bulk-undo",
+      "page": "needs-you",
+      "what": "take a bulk Mark seen back before its clock ends",
+      "opens": "run",
+      "row": null,
+      "href": "/inbox",
+      "was": [],
+      "shows": "for 6 seconds after a bulk Mark seen",
       "reach": [],
       "twins": false
     },
@@ -1954,19 +2003,7 @@
           "id": "mark-read"
         }
       ],
-      "shows": "on an unread notice without a fix",
-      "reach": [],
-      "twins": false
-    },
-    {
-      "id": "inbox-order",
-      "page": "needs-you",
-      "what": "order the Inbox worst first or newest first",
-      "opens": "view",
-      "row": "worst|newest",
-      "href": "/inbox",
-      "was": [],
-      "shows": null,
+      "shows": "on an unread notice",
       "reach": [],
       "twins": false
     },
@@ -2223,18 +2260,6 @@
       "href": "/map",
       "was": [],
       "shows": null,
-      "reach": [],
-      "twins": false
-    },
-    {
-      "id": "mark-all-read",
-      "page": "notifications",
-      "what": "mark every notification read",
-      "opens": "run",
-      "row": null,
-      "href": "/system/notifications",
-      "was": [],
-      "shows": "while a notification is unread",
       "reach": [],
       "twins": false
     },
@@ -2587,14 +2612,43 @@
       "twins": false
     },
     {
-      "id": "push-to-phone",
+      "id": "push-off",
       "page": "notifications",
-      "what": "turn pushing urgent notifications to the phone on or off",
+      "what": "turn push to the phone off (needs the tick in the box first)",
       "opens": "run",
       "row": null,
       "href": "/system/notifications",
       "was": [],
-      "shows": null,
+      "shows": "after Turn push off… was pressed",
+      "reach": [
+        {
+          "do": "click",
+          "control": "push-off-open"
+        }
+      ],
+      "twins": false
+    },
+    {
+      "id": "push-off-open",
+      "page": "notifications",
+      "what": "open the box with the tick that lets push to the phone be turned off",
+      "opens": "view",
+      "row": null,
+      "href": "/system/notifications",
+      "was": [],
+      "shows": "while push to the phone is on",
+      "reach": [],
+      "twins": false
+    },
+    {
+      "id": "push-to-phone",
+      "page": "notifications",
+      "what": "turn pushing urgent notifications to the phone on again",
+      "opens": "run",
+      "row": null,
+      "href": "/system/notifications",
+      "was": [],
+      "shows": "while push to the phone is off",
       "reach": [],
       "twins": false
     },
@@ -2813,18 +2867,6 @@
       "opens": "run",
       "row": "<schedule id>",
       "href": "/activity?view=planned",
-      "was": [],
-      "shows": null,
-      "reach": [],
-      "twins": false
-    },
-    {
-      "id": "save-digest",
-      "page": "notifications",
-      "what": "save the digest time",
-      "opens": "run",
-      "row": null,
-      "href": "/system/notifications",
       "was": [],
       "shows": null,
       "reach": [],
@@ -3123,27 +3165,18 @@
       "twins": false
     },
     {
-      "id": "snooze",
-      "page": "notifications",
-      "what": "snooze every push for an hour (Snooze 1 h)",
-      "opens": "run",
-      "row": null,
-      "href": "/system/notifications",
-      "was": [],
-      "shows": null,
-      "reach": [],
-      "twins": false
-    },
-    {
       "id": "snooze-for",
       "page": "notifications",
-      "what": "snooze every push for 1 h, 4 h, until 07:00 or a day",
+      "what": "hold every push for 1 hour, 4 hours, until tonight 18:00, tomorrow 07:00, Monday 07:00 or a date and time (at most 7 days); pick is the button of the date panel",
       "opens": "run",
-      "row": "60|240|morning|1440",
+      "row": "1h|4h|tonight|tomorrow|monday|pick",
       "href": "/system/notifications",
       "was": [
         {
           "id": "notify-snooze-minutes"
+        },
+        {
+          "id": "snooze"
         }
       ],
       "shows": null,
@@ -3499,6 +3532,30 @@
       "id": "stack-push",
       "page": "notifications",
       "what": "turn one stack's pushes on or off (muted: the Inbox only)",
+      "opens": "run",
+      "row": "<stack>",
+      "href": "/system/notifications",
+      "was": [],
+      "shows": null,
+      "reach": [],
+      "twins": false
+    },
+    {
+      "id": "stack-push-all",
+      "page": "notifications",
+      "what": "turn every stack's pushes on or off together",
+      "opens": "run",
+      "row": null,
+      "href": "/system/notifications",
+      "was": [],
+      "shows": null,
+      "reach": [],
+      "twins": false
+    },
+    {
+      "id": "stack-push-only",
+      "page": "notifications",
+      "what": "push for this stack only: every other stack is muted",
       "opens": "run",
       "row": "<stack>",
       "href": "/system/notifications",
@@ -4165,23 +4222,9 @@
       "row": null
     },
     {
-      "id": "mute",
-      "page": "notifications",
-      "what": "mute one stack's notifications",
-      "was": [],
-      "row": "<stack>"
-    },
-    {
       "id": "notify-digest",
       "page": "notifications",
-      "what": "the time of the daily digest",
-      "was": [],
-      "row": null
-    },
-    {
-      "id": "notify-push",
-      "page": "notifications",
-      "what": "push notifications to the phone",
+      "what": "the time of the daily digest (saves as you change it)",
       "was": [],
       "row": null
     },
@@ -4189,6 +4232,13 @@
       "id": "passkey-label",
       "page": "passkeys",
       "what": "the name a new passkey is kept under",
+      "was": [],
+      "row": null
+    },
+    {
+      "id": "push-off-ack",
+      "page": "notifications",
+      "what": "the tick that lets Turn push off go: nothing reaches the phone until push is turned on again",
       "was": [],
       "row": null
     },

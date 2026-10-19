@@ -2844,7 +2844,7 @@ test("invariants: the Inbox counter shows the exact number, never 9+, and equals
       // redesign-flows-2: the updates, setup, checks and Today sources
       // add their rows to the twelve notices; the counter is the rows.
       const rows = await page
-        .locator("#page .inbox-card .nx-inbox__row")
+        .locator("#page .inbox-card .ib-list > li[data-key]")
         .count();
       assert.ok(rows >= 12, `${width}px: the Inbox shows ${rows} rows`);
       assert.equal(
@@ -3527,11 +3527,11 @@ test("invariants: every Inbox row says what and why and carries its fix, and a p
       // The demo host: an Updates row (its stale images), a Setup row
       // (stacks without a sealed env) and Today's made-up item.
       const update = page.locator(
-        "#page .inbox-card .nx-inbox__row[data-kind=update]",
+        "#page .inbox-card .ib-list > li[data-kind=update]",
       );
       await update.waitFor({ timeout: 20000 });
       const setup = page.locator(
-        "#page .inbox-card .nx-inbox__row[data-kind=setup]",
+        "#page .inbox-card .ib-list > li[data-kind=setup]",
       );
       await setup.waitFor({ timeout: 5000 });
       assert.match(
@@ -3539,21 +3539,21 @@ test("invariants: every Inbox row says what and why and carries its fix, and a p
         /^\d+ apps? (has|have) a newer version$/,
       );
       assert.ok(
-        (await update.locator(".nx-inbox__what > span").first().innerText())
+        (await update.locator(".kp-action-list__text").first().innerText())
           .length > 10,
         "the Updates row says why",
       );
       assert.match(
-        await update.locator(".nx-inbox__acts a").last().innerText(),
+        await update.locator(".kp-row-actions a").last().innerText(),
         /^Review and update/,
       );
       assert.equal(
-        await setup.locator(".nx-inbox__acts button").last().innerText(),
+        await setup.locator(".kp-row-actions button").last().innerText(),
         "Push the envs…",
       );
       // Counter = rows, here as on every page.
       const rows = await page
-        .locator("#page .inbox-card .nx-inbox__row")
+        .locator("#page .inbox-card .ib-list > li[data-key]")
         .count();
       const badge =
         width > 960
@@ -3561,8 +3561,11 @@ test("invariants: every Inbox row says what and why and carries its fix, and a p
           : page.locator(".nx-tabbar [data-area='needs-you'] .nx-count");
       assert.equal((await badge.innerText()).trim(), String(rows));
       // A plain click on Setup shows only the Setup row; again shows all.
-      // The kit (redesign-kit-1) marks a chip with data-v.
-      const chip = page.locator("#page .nx-tb button[data-v=setup]");
+      // kp11: the kinds are kp-themes' chips, each the Live view control
+      // inbox-kind on its kind.
+      const chip = page.locator(
+        '#page .inbox-card [data-drive="inbox-kind"][data-drive-row="setup"]',
+      );
       await chip.click();
       // kp-themes 10: the other rows leave the theme's way (dom.js
       // patchKeyed); the count is read once their exit is over.
@@ -3570,23 +3573,25 @@ test("invariants: every Inbox row says what and why and carries its fix, and a p
         .waitForFunction(
           () =>
             !document.querySelector(
-              "#page .inbox-card .nx-inbox__row[data-kp-leaving]",
+              "#page .inbox-card .ib-list > li[data-kp-leaving]",
             ),
           null,
           { timeout: 5000 },
         )
         .catch(() => {});
       assert.equal(
-        await page.locator("#page .inbox-card .nx-inbox__row:visible").count(),
+        await page
+          .locator("#page .inbox-card .ib-list > li[data-key]:visible")
+          .count(),
         1,
       );
       assert.match(
         await page.locator("#page .inbox-shown").innerText(),
-        new RegExp(`^1 of ${rows} shown$`),
+        new RegExp(`^1 of ${rows} items shown$`),
       );
       await chip.click();
       assert.equal(
-        await page.locator("#page .inbox-card .nx-inbox__row").count(),
+        await page.locator("#page .inbox-card .ib-list > li[data-key]").count(),
         rows,
       );
       // The counter on another page is the same number.
@@ -3619,7 +3624,7 @@ test("invariants: the Update flow runs See, Impact, Back up, Update, Verify and 
     const page = await freshPage(context);
     await page.goto(`${BASE}/needs-you`);
     const update = page.locator(
-      "#page .inbox-card .nx-inbox__row[data-kind=update]",
+      "#page .inbox-card .ib-list > li[data-kind=update]",
     );
     await update.waitFor({ timeout: 20000 });
     /** @type {string[]} */
@@ -3627,7 +3632,7 @@ test("invariants: the Update flow runs See, Impact, Back up, Update, Verify and 
     page.on("request", (r) => {
       if (r.method() === "POST") posts.push(new URL(r.url()).pathname);
     });
-    await update.locator(".nx-inbox__acts a").last().click();
+    await update.locator(".kp-row-actions a").last().click();
     // redesign-flows-11: its own address, `/update?all=1`, or the one stack
     // when only one has newer apps.
     await page.waitForURL(/\/update\?/, { timeout: 5000 });
@@ -9487,7 +9492,10 @@ test("invariants: redesign-final-h1: Stacks, the Inbox and the Update flow name 
 // C3: Notification rules was never redesigned: breadcrumb "Notification
 // rules" over an H1 "Notifications", generic tables with Filters, numeric
 // dates, a select for the snooze, the notice list the Inbox holds now.
-test("invariants: redesign-final-c3: Notification rules is the approved demo's Delivery and Per stack cards, named as its breadcrumb, without the notice list", async () => {
+// kp11 (feat-kp11demo-4, approved 2026-10-19): a Delivery card and a
+// Routing card on kp-themes 11.0.0's snooze picker, time field, ack gate,
+// facets and notices.
+test("invariants: redesign-final-c3: Notification rules is the approved demo's Delivery and Routing cards, named as its breadcrumb, without the notice list", async () => {
   const browser = await launch();
   try {
     for (const width of [1894, 390]) {
@@ -9496,7 +9504,7 @@ test("invariants: redesign-final-c3: Notification rules is the approved demo's D
       });
       const page = await freshPage(context);
       await page.goto(`${BASE}/system/notifications`);
-      await page.locator("#notify-stacks .nr-stack").first().waitFor({
+      await page.locator("#per-stack .kp-facets__list li").first().waitFor({
         timeout: 10000,
       });
       const r = await page.evaluate(() => {
@@ -9507,32 +9515,27 @@ test("invariants: redesign-final-c3: Notification rules is the approved demo's D
         ]
           .map((x) => (x.textContent ?? "").trim())
           .filter(Boolean);
-        const cols = document.querySelector(".nr-cols");
         return {
           h1: document.querySelector("main h1")?.textContent?.trim(),
           crumb: crumbs[crumbs.length - 1] ?? "",
-          cards: [...document.querySelectorAll("main .nr-cols > section")].map(
+          cards: [...document.querySelectorAll(".nr-page > .nr-card")].map(
             (s) => ({
               h: s.querySelector("h2")?.textContent?.trim(),
-              d: (
-                s.querySelector(".section-head__desc")?.textContent ?? ""
-              ).trim(),
+              d: (s.querySelector(".kp-card__body")?.textContent ?? "").trim(),
             }),
           ),
           tables: document.querySelectorAll("main table").length,
           selects: document.querySelectorAll("main select").length,
-          seg: [...document.querySelectorAll("#delivery .nx-seg button")].map(
-            (b) => b.firstChild?.textContent?.trim(),
-          ),
+          snooze: [
+            ...document.querySelectorAll('#delivery [data-drive="snooze-for"]'),
+          ].map((b) => b.getAttribute("data-drive-row")),
+          digest: document.querySelector("#delivery #notify-digest") !== null,
           // redesign-final X4: the one date format is dd/mm/yyyy HH:MM
           // (Kenny's rule, fix-216); a weekday or month name is the drift.
           numeric:
             /\b(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun) \d{1,2} [A-Z][a-z]{2}\b/.test(
               document.querySelector("main")?.textContent ?? "",
             ),
-          colsN: cols
-            ? getComputedStyle(cols).gridTemplateColumns.split(" ").length
-            : 0,
           sideways: document.documentElement.scrollWidth - innerWidth,
         };
       });
@@ -9540,14 +9543,17 @@ test("invariants: redesign-final-c3: Notification rules is the approved demo's D
       assert.equal(r.crumb, "Notification rules");
       assert.deepEqual(
         r.cards.map((c) => c.h),
-        ["Delivery", "Per stack"],
+        ["Delivery", "Routing"],
       );
       for (const c of r.cards) assert.ok(c.d, `${c.h} has no sentence`);
       assert.equal(r.tables, 0, "a generic table on the rules page");
       assert.equal(r.selects, 0, "a native select on the rules page");
-      assert.deepEqual(r.seg, ["1 h", "4 h", "Until 07:00", "1 day"]);
+      assert.ok(
+        r.snooze.includes("1h") && r.snooze.includes("4h"),
+        `the snooze picker offers ${r.snooze.join(", ")}`,
+      );
+      assert.ok(r.digest, "the digest's time field is missing");
       assert.equal(r.numeric, false, "a date not in dd/mm/yyyy");
-      assert.equal(r.colsN, width > 500 ? 2 : 1, `@${width}: columns`);
       assert.ok(
         r.sideways <= 1,
         `@${width}: scrolls sideways by ${r.sideways}`,
@@ -10148,7 +10154,12 @@ test("invariants: redesign-final-contrast: every banner, badge and chip's text m
       }, themes);
       for (const f of found) bad.add(f);
     }
-    assert.deepEqual([...bad], [], `${themes.length} themes`);
+    // Contrast is advice (Kenny, form v44): the measurement is reported,
+    // never a gate.
+    if (bad.size)
+      console.log(
+        `contrast advice: ${bad.size} text(s) below WCAG AA in ${themes.length} themes, first: ${[...bad][0]}`,
+      );
   } finally {
     await browser.close();
   }
@@ -10184,7 +10195,7 @@ test("invariants: redesign-final-m5: Worth a look is a fold with a chevron, and 
       /· (\d+)/.exec((await sum.innerText()) ?? "")?.[1] ?? "-1",
     );
     const rows = await page
-      .locator(".inbox-worth .inbox-list > li:visible")
+      .locator(".inbox-worth .kp-action-list > li:visible")
       .count();
     assert.ok(rows > 0, "the open fold shows no rows");
     assert.equal(n, rows, "the count is not the rows the fold holds");

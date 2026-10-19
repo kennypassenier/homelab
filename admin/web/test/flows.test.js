@@ -4,9 +4,18 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
+  GROUPS,
+  askId,
+  askSpec,
+  bulkRows,
   checkRowsOf,
-  headline,
+  countWords,
+  fixAllBatch,
+  fixAllRule,
+  groupOf,
+  groupRows,
   kindOf,
+  problemOf,
   setupRows,
   shownRows,
   staleApps,
@@ -158,6 +167,15 @@ test("redesign-flows-2: a manual check is a row while open or failing, never onc
     ],
   );
   assert.ok(rows.every((r) => kindOf(r) === "check"));
+  // kp11: the check's own question, and "Same as last time" only for a
+  // check that was answered "fails" before.
+  assert.deepEqual(
+    rows.map((r) => [r.checkText, r.previous]),
+    [
+      ["Does the UPS self-test pass?", null],
+      ["Fan quiet?", "fail"],
+    ],
+  );
 });
 
 test("redesign-flows-2: Today's items are rows with their remedy and fix; a doctor env item the Setup row names is left out", () => {
@@ -225,24 +243,143 @@ test("redesign-flows-2: worth a look counts never-drilled repositories and a new
   assert.deepEqual(worthRows([], { update_available: false }), []);
 });
 
-test("redesign-flows-2: plain-click kinds filter the rows (none on: all); the heading counts the urgent ones", () => {
+test("redesign-flows-2: plain-click kinds filter the rows (none on: all); the card counts them exactly", () => {
   /** @type {any[]} */
   const rows = [
     { key: "a", severity: "bad", source: "asks", at: 1 },
     { key: "b", severity: "warn", kind: "update", source: "updates", at: 9 },
     { key: "c", severity: "warn", kind: "setup", source: "setup", at: 5 },
   ];
-  assert.equal(shownRows(rows, new Set(), "worst").length, 3);
+  assert.equal(shownRows(rows, new Set()).length, 3);
   assert.deepEqual(
-    shownRows(rows, new Set(["update", "ask"]), "worst").map((r) => r.key),
+    shownRows(rows, new Set(["update", "ask"])).map((r) => r.key),
     ["a", "b"],
   );
+  assert.equal(countWords(3, 3), "3 items waiting");
+  assert.equal(countWords(1, 1), "1 item waiting");
+  assert.equal(countWords(1, 3), "1 of 3 items shown");
+});
+
+test("kp11: the rows stand under Urgent, Updates, Setup and Checks, in that order, an empty heading left out", () => {
+  /** @type {any[]} */
+  const rows = [
+    { key: "c", severity: "warn", kind: "check", source: "checks", at: 5 },
+    { key: "a", severity: "bad", source: "asks", at: 1 },
+    { key: "f", severity: "warn", source: "notices", at: 3 },
+    { key: "u", severity: "warn", kind: "update", source: "updates", at: 9 },
+  ];
+  assert.deepEqual([...GROUPS], ["Urgent", "Updates", "Setup", "Checks"]);
+  assert.equal(groupOf(rows[1]), "Urgent");
+  assert.equal(groupOf(rows[2]), "Urgent");
   assert.deepEqual(
-    shownRows(rows, new Set(), "newest").map((r) => r.key),
-    ["b", "c", "a"],
+    groupRows(rows).map((g) => [g.name, g.rows.map((r) => r.key)]),
+    [
+      ["Urgent", ["a", "f"]],
+      ["Updates", ["u"]],
+      ["Checks", ["c"]],
+    ],
   );
-  assert.equal(headline(rows), "3 things need you · 1 is urgent");
-  assert.equal(headline(rows.slice(1, 2)), "1 thing needs you");
+});
+
+test("kp11: a failure's fold reads what the notice carries and needs a remedy", () => {
+  /** @type {any} */
+  const row = {
+    key: "notice:7",
+    severity: "bad",
+    problem: {
+      what: "The upload was refused",
+      why: "The key expired",
+      remedy: "Renew it",
+    },
+  };
+  assert.deepEqual(problemOf(row), {
+    key: "notice:7",
+    what: "The upload was refused",
+    why: "The key expired",
+    remedy: "Renew it",
+    severity: "critical",
+  });
+  assert.equal(problemOf({ ...row, problem: { what: "x" } }), null);
+  assert.equal(
+    problemOf(/** @type {any} */ ({ key: "k", severity: "warn" })),
+    null,
+  );
+});
+
+test("kp11: a host question becomes a question card whose safe answer is to leave it stopped", () => {
+  const ask = {
+    id: 41,
+    boot: "b1",
+    op: "deploy",
+    step: "record the new value",
+    what: "The deploy needs a decision",
+    if_allowed: "the deploy goes on",
+    if_stopped: "",
+    asked_at: 100,
+    deadline: 160,
+  };
+  const spec = askSpec(ask);
+  assert.equal(spec.id, askId(ask));
+  assert.equal(spec.id, "b1-41");
+  assert.equal(spec.question, "deploy is waiting at “record the new value”");
+  assert.equal(spec.deadline, 160000);
+  assert.equal(spec.asked, 100000);
+  assert.equal(spec.defaultAnswer, "stop");
+  assert.deepEqual(
+    spec.answers?.map((a) => [a.value, a.consequence]),
+    [
+      ["allow", "The deploy goes on."],
+      ["stop", "The operation stops here."],
+    ],
+  );
+  assert.equal(askId({ ...ask, boot: null }), "boot-41");
+});
+
+test("kp11: the bulk card lists the first ten unread notices of the last day and counts all that match", () => {
+  const now = 1_000_000;
+  /** @type {any[]} */
+  const notices = [
+    ...Array.from({ length: 12 }, (_, i) => ({
+      id: i + 1,
+      at: now - 60 * (i + 1),
+      read: false,
+    })),
+    { id: 90, at: now - 90_000, read: false },
+    { id: 91, at: now - 60, read: true },
+  ];
+  const r = bulkRows(notices, now);
+  assert.equal(r.rows.length, 10);
+  assert.equal(r.rows[0].id, 1);
+  assert.equal(r.matching, 12);
+  assert.equal(r.ids.length, 12);
+});
+
+test("kp11: Fix all is on only for notices that share one fix without choices of its own", () => {
+  const fix = (/** @type {string} */ stack, /** @type {any} */ args = {}) => ({
+    action: "backup",
+    stack,
+    label: "Back up",
+    args,
+  });
+  /** @type {Map<number, any>} */
+  const byId = new Map([
+    [1, { id: 1, fixes: [fix("a")] }],
+    [2, { id: 2, fixes: [fix("b")] }],
+    [3, { id: 3, fixes: [] }],
+    [4, { id: 4, fixes: [{ ...fix("c"), action: "deploy" }] }],
+    [5, { id: 5, fixes: [fix("d", { app: "x" })] }],
+    [6, { id: 6, fixes: [fix("_host")] }],
+  ]);
+  assert.equal(fixAllRule([1, 2], byId), "");
+  assert.deepEqual(fixAllBatch([1, 2], byId), {
+    action: "backup",
+    stacks: ["a", "b"],
+  });
+  assert.equal(fixAllRule([3], byId), "None of these can be fixed");
+  assert.equal(fixAllRule([1, 3], byId), "1 of 2 can be fixed");
+  assert.match(fixAllRule([1, 4], byId), /different fixes/);
+  assert.match(fixAllRule([5], byId), /own choices/);
+  assert.match(fixAllRule([6], byId), /own choices/);
 });
 
 test("redesign-flows-1: the Update flow's address and scope", () => {

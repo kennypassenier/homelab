@@ -2777,24 +2777,7 @@ details.nx-card--fold[open] > summary::before {
   gap: 8px;
 }
 
-/* -- the Inbox's rows and the System landing's cards -- */
-.nx-inbox {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: grid;
-}
-.nx-inbox__row {
-  display: grid;
-  grid-template-columns: 10px minmax(0, 1fr) auto;
-  gap: 4px 14px;
-  align-items: center;
-  padding: 12px 4px;
-  border-block-end: 1px solid var(--border);
-}
-.nx-inbox__row:last-child {
-  border-block-end: 0;
-}
+/* -- the severity dot (Apply's items) and the System landing's cards -- */
 .nx-sev {
   inline-size: 10px;
   block-size: 10px;
@@ -2808,28 +2791,6 @@ details.nx-card--fold[open] > summary::before {
 }
 .nx-sev--info {
   background: var(--nx-info);
-}
-.nx-inbox__what strong {
-  display: block;
-}
-.nx-inbox__what span {
-  display: block;
-  font-size: var(--kp-text-sm);
-  color: var(--muted-foreground);
-}
-.nx-inbox__acts {
-  display: flex;
-  gap: 8px;
-  justify-content: flex-end;
-}
-@media (max-width: 48rem) {
-  .nx-inbox__row {
-    grid-template-columns: 10px minmax(0, 1fr);
-  }
-  .nx-inbox__acts {
-    grid-column: 2;
-    justify-content: flex-start;
-  }
 }
 .nx-actions {
   display: grid;

@@ -1,5 +1,3 @@
-// The kp-themes module chassis-rs serves at /static/kp/js/alarm.js (kp-themes 10.1.1),
-// copied from kp-themes js/alarm.d.ts: chassis serves the module, not its types.
 /** Dispatched when an alarm closes, bubbling, on its trigger (or the document): `{ reason, id }`. */
 export declare const ALARM_CLOSE_EVENT = "kp-alarm-close";
 /** Dispatched on the alarm, bubbling, once it is open: `{ id, mode }`. */

@@ -1,20 +1,14 @@
-// The kp-themes module chassis-rs serves at /static/kp/js/theme-registry.js (kp-themes 10.1.1),
-// copied from kp-themes js/theme-registry.d.ts: chassis serves the module, not its types.
 export type ThemeName =
   | "formal"
-  | "light"
   | "dark"
   | "cyberpunk"
   | "synthwave"
   | "pastel"
-  | "terminal"
   | "forest"
   | "blueprint"
   | "solstice"
   | "brutalism"
   | "deco"
-  | "phantom"
-  | "grotesk"
   | "nostromo"
   | "titanium";
 export type ThemeRecord = {
@@ -31,7 +25,7 @@ export type ThemeRecord = {
  * measured on 2026-09-04 carrying a hand-kept copy of which themes
  * exist, and both had it wrong.
  *
- * @typedef {'formal' | 'light' | 'dark' | 'cyberpunk' | 'synthwave' | 'pastel' | 'terminal' | 'forest' | 'blueprint' | 'solstice' | 'brutalism' | 'deco' | 'phantom' | 'grotesk' | 'nostromo' | 'titanium'} ThemeName
+ * @typedef {'formal' | 'dark' | 'cyberpunk' | 'synthwave' | 'pastel' | 'forest' | 'blueprint' | 'solstice' | 'brutalism' | 'deco' | 'nostromo' | 'titanium'} ThemeName
  */
 /** @typedef {{name: ThemeName, label: string, dark: boolean}} ThemeRecord */
 /** @type {readonly ThemeRecord[]} */
@@ -54,4 +48,4 @@ export declare const STORAGE_KEY = "theme";
  * matters happens in the browser, on a page where the two files may
  * have arrived separately. js/diagnostics.js does it.
  */
-export declare const VERSION = "10.1.1";
+export declare const VERSION = "11.0.0";

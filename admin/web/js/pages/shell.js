@@ -8,17 +8,43 @@
 // exec_enabled = true. `/shell` and `/log`'s old Console role land here.
 
 import { act, onAct, send } from "../act.js";
-import { refusalCallout } from "../actui.js";
 import { fetchJson, h } from "../dom.js";
+import { gridRow, formGrid, buttonGroup } from "../gridrow.js";
+import {
+  CONSOLE_RETRY_EVENT,
+  attachConsoles,
+  clearConsole,
+  consoleBlocks,
+  runConsoleCommand,
+  setConsole,
+  setConsoleComplete,
+  setConsoleContext,
+  setConsoleRun,
+} from "/static/kp/js/console.js";
+import { setKeys, attachKeys } from "/static/kp/js/keys.js";
+import { attachDisabledReasons } from "/static/kp/js/reason.js";
 import { declare, declareField, drivable } from "../drivable.js";
 import { shellResult, shellTargets } from "../parity.js";
 import { current, subscribe } from "../store.js";
-import { ensureStyle, pageHeader } from "../ui.js";
+import { dot, ensureStyle, pageHeader } from "../ui.js";
 import { setParams } from "../urlstate.js";
 import { mountHostLog } from "./log.js";
 
-/** Lines the Up key recalls. */
-const RECALL = 50;
+/** Words that need a second Enter: what cannot be taken back. */
+const CONFIRM_WORDS = ["rm", "reboot", "shutdown", "mkfs", "dd", "kill -9"];
+/** Words Tab completes. */
+const COMPLETE = [
+  "df -h",
+  "free -m",
+  "uptime",
+  "hostname",
+  "ls",
+  "cat",
+  "journalctl -u",
+  "systemctl status",
+  "docker ps",
+  "ps aux",
+];
 
 // Live view (invariant 39): every control on this page that runs
 // something; the explorer's own controls are declared for this page too.
@@ -192,7 +218,7 @@ export function mount(root) {
       {
         type: "button",
         class: "kp-button kp-button--primary",
-        title: "Jump to the shell bar (Ctrl `)",
+        title: "Jump to the prompt (:)",
       },
       "Run a command",
     ),
@@ -213,55 +239,95 @@ export function mount(root) {
   header.title.after(liveChip);
   header.el.classList.add("con-head");
 
-  // ── the shell bar ───────────────────────────────────────────────────
-  const target = h("select", {
-    class: "kp-field__input",
-    id: SHELL_TARGET,
-    "aria-label": "Container",
-    title: "The container the command runs in",
-  });
-  const line = h("input", {
-    class: "kp-field__input mono",
-    id: SHELL_LINE,
-    type: "text",
-    autocomplete: "off",
-    spellcheck: "false",
-    placeholder: "a command, e.g. df -h /appdata",
-    "aria-label": "Command",
-  });
-  drivable(target, CONTAINER);
-  const run = drivable(
-    h(
-      "button",
-      {
-        type: "submit",
-        class: "kp-button kp-button--primary",
-        id: "shell-run",
-        title:
-          "Run as root in the container (pct exec); queued as a job and audited (Enter)",
-      },
-      "Run",
-    ),
-    RUN,
-  );
-  // The hint's words are there from the first frame, so the footer never
-  // grows when the host's settings arrive, and stay when they cannot be
-  // read (finding 11).
+  // ── the console: kp's, in its own pane under the log ────────────────
+  // (feat-kp11demo-7) The prompt, the history of the last 50 lines for this
+  // tab, the command blocks with their state, timer and exit code, the
+  // output folded past twelve lines, Tab to complete, a second Enter for the
+  // words that cannot be taken back. The page supplies what a command may do:
+  // each line is the exec action on the host-wide target, a queued, audited
+  // job; the host refuses unless exec_enabled = true.
   const EXEC_ON =
-    "Runs as root; every line is a job in the queue and a line in the host's audit log. ↑ ↓ walk your history.";
-  const off = h("p", { class: "con-off" }, EXEC_ON);
-  const form = h(
-    "form",
-    { class: "con-shell", "aria-label": "Run a command" },
-    target,
-    h(
-      "label",
-      { class: "con-prompt" },
-      h("b", { "aria-hidden": "true" }, "#"),
-      line,
-    ),
-    run,
-    off,
+    "Runs as root; every line is a job in the queue and a line in the host's audit log. ↑ walks your history, Tab completes.";
+  const EXEC_OFF =
+    "Remote exec is off (exec_enabled = false, changed over ssh only)";
+  const consoleEl = h("div", {
+    class: "kp-console",
+    "data-kp-console": "",
+    "data-kp-console-prompt": "#",
+    "data-kp-console-context": "select",
+    "data-kp-console-history": "50",
+    "data-kp-console-remember": "session",
+    "data-kp-console-tab": "complete",
+    "data-kp-console-status": "exit-code",
+    "data-kp-console-max-lines": "12",
+    "data-kp-console-follow": "stick",
+    "data-kp-console-cancel": "",
+    "data-kp-console-confirm": `/^\\s*(${CONFIRM_WORDS.join("|")})\\b/`,
+    "data-kp-console-hint": EXEC_ON,
+    "data-kp-state": "loading",
+    "aria-label": "Host console",
+  });
+  const consolePane = h("div", { class: "con-pane" }, consoleEl);
+
+  // ── the session tools and the words that need a second press ────────
+  const toolRead = h(
+    "span",
+    { class: "kp-formgrid__value con-read", role: "status" },
+    "",
+  );
+  const mkBtn = (/** @type {string} */ label, /** @type {string} */ title) =>
+    h("button", { type: "button", class: "kp-button", title }, label);
+  const clearBtn = mkBtn(
+    "Clear",
+    "Empty the screen; Undo brings every block back",
+  );
+  const againBtn = mkBtn(
+    "Run again",
+    "Repeat the last command in the same container",
+  );
+  const saveBtn = mkBtn("Download the session", "Every block as one text file");
+  const chips = h(
+    "span",
+    { class: "con-chips" },
+    ...CONFIRM_WORDS.map((w) => h("span", { class: "kp-badge" }, w)),
+  );
+  const tools = formGrid(
+    [
+      gridRow({
+        label: "Needs a second press",
+        control: chips,
+        value: h(
+          "span",
+          { class: "con-read" },
+          "A line that starts with one of these waits for a second Enter.",
+        ),
+        wide: false,
+      }),
+      gridRow({
+        label: "Screen",
+        control: "Empties the screen; Undo brings it back.",
+        actions: clearBtn,
+        buttons: true,
+      }),
+      gridRow({
+        label: "Last command",
+        control: "Repeats the last command in the same place.",
+        actions: againBtn,
+        buttons: true,
+      }),
+      gridRow({
+        label: "Whole session",
+        control: "Every block as one text file.",
+        actions: saveBtn,
+        buttons: true,
+      }),
+      gridRow({
+        label: "Keys",
+        control: h("span", { class: "kp-keys", "data-con-keys": "" }),
+        value: toolRead,
+      }),
+    ],
+    "con-tools",
   );
 
   const body = h("div", { class: "con-body" });
@@ -269,8 +335,8 @@ export function mount(root) {
   const explorer = mountHostLog(body, {
     drive: DRIVE,
     followInBar: false,
-    foot: form,
-    label: "Host lines and shell",
+    foot: h("div", { class: "con-foot" }, consolePane, tools),
+    label: "Host lines and the console",
     onFollow: (on) => paintFollow(on),
   });
   const paintFollow = (/** @type {boolean} */ on) => {
@@ -288,176 +354,217 @@ export function mount(root) {
     explorer.setFollow(!explorer.following()),
   );
   download.addEventListener("click", () => explorer.download());
-  runACommand.addEventListener("click", () => line.focus());
+  setKeys(/** @type {HTMLElement} */ (root.querySelector("[data-con-keys]")), [
+    [":", "jump to the prompt"],
+    ["↑", "earlier command"],
+    ["Tab", "complete"],
+    ["Space", "pause following"],
+    ["End", "tail"],
+  ]);
+  const detach = [
+    attachConsoles(root),
+    attachKeys(root),
+    attachDisabledReasons(root),
+  ];
 
-  // Remote exec off on this host: say so under the bar, once known.
+  // The inner parts Live view and the old fields name.
+  const decorate = () => {
+    const sel = consoleEl.querySelector("select");
+    const input = consoleEl.querySelector(".kp-console__input");
+    const run = consoleEl.querySelector(".kp-console__run");
+    if (sel instanceof HTMLElement) {
+      sel.id = SHELL_TARGET;
+      drivable(sel, CONTAINER);
+    }
+    if (input instanceof HTMLElement) input.id = SHELL_LINE;
+    if (run instanceof HTMLElement) drivable(run, RUN);
+    // The prompt is a package form: a busy submit and a summary that says
+    // why a line was refused (kp-themes forms.js).
+    const form = consoleEl.querySelector("form");
+    if (form instanceof HTMLElement) {
+      form.setAttribute("data-kp-form", "");
+      form.setAttribute("novalidate", "");
+      if (!form.querySelector("[data-kp-form-summary]"))
+        form.prepend(
+          h("div", {
+            class: "kp-form__summary",
+            "data-kp-form-summary": "",
+            tabindex: "-1",
+            hidden: "",
+          }),
+        );
+    }
+    if (run instanceof HTMLElement) run.setAttribute("data-kp-submit", "");
+  };
+
+  // Remote exec off on this host: the prompt stops and says why.
   const abort = new AbortController();
+  let execOff = false;
+  const paintExec = () => {
+    consoleEl.toggleAttribute("disabled", execOff);
+    if (execOff) consoleEl.setAttribute("data-kp-disabled-reason", EXEC_OFF);
+    else consoleEl.removeAttribute("data-kp-disabled-reason");
+    attachDisabledReasons(root);
+  };
   void fetchJson("/data/host-settings", "the host settings", abort.signal).then(
     (r) => {
       if (!r.ok) return;
       /** @type {{key: string, value: unknown, set?: boolean}[]} */
       const fields = r.body?.page?.fields ?? [];
       const exec = fields.find((x) => x.key === "exec_enabled");
-      if (exec?.value === false)
-        off.textContent =
-          "Remote exec is off on this host (exec_enabled = false, changed over ssh only): the host refuses commands. ↑ ↓ walk your history.";
+      execOff = exec?.value === false;
+      paintExec();
     },
   );
 
+  // The containers (the fleet's stacks, by number); ?vmid= or the one
+  // picked before stays chosen.
   let wanted = params.get("vmid") ?? "";
   const fillTargets = () => {
-    const list = shellTargets(current().fleet?.stacks ?? []);
+    const stacks = current().fleet?.stacks;
+    if (!stacks) {
+      setConsole(consoleEl, { state: "loading" });
+      return;
+    }
+    const list = shellTargets(stacks);
     if (wanted && !list.some((t) => t.value === wanted))
       list.push({ value: wanted, label: `${wanted} · by number` });
     const sig = list.map((t) => t.value).join(",");
-    if (target.dataset.sig === sig) return;
-    target.dataset.sig = sig;
-    // The first container is chosen from the start, as the demo (finding
-    // 11); an address's ?vmid= or the one picked before stays chosen.
-    const keep = target.value || wanted;
-    target.replaceChildren(
-      ...(list.length
-        ? list.map((t) => h("option", { value: t.value }, t.label))
-        : [h("option", { value: "" }, "Reading the containers…")]),
-    );
-    target.value = list.some((t) => t.value === keep)
-      ? keep
-      : (list[0]?.value ?? "");
+    if (consoleEl.dataset.sig !== sig) {
+      consoleEl.dataset.sig = sig;
+      setConsoleContext(consoleEl, {
+        label: "Run in",
+        options: list,
+        value: list.some((t) => t.value === wanted)
+          ? wanted
+          : (list[0]?.value ?? ""),
+        state: "ready",
+      });
+    }
+    setConsole(consoleEl, { state: "ready" });
+    decorate();
   };
-  fillTargets();
-  const unsub = subscribe(fillTargets);
-  target.addEventListener("change", () => {
-    wanted = target.value;
+  setConsoleComplete(consoleEl, (prefix) =>
+    COMPLETE.filter((w) => w.startsWith(prefix)),
+  );
+  /** The exec action as the console's job. */
+  setConsoleRun(consoleEl, async (command, context) => {
+    wanted = context;
     history.replaceState(
       history.state,
       "",
       location.pathname + setParams(location.search, { vmid: wanted }),
     );
-  });
-
-  /** @type {string[]} */
-  const recall = [];
-  let recallAt = -1;
-  /** @type {Map<number, HTMLElement>} */
-  const pending = new Map();
-
-  /** @param {number} job */
-  const paintJob = (job) => {
-    const el = pending.get(job);
-    const j = act.jobs.find((x) => x.job === job);
-    if (!el || !j) return;
-    const r = shellResult(j);
-    const res = /** @type {HTMLElement} */ (el.querySelector(".con-exec__out"));
-    const state = /** @type {HTMLElement} */ (
-      el.querySelector(".con-exec__state")
-    );
-    state.textContent = r.done
-      ? r.ok
-        ? `exit ${r.exit ?? 0}`
-        : r.exit == null
-          ? j.state
-          : `exit ${r.exit}`
-      : j.state === "queued"
-        ? "queued behind the host's current operation…"
-        : "running…";
-    state.dataset.tone = r.done ? (r.ok ? "ok" : "bad") : "";
-    if (r.done) {
-      res.textContent = r.output || "(no output)";
-      res.hidden = false;
-      pending.delete(job);
-    }
-  };
-  const offJobs = onAct("jobs", (id) => {
-    if (id == null) for (const j of pending.keys()) paintJob(j);
-    else if (pending.has(id)) paintJob(id);
-  });
-
-  const submit = async () => {
-    const cmd = line.value.trim();
-    const n = target.value;
-    if (!cmd) return;
-    if (!/^\d{3,5}$/.test(n)) {
-      target.focus();
-      explorer.addBlock(
-        h(
-          "div",
-          { class: "con-exec" },
-          refusalCallout(
-            {
-              what: "the shell",
-              why: "no container is chosen",
-              fix: "choose one first",
-            },
-            "warning",
-          ),
-        ),
-      );
-      return;
-    }
-    recall.unshift(cmd);
-    recall.splice(RECALL);
-    recallAt = -1;
-    line.value = "";
-    const ct = target.selectedOptions[0]?.textContent?.trim() ?? `CT ${n}`;
-    const entry = h(
-      "div",
-      { class: "con-exec" },
-      h(
-        "div",
-        { class: "con-exec__head" },
-        h("span", { class: "mono" }, `# ${cmd}  ·  ${ct}`),
-        h("span", { class: "con-exec__state" }, "sending…"),
-      ),
-      h("pre", { class: "con-exec__out mono", hidden: "" }),
-    );
-    explorer.addBlock(entry);
+    if (!/^\d{3,5}$/.test(context))
+      return {
+        update: (handler) =>
+          handler({
+            state: "refused",
+            error: "no container is chosen",
+            remedy: "Choose a container first.",
+          }),
+      };
     const r = await send(
       "POST",
       "/data/actions/_host/exec",
-      { vmid: n, command: cmd },
-      `exec in CT ${n}`,
+      { vmid: context, command },
+      `exec in CT ${context}`,
     );
-    if (!r.ok) {
-      /** @type {HTMLElement} */ (
-        entry.querySelector(".con-exec__state")
-      ).textContent = "refused";
-      entry.append(refusalCallout(r.error));
+    if (!r.ok)
+      return {
+        update: (handler) =>
+          handler({
+            state: "refused",
+            error: r.error.why,
+            remedy: r.error.fix || undefined,
+          }),
+      };
+    const job = /** @type {number} */ (r.body.job);
+    /** @type {(() => void) | null} */
+    let stop = null;
+    return {
+      update: (handler) => {
+        const paint = () => {
+          const j = act.jobs.find((x) => x.job === job);
+          if (!j) return handler({ state: "queued" });
+          const res = shellResult(j);
+          if (!res.done)
+            return handler({
+              state: j.state === "queued" ? "queued" : "running",
+            });
+          stop?.();
+          handler({
+            state: res.ok ? "ok" : "failed",
+            ...(res.exit != null ? { code: res.exit } : {}),
+            output: res.output || "",
+          });
+        };
+        stop = onAct("jobs", (id) => {
+          if (id == null || id === job) paint();
+        });
+        paint();
+      },
+      cancel: () => {
+        void send(
+          "POST",
+          `/data/actions/jobs/${job}/cancel`,
+          {},
+          "cancel the command",
+        );
+      },
+    };
+  });
+  consoleEl.addEventListener(CONSOLE_RETRY_EVENT, () => fillTargets());
+  fillTargets();
+  const unsub = subscribe(fillTargets);
+
+  // the session tools
+  let last = "";
+  consoleEl.addEventListener("kp-console-block", (e) => {
+    const b = /** @type {CustomEvent} */ (e).detail.block;
+    if (b?.command) last = b.command;
+    toolRead.textContent = `${consoleBlocks(consoleEl).length.toLocaleString("en-GB")} commands in this tab.`;
+  });
+  clearBtn.addEventListener("click", () => {
+    clearConsole(consoleEl, { undo: true });
+    toolRead.textContent =
+      "Screen cleared. Undo is in the toast for a few seconds; ↑ still recalls your commands.";
+  });
+  againBtn.addEventListener("click", () => {
+    if (!last) {
+      toolRead.textContent = "No command ran in this tab yet.";
       return;
     }
-    const job = /** @type {number} */ (r.body.job);
-    entry.dataset.job = String(job);
-    pending.set(job, entry);
-    paintJob(job);
-  };
-  form.addEventListener("submit", (e) => {
-    e.preventDefault();
-    void submit();
+    void runConsoleCommand(consoleEl, last);
+    toolRead.textContent = `Run again: ${last}`;
   });
-  line.addEventListener("keydown", (e) => {
-    if (e.key === "ArrowUp" && recall.length) {
-      e.preventDefault();
-      recallAt = Math.min(recallAt + 1, recall.length - 1);
-      line.value = recall[recallAt];
-    } else if (e.key === "ArrowDown" && recallAt >= 0) {
-      e.preventDefault();
-      recallAt -= 1;
-      line.value = recallAt >= 0 ? recall[recallAt] : "";
-    }
+  saveBtn.addEventListener("click", () => {
+    const blocks = consoleBlocks(consoleEl);
+    const text = blocks
+      .map(
+        (b) =>
+          `# ${b.context}\n$ ${b.command}\n${b.output}\n[${b.state}${b.code === undefined ? "" : `, exit ${b.code}`}]`,
+      )
+      .join("\n\n");
+    const url = URL.createObjectURL(new Blob([text], { type: "text/plain" }));
+    const a = h("a", { href: url, download: "host-console.txt" });
+    document.body.append(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 0);
+    toolRead.textContent = `Downloaded host-console.txt: ${blocks.length.toLocaleString("en-GB")} blocks, ${text.length.toLocaleString("en-GB")} characters.`;
   });
-  /** @param {KeyboardEvent} e */
-  const onKey = (e) => {
-    if (e.key === "`" && e.ctrlKey) {
-      e.preventDefault();
-      line.focus();
-    }
-  };
-  document.addEventListener("keydown", onKey);
+  runACommand.addEventListener("click", () =>
+    /** @type {HTMLElement | null} */ (
+      consoleEl.querySelector(".kp-console__input")
+    )?.focus(),
+  );
+  void dot;
   return () => {
     abort.abort();
     explorer.cleanup();
     unsub();
-    offJobs();
-    document.removeEventListener("keydown", onKey);
+    for (const d of detach) d();
     root.classList.remove("con-page");
   };
 }

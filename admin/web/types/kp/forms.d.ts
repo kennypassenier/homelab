@@ -1,5 +1,3 @@
-// The kp-themes module chassis-rs serves at /static/kp/js/forms.js (kp-themes 10.1.1),
-// copied from kp-themes js/forms.d.ts: chassis serves the module, not its types.
 /**
  * Fired when a form passes validation. A contract value [TH26]: the
  * detail carries the FormData and, since KT6, a `done()` that ends the

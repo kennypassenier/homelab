@@ -1,5 +1,3 @@
-// The kp-themes module chassis-rs serves at /static/kp/js/freshness.js (kp-themes 10.1.1),
-// copied from kp-themes js/freshness.d.ts: chassis serves the module, not its types.
 /** A ticking line. */
 export declare const AGO = "[data-kp-ago]";
 /** The zone a moment is written in, whatever the reader's (rule 52). */

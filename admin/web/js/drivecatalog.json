@@ -394,7 +394,7 @@
     {
       "id": "backup-clear-filter",
       "page": "backups",
-      "what": "turn one active filter off (stack:<name>, text, drills, sort, all)",
+      "what": "turn one active filter off (stack:<name>, text, drills, all)",
       "opens": "view",
       "row": "<filter>",
       "href": "/backups",
@@ -411,7 +411,7 @@
     {
       "id": "backup-fleet-night",
       "page": "backups",
-      "what": "pin one night of the coverage heatmap from the whole-fleet row",
+      "what": "pin one night of the coverage grid from the whole-fleet row",
       "opens": "view",
       "row": "<YYYY-MM-DD>",
       "href": "/backups",
@@ -421,14 +421,98 @@
       "twins": false
     },
     {
+      "id": "backup-month-day",
+      "page": "backups",
+      "what": "pin one day of the month calendar",
+      "opens": "view",
+      "row": "<YYYY-MM-DD>",
+      "href": "/backups",
+      "was": [],
+      "shows": "in the Month view",
+      "reach": [
+        {
+          "do": "click",
+          "control": "backups-view",
+          "row": "month"
+        }
+      ],
+      "twins": false
+    },
+    {
+      "id": "backup-month-next",
+      "page": "backups",
+      "what": "show the month after",
+      "opens": "view",
+      "row": null,
+      "href": "/backups",
+      "was": [],
+      "shows": "in the Month view",
+      "reach": [
+        {
+          "do": "click",
+          "control": "backups-view",
+          "row": "month"
+        }
+      ],
+      "twins": false
+    },
+    {
+      "id": "backup-month-prev",
+      "page": "backups",
+      "what": "show the month before",
+      "opens": "view",
+      "row": null,
+      "href": "/backups",
+      "was": [],
+      "shows": "in the Month view",
+      "reach": [
+        {
+          "do": "click",
+          "control": "backups-view",
+          "row": "month"
+        }
+      ],
+      "twins": false
+    },
+    {
+      "id": "backup-month-today",
+      "page": "backups",
+      "what": "show this month again",
+      "opens": "view",
+      "row": null,
+      "href": "/backups",
+      "was": [],
+      "shows": "in the Month view",
+      "reach": [
+        {
+          "do": "click",
+          "control": "backups-view",
+          "row": "month"
+        }
+      ],
+      "twins": false
+    },
+    {
       "id": "backup-night",
       "page": "backups",
-      "what": "pin one stack's night of the coverage heatmap",
+      "what": "pin one stack's night of the coverage grid",
       "opens": "view",
       "row": "<stack>/<YYYY-MM-DD>",
       "href": "/backups",
       "was": [],
       "shows": null,
+      "reach": [],
+      "twins": false
+    },
+    {
+      "id": "backup-night-repair",
+      "page": "backups",
+      "what": "back up a stack that missed the night on show",
+      "opens": "dialog",
+      "row": "<stack>",
+      "href": "/backups",
+      "was": [],
+      "shows": "on a stack that missed the night",
       "reach": [],
       "twins": false
     },
@@ -458,7 +542,7 @@
       "row": null,
       "href": "/backups",
       "was": [],
-      "shows": null,
+      "shows": "in the Nights view",
       "reach": [],
       "twins": false
     },
@@ -470,7 +554,7 @@
       "row": null,
       "href": "/backups",
       "was": [],
-      "shows": "once the strip shows earlier nights",
+      "shows": "once the grid shows earlier nights",
       "reach": [
         {
           "do": "click",
@@ -487,7 +571,7 @@
       "row": null,
       "href": "/backups",
       "was": [],
-      "shows": null,
+      "shows": "in the Nights view",
       "reach": [],
       "twins": false
     },
@@ -530,7 +614,7 @@
     {
       "id": "backup-stack-filter",
       "page": "backups",
-      "what": "turn one stack on or off in the heatmap and the table",
+      "what": "turn one stack on or off in the coverage grid",
       "opens": "view",
       "row": "<stack>",
       "href": "/backups",
@@ -564,6 +648,18 @@
       "twins": false
     },
     {
+      "id": "backups-range",
+      "page": "backups",
+      "what": "how many nights the coverage grid shows",
+      "opens": "view",
+      "row": "<7d|30d|90d>",
+      "href": "/backups",
+      "was": [],
+      "shows": "in the Nights view",
+      "reach": [],
+      "twins": false
+    },
+    {
       "id": "backups-refresh",
       "page": "backups",
       "what": "read every stack's repositories from the host again",
@@ -593,6 +689,18 @@
       "what": "show only the repositories never restore-drilled, or all again",
       "opens": "view",
       "row": null,
+      "href": "/backups",
+      "was": [],
+      "shows": null,
+      "reach": [],
+      "twins": false
+    },
+    {
+      "id": "backups-view",
+      "page": "backups",
+      "what": "switch the coverage between the last nights and one month",
+      "opens": "view",
+      "row": "<nights|month>",
       "href": "/backups",
       "was": [],
       "shows": null,
@@ -1209,9 +1317,9 @@
     {
       "id": "firewall-action-filter",
       "page": "firewall",
-      "what": "show only ACCEPT or only DROP rules (again shows every rule)",
+      "what": "show only ACCEPT or only DROP rules (again shows every rule), or All",
       "opens": "view",
-      "row": "ACCEPT|DROP",
+      "row": "all|ACCEPT|DROP",
       "href": "/firewall",
       "was": [],
       "shows": null,
@@ -1233,19 +1341,43 @@
     {
       "id": "firewall-clear-rule-filter",
       "page": "firewall",
-      "what": "clear the Rules card's search and action filter",
+      "what": "clear the Rules table's search and action filter",
       "opens": "view",
       "row": null,
       "href": "/firewall",
       "was": [],
       "shows": "while the rule search or filter narrows the rules",
       "reach": [],
-      "twins": true
+      "twins": false
+    },
+    {
+      "id": "firewall-compare",
+      "page": "firewall",
+      "what": "light a stack in the matrix with the Differences reading on (Compare…)",
+      "opens": "view",
+      "row": "<stack>",
+      "href": "/firewall",
+      "was": [],
+      "shows": null,
+      "reach": [],
+      "twins": false
+    },
+    {
+      "id": "firewall-compare-mode",
+      "page": "firewall",
+      "what": "what the matrix shows: what pve enforces now, what the stack files declare, or only the pairs where they differ",
+      "opens": "view",
+      "row": "live|files|differences",
+      "href": "/firewall",
+      "was": [],
+      "shows": null,
+      "reach": [],
+      "twins": false
     },
     {
       "id": "firewall-decided-by",
       "page": "firewall",
-      "what": "jump from the pinned square to a rule that decides it",
+      "what": "jump from the traced pair to the rule that decides it",
       "opens": "view",
       "row": "<stack>/<in|out>/<n>",
       "href": "/firewall",
@@ -1266,11 +1398,6 @@
       "reach": [
         {
           "do": "click",
-          "control": "firewall-light",
-          "row": "*"
-        },
-        {
-          "do": "click",
           "control": "firewall-rule",
           "row": "*"
         }
@@ -1280,7 +1407,7 @@
     {
       "id": "firewall-edit-rules",
       "page": "firewall",
-      "what": "go to the chosen stack's firewall on its Settings (the header's Edit rules…)",
+      "what": "go to the chosen stack's firewall on its Settings (Edit rules…, guarded when its management is open)",
       "opens": "view",
       "row": null,
       "href": "/firewall",
@@ -1304,7 +1431,7 @@
     {
       "id": "firewall-edit-these-rules",
       "page": "firewall",
-      "what": "go to the Rules card's stack's firewall on its Settings",
+      "what": "go to the Rules table's stack's firewall on its Settings",
       "opens": "view",
       "row": null,
       "href": "/firewall",
@@ -1316,7 +1443,37 @@
     {
       "id": "firewall-fix",
       "page": "firewall",
-      "what": "go to a stack's firewall on its Settings from its attention row (Declare… or Compare…)",
+      "what": "go to a stack's firewall on its Settings from its attention row (Declare… or Fix…)",
+      "opens": "view",
+      "row": "<stack>",
+      "href": "/firewall",
+      "was": [],
+      "shows": null,
+      "reach": [],
+      "twins": false
+    },
+    {
+      "id": "firewall-follow",
+      "page": "firewall",
+      "what": "the stack the Lines view follows",
+      "opens": "view",
+      "row": null,
+      "href": "/firewall",
+      "was": [],
+      "shows": "in the Lines view",
+      "reach": [
+        {
+          "do": "click",
+          "control": "firewall-view",
+          "row": "lines"
+        }
+      ],
+      "twins": false
+    },
+    {
+      "id": "firewall-guard-stack",
+      "page": "firewall",
+      "what": "choose the stack whose rules Edit rules… opens",
       "opens": "view",
       "row": "<stack>",
       "href": "/firewall",
@@ -1393,8 +1550,14 @@
       "row": "<stack>/<in|out>/<n>",
       "href": "/firewall",
       "was": [],
-      "shows": null,
-      "reach": [],
+      "shows": "in an opened rule",
+      "reach": [
+        {
+          "do": "click",
+          "control": "firewall-rule",
+          "row": "*"
+        }
+      ],
       "twins": false
     },
     {
@@ -1409,11 +1572,6 @@
       "reach": [
         {
           "do": "click",
-          "control": "firewall-light",
-          "row": "*"
-        },
-        {
-          "do": "click",
           "control": "firewall-rule",
           "row": "*"
         }
@@ -1423,7 +1581,7 @@
     {
       "id": "firewall-rule-search",
       "page": "firewall",
-      "what": "the Rules card's filter box (address, port, stack or why)",
+      "what": "the Rules table's search box (address, port, stack or why)",
       "opens": "view",
       "row": null,
       "href": "/firewall",
@@ -1435,7 +1593,7 @@
     {
       "id": "firewall-rules-stack",
       "page": "firewall",
-      "what": "show one stack's rules in the Rules card",
+      "what": "show only one stack's rules in the Rules table (again shows every stack)",
       "opens": "view",
       "row": "<stack>",
       "href": "/firewall",
@@ -1487,6 +1645,78 @@
       "twins": false
     },
     {
+      "id": "firewall-total",
+      "page": "firewall",
+      "what": "show only the stacks a total counts, and light them in the matrix (again shows every stack)",
+      "opens": "view",
+      "row": "none|differs|open",
+      "href": "/firewall",
+      "was": [],
+      "shows": null,
+      "reach": [],
+      "twins": false
+    },
+    {
+      "id": "firewall-trace-copy",
+      "page": "firewall",
+      "what": "copy the trace as text",
+      "opens": "run",
+      "row": null,
+      "href": "/firewall",
+      "was": [],
+      "shows": null,
+      "reach": [],
+      "twins": false
+    },
+    {
+      "id": "firewall-trace-from",
+      "page": "firewall",
+      "what": "the stack a traced connection starts at",
+      "opens": "view",
+      "row": null,
+      "href": "/firewall",
+      "was": [],
+      "shows": null,
+      "reach": [],
+      "twins": false
+    },
+    {
+      "id": "firewall-trace-port",
+      "page": "firewall",
+      "what": "the port of the traced connection, or any port the rules allow",
+      "opens": "view",
+      "row": null,
+      "href": "/firewall",
+      "was": [],
+      "shows": null,
+      "reach": [],
+      "twins": false
+    },
+    {
+      "id": "firewall-trace-swap",
+      "page": "firewall",
+      "what": "turn the traced pair round (From and To change places; key S)",
+      "opens": "view",
+      "row": null,
+      "href": "/firewall",
+      "was": [],
+      "shows": null,
+      "reach": [],
+      "twins": false
+    },
+    {
+      "id": "firewall-trace-to",
+      "page": "firewall",
+      "what": "the stack a traced connection goes to",
+      "opens": "view",
+      "row": null,
+      "href": "/firewall",
+      "was": [],
+      "shows": null,
+      "reach": [],
+      "twins": false
+    },
+    {
       "id": "firewall-try-again",
       "page": "firewall",
       "what": "read what failed again",
@@ -1501,7 +1731,7 @@
     {
       "id": "firewall-unlight",
       "page": "firewall",
-      "what": "turn one lit stack off from its chip above the matrix",
+      "what": "turn one lit stack off from the reading above the matrix",
       "opens": "view",
       "row": "<stack>",
       "href": "/firewall",
@@ -1514,6 +1744,18 @@
           "row": "*"
         }
       ],
+      "twins": false
+    },
+    {
+      "id": "firewall-view",
+      "page": "firewall",
+      "what": "read the reachability as the full grid or as lines around one stack",
+      "opens": "view",
+      "row": "grid|lines",
+      "href": "/firewall",
+      "was": [],
+      "shows": null,
+      "reach": [],
       "twins": false
     },
     {
@@ -2619,6 +2861,18 @@
           "row": "*"
         }
       ],
+      "twins": false
+    },
+    {
+      "id": "restore-retry",
+      "page": "restore",
+      "what": "run the restore again after it stopped",
+      "opens": "run",
+      "row": null,
+      "href": "/backups/restore",
+      "was": [],
+      "shows": "when the restore stopped",
+      "reach": [],
       "twins": false
     },
     {
@@ -3969,7 +4223,21 @@
     {
       "id": "bk-filter",
       "page": "backups",
-      "what": "filter the repositories by stack or app",
+      "what": "search the repositories by stack or app",
+      "was": [],
+      "row": null
+    },
+    {
+      "id": "bk-night-pick",
+      "page": "backups",
+      "what": "the night the list of stacks shows (the last 14 nights)",
+      "was": [],
+      "row": null
+    },
+    {
+      "id": "bk-week-stack",
+      "page": "backups",
+      "what": "the stack whose week the night section draws",
       "was": [],
       "row": null
     },
@@ -3991,6 +4259,34 @@
       "id": "fleetview-traffic",
       "page": "fleetview",
       "what": "show the measured traffic on the map",
+      "was": [],
+      "row": null
+    },
+    {
+      "id": "fw-follow",
+      "page": "firewall",
+      "what": "the stack the Lines view follows",
+      "was": [],
+      "row": null
+    },
+    {
+      "id": "fw-trace-from",
+      "page": "firewall",
+      "what": "the stack a traced connection starts at",
+      "was": [],
+      "row": null
+    },
+    {
+      "id": "fw-trace-port",
+      "page": "firewall",
+      "what": "the port of the traced connection",
+      "was": [],
+      "row": null
+    },
+    {
+      "id": "fw-trace-to",
+      "page": "firewall",
+      "what": "the stack a traced connection goes to",
       "was": [],
       "row": null
     },
@@ -4047,6 +4343,13 @@
       "id": "restore-confirm",
       "page": "restore",
       "what": "the stack's name, typed to confirm the restore",
+      "was": [],
+      "row": null
+    },
+    {
+      "id": "rs-stack",
+      "page": "restore",
+      "what": "the stack whose apps the flow lists",
       "was": [],
       "row": null
     },
@@ -4205,7 +4508,7 @@
     "jobs": "/activity?view=running",
     "log": "/activity?view=host-log",
     "schedules": "/activity?view=planned",
-    "backupcalendar": "/backups?section=coverage",
+    "backupcalendar": "/backups?view=month",
     "retired": "/backups?section=removed",
     "fleetview": "/map",
     "notifications": "/inbox",

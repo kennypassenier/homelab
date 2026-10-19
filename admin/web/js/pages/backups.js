@@ -1,36 +1,31 @@
 // feat-backup-1/2/3, redesign-backups (Backups redesign 3.71, approved by Kenny
-// 2026-10-03; the demo is `redesign-3.71/backups.html`): the Backups page.
+// 2026-10-03); rebuilt on kp-themes 11.0.0 from the demo Kenny approved on
+// 2026-10-19 (app-homelab-backups, feat-kp11demo-8): the Backups page.
 //
 // Top to bottom: the header (Refresh, Back up now…, Restore… as the one
 // primary action); five KPI tiles (last night, newest snapshot,
 // repositories, restore drills — a tile that filters the table — and what
-// retired stacks still keep); the attention band; the nightly coverage
-// heatmap (every stack × 30 nights, with a whole-fleet row; hover a night
-// for its snapshot time and ids, click to pin it — into the address as
-// `?night=` — and read it in the side panel); the repositories grouped per
-// stack (sort, `/` filter, a 7-night tick strip, size, drill status, a
-// click shows every snapshot with its own Restore); and "Kept from retired
-// stacks", folded, last (was the Retired page).
+// retired stacks still keep); the attention band; "Backups per night": the
+// coverage grid of every stack against the last 7, 30 or 90 nights, or one
+// month as a calendar with the same grid beside it (the Calendar page is the
+// Month option of this switch now); "One night": who backed up on a night,
+// with a repair next to each miss, and the week of one stack; the
+// repositories as one grouped, expandable, sortable table with a bar of what
+// each stack takes; and "Kept from retired stacks", folded, last.
 //
 // Data: `/data/backups/<stack>` (repositories, sizes, drill verdicts, every
 // snapshot — the host's snapshot cache, fix-180) and
 // `/data/backup-calendar?stack=<stack>` (which stacks keep no data by
-// design, and each stack's snapshot nights), one stack at a time so a slow
-// repository holds up only its own row (fix-177, fix-224); `/data/retired`.
-// Restore, Verify restore (fix-237) and the drills are the existing action
-// dialogs; "Show a file…" (fix-241) is the existing read-only dialog.
-//
-// The shared pieces (header, KPI strip, attention band, cards, hover card,
-// sort headers, filter chips) are ui.js's; the page's root carries
-// `bk-page`, under which app.css measures them the way the demo does.
+// design, and each stack's snapshot nights — the whole history, so the 90
+// night range and any month need no further read), one stack at a time so a
+// slow repository holds up only its own row (fix-177, fix-224);
+// `/data/retired`. Restore, Verify restore (fix-237) and the drills are the
+// existing action dialogs; "Show a file…" (fix-241) is the existing
+// read-only dialog.
 
-import { fetchJson, h, slowRead, tableBlock } from "../dom.js";
-import {
-  formatClock,
-  formatDateTime,
-  formatDay,
-  humanDuration,
-} from "../format.js";
+import { bindTableUrl, ensureStyle, fetchJson, h, slowRead } from "../dom.js";
+import { agoEl, setAgo } from "../ago.js";
+import { formatClock, formatDateTime, humanDuration } from "../format.js";
 import { openAction, openBatch } from "../actiondialog.js";
 import { openDialog } from "../actui.js";
 import { snapshotPickerRows } from "../snapshotpicker.js";
@@ -43,58 +38,145 @@ import {
   fieldId,
   viaForm,
 } from "../drivable.js";
-import { stackHref } from "../router.js";
 import { current, listen, subscribe } from "../store.js";
 import { setParams } from "../urlstate.js";
-import { stackHues } from "../topology.js";
 import { RETIRED_COLUMNS, retiredRow } from "./retired.js";
 import { changesRetired } from "../retiredview.js";
-import { attachDataTables } from "/static/kp/js/datatable.js";
 import {
   allRepos,
-  cellState,
   drillState,
-  drillWords,
-  fleetNight,
-  humanBytes,
   kpis,
   nightRange,
   nightsNow,
   offsetFor,
-  repoGroups,
   searchFromView,
-  stackNight,
-  stackWhy,
-  ticks,
   viewFromSearch,
+  addDays,
+  cellState,
+  nightKey,
 } from "../backupsview.js";
+import {
+  calendarDays,
+  monthNights,
+  nightDate,
+  nightRows,
+  nightSentence,
+  nightSummary,
+  nightsSpec,
+  sizeText,
+  stackSizes,
+} from "../backupgrid.js";
+import {
+  COL,
+  feedCells,
+  groupRow,
+  reposShell,
+  repoRow,
+  selectionBar,
+  snapshotList,
+} from "../backuprepos.js";
+import { gridRow, formGrid, buttonGroup } from "../gridrow.js";
 import {
   countOf,
   attentionBand,
   button,
-  filterChip,
-  dot,
-  hoverCard,
-  hueColour,
   kbd,
   kpiStrip,
-  PHONE,
   pageHeader,
   section,
-  skeleton,
-  sortHead,
-  swatch,
 } from "../ui.js";
-
-/** A stack's colour square, in the topology's hue. @param {number} hue */
-const stackMark = (hue) => swatch(hueColour(hue));
+import {
+  attachDataTables,
+  dataTable,
+  VIEW_EVENT,
+} from "/static/kp/js/datatable.js";
+import { attachRowSelect } from "/static/kp/js/row-select.js";
+import { attachUptimes, setUptime } from "/static/kp/js/uptime.js";
+import { attachBarCells, setBarCell } from "/static/kp/js/barcell.js";
+import { attachIdmarks } from "/static/kp/js/idmark.js";
+import { attachActionColumns } from "/static/kp/js/actions.js";
+import { attachHoverCards } from "/static/kp/js/hovercard.js";
+import {
+  HEAT_PAGE_EVENT,
+  HEAT_PICK_EVENT,
+  HEAT_ROW_EVENT,
+  attachHeats,
+  setHeat,
+  setHeatPick,
+  setHeatRows,
+} from "/static/kp/js/heat.js";
+import { attachFootprints } from "/static/kp/js/footprint.js";
+import { setKeys } from "/static/kp/js/keys.js";
+import {
+  SEGMENTED_EVENT,
+  attachSegmented,
+  setSegmentedValues,
+} from "/static/kp/js/segmented.js";
+import { RANGE_EVENT, attachRanges } from "/static/kp/js/range.js";
+import {
+  CALENDAR_MONTH_EVENT,
+  CALENDAR_PICK_EVENT,
+  attachCalendars,
+  calendarMonth,
+  calendarSelect,
+  setCalendarDays,
+  setCalendarLegend,
+  setCalendarState,
+} from "/static/kp/js/calendar.js";
+import {
+  CARD_RETRY_EVENT,
+  attachCardStates,
+  setCardState,
+} from "/static/kp/js/card-state.js";
+import {
+  STACKBAR_PICK_EVENT,
+  STACKBAR_RETRY_EVENT,
+  attachStackbars,
+  setStackbar,
+} from "/static/kp/js/stackbar.js";
+import {
+  FACET_EVENT,
+  attachFacets,
+  getFacetValues,
+  setFacetItems,
+  setFacetValues,
+} from "/static/kp/js/facets.js";
+import {
+  SELECTION_ACTION_EVENT,
+  attachSelectionBars,
+} from "/static/kp/js/selection-bar.js";
+import {
+  STATUS_RETRY_EVENT,
+  attachStatusLists,
+  buildStatusList,
+  countStatus,
+} from "/static/kp/js/statusrow.js";
+import {
+  WEEK_RANGE_EVENT,
+  attachWeeks,
+  setWeekEvents,
+  setWeekLegend,
+  setWeekStart,
+  setWeekState,
+} from "/static/kp/js/week.js";
+import { drawnSelect } from "/static/kp/js/combobox.js";
 
 // review M5: every page field Live view may set is declared (drivable.js
 // `declareField`); the client and the dashboard refuse any other.
 const BK_FILTER = declareField({
   id: "bk-filter",
   page: "backups",
-  what: "filter the repositories by stack or app",
+  what: "search the repositories by stack or app",
+});
+const NIGHT_PICK = declareField({
+  id: "bk-night-pick",
+  page: "backups",
+  what: "the night the list of stacks shows (the last 14 nights)",
+});
+const WEEK_STACK = declareField({
+  id: "bk-week-stack",
+  page: "backups",
+  what: "the stack whose week the night section draws",
 });
 const SNAPFILE = declareField({
   id: "snapfile",
@@ -106,7 +188,6 @@ const SNAPFILE = declareField({
 /**
  * @typedef {import("../backupsview.js").StackRead} StackRead
  * @typedef {import("../backupsview.js").Repo} Repo
- * @typedef {import("../backupsview.js").SortKey} SortKey
  */
 
 // ── Live view (fix-239, invariant 39): every control of this page is
@@ -137,19 +218,67 @@ const UNDRILLED = declare({
   opens: "view",
   what: "show only the repositories never restore-drilled, or all again",
 });
+const VIEW = declare({
+  id: "backups-view",
+  page: "backups",
+  opens: "view",
+  row: "<nights|month>",
+  what: "switch the coverage between the last nights and one month",
+});
+const RANGE = declare({
+  id: "backups-range",
+  page: "backups",
+  opens: "view",
+  row: "<7d|30d|90d>",
+  what: "how many nights the coverage grid shows",
+  shows: "in the Nights view",
+});
 const NIGHT = declare({
   id: "backup-night",
   page: "backups",
   opens: "view",
   row: "<stack>/<YYYY-MM-DD>",
-  what: "pin one stack's night of the coverage heatmap",
+  what: "pin one stack's night of the coverage grid",
 });
 const FLEET_NIGHT = declare({
   id: "backup-fleet-night",
   page: "backups",
   opens: "view",
   row: "<YYYY-MM-DD>",
-  what: "pin one night of the coverage heatmap from the whole-fleet row",
+  what: "pin one night of the coverage grid from the whole-fleet row",
+});
+const MONTH_DAY = declare({
+  id: "backup-month-day",
+  page: "backups",
+  opens: "view",
+  row: "<YYYY-MM-DD>",
+  what: "pin one day of the month calendar",
+  shows: "in the Month view",
+  reach: [{ do: "click", control: "backups-view", row: "month" }],
+});
+const MONTH_PREV = declare({
+  id: "backup-month-prev",
+  page: "backups",
+  opens: "view",
+  what: "show the month before",
+  shows: "in the Month view",
+  reach: [{ do: "click", control: "backups-view", row: "month" }],
+});
+const MONTH_NEXT = declare({
+  id: "backup-month-next",
+  page: "backups",
+  opens: "view",
+  what: "show the month after",
+  shows: "in the Month view",
+  reach: [{ do: "click", control: "backups-view", row: "month" }],
+});
+const MONTH_TODAY = declare({
+  id: "backup-month-today",
+  page: "backups",
+  opens: "view",
+  what: "show this month again",
+  shows: "in the Month view",
+  reach: [{ do: "click", control: "backups-view", row: "month" }],
 });
 const UNPIN = declare({
   id: "backup-night-unpin",
@@ -164,13 +293,14 @@ const EARLIER = declare({
   page: "backups",
   opens: "view",
   what: "show the nights before the ones on screen",
+  shows: "in the Nights view",
 });
 const LATER = declare({
   id: "backup-nights-later",
   page: "backups",
   opens: "view",
   what: "show the nights after the ones on screen",
-  shows: "once the strip shows earlier nights",
+  shows: "once the grid shows earlier nights",
   reach: [{ do: "click", control: "backup-nights-earlier" }],
 });
 const TODAY = declare({
@@ -178,20 +308,21 @@ const TODAY = declare({
   page: "backups",
   opens: "view",
   what: "go back to the latest nights and unpin",
+  shows: "in the Nights view",
 });
 const STACK_FILTER = declare({
   id: "backup-stack-filter",
   page: "backups",
   opens: "view",
   row: "<stack>",
-  what: "turn one stack on or off in the heatmap and the table",
+  what: "turn one stack on or off in the coverage grid",
 });
 const CLEAR = declare({
   id: "backup-clear-filter",
   page: "backups",
   opens: "view",
   row: "<filter>",
-  what: "turn one active filter off (stack:<name>, text, drills, sort, all)",
+  what: "turn one active filter off (stack:<name>, text, drills, all)",
   shows: "while a filter is on",
   reach: [{ do: "click", control: "backups-undrilled-filter" }],
 });
@@ -224,6 +355,14 @@ const RETRY = declare({
   what: "read one stack's repositories again after its read failed",
   shows: "on a stack whose repositories could not be read",
 });
+const NIGHT_REPAIR = declare({
+  id: "backup-night-repair",
+  page: "backups",
+  opens: "dialog",
+  row: "<stack>",
+  what: "back up a stack that missed the night on show",
+  shows: "on a stack that missed the night",
+});
 // fix-239/241: "Show a file…" opens a page dialog (no catalog action).
 const SNAPSHOT_FILE = declare({
   id: "snapshot-file",
@@ -234,21 +373,23 @@ const SNAPSHOT_FILE = declare({
 });
 
 /** A read that never settles is given up after this long (fix-224). */
-const UNREAD_GIVE_UP_MS = 180_000;
+// fix-224: overridable only from a test (`globalThis.__HOMELAB_TEST_...__`),
+// never read from anything a server or a URL controls.
+const UNREAD_GIVE_UP_MS =
+  Number(/** @type {any} */ (globalThis).__HOMELAB_TEST_UNREAD_GIVE_UP_MS__) ||
+  180_000;
 
 const nowS = () => Math.floor(Date.now() / 1000);
 
-/** @param {number} t unix seconds @returns {string} local HH:MM */
-const hhmm = (t) => formatClock(t);
+/** The nightly round starts at 03:00 (the planned pill of the week). */
+const PLANNED_AT = "03:00";
 
-/**
- * A night (YYYY-MM-DD, a civil date) as every page writes a day: "Sat 3
- * Oct" (redesign-final X4: one date format).
- * @param {string} n
- */
-const shortDate = (n) =>
-  formatDay(Date.parse(`${n}T12:00:00Z`) / 1000, { timeZone: "UTC" });
-const longDate = shortDate;
+/** The grid's columns for a range. @type {Record<string, {n: number, every: number}>} */
+const RANGES = {
+  "7d": { n: 7, every: 1 },
+  "30d": { n: 30, every: 3 },
+  "90d": { n: 90, every: 7 },
+};
 
 /**
  * The restore action a stack's repositories need.
@@ -267,21 +408,39 @@ const restoreKind = (native) => (native ? "restore-native" : "restore");
 const restorePreset = (native, app, snapshot) =>
   native ? { snapshot } : { app, snapshot };
 
+/** @param {Element} el @param {{label: string, value?: string}[]} options @param {string} value */
+function setOptions(el, options, value) {
+  const select = /** @type {HTMLSelectElement} */ (el);
+  select.replaceChildren(
+    ...options.map((o) => h("option", { value: o.value ?? o.label }, o.label)),
+  );
+  select.value = value;
+  drawnSelect(select)?.refresh();
+}
+
 /**
  * @param {HTMLElement} root
  * @returns {() => void}
  */
 export function mount(root) {
+  ensureStyle("/css/pages/backups.css");
   const fromUrl = viewFromSearch(location.search);
+  const params = new URLSearchParams(location.search);
   const S = {
     /** @type {string | null} */ night: fromUrl.night,
     offset: 0,
     stacks: fromUrl.stacks,
-    undrilled: fromUrl.undrilled,
-    q: fromUrl.q,
-    /** @type {SortKey[]} */ sort: fromUrl.sort,
-    /** @type {Set<string>} */ collapsed: new Set(),
-    /** @type {string | null} */ open: null,
+    /** @type {"nights" | "month"} */
+    view: params.get("view") === "month" ? "month" : "nights",
+    /** @type {"7d" | "30d" | "90d"} */
+    range: /** @type {any} */ (
+      ["7d", "30d", "90d"].includes(params.get("range") ?? "")
+        ? params.get("range")
+        : "30d"
+    ),
+    /** @type {"quiet" | "plain"} */ weekend: "quiet",
+    cursor: monthOfNow(),
+    weekStack: /** @type {string | null} */ (null),
   };
   /** @type {string[]} */
   let names = [];
@@ -296,17 +455,36 @@ export function mount(root) {
   /** @type {number | null} */
   let readAt = null;
   const abort = new AbortController();
-  const tip = hoverCard();
   root.classList.add("bk-page");
   /** @type {(() => void)[]} */
-  const cleanups = [() => tip.stop(), () => root.classList.remove("bk-page")];
-  const N = () => (matchMedia(PHONE).matches ? 14 : 30);
-  /** @type {Map<string, number>} */
-  let hues = new Map();
-  const hueOf = (/** @type {string} */ s) => hues.get(s) ?? 210;
+  const cleanups = [() => root.classList.remove("bk-page")];
+  /** Stack → CT number, from the fleet. @type {Map<string, number>} */
+  const vmids = new Map();
+  /** repository key → what the row stands for. @type {Map<string, {stack: string, native: boolean, repo: Repo, read: StackRead}>} */
+  const refs = new Map();
+  /** Stack → its colour slot by size. @type {Map<string, string>} */
+  let slots = new Map();
+  const markOf = (/** @type {string} */ s) =>
+    slots.get(s) ?? "var(--muted-foreground)";
 
   const writeUrl = () => {
-    const search = setParams(location.search, searchFromView(S));
+    let search = setParams(
+      location.search,
+      searchFromView({
+        night: S.night,
+        stacks: S.stacks,
+        undrilled: false,
+        q: "",
+        sort: [],
+      }),
+    );
+    search = setParams(search, {
+      view: S.view === "month" ? "month" : null,
+      range: S.range === "30d" ? null : S.range,
+      drills: null,
+      q: null,
+      sort: null,
+    });
     if (search !== location.search)
       history.replaceState(history.state, "", location.pathname + search);
   };
@@ -324,7 +502,7 @@ export function mount(root) {
     button("Back up now…", {
       cls: "kp-button--secondary",
       title:
-        "Run a backup now of every stack that keeps data (or only the stacks you turned on below); the dialog lists them first",
+        "Run a backup now of every stack that keeps data (or only the stacks you turned on in the grid); the dialog lists them first",
       onClick: () => {
         const want = names.filter((n) => {
           const r = reads[n];
@@ -367,13 +545,8 @@ export function mount(root) {
         title:
           "Click to show only the repositories never drilled in the table; click again to show all",
         toggle: {
-          pressed: S.undrilled,
-          onToggle: () => {
-            S.undrilled = !S.undrilled;
-            writeUrl();
-            paintKpis();
-            paintRepos();
-          },
+          pressed: false,
+          onToggle: () => toggleUndrilled(),
           drive: { id: UNDRILLED },
         },
       },
@@ -388,32 +561,57 @@ export function mount(root) {
 
   const band = attentionBand([]);
 
-  // ── coverage heatmap + night detail ───────────────────────────────────
-  const heat = h("div", {
-    class: "bk-heat",
-    role: "grid",
-    "aria-label": "Snapshots per stack per night",
-    "aria-describedby": "bk-cov-keys",
+  // ── the coverage: grid of nights, or one month ────────────────────────
+  const viewItem = (
+    /** @type {"nights" | "month"} */ value,
+    /** @type {string} */ label,
+  ) =>
+    drivable(
+      h(
+        "button",
+        {
+          type: "button",
+          class: "kp-segmented__item",
+          role: "radio",
+          "aria-checked": String(S.view === value),
+          "data-value": value,
+        },
+        label,
+      ),
+      VIEW,
+      value,
+    );
+  const viewSwitch = h(
+    "div",
+    {
+      class: "kp-segmented",
+      "data-kp-segmented": "single",
+      role: "radiogroup",
+      "aria-label": "Backups view",
+    },
+    viewItem("nights", "Nights"),
+    viewItem("month", "Month"),
+  );
+  const readAgo = agoEl("read", null);
+  const rangeBox = h("div", {
+    class: "kp-range",
+    "data-kp-range": S.range,
+    "data-kp-range-presets": "7d 30d 90d",
+    "aria-label": "Nights to show",
   });
-  const range = h("span", { class: "bk-range" });
-  const covActive = h("div", { class: "bk-active", "aria-live": "polite" });
   const earlier = drivable(
     button("‹ Earlier", {
       cls: "kp-button--sm kp-button--ghost",
-      onClick: () => {
-        S.offset += N();
-        paintHeat();
-      },
+      title: "Show the nights before these (Page Up in the grid)",
+      onClick: () => page(+1),
     }),
     EARLIER,
   );
   const later = drivable(
     button("Later ›", {
       cls: "kp-button--sm kp-button--ghost",
-      onClick: () => {
-        S.offset = Math.max(0, S.offset - N());
-        paintHeat();
-      },
+      title: "Show the nights after these (Page Down in the grid)",
+      onClick: () => page(-1),
     }),
     LATER,
   );
@@ -428,102 +626,289 @@ export function mount(root) {
     }),
     TODAY,
   );
-  const legendSwatch = (/** @type {string} */ cls, /** @type {string} */ w) =>
-    h("span", null, h("i", { class: `bk-legend__sw ${cls}` }), w);
-  const legend = h(
-    "div",
-    { class: "bk-legend", id: "bk-cov-keys" },
-    legendSwatch("bk-legend__ok", "backed up"),
-    legendSwatch("bk-legend__miss", "missed"),
-    legendSwatch("bk-legend__before", "before any history"),
-    legendSwatch("bk-legend__none", "keeps no data by design"),
+  const rangeText = h("span", { class: "bk-range" });
+  const rangeRow = gridRow({
+    label: "Nights shown",
+    hideLabel: true,
+    control: rangeBox,
+  });
+  const pagingRow = gridRow({
+    label: "Nights",
+    control: buttonGroup([earlier, later, today]),
+    value: rangeText,
+    buttons: true,
+  });
+  const toolbar = formGrid(
+    [
+      gridRow({
+        label: "View",
+        hideLabel: true,
+        control: viewSwitch,
+        value: readAgo,
+      }),
+      rangeRow,
+      pagingRow,
+    ],
+    "bk-toolbar",
+  );
+
+  const nightsHeat = h("div", {
+    class: "kp-heat",
+    "data-kp-heat": "",
+    "data-kp-heat-toggle": "",
+  });
+  const monthHeat = h("div", { class: "kp-heat", "data-kp-heat": "" });
+  const calendar = h("section", {
+    class: "kp-calendar kp-calendar--busy-whole",
+    "data-kp-calendar": "",
+    "data-kp-calendar-month": `${S.cursor.year}-${String(S.cursor.month).padStart(2, "0")}`,
+    "data-kp-heading-level": "3",
+    "data-kp-time-zone": "Europe/Brussels",
+    "data-kp-week-starts-on": "1",
+    "data-kp-key": "backups",
+    lang: "en-GB",
+    "aria-label": "Backups per night",
+  });
+  const nightsBox = h("div", { class: "bk-nights" }, nightsHeat);
+  const monthBox = h("div", { class: "bk-monthbox" }, calendar, monthHeat);
+  const covCard = h(
+    "section",
+    {
+      class: "kp-card bk-card",
+      "data-kp-state": "loading",
+      "aria-label": "Backups per night",
+    },
     h(
-      "span",
-      { class: "bk-legend__keys" },
-      kbd("← → ↑ ↓"),
-      " move · ",
-      kbd("Enter"),
-      " pin · ",
-      kbd("Esc"),
-      " unpin · ",
-      kbd("PgUp"),
-      " earlier",
+      "div",
+      { class: "kp-card__stage" },
+      h(
+        "div",
+        { class: "kp-card__data" },
+        h("div", { class: "bk-cov__body" }, nightsBox, monthBox),
+      ),
     ),
+  );
+  const keysEl = h("span", { class: "kp-keys" });
+  const legendItem = (/** @type {string} */ tone, /** @type {string} */ w) =>
+    h(
+      "li",
+      null,
+      h("span", { class: "kp-heat__swatch", "data-kp-tone": tone }),
+      ` ${w}`,
+    );
+  const legend = h(
+    "ul",
+    { class: "kp-heat__legend", "aria-label": "Legend" },
+    legendItem("ok", "backed up"),
+    legendItem("warn", "some stacks missed"),
+    legendItem("bad", "missed"),
+    legendItem("before", "before any history"),
+    legendItem("none", "keeps no data"),
+    h("li", { "data-kp-end": "" }, keysEl),
+  );
+  setKeys(keysEl, [
+    [["←", "→", "↑", "↓"], "move"],
+    ["Enter", "pin the night"],
+    [["Page Up", "Page Down"], "earlier or later"],
+    ["Esc", "unpin"],
+  ]);
+  const pinRead = h(
+    "p",
+    { class: "kp-formgrid__control", role: "status", "data-bk-pin": "" },
+    "No night pinned. Press a cell to pin its night.",
+  );
+  const shownRead = h(
+    "p",
+    { class: "kp-formgrid__control", role: "status", "data-bk-shown": "" },
+    "All stacks shown. Press a stack name to show only that one.",
+  );
+  const repairBtn = viaForm(
+    button("Back up now", {
+      cls: "kp-button--sm",
+      onClick: () => {
+        if (repairBtn.dataset.bkStack)
+          void openAction(repairBtn.dataset.bkStack, "backup");
+      },
+    }),
+    "backup",
+  );
+  repairBtn.hidden = true;
+  const unpinBtn = drivable(
+    button("Unpin ×", {
+      cls: "kp-button--sm kp-button--ghost",
+      title: "Unpin and go back to last night (Esc)",
+      onClick: () => pin(null),
+    }),
+    UNPIN,
+  );
+  unpinBtn.hidden = true;
+  const reads3 = formGrid(
+    [
+      h(
+        "div",
+        { class: "kp-formgrid__row" },
+        h("span", { class: "kp-formgrid__label" }, "Pinned"),
+        pinRead,
+        h("div", { class: "kp-formgrid__actions" }, repairBtn, unpinBtn),
+      ),
+      h(
+        "div",
+        { class: "kp-formgrid__row" },
+        h("span", { class: "kp-formgrid__label" }, "Shown"),
+        shownRead,
+      ),
+    ],
+    "bk-reads",
   );
   const cov = section({
     id: "bk-coverage",
-    title: "Nightly coverage",
-    desc: "Each square is one stack on one night, filled when it made a snapshot. Hover for the details, click to pin a night.",
-    tools: [earlier, range, later, today],
-    cls: "bk-span-8",
+    title: "Backups per night",
+    desc: "Shows, for each stack, whether a backup landed on each night, so a missed night stands out at a glance and one press pins it; the Month option shows one month as a calendar with the same grid beside it.",
   });
-  cov.body.append(covActive, heat, legend);
-  const detail = h("div", { class: "bk-night", id: "bk-night" });
-  const side = section({
-    id: "bk-night-card",
-    tag: "aside",
-    title: "Night detail",
-    desc: "Which stack wrote its snapshot that night, and when; restore any of them from here.",
-    cls: "bk-span-4",
+  cov.body.append(toolbar, covCard, legend, reads3);
+
+  // ── one night ─────────────────────────────────────────────────────────
+  const nightSel = h("select", {
+    class: "kp-field__input",
+    id: NIGHT_PICK,
+    "data-kp-select": "",
   });
-  side.body.append(detail);
-  const grid = h("div", { class: "bk-grid" }, cov.el, side.el);
-  let focusCell = { r: 0, c: N() - 1 };
+  const weekSel = h("select", {
+    class: "kp-field__input",
+    id: WEEK_STACK,
+    "data-kp-select": "",
+  });
+  const nightSummaryEl = h(
+    "p",
+    {
+      class: "kp-formgrid__value bk-summary",
+      role: "status",
+      "data-bk-night-summary": "",
+    },
+    "…",
+  );
+  const weekEl = h("div", {
+    class: "kp-week",
+    "data-kp-week": "",
+    "data-kp-week-upcoming": "8",
+    "aria-label": "Snapshots of one stack in a week",
+  });
+  let list = h("ul", {
+    class: "kp-statuslist kp-statuslist--rows",
+    "aria-label": "Stacks on this night",
+  });
+  const listBox = h("div", { class: "bk-night__list" }, list);
+  const pick = formGrid(
+    [
+      h(
+        "div",
+        { class: "kp-formgrid__row" },
+        h(
+          "label",
+          { class: "kp-formgrid__label", for: "bk-week-stack" },
+          "Week of",
+        ),
+        h("div", { class: "kp-formgrid__control" }, weekSel),
+        h("p", { class: "kp-formgrid__value" }, "Which stack the week shows."),
+      ),
+      h(
+        "div",
+        { class: "kp-formgrid__row" },
+        h(
+          "label",
+          { class: "kp-formgrid__label", for: "bk-night-pick" },
+          "Night",
+        ),
+        h("div", { class: "kp-formgrid__control" }, nightSel),
+        nightSummaryEl,
+      ),
+    ],
+    "bk-night__pick",
+  );
+  const nightCard = h(
+    "section",
+    {
+      class: "kp-card bk-card",
+      "data-kp-state": "loading",
+      "aria-label": "One night",
+    },
+    h(
+      "div",
+      { class: "kp-card__stage" },
+      h(
+        "div",
+        { class: "kp-card__data bk-night__cols" },
+        pick,
+        h(
+          "div",
+          { class: "bk-night__body" },
+          h("div", { class: "bk-night__week" }, weekEl),
+          listBox,
+        ),
+      ),
+    ),
+  );
+  const nightSec = section({
+    id: "bk-night",
+    title: "One night",
+    desc: "Lists every stack for the night you pick, with a repair next to each miss, and draws one stack's week so a backup that creeps later each night is visible.",
+  });
+  nightSec.body.append(nightCard);
 
   // ── repositories ──────────────────────────────────────────────────────
-  const search = /** @type {HTMLInputElement} */ (
-    h("input", {
-      class: "bk-search nx-search",
-      id: BK_FILTER,
-      name: "bk-filter",
-      type: "search",
-      placeholder: "Filter stacks or apps",
-      "aria-label": "Filter repositories by stack or app",
-      autocomplete: "off",
-    })
+  const stackbar = h("figure", { class: "kp-stackbar" });
+  const facets = h(
+    "div",
+    {
+      class: "kp-facets kp-facets--row",
+      "data-kp-facets": "",
+      "data-kp-facets-all": "All stacks",
+      role: "group",
+      "aria-labelledby": "bk-h-stack",
+    },
+    h("ul", { class: "kp-facets__list" }),
+    h("p", { class: "kp-facets__empty", hidden: "" }, "No stacks yet."),
   );
-  search.value = S.q;
-  search.addEventListener("input", () => {
-    S.q = search.value;
-    writeUrl();
-    paintRepos();
-  });
-  search.addEventListener("keydown", (/** @type {KeyboardEvent} */ e) => {
-    if (e.key === "Escape" && search.value) {
-      e.stopPropagation();
-      search.value = "";
-      S.q = "";
-      writeUrl();
-      paintRepos();
-    }
-  });
-  const repoActive = h("div", { class: "bk-active", "aria-live": "polite" });
-  const repoBox = h("div", { class: "bk-table-wrap" });
+  const facetGrid = formGrid(
+    [
+      h(
+        "div",
+        { class: "kp-formgrid__row" },
+        h(
+          "h3",
+          { class: "kp-formgrid__label kp-facets__title", id: "bk-h-stack" },
+          "Stack",
+        ),
+        h(
+          "div",
+          { class: "kp-formgrid__control", "data-kp-formgrid-span": "wide" },
+          facets,
+        ),
+      ),
+    ],
+    "bk-repos__facets",
+  );
+  const barSlot = h("div", { class: "bk-barslot" });
+  const shell = reposShell("bk-repo-table", BK_FILTER);
+  const tableHost = h("div", { class: "bk-tablehost" }, shell.wrap);
+  barSlot.append(selectionBar("bk-repo-table"));
+  const readState = h("span", { class: "bk-readstate" });
   const repos = section({
     id: "bk-repos",
     title: "Repositories",
-    desc: "One restic repository per app that keeps data (a native service has its own), grouped by stack. The ticks show the last 7 nights.",
-    // The `/` hint sits inside the box, so the two never part.
-    tools: [
-      h("div", { class: "nx-tb__search bk-searchbox" }, search, kbd("/")),
-    ],
+    desc: "One restic repository per app that keeps data (a native service has its own), grouped by stack: which stack takes the space, the last 7 nights, the restore drill, and every snapshot under a row.",
   });
-  repos.body.append(repoActive, repoBox);
-  const readState = h("span", { class: "bk-readstate" });
+  repos.body.append(stackbar, facetGrid, barSlot, tableHost);
   repos.foot.hidden = false;
   repos.foot.append(
     readState,
     h(
       "span",
       null,
-      kbd("j"),
-      " ",
-      kbd("k"),
-      " move · ",
-      kbd("Enter"),
-      " open · ",
       kbd("/"),
-      " filter",
+      " filter · ",
+      kbd("Shift"),
+      " click a header: a second sort key",
     ),
   );
 
@@ -538,7 +923,64 @@ export function mount(root) {
     badge: retiredCount,
   });
 
-  root.replaceChildren(head.el, strip.el, band.el, grid, repos.el, ret.el);
+  root.replaceChildren(
+    head.el,
+    strip.el,
+    band.el,
+    cov.el,
+    nightSec.el,
+    repos.el,
+    ret.el,
+  );
+
+  // ── attach what the page carries (the package's components) ───────────
+  cleanups.push(
+    attachSegmented(root),
+    attachRanges(root),
+    attachHeats(root),
+    attachCalendars(root, {
+      decorate: (part, info) => {
+        if (info.kind === "day" && info.value)
+          drivable(part, MONTH_DAY, info.value);
+        else if (info.kind === "month-prev") drivable(part, MONTH_PREV);
+        else if (info.kind === "month-next") drivable(part, MONTH_NEXT);
+        else if (info.kind === "today") drivable(part, MONTH_TODAY);
+      },
+    }),
+    attachWeeks(root),
+    attachCardStates(root),
+    attachStackbars(root),
+    attachFacets(root),
+    attachSelectionBars(root),
+    attachHoverCards(root),
+    attachFootprints(root),
+  );
+  const detachStatus = attachStatusLists(root);
+  cleanups.push(detachStatus);
+  const tables = attachDataTables(root, {
+    detail: (row) => {
+      const ref = refs.get(row.dataset.kpRowKey ?? "");
+      if (!ref) return null;
+      return snapshotList(ref, Date.now(), (x) => snapshotActions(ref, x));
+    },
+    decorate: (part, info) => {
+      if (info.kind === "row-group-toggle" && info.value)
+        drivable(part, FOLD, info.value);
+      else if (info.kind === "row-toggle" && info.value)
+        drivable(part, OPEN_REPO, info.value);
+    },
+  });
+  cleanups.push(tables);
+  cleanups.push(
+    attachRowSelect(root),
+    attachUptimes(root),
+    attachBarCells(root),
+  );
+  const table = () =>
+    /** @type {import("/static/kp/js/datatable.js").DataTableHandle | null} */ (
+      dataTable(shell.wrap)
+    );
+  cleanups.push(bindTableUrl(table(), "repos"));
 
   // ── painting ──────────────────────────────────────────────────────────
   const paintLive = () => {
@@ -554,19 +996,19 @@ export function mount(root) {
       : `Read from the host's snapshot cache · ${done - failed.length} of ${names.length} stacks answered${failed.length ? ` · ${failed.join(", ")} could not be read` : ""}`;
     // redesign-final (exact counts): "N of M stacks answered" is the
     // coverage rows of the stacks that answered.
-    countOf(readState, heat, '.bk-heat__label[data-read="ok"]');
+    countOf(readState, nightsHeat, '.kp-heat__row[data-kp-read="ok"]');
     readState.dataset.bkRead =
       names.length > 0 && done === names.length ? "all" : "some";
+    setAgo(readAgo, done === names.length && names.length ? readAt : null);
   };
 
   const paintKpis = () => {
     const k = kpis(reads, nowS(), retired ? retired.length : null);
     const loading = !current().fleet || !k.settled;
     for (const t of strip.tiles.values()) t.set({ loading });
+    const pressed = undrilledOn();
     if (loading) {
-      tile("drills").set({
-        toggle: { ...tileToggle(), pressed: S.undrilled },
-      });
+      tile("drills").set({ toggle: { ...tileToggle(), pressed } });
       return;
     }
     const ln = k.lastNight;
@@ -580,7 +1022,7 @@ export function mount(root) {
           : "every stack covered",
       ctxTone: !ln.expected ? null : ln.missed.length ? "bad" : "ok",
       tone: ln.missed.length ? "bad" : null,
-      title: `The night of ${longDate(ln.night)}`,
+      title: `The night of ${nightDate(ln.night)}`,
     });
     tile("newest").set(
       k.newest
@@ -609,7 +1051,7 @@ export function mount(root) {
             : "no repository yet",
       ctxTone: d.failed ? "bad" : d.never ? "warn" : d.total ? "ok" : null,
       tone: d.failed ? "bad" : d.passed < d.total ? "warn" : null,
-      toggle: { ...tileToggle(), pressed: S.undrilled },
+      toggle: { ...tileToggle(), pressed },
     });
     tile("retired").set(
       retired
@@ -626,13 +1068,8 @@ export function mount(root) {
     paintBand(k);
   };
   const tileToggle = () => ({
-    pressed: S.undrilled,
-    onToggle: () => {
-      S.undrilled = !S.undrilled;
-      writeUrl();
-      paintKpis();
-      paintRepos();
-    },
+    pressed: undrilledOn(),
+    onToggle: () => toggleUndrilled(),
   });
 
   /** @param {ReturnType<typeof kpis>} k */
@@ -644,7 +1081,7 @@ export function mount(root) {
         key: "missed",
         tone: "bad",
         title: `${k.lastNight.missed.length} of ${k.lastNight.expected} stacks made no snapshot last night`,
-        text: `${k.lastNight.missed.join(", ")} — pin the night in the coverage below to see each one, or back them up now.`,
+        text: `${k.lastNight.missed.join(", ")} — pin the night in the grid to see each one, or back them up now.`,
       });
     if (k.drills.never)
       items.push({
@@ -657,7 +1094,12 @@ export function mount(root) {
             cls: "kp-button--sm kp-button--secondary",
             title:
               "List every repository that never had a drill, each with its own Verify restore",
-            onClick: () => openDrills(),
+            onClick: () =>
+              openDrills(
+                allRepos(reads).filter(
+                  (r) => drillState(r) === "never" && r.newest_snapshot,
+                ),
+              ),
           }),
           DRILL_NOW,
         ),
@@ -665,229 +1107,616 @@ export function mount(root) {
     band.set(items);
   };
 
-  /** @param {string} s @param {string} night */
-  const cellTip = (s, night) => {
-    const r = reads[s];
-    if (!r) return null;
-    const n = stackNight(r, night, nightsNow(nowS()));
-    /** @type {Node[]} */
-    const out = [h("b", null, `${s} · ${shortDate(night)}`)];
-    if (n.state === "ok")
-      out.push(
-        dot("ok", `snapshot at ${n.times.map(hhmm).join(", ")}`),
-        ...(n.ids.length
-          ? [
-              h(
-                "span",
-                { class: "bk-tip__ids mono" },
-                n.ids.map((x) => `${x.owner} ${x.short_id}`).join(" · "),
-              ),
-            ]
-          : []),
-        h(
-          "span",
-          { class: "bk-hint" },
-          "Click to pin this night · Enter on the keyboard",
-        ),
+  const fleetReady = () => !!current().fleet;
+  const nn = () => nightsNow(nowS());
+
+  /** Decorate what the package drew in the grid so Live view reaches it. @param {HTMLElement} grid */
+  const decorateHeat = (grid) => {
+    for (const cell of /** @type {HTMLElement[]} */ ([
+      ...grid.querySelectorAll(".kp-heat__cell[data-row-key]"),
+    ])) {
+      const row = cell.dataset.rowKey ?? "";
+      const col = cell.dataset.colKey ?? "";
+      if (row === "fleet") drivable(cell, FLEET_NIGHT, col);
+      else drivable(cell, NIGHT, `${row}/${col}`);
+    }
+    for (const label of /** @type {HTMLElement[]} */ ([
+      ...grid.querySelectorAll(
+        ".kp-heat__label button[data-key], button.kp-heat__label[data-key]",
+      ),
+    ]))
+      drivable(label, STACK_FILTER, label.dataset.key ?? "");
+    // The rows the page already read: "N of M stacks answered" counts them.
+    for (const row of /** @type {HTMLElement[]} */ ([
+      ...grid.querySelectorAll(".kp-heat__row[data-row-key]"),
+    ])) {
+      const r = reads[row.dataset.rowKey ?? ""];
+      if (r) row.dataset.kpRead = r.status;
+    }
+  };
+
+  /** The state of the whole coverage card, from what is known. */
+  const coverageState = () => {
+    if (!fleetReady()) return "loading";
+    if (names.length === 0) return "empty";
+    const settled = names.every((n) => reads[n]?.status !== "pending");
+    if (settled && names.every((n) => reads[n]?.status === "failed"))
+      return "error";
+    return "ready";
+  };
+
+  const paintCoverage = () => {
+    const state = coverageState();
+    const now = nn();
+    const isMonth = S.view === "month";
+    rangeRow.hidden = isMonth;
+    pagingRow.hidden = isMonth;
+    nightsBox.hidden = isMonth;
+    monthBox.hidden = !isMonth;
+    setSegmentedValues(viewSwitch, [S.view]);
+    covCard.style.setProperty("--bk-rows", String(Math.max(names.length, 3)));
+    setCardState(covCard, state, {
+      words: "Reading the stacks…",
+      title:
+        state === "empty"
+          ? "No stack has a backup history yet"
+          : "The backup history could not be read",
+      text:
+        state === "empty"
+          ? "The first nightly round fills this view."
+          : "None of the stacks answered. Nothing was changed.",
+    });
+    if (state !== "ready") {
+      setCalendarState(calendar, state === "loading" ? "loading" : "ready");
+      return;
+    }
+    const range = RANGES[S.range];
+    const nights = nightRange(now.current, range.n, S.offset);
+    const common = {
+      names,
+      reads,
+      now,
+      weekend: S.weekend,
+      markOf,
+      fleetReady: fleetReady(),
+      shown: S.stacks,
+    };
+    if (!isMonth) {
+      setHeat(
+        nightsHeat,
+        nightsSpec({
+          ...common,
+          nights,
+          every: range.every,
+          label: `Backups per stack, last ${range.n} nights`,
+        }),
       );
-    else if (n.state === "miss") out.push(dot("bad", "no snapshot this night"));
-    else if (n.state === "none")
-      out.push(h("span", null, "keeps no data by design"));
-    else if (n.state === "before")
-      out.push(h("span", null, "before this stack had any backup history"));
-    else if (n.state === "wait")
-      out.push(h("span", null, "tonight's round has not run yet"));
-    else if (n.state === "unread")
-      out.push(
-        dot(
-          "bad",
-          r.status === "failed" ? `not read: ${r.reason}` : "not read",
-        ),
+      decorateHeat(nightsHeat);
+      if (S.night && nights.includes(S.night)) setHeatPick(nightsHeat, S.night);
+      else setHeatPick(nightsHeat, null);
+      setHeatRows(nightsHeat, [...S.stacks]);
+      rangeText.textContent = `${nightDate(nights[0])} – ${nightDate(nights[nights.length - 1])}`;
+      later.toggleAttribute("disabled", S.offset === 0);
+    } else {
+      const days = monthNights(S.cursor.year, S.cursor.month);
+      setHeat(monthHeat, {
+        ...nightsSpec({
+          ...common,
+          nights: days,
+          every: 5,
+          label: `Backups per stack in ${String(S.cursor.month).padStart(2, "0")}/${S.cursor.year}`,
+        }),
+        toggle: false,
+      });
+      decorateHeat(monthHeat);
+      const from = addDays(now.current, -400);
+      setCalendarDays(
+        calendar,
+        calendarDays(reads, now, { from, to: addDays(now.current, 45) }),
       );
-    else out.push(h("span", null, "reading…"));
+      setCalendarLegend(calendar, [
+        { tone: "ok", label: "every stack backed up" },
+        { tone: "warn", label: "some stacks missed" },
+        { tone: "bad", label: "every stack missed" },
+        { tone: "future", label: "not run yet" },
+      ]);
+      setHeatPick(
+        monthHeat,
+        S.night && days.includes(S.night) ? S.night : null,
+      );
+      if (S.night) calendarSelect(calendar, S.night);
+    }
+    legend.hidden = false;
+    shownRead.textContent = S.stacks.size
+      ? `Showing only: ${[...S.stacks].sort().join(", ")} (the page filters; the grid reports).`
+      : "All stacks shown. Press a stack name to show only that one.";
+  };
+
+  const paintPin = () => {
+    unpinBtn.hidden = !S.night;
+    repairBtn.hidden = true;
+    delete repairBtn.dataset.bkStack;
+    if (!S.night) {
+      pinRead.textContent =
+        S.view === "month"
+          ? "No night picked. Press a day or a cell."
+          : "No night pinned. Press a cell to pin its night.";
+      return;
+    }
+    const now = nn();
+    pinRead.textContent = nightSentence(reads, S.night, now);
+    const first = names.find(
+      (s) =>
+        reads[s] &&
+        cellState(reads[s], /** @type {string} */ (S.night), now) === "miss",
+    );
+    if (first) {
+      repairBtn.hidden = false;
+      repairBtn.textContent = `Back up ${first} now`;
+      repairBtn.dataset.bkStack = first;
+    }
+  };
+
+  // ── one night: the list and the week ──────────────────────────────────
+  const nightOn = () => S.night ?? nn().last;
+  const mondayOf = (/** @type {string} */ iso) => {
+    // date-key: the weekday only decides which Monday the week starts on.
+    const wd = new Date(`${iso}T12:00:00Z`).getUTCDay();
+    return addDays(iso, -((wd + 6) % 7));
+  };
+  /** @type {string} */
+  let weekStart = "";
+
+  const paintNightPickers = () => {
+    const now = nn();
+    const last = now.last;
+    const nights = Array.from({ length: 14 }, (_, i) => addDays(last, -i));
+    const on = nightOn();
+    if (!nights.includes(on)) nights.push(on);
+    setOptions(
+      nightSel,
+      nights.map((n) => {
+        const missed = names.filter(
+          (s) => reads[s] && cellState(reads[s], n, now) === "miss",
+        ).length;
+        return {
+          value: n,
+          label: `${nightDate(n)}${n === last ? " (last night)" : ""}${missed ? ` · ${missed} missed` : ""}`,
+        };
+      }),
+      on,
+    );
+    const keeping = names.filter((s) => {
+      const r = reads[s];
+      return !(r?.status === "ok" && r.noBackup);
+    });
+    const wanted =
+      S.weekStack && keeping.includes(S.weekStack)
+        ? S.weekStack
+        : keeping.includes("kyu")
+          ? "kyu"
+          : keeping[0];
+    S.weekStack = wanted ?? null;
+    setOptions(
+      weekSel,
+      keeping.map((s) => ({ value: s, label: s })),
+      wanted ?? "",
+    );
+  };
+
+  const weekEvents = () => {
+    const stack = S.weekStack;
+    const r = stack ? reads[stack] : null;
+    /** @type {import("/static/kp/js/week.js").WeekEvent[]} */
+    const out = [];
+    if (!stack || !r || r.status !== "ok") return out;
+    const now = nn();
+    for (let d = 0; d < 7; d++) {
+      const iso = addDays(weekStart, d);
+      if (iso > now.current) continue;
+      const st = cellState(r, iso, now);
+      if (st === "before" || st === "none") continue;
+      out.push({
+        id: `plan-${iso}`,
+        start: plannedMs(iso),
+        label: "planned",
+        state: "reference",
+        detail: `${nightDate(iso)}: the nightly round starts at ${PLANNED_AT}.`,
+      });
+      if (st === "miss")
+        out.push({
+          id: `${stack}-miss-${iso}`,
+          start: plannedMs(iso) + 30_000,
+          label: "missed",
+          state: "skipped",
+          detail: `${nightDate(iso)}: no snapshot${r.reason ? `, ${r.reason}` : ""}.`,
+        });
+    }
+    r.repos.forEach((repo, i) => {
+      for (const x of repo.snapshots ?? []) {
+        const iso = nightKey(x.time);
+        if (iso < weekStart || iso > addDays(weekStart, 6)) continue;
+        out.push({
+          id: `${stack}-${repo.owner}-${x.short_id}`,
+          start: x.time * 1000,
+          label: repo.owner,
+          series: /** @type {1} */ (Math.min(i + 1, 5)),
+          detail: `${nightDate(iso)}: ${repo.owner} snapshot ${x.short_id} at ${formatDateTime(x.time).slice(-5)}.`,
+        });
+      }
+    });
     return out;
   };
 
-  const paintHeat = () => {
-    tip.hide();
-    const n = N();
-    const nn = nightsNow(nowS());
-    const nights = nightRange(nn.current, n, S.offset);
-    heat.style.setProperty("--n", String(n));
-    const rows = names.filter((s) => !S.stacks.size || S.stacks.has(s));
-    if (focusCell.c >= n) focusCell = { r: focusCell.r, c: n - 1 };
-    if (focusCell.r >= rows.length) focusCell = { r: 0, c: focusCell.c };
-    const fleetRow = h("div", { class: "bk-heat__row bk-heat__fleet" });
-    for (const night of nights) {
-      const f = fleetNight(reads, night, nn);
-      const loading =
-        !current().fleet || names.some((s) => reads[s]?.status === "pending");
-      const cls = [
-        "bk-heat__cell",
-        loading
-          ? "bk-heat__cell--load"
-          : f.before
-            ? "bk-heat__cell--before"
-            : f.wait
-              ? "bk-heat__cell--wait"
-              : f.expected && f.ok === 0
-                ? "bk-heat__cell--miss"
-                : f.pct < 100 && f.expected
-                  ? "bk-heat__cell--warn"
-                  : "",
-        night === S.night ? "is-col" : "",
-      ]
-        .filter(Boolean)
-        .join(" ");
-      const b = drivable(
-        h(
-          "button",
-          {
-            type: "button",
-            class: cls,
-            tabindex: "-1",
-            style: `--r: ${f.pct}%`,
-            "aria-label": `${night}: ${f.ok} of ${f.expected} stacks backed up`,
-          },
-          h("i"),
-        ),
-        FLEET_NIGHT,
-        night,
-      );
-      b.addEventListener("click", () => pin(night));
-      tip.attach(b, () => [
-        h("b", null, shortDate(night)),
-        f.before
-          ? h("span", null, "before any backup history")
-          : f.wait
-            ? h("span", null, "tonight's round has not run yet")
-            : dot(
-                f.ok === f.expected ? "ok" : f.ok ? "warn" : "bad",
-                `${f.ok} of ${f.expected} stacks backed up`,
-              ),
-        ...(f.waiting.length
-          ? [
-              h(
-                "span",
-                { class: "bk-hint" },
-                `Waiting: ${f.waiting.join(", ")}`,
-              ),
-            ]
-          : []),
-        h("span", { class: "bk-hint" }, "Click to pin this night"),
-      ]);
-      fleetRow.append(b);
+  const paintNight = () => {
+    const state = coverageState();
+    const now = nn();
+    const night = nightOn();
+    paintNightPickers();
+    if (state !== "ready") {
+      setCardState(nightCard, state, {
+        words: "Reading the stacks…",
+        title:
+          state === "empty"
+            ? "No stack has a backup history yet"
+            : "The stacks could not be read",
+        text:
+          state === "empty"
+            ? "The first nightly round fills this view."
+            : "None of the stacks answered. Nothing was changed.",
+      });
+      nightSummaryEl.textContent = "…";
+      return;
     }
-    /** @type {Node[]} */
-    const body = [
-      h(
-        "span",
-        { class: "bk-heat__label bk-heat__label--fleet" },
-        h("span", null, "Whole fleet"),
-      ),
-      fleetRow,
-      h("div", { class: "bk-heat__sep" }),
-    ];
-    rows.forEach((s, ri) => {
-      const r = reads[s] ?? { status: "pending" };
-      const label = drivable(
-        h(
-          "button",
-          {
-            type: "button",
-            class: "bk-heat__label",
-            "data-stack": s,
-            "data-read": r.status,
-            "aria-pressed": String(S.stacks.has(s)),
-            title: `Click to show only ${s} (each click turns a stack on or off; Show every stack resets)`,
-          },
-          stackMark(hueOf(s)),
-          h(
-            "span",
-            { class: r.status === "ok" && r.noBackup ? "bk-muted" : "" },
-            s,
-          ),
-        ),
-        STACK_FILTER,
-        s,
-      );
-      label.addEventListener("click", () => toggleStack(s));
-      const row = h("div", { class: "bk-heat__row", role: "row" });
-      nights.forEach((night, ci) => {
-        const st = cellState(r, night, nn);
-        const cell = drivable(
-          h("button", {
-            type: "button",
-            class: `bk-heat__cell bk-heat__cell--${st}${night === S.night ? " is-col" : ""}`,
-            role: "gridcell",
-            tabindex: ri === focusCell.r && ci === focusCell.c ? "0" : "-1",
-            "data-r": String(ri),
-            "data-c": String(ci),
-            "aria-label": `${s}, ${shortDate(night)}: ${st === "ok" ? "backed up" : st === "miss" ? "missed" : st}`,
-          }),
-          NIGHT,
-          `${s}/${night}`,
-        );
-        cell.addEventListener("click", () => {
-          focusCell = { r: ri, c: ci };
-          pin(night);
-        });
-        tip.attach(cell, () => cellTip(s, night));
-        row.append(cell);
-      });
-      body.push(label, row);
+    setCardState(nightCard, "ready");
+    const next = buildStatusList(nightRows(names, reads, night, now), {
+      label: `Stacks on ${nightDate(night)}`,
     });
-    body.push(
-      h("span"),
-      h(
-        "div",
-        { class: "bk-heat__axis", "aria-hidden": "true" },
-        ...nights.map((night, i) =>
-          h(
-            "span",
-            null,
-            i % 3 === 0 || i === n - 1 ? String(Number(night.slice(8))) : "",
-          ),
-        ),
-      ),
+    next.className = "kp-statuslist kp-statuslist--rows";
+    list.replaceWith(next);
+    list = next;
+    attachStatusLists(listBox);
+    for (const b of /** @type {HTMLElement[]} */ ([
+      ...list.querySelectorAll("[data-kp-status-retry-button]"),
+    ])) {
+      const id = b
+        .closest("[data-kp-status-id]")
+        ?.getAttribute("data-kp-status-id");
+      if (id) {
+        viaForm(b, "backup");
+        drivable(b, NIGHT_REPAIR, id);
+      }
+    }
+    nightSummaryEl.textContent = nightSummary(countStatus(list), night);
+    if (!weekStart || nightSel.dataset.bkWeekFor !== night) {
+      weekStart = mondayOf(night);
+      nightSel.dataset.bkWeekFor = night;
+    }
+    setWeekStart(weekEl, weekStart);
+    setWeekEvents(weekEl, weekEvents());
+    const stack = S.weekStack;
+    const r = stack ? reads[stack] : null;
+    setWeekLegend(
+      weekEl,
+      r && r.status === "ok"
+        ? r.repos.map((repo, i) => ({
+            series: /** @type {1} */ (Math.min(i + 1, 5)),
+            label: `${repo.owner} snapshot`,
+          }))
+        : [],
     );
-    heat.replaceChildren(...body);
-    range.textContent = `${shortDate(nights[0])} – ${shortDate(nights[n - 1])}`;
-    later.toggleAttribute("disabled", S.offset === 0);
-    if (S.stacks.size) {
-      const all = drivable(
-        h(
-          "button",
-          { type: "button", class: "bk-linkbtn" },
-          "Show every stack",
-        ),
-        CLEAR,
-        "all-stacks",
-      );
-      all.addEventListener("click", () => {
-        S.stacks.clear();
-        writeUrl();
-        paintAll();
-      });
-      covActive.replaceChildren(
-        h("span", null, "Showing"),
-        ...[...S.stacks].sort().map((s) =>
-          filterChip(s, () => toggleStack(s), {
-            id: CLEAR,
-            row: `stack:${s}`,
-          }),
-        ),
-        all,
-      );
-    } else
-      covActive.replaceChildren(
-        h(
-          "span",
-          null,
-          "Click stack names to show only them; each click turns one on or off.",
-        ),
-      );
+    if (!stack || !r)
+      setWeekState(weekEl, "empty", "Pick a stack that keeps data.");
+    else if (r.status === "pending")
+      setWeekState(weekEl, "loading", "Reading the stack…");
+    else if (r.status === "failed")
+      setWeekState(weekEl, "error", `${stack} could not be read: ${r.reason}`);
   };
+
+  // ── repositories ──────────────────────────────────────────────────────
+  const paintRepos = () => {
+    const dt = table();
+    if (!dt) return;
+    const now = nn();
+    const nowSec = nowS();
+    // The rows first; the table is told after.
+    const selected = dt.selected();
+    const groups = names.map((s) => ({
+      stack: s,
+      read: reads[s] ?? { status: "pending" },
+    }));
+    const all = allRepos(reads);
+    const sizes = stackSizes(all);
+    slots = new Map(
+      sizes.map((s, i) => [s.stack, `var(--chart-${(i % 5) + 1})`]),
+    );
+    refs.clear();
+    const max = Math.max(1, ...all.map((r) => r.size_bytes ?? 0));
+    const frag = document.createDocumentFragment();
+    for (const g of groups) {
+      const r = g.read;
+      const native = r.status === "ok" && r.native;
+      const total = r.status === "ok" ? r.repos.length : 0;
+      const why =
+        r.status === "pending"
+          ? `reading… (${Math.round((Date.now() - (startedAt[g.stack] ?? Date.now())) / 1000)} s)`
+          : r.status === "failed"
+            ? `could not read it: ${r.reason}`
+            : r.noBackup
+              ? "keeps no data by design"
+              : r.repos.length === 0
+                ? r.reason
+                  ? `no repository found on the backup target (${r.reason})`
+                  : "no repository found on the backup target"
+                : null;
+      /** @type {HTMLElement | null} */
+      let act = null;
+      if (r.status === "ok" && total)
+        act = viaForm(
+          button("Restore…", {
+            cls: "kp-button--sm",
+            title: `Restore one of ${g.stack}'s apps`,
+            attrs: {
+              "data-action": restoreKind(native),
+              "data-kp-action": "restore",
+            },
+            onClick: (e) => {
+              e.stopPropagation();
+              void openAction(g.stack, restoreKind(native));
+            },
+          }),
+          restoreKind(native),
+        );
+      else if (r.status === "failed")
+        act = drivable(
+          button("Retry", {
+            cls: "kp-button--sm kp-button--secondary",
+            title: `Read ${g.stack}'s repositories again`,
+            onClick: (e) => {
+              e.stopPropagation();
+              void retryOne(g.stack);
+            },
+          }),
+          RETRY,
+          g.stack,
+        );
+      frag.append(
+        groupRow({
+          stack: g.stack,
+          vmid: vmids.get(g.stack) ?? null,
+          read: r,
+          total,
+          restore: act,
+          why,
+        }),
+      );
+      if (r.status !== "ok") continue;
+      for (const repo of r.repos) {
+        const key = `${g.stack}/${repo.owner}`;
+        refs.set(key, { stack: g.stack, native, repo, read: r });
+        const newest = repo.newest_snapshot;
+        const restore = viaForm(
+          button("Restore…", {
+            cls: "kp-button--sm",
+            title: newest
+              ? "Restore this app; the newest snapshot is picked, change it in the dialog"
+              : "This repository has no snapshot to restore",
+            attrs: {
+              "data-action": restoreKind(native),
+              "data-kp-action": "restore",
+            },
+            onClick: () => {
+              if (newest)
+                void openAction(g.stack, restoreKind(native), {
+                  preset: restorePreset(native, repo.owner, newest.short_id),
+                });
+            },
+          }),
+          restoreKind(native),
+        );
+        if (!newest) restore.setAttribute("disabled", "");
+        frag.append(
+          repoRow({ stack: g.stack, native, repo, read: r, now, max, restore }),
+        );
+      }
+    }
+    shell.tbody.replaceChildren(frag);
+    attachIdmarks(shell.wrap);
+    feedCells(shell.wrap, refs, now, setUptime, setBarCell);
+    dt.refresh();
+    attachActionColumns(shell.wrap);
+    // The ticks, the opened rows and the folds survive a repaint by key.
+    const keep = selected.filter((k) => refs.has(k));
+    if (keep.length) dt.select(keep);
+    drivableHeads();
+
+    const settled =
+      names.length > 0 && names.every((n) => reads[n]?.status !== "pending");
+    const anyOk = names.some((n) => reads[n]?.status === "ok");
+    if (!fleetReady() || (!anyOk && !settled)) {
+      dt.busy({ text: "Reading the repositories…", overlay: true });
+      dt.state("loading");
+    } else if (settled && !anyOk && names.length) {
+      dt.busy(null);
+      dt.fail("None of the stacks answered. Nothing was changed.");
+    } else {
+      dt.busy(
+        settled
+          ? null
+          : {
+              text: `Reading the repositories… ${names.filter((n) => reads[n]?.status !== "pending").length} of ${names.length} stacks`,
+              overlay: false,
+            },
+      );
+      dt.state("ready");
+    }
+    paintBar(sizes, all.length);
+    void nowSec;
+  };
+
+  /** Live view reaches the sort headers by their column. */
+  const drivableHeads = () => {
+    /** @type {Record<number, string>} */
+    const rows = { 2: "app", 5: "snaps", 6: "size", 7: "drill" };
+    const heads = /** @type {HTMLTableCellElement[]} */ ([
+      ...shell.wrap.querySelectorAll("thead th[data-kp-sort]"),
+    ]);
+    heads.forEach((th) => {
+      const col = th.cellIndex;
+      if (rows[col]) drivable(th, SORT, rows[col]);
+    });
+  };
+
+  /** @param {{stack: string, bytes: number, count: number}[]} sizes @param {number} total */
+  const paintBar = (sizes, total) => {
+    const state = !fleetReady()
+      ? "loading"
+      : coverageState() === "error"
+        ? "error"
+        : names.length &&
+            names.some((n) => reads[n]?.status === "pending") &&
+            total === 0
+          ? "loading"
+          : total === 0
+            ? "empty"
+            : "ready";
+    const sum = sizes.reduce((a, s) => a + s.bytes, 0);
+    setStackbar(stackbar, {
+      title: "Backup disk, by stack",
+      parts:
+        state === "ready"
+          ? sizes.map((s) => ({
+              key: s.stack,
+              label: s.stack,
+              value: s.bytes,
+              tip: `${s.stack}: ${sizeTextOf(s.bytes)} in ${s.count} ${s.count === 1 ? "repository" : "repositories"}`,
+            }))
+          : [],
+      format: sizeTextOf,
+      summary: `${total.toLocaleString("en-GB")} ${total === 1 ? "repository" : "repositories"}, ${sizeTextOf(sum)}`,
+      state,
+      message:
+        state === "error"
+          ? "The backup repositories could not be read."
+          : "Nothing is stored yet.",
+      label: "Backup repositories by stack",
+    });
+    setFacetItems(
+      facets,
+      state === "ready"
+        ? sizes.map((s, i) => ({
+            value: s.stack,
+            label: s.stack,
+            count: s.count,
+            swatch: `var(--chart-${(i % 5) + 1})`,
+            pattern: s.stack,
+          }))
+        : [],
+    );
+    const values = tableStackFilter();
+    if (values) setFacetValues(facets, values);
+  };
+
+  const tableStackFilter = () => {
+    const dt = table();
+    const f = dt?.view().filters[COL.stack];
+    return Array.isArray(f) && f.length ? f : null;
+  };
+  const undrilledOn = () => {
+    const f = table()?.view().filters[COL.drill];
+    return Array.isArray(f) && f.length === 1 && f[0] === "never drilled";
+  };
+  const toggleUndrilled = () => {
+    table()?.filter(COL.drill, undrilledOn() ? null : ["never drilled"]);
+    paintKpis();
+  };
+
+  // The stack filter is one thing in three places: the bar, the list and the table's own filter.
+  const filterStacks = (/** @type {string[]} */ keys) => {
+    setFacetValues(facets, keys.length ? keys : null);
+    table()?.filter(COL.stack, keys.length ? keys : null);
+  };
+  stackbar.addEventListener(STACKBAR_PICK_EVENT, (e) => {
+    const key = /** @type {CustomEvent} */ (e).detail.key;
+    const now = getFacetValues(facets);
+    filterStacks(now.length === 1 && now[0] === key ? [] : [key]);
+  });
+  stackbar.addEventListener(STACKBAR_RETRY_EVENT, () => void loadAll(true));
+  facets.addEventListener(FACET_EVENT, () => {
+    const values = getFacetValues(facets);
+    const all = stackSizes(allRepos(reads)).length;
+    table()?.filter(
+      COL.stack,
+      values.length && values.length < all ? values : null,
+    );
+  });
+  shell.wrap.addEventListener(VIEW_EVENT, () => {
+    setFacetValues(facets, tableStackFilter());
+    paintKpis();
+  });
+  shell.wrap.addEventListener("kp-datatable-retry", () => void loadAll(true));
+
+  /** @param {{stack: string, native: boolean, repo: Repo}} ref @param {import("../backupsview.js").Snap} x */
+  const snapshotActions = (ref, x) => {
+    const restore = viaForm(
+      button("Restore…", {
+        cls: "kp-button--sm",
+        title: `Restore ${ref.repo.owner} to ${x.short_id}`,
+        attrs: {
+          "data-action": restoreKind(ref.native),
+          "data-kp-action": "restore",
+        },
+        onClick: () =>
+          void openAction(ref.stack, restoreKind(ref.native), {
+            preset: restorePreset(ref.native, ref.repo.owner, x.short_id),
+          }),
+      }),
+      restoreKind(ref.native),
+    );
+    /** @type {HTMLElement[]} */
+    const out = [restore];
+    // A native unit's snapshot is one tar stream, not a tree of files, so
+    // its row has no Show a file (restore is the way back for it).
+    if (!ref.native) {
+      const file = drivable(
+        button("Show a file…", {
+          cls: "kp-button--sm kp-button--ghost",
+          title:
+            "Read one file as this snapshot holds it, without restoring anything",
+          attrs: { "data-kp-action": "file" },
+          onClick: () => openFileDialog(ref.stack, ref.repo, x.short_id),
+        }),
+        SNAPSHOT_FILE,
+        `${ref.stack}/${ref.repo.owner}`,
+      );
+      out.push(file);
+    }
+    return out;
+  };
+
+  // the selection bar: Verify restore and Back up now on the ticked rows
+  barSlot.addEventListener(SELECTION_ACTION_EVENT, (e) => {
+    const d = /** @type {CustomEvent} */ (e).detail;
+    /** @type {string[]} */
+    const keys = d.keys ?? [];
+    const picked = keys.map((k) => refs.get(k)).filter((x) => !!x);
+    if (d.action === "verify") {
+      openDrills(
+        picked
+          .filter((x) => x && x.repo.newest_snapshot)
+          .map((x) => ({
+            .../** @type {any} */ (x).repo,
+            stack: /** @type {any} */ (x).stack,
+            native: /** @type {any} */ (x).native,
+          })),
+      );
+    } else {
+      const stacks = [
+        ...new Set(picked.map((x) => /** @type {any} */ (x).stack)),
+      ];
+      void openBatch("backup", stacks);
+    }
+  });
 
   /** @param {string} s */
   const toggleStack = (s) => {
@@ -897,656 +1726,194 @@ export function mount(root) {
     paintAll();
   };
 
-  // keyboard: roving focus in the grid (DESIGN_LANGUAGE §10, calendars)
-  heat.addEventListener("keydown", (/** @type {KeyboardEvent} */ e) => {
-    const c = /** @type {HTMLElement | null} */ (
-      /** @type {HTMLElement} */ (e.target).closest(".bk-heat__cell[data-r]")
-    );
-    if (!c) return;
-    let r = Number(c.dataset.r);
-    let col = Number(c.dataset.c);
-    const rowsN = heat.querySelectorAll(".bk-heat__row[role=row]").length;
-    const n = N();
-    if (e.key === "ArrowRight") col = Math.min(n - 1, col + 1);
-    else if (e.key === "ArrowLeft") col = Math.max(0, col - 1);
-    else if (e.key === "ArrowDown") r = Math.min(rowsN - 1, r + 1);
-    else if (e.key === "ArrowUp") r = Math.max(0, r - 1);
-    else if (e.key === "PageUp" || e.key === "PageDown" || e.key === "Home") {
-      e.preventDefault();
-      if (e.key === "PageUp") S.offset += n;
-      else if (e.key === "PageDown") S.offset = Math.max(0, S.offset - n);
-      else {
-        S.offset = 0;
-        pin(null);
-      }
-      paintHeat();
-      focusAt();
-      return;
-    } else if (e.key === "Escape") {
-      e.preventDefault();
-      pin(null);
-      focusAt();
-      return;
-    } else return;
-    e.preventDefault();
-    focusCell = { r, c: col };
-    focusAt();
-  });
-  const focusAt = () => {
-    heat
-      .querySelectorAll(".bk-heat__cell[data-r]")
-      .forEach((x) =>
-        /** @type {HTMLElement} */ (x).setAttribute("tabindex", "-1"),
-      );
-    const el = /** @type {HTMLElement | null} */ (
-      heat.querySelector(
-        `.bk-heat__cell[data-r="${focusCell.r}"][data-c="${focusCell.c}"]`,
-      )
-    );
-    if (!el) return;
-    el.setAttribute("tabindex", "0");
-    el.focus();
-  };
-
-  const paintDetail = () => {
-    const nn = nightsNow(nowS());
-    const n = S.night ?? nn.last;
-    const settled =
-      names.length > 0 &&
-      names.every((s) => reads[s] && reads[s].status !== "pending");
-    const expected = names.filter((s) =>
-      ["ok", "miss"].includes(
-        cellState(reads[s] ?? { status: "pending" }, n, nn),
-      ),
-    );
-    const ok = expected.filter(
-      (s) => cellState(reads[s] ?? { status: "pending" }, n, nn) === "ok",
-    );
-    const unpin = S.night
-      ? drivable(
-          button("Unpin ×", {
-            cls: "kp-button--sm kp-button--ghost",
-            title: "Unpin and go back to last night (Esc)",
-            onClick: () => pin(null),
-          }),
-          UNPIN,
-        )
-      : h("span");
-    detail.replaceChildren(
-      h(
-        "div",
-        { class: "bk-night__top" },
-        h(
-          "div",
-          null,
-          h(
-            "div",
-            { class: "bk-hint bk-night__label" },
-            S.night ? "Pinned night" : "Last night (click any night to pin it)",
-          ),
-          h("div", { class: "bk-night__date" }, longDate(n)),
-          h(
-            "div",
-            { class: "bk-night__big" },
-            settled ? `${ok.length}` : skeleton("2ch"),
-            h(
-              "small",
-              null,
-              ` of ${settled ? expected.length : "…"} stacks backed up`,
-            ),
-          ),
-        ),
-        unpin,
-      ),
-      h(
-        "ul",
-        null,
-        ...names.map((s) => {
-          const r = reads[s] ?? { status: "pending" };
-          const sn = stackNight(r, n, nn);
-          /** @type {Node} */
-          let state;
-          if (sn.state === "load") state = skeleton("6ch");
-          else if (sn.state === "ok")
-            state = dot(
-              "ok",
-              sn.times.length > 1
-                ? `${hhmm(sn.times[0])}–${hhmm(sn.times[sn.times.length - 1])}`
-                : hhmm(sn.times[0]),
-              { cls: "mono" },
-            );
-          else if (sn.state === "none")
-            state = h("span", { class: "bk-muted" }, "keeps no data");
-          else if (sn.state === "before")
-            state = h("span", { class: "bk-muted" }, "no history yet");
-          else if (sn.state === "wait")
-            state = h("span", { class: "bk-muted" }, "not run yet");
-          else if (sn.state === "unread") state = dot("bad", "not read");
-          else state = dot("bad", "missed");
-          /** @type {Node} */
-          let act = h("span");
-          if (sn.state === "ok" && r.status === "ok" && r.repos.length) {
-            const one = r.native || r.repos.length === 1;
-            const first = sn.ids[0];
-            act = viaForm(
-              button("Restore…", {
-                cls: "kp-button--sm kp-button--ghost",
-                title: `Restore ${s} to the snapshot of this night`,
-                attrs: { "data-action": restoreKind(r.native) },
-                onClick: () =>
-                  void openAction(s, restoreKind(r.native), {
-                    preset:
-                      one && first
-                        ? restorePreset(r.native, first.owner, first.short_id)
-                        : {},
-                  }),
-              }),
-              restoreKind(r.native),
-            );
-          }
-          return h(
-            "li",
-            { "data-stack": s },
-            stackMark(hueOf(s)),
-            h("span", null, s),
-            state,
-            act,
-          );
-        }),
-      ),
-    );
+  const page = (/** @type {number} */ dir) => {
+    const n = RANGES[S.range].n;
+    S.offset = Math.max(0, S.offset + dir * n);
+    paintCoverage();
   };
 
   /** @param {string | null} n */
   const pin = (n) => {
     S.night = n;
     if (n) {
-      const off = offsetFor(nightsNow(nowS()).current, n, N());
-      if (S.offset > off || off >= S.offset + N()) S.offset = off;
+      const range = RANGES[S.range].n;
+      const off = offsetFor(nn().current, n, range);
+      if (S.offset > off || off >= S.offset + range) S.offset = off;
+      S.cursor = { year: Number(n.slice(0, 4)), month: Number(n.slice(5, 7)) };
+      weekStart = "";
     }
     writeUrl();
-    paintHeat();
-    paintDetail();
+    paintCoverage();
+    paintPin();
+    paintNight();
   };
 
-  // ── repositories table ────────────────────────────────────────────────
-  /** @param {Repo & {stack: string, native: boolean}} r */
-  const drillTip = (r) => {
-    const d = drillState(r);
-    return [
-      h("b", null, "Restore drill"),
-      h(
-        "span",
-        null,
-        d === "never"
-          ? "This repository was never restored into scratch to prove it works."
-          : d === "failed"
-            ? `Last drill ${formatDateTime(r.drill?.last_attempt)} failed: ${r.drill?.last_error}`
-            : `Last passed ${formatDateTime(r.drill?.last_pass)}.`,
-      ),
-      h(
-        "span",
-        { class: "bk-hint" },
-        "The nightly round drills one repository in turn, the one drilled longest ago.",
-      ),
-    ];
-  };
-
-  const paintRepos = () => {
-    const now = nowS();
-    const last = nightsNow(now).last;
-    const groups = repoGroups(
-      Object.fromEntries(
-        names.map((n) => [n, reads[n] ?? { status: "pending" }]),
-      ),
-      S,
-      now,
-    );
-    const tbody = h("tbody");
-    for (const g of groups) {
-      const s = g.stack;
-      const r = g.read;
-      const collapsed = S.collapsed.has(s);
-      const native = r.status === "ok" && r.native;
-      const groupRestore =
-        r.status === "ok" && g.total
-          ? viaForm(
-              button("Restore…", {
-                cls: "kp-button--sm kp-button--ghost",
-                title: `Restore one of ${s}'s apps`,
-                attrs: { "data-action": restoreKind(native) },
-                onClick: () => void openAction(s, restoreKind(native)),
-              }),
-              restoreKind(native),
-            )
-          : r.status === "failed"
-            ? drivable(
-                button("Retry", {
-                  cls: "kp-button--sm kp-button--secondary",
-                  title: `Read ${s}'s repositories again`,
-                  onClick: () => void retryOne(s),
-                }),
-                RETRY,
-                s,
-              )
-            : null;
-      // The group's Restore… (or Retry) shares the repo rows' Restore slot.
-      if (groupRestore) groupRestore.dataset.kpAction = "restore";
-      const gtr = drivable(
-        h(
-          "tr",
-          {
-            class: "bk-repo-group",
-            tabindex: "0",
-            "data-stack": s,
-            ...(g.total
-              ? {
-                  "aria-expanded": String(!collapsed),
-                  title: "Click to fold or unfold this stack",
-                }
-              : {}),
-          },
-          h(
-            "td",
-            null,
-            h(
-              "span",
-              { class: "bk-group-id" },
-              g.total
-                ? h("span", { class: "bk-caret" })
-                : h("span", { class: "bk-caret-pad" }),
-              stackMark(hueOf(s)),
-              h("a", { href: stackHref(s), title: `Open ${s}'s page` }, s),
-            ),
-          ),
-          h(
-            "td",
-            { class: "bk-meta", colspan: "5" },
-            r.status === "pending" ? skeleton("30%") : stackWhy(r),
-          ),
-          h(
-            "td",
-            { class: "bk-row-actions" },
-            h("div", { class: "kp-row-actions" }, groupRestore),
-          ),
-        ),
-        FOLD,
-        s,
-      );
-      gtr.addEventListener("click", (/** @type {MouseEvent} */ e) => {
-        if (/** @type {HTMLElement} */ (e.target).closest("button, a, input"))
-          return;
-        if (!g.total) return;
-        if (collapsed) S.collapsed.delete(s);
-        else S.collapsed.add(s);
-        paintRepos();
-      });
-      tbody.append(gtr);
-      if (r.status === "pending") {
-        tbody.append(
-          h(
-            "tr",
-            { class: "bk-repo bk-repo--load" },
-            ...[30, 40, 50, 20, 30, 50, 40].map((w) =>
-              h("td", null, skeleton(`${w}%`)),
-            ),
-          ),
-        );
-        continue;
-      }
-      if (collapsed) continue;
-      for (const repo of g.rows) {
-        const key = `${s}/${repo.owner}`;
-        const open = S.open === key;
-        const newest = repo.newest_snapshot;
-        const fresh = newest != null && now - newest.time < 30 * 3600;
-        const d = drillState(repo);
-        const size = humanBytes(repo.size_bytes);
-        const full = { ...repo, stack: s, native };
-        const tr = drivable(
-          h(
-            "tr",
-            {
-              class: "bk-repo",
-              tabindex: "0",
-              "aria-expanded": String(open),
-              title: "Click to see every snapshot",
-              "data-kp-row-key": `${s}-${repo.owner}`,
-            },
-            h("td", { class: "mono bk-app" }, repo.owner),
-            h(
-              "td",
-              { "data-label": "Newest" },
-              newest
-                ? h("span", { class: "bk-idchip mono" }, newest.short_id)
-                : h("span", { class: "bk-muted" }, repo.error ?? "—"),
-            ),
-            h(
-              "td",
-              { "data-label": "Age" },
-              newest
-                ? dot(
-                    fresh ? "ok" : "bad",
-                    `${humanDuration(now - newest.time)} ago`,
-                  )
-                : h("span", { class: "bk-muted" }, "—"),
-            ),
-            h(
-              "td",
-              { class: "bk-num", "data-label": "Snapshots" },
-              `${repo.snapshot_count}`,
-              h(
-                "span",
-                { class: "bk-ticks", "aria-hidden": "true" },
-                ...ticks(repo, last).map((t) =>
-                  h("i", t ? null : { class: "gap" }),
-                ),
-              ),
-            ),
-            h(
-              "td",
-              { class: "bk-num", "data-label": "Size" },
-              size ??
-                h(
-                  "span",
-                  {
-                    class: "bk-muted",
-                    title: "The host could not measure this repository's size",
-                  },
-                  "—",
-                ),
-            ),
-            h(
-              "td",
-              { "data-label": "Restore drill" },
-              dot(
-                d === "never" ? "warn" : d === "failed" ? "bad" : "ok",
-                drillWords(d),
-                { cls: "bk-drill", attrs: { tabindex: "0" } },
-              ),
-            ),
-            h(
-              "td",
-              { class: "bk-row-actions" },
-              h(
-                "div",
-                { class: "kp-row-actions" },
-                ...rowActions(s, native, repo),
-              ),
-            ),
-          ),
-          OPEN_REPO,
-          key,
-        );
-        if (newest) {
-          const chip = /** @type {HTMLElement} */ (tr.children[1].firstChild);
-          chip.tabIndex = 0;
-          tip.attach(chip, () => [
-            h("b", null, `snapshot ${newest.short_id}`),
-            h("span", { class: "mono" }, newest.id),
-            h("span", null, formatDateTime(newest.time)),
-          ]);
-        }
-        tip.attach(
-          /** @type {HTMLElement} */ (tr.querySelector(".bk-drill")),
-          () => drillTip(full),
-        );
-        tr.addEventListener("click", (/** @type {MouseEvent} */ e) => {
-          if (/** @type {HTMLElement} */ (e.target).closest("button, a, input"))
-            return;
-          S.open = open ? null : key;
-          paintRepos();
-        });
-        tbody.append(tr);
-        if (open)
-          tbody.append(
-            h(
-              "tr",
-              { class: "bk-snaps" },
-              h(
-                "td",
-                { colspan: "7" },
-                h(
-                  "div",
-                  { class: "bk-hint bk-snaps__head" },
-                  `All ${repo.snapshot_count} snapshots of ${key}, newest first`,
-                ),
-                h(
-                  "ol",
-                  null,
-                  ...(repo.snapshots ?? []).map((x) =>
-                    h(
-                      "li",
-                      null,
-                      h("span", { class: "bk-idchip mono" }, x.short_id),
-                      h(
-                        "span",
-                        null,
-                        `${formatDateTime(x.time)} · ${humanDuration(now - x.time)} ago`,
-                      ),
-                      viaForm(
-                        button("Restore", {
-                          cls: "kp-button--sm kp-button--ghost",
-                          title: `Restore ${repo.owner} to ${x.short_id}`,
-                          attrs: { "data-action": restoreKind(native) },
-                          onClick: () =>
-                            void openAction(s, restoreKind(native), {
-                              preset: restorePreset(
-                                native,
-                                repo.owner,
-                                x.short_id,
-                              ),
-                            }),
-                        }),
-                        restoreKind(native),
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-            ),
-          );
-      }
-    }
-    if (!tbody.children.length) {
-      const clear = drivable(
-        h(
-          "button",
-          { type: "button", class: "bk-linkbtn" },
-          "Clear the filters",
-        ),
-        CLEAR,
-        "all",
-      );
-      clear.addEventListener("click", resetAll);
-      tbody.append(
-        h(
-          "tr",
-          null,
-          h(
-            "td",
-            { colspan: "7" },
-            h(
-              "div",
-              { class: "bk-empty" },
-              h(
-                "strong",
-                null,
-                names.length ? "No repository matches" : "No stack to show yet",
-              ),
-              ...(names.length ? [clear] : []),
-            ),
-          ),
-        ),
-      );
-    }
-    /** @param {string} label @param {SortKey["key"]} key @param {string} [cls] */
-    const head = (label, key, cls) =>
-      sortHead({
-        label,
-        key,
-        sort: S.sort,
-        onSort: (next) => {
-          S.sort = /** @type {SortKey[]} */ (next);
-          writeUrl();
-          paintRepos();
-        },
-        cls,
-        drive: { id: SORT, row: key },
-      });
-    repoBox.replaceChildren(
-      h(
-        "table",
-        { class: "bk-table" },
-        h(
-          "thead",
-          null,
-          h(
-            "tr",
-            null,
-            head("App", "app"),
-            h("th", { scope: "col" }, "Newest"),
-            head("Age", "age"),
-            head("Snapshots", "snaps", "bk-num"),
-            head("Size", "size", "bk-num"),
-            head("Restore drill", "drill"),
-            h("th", { scope: "col" }, h("span", { class: "nx-vh" }, "Actions")),
-          ),
-        ),
-        tbody,
-      ),
-    );
-    /** @type {Node[]} */
-    const act = [];
-    const chipOf = (
-      /** @type {string} */ label,
-      /** @type {string} */ row,
-      /** @type {() => void} */ clear,
-    ) => filterChip(label, clear, { id: CLEAR, row });
-    if (S.q.trim())
-      act.push(
-        chipOf(`“${S.q.trim()}”`, "text", () => {
-          S.q = "";
-          search.value = "";
-          writeUrl();
-          paintRepos();
-        }),
-      );
-    if (S.undrilled)
-      act.push(
-        chipOf("never drilled", "drills", () => {
-          S.undrilled = false;
-          writeUrl();
-          paintAll();
-        }),
-      );
-    for (const s of [...S.stacks].sort())
-      act.push(chipOf(s, `stack:${s}`, () => toggleStack(s)));
-    if (S.sort.length)
-      act.push(
-        chipOf(
-          `sorted by ${S.sort.map((x) => x.key + (x.dir > 0 ? " ↑" : " ↓")).join(", ")}`,
-          "sort",
-          () => {
-            S.sort = [];
-            writeUrl();
-            paintRepos();
-          },
-        ),
-      );
-    if (act.length) {
-      const all = drivable(
-        h("button", { type: "button", class: "bk-linkbtn" }, "Reset all"),
-        CLEAR,
-        "all",
-      );
-      all.addEventListener("click", resetAll);
-      repoActive.replaceChildren(h("span", null, "Active:"), ...act, all);
-    } else
-      repoActive.replaceChildren(
-        h(
-          "span",
-          null,
-          "Click a header to sort; each header clicked is a further key (again reverses it, a third time takes it out) · click a stack to fold it · click a row for every snapshot",
-        ),
-      );
-  };
-
-  const resetAll = () => {
-    S.q = "";
-    search.value = "";
-    S.undrilled = false;
-    S.open = null;
-    S.stacks.clear();
-    S.sort = [];
-    S.collapsed.clear();
+  // events of the coverage
+  const onPick = (/** @type {Event} */ e) => {
+    const d = /** @type {CustomEvent} */ (e).detail;
+    const key = d.picked ? d.colKey : null;
+    if (key === S.night) return;
+    S.night = key;
+    weekStart = "";
     writeUrl();
-    paintAll();
+    if (S.view === "month" && key) calendarSelect(calendar, key);
+    paintPin();
+    paintNight();
+  };
+  nightsHeat.addEventListener(HEAT_PICK_EVENT, onPick);
+  monthHeat.addEventListener(HEAT_PICK_EVENT, onPick);
+  nightsHeat.addEventListener(HEAT_ROW_EVENT, (e) => {
+    S.stacks = new Set(/** @type {CustomEvent} */ (e).detail.keys);
+    writeUrl();
+    shownRead.textContent = S.stacks.size
+      ? `Showing only: ${[...S.stacks].sort().join(", ")} (the page filters; the grid reports).`
+      : "All stacks shown. Press a stack name to show only that one.";
+    paintCoverage();
+  });
+  nightsHeat.addEventListener(HEAT_PAGE_EVENT, (e) =>
+    page(
+      /** @type {CustomEvent} */ (e).detail.direction === "earlier" ? +1 : -1,
+    ),
+  );
+  calendar.addEventListener(CALENDAR_PICK_EVENT, (e) => {
+    const date = /** @type {CustomEvent} */ (e).detail.date;
+    S.night = date;
+    weekStart = "";
+    writeUrl();
+    setHeatPick(monthHeat, date);
+    paintPin();
+    paintNight();
+  });
+  calendar.addEventListener(CALENDAR_MONTH_EVENT, (e) => {
+    const d = /** @type {CustomEvent} */ (e).detail;
+    S.cursor = { year: d.year, month: d.month };
+    paintCoverage();
+  });
+  viewSwitch.addEventListener(SEGMENTED_EVENT, (e) => {
+    S.view =
+      /** @type {CustomEvent} */ (e).detail.value === "month"
+        ? "month"
+        : "nights";
+    writeUrl();
+    paintCoverage();
+    paintPin();
+  });
+  rangeBox.addEventListener(RANGE_EVENT, (e) => {
+    const key = /** @type {CustomEvent} */ (e).detail.preset;
+    if (!(key in RANGES)) return;
+    S.range = /** @type {any} */ (key);
+    S.offset = S.night
+      ? offsetFor(nn().current, S.night, RANGES[S.range].n)
+      : 0;
+    writeUrl();
+    paintCoverage();
+  });
+  for (const el of [covCard, nightCard]) {
+    el.addEventListener(CARD_RETRY_EVENT, () => void loadAll(true));
+  }
+  nightSel.addEventListener("change", () => {
+    const night = nightSel.value;
+    pin(night === nn().last && !S.night ? null : night);
+  });
+  weekSel.addEventListener("change", () => {
+    S.weekStack = weekSel.value;
+    paintNight();
+  });
+  weekEl.addEventListener(WEEK_RANGE_EVENT, (e) => {
+    weekStart = /** @type {CustomEvent} */ (e).detail.start;
+    setWeekEvents(weekEl, weekEvents());
+  });
+  nightCard.addEventListener(STATUS_RETRY_EVENT, (e) => {
+    const id = /** @type {CustomEvent} */ (e).detail.id;
+    if (names.includes(id) && reads[id]?.status === "ok")
+      void openAction(id, "backup");
+    else if (names.includes(id)) void retryOne(id);
+  });
+
+  const paintAll = () => {
+    paintLive();
+    paintKpis();
+    paintCoverage();
+    paintPin();
+    paintNight();
+    paintRepos();
+  };
+
+  // ── dialogs ───────────────────────────────────────────────────────────
+  // redesign-final-h3: Restore… opens the Restore flow (FLOWS.md §5), on
+  // the stack the view is narrowed to, or the first with a snapshot.
+  const openRestorePicker = () => {
+    const withRepos = names.filter(
+      (n) =>
+        reads[n]?.status === "ok" && /** @type {any} */ (reads[n]).repos.length,
+    );
+    const first =
+      (S.stacks.size ? withRepos.find((n) => S.stacks.has(n)) : null) ??
+      withRepos[0] ??
+      null;
+    history.pushState(null, "", restoreHref(first));
+    dispatchEvent(new PopStateEvent("popstate"));
   };
 
   /**
-   * Restore… (the row's own app and newest snapshot, fix-216), Verify
-   * restore… (fix-237) and Show a file… (fix-241).
-   * @param {string} stack
-   * @param {boolean} native
-   * @param {Repo} r
-   * @returns {Node[]}
+   * "Verify restore" on a set of repositories (the drill list, or the
+   * ticked rows): each its own Verify restore, a job per repository.
+   * @param {(Repo & {stack: string, native?: boolean})[]} repoList
    */
-  const rowActions = (stack, native, r) => {
-    const newest = r.newest_snapshot;
-    if (!newest) return [];
-    const restore = viaForm(
-      button("Restore…", {
-        cls: "kp-button--sm kp-button--secondary",
-        title:
-          "Restore this app; the newest snapshot is picked, change it in the dialog",
-        attrs: { "data-action": restoreKind(native) },
-        onClick: () =>
-          void openAction(stack, restoreKind(native), {
-            preset: restorePreset(native, r.owner, newest.short_id),
+  const openDrills = (repoList) => {
+    /** @type {{close: () => void} | null} */
+    let dlg = null;
+    const items = h(
+      "ul",
+      { class: "bk-drill-list" },
+      ...repoList.map((r) => {
+        const b = viaForm(
+          button("Verify restore…", {
+            cls: "kp-button--sm kp-button--secondary",
+            title:
+              "Restore the newest snapshot into the drill's scratch directory and judge it",
+            attrs: { "data-action": "verify-restore" },
+            onClick: () => {
+              dlg?.close();
+              void openAction(r.stack, "verify-restore", {
+                preset: {
+                  app: r.owner,
+                  snapshot: /** @type {any} */ (r.newest_snapshot).short_id,
+                },
+              });
+            },
           }),
+          "verify-restore",
+        );
+        return h(
+          "li",
+          null,
+          h("span", { class: "mono" }, `${r.stack}/${r.owner}`),
+          h(
+            "span",
+            { class: "bk-hint" },
+            `newest ${humanDuration(nowS() - (r.newest_snapshot?.time ?? nowS()))} ago`,
+          ),
+          b,
+        );
       }),
-      restoreKind(native),
     );
-    const verify = viaForm(
-      button("Verify restore…", {
-        cls: "kp-button--sm kp-button--ghost",
-        title:
-          "Restore this snapshot into the drill's scratch directory to prove it restores; live data is not touched",
-        attrs: { "data-action": "verify-restore" },
-        onClick: () =>
-          void openAction(stack, "verify-restore", {
-            preset: { app: r.owner, snapshot: newest.short_id },
-          }),
-      }),
-      "verify-restore",
-    );
-    // kp-themes action columns: a named role per button gives each action
-    // one fixed slot, so a row without Show a file keeps that slot empty.
-    restore.dataset.kpAction = "restore";
-    verify.dataset.kpAction = "verify";
-    /** @type {Node[]} */
-    const out = [restore, verify];
-    // A native unit's snapshot is one tar stream, not a tree of files, so
-    // its row has no Show a file (restore is the way back for it).
-    if (!native) {
-      const file = drivable(
-        button("Show a file…", {
-          cls: "kp-button--sm kp-button--ghost",
-          title:
-            "Read one file as this snapshot holds it, without restoring anything",
-          onClick: () => openFileDialog(stack, r),
-        }),
-        SNAPSHOT_FILE,
-        `${stack}/${r.owner}`,
-      );
-      file.dataset.kpAction = "show-file";
-      out.push(file);
-    }
-    return out;
+    dlg = openDialog({
+      title: "Verify restore",
+      description:
+        "Verify restore restores a repository's newest snapshot into the drill's scratch directory, judges it as the nightly drill does, and empties the scratch again; nothing live is touched. Each runs as its own job.",
+      body: [
+        items,
+        h(
+          "p",
+          { class: "bk-hint" },
+          "The Restore drills tile counts the nightly round's own drills, one repository a night in turn; a verify you start here reports in its job.",
+        ),
+      ],
+      wide: true,
+      id: "bk-drills",
+    });
   };
-
-  rowKeys(repos.el);
 
   // ── retired ───────────────────────────────────────────────────────────
   /** @type {(() => void) | null} */
@@ -1576,7 +1943,13 @@ export function mount(root) {
       return;
     }
     if (!retired) {
-      ret.body.replaceChildren(skeleton("60%"), skeleton("40%"));
+      ret.body.replaceChildren(
+        h("div", {
+          class: "kp-skeleton bk-retired-load",
+          role: "status",
+          "aria-label": "Reading the retired list",
+        }),
+      );
       return;
     }
     if (!retired.length) {
@@ -1606,112 +1979,26 @@ export function mount(root) {
       );
       return;
     }
-    const table = tableBlock({
-      remember: "retired",
-      caption:
-        "Every stack, app or native unit the host keeps a retired record of",
-      captionHidden: true,
-      search: "Search retired keys",
-      nothing: "Nothing retired is kept right now.",
-      pageSize: 25,
-      pageSizes: "25,50,100",
-      columns: RETIRED_COLUMNS,
+    import("../dom.js").then(({ tableBlock }) => {
+      if (abort.signal.aborted || !retired) return;
+      const t = tableBlock({
+        remember: "retired",
+        caption:
+          "Every stack, app or native unit the host keeps a retired record of",
+        captionHidden: true,
+        search: "Search retired keys",
+        nothing: "Nothing retired is kept right now.",
+        pageSize: 25,
+        pageSizes: "25,50,100",
+        columns: RETIRED_COLUMNS,
+      });
+      ret.body.replaceChildren(t.wrap);
+      detachRetired = attachDataTables(ret.body);
+      t.tbody.replaceChildren(...retired.map(retiredRow));
+      t.ready();
     });
-    ret.body.replaceChildren(table.wrap);
-    detachRetired = attachDataTables(ret.body);
-    table.tbody.replaceChildren(...retired.map(retiredRow));
-
-    table.ready();
   };
   cleanups.push(() => detachRetired?.());
-
-  const paintAll = () => {
-    paintLive();
-    paintKpis();
-    paintHeat();
-    paintDetail();
-    paintRepos();
-  };
-
-  // ── dialogs ───────────────────────────────────────────────────────────
-  /**
-   * Restore… in the header: pick the stack, the app and the snapshot here,
-   * then the Restore action's own dialog opens with all three filled in.
-   */
-  // redesign-final-h3: Restore… opens the Restore flow (FLOWS.md §5), on
-  // the stack the view is narrowed to, or the first with a snapshot.
-  const openRestorePicker = () => {
-    const withRepos = names.filter(
-      (n) =>
-        reads[n]?.status === "ok" && /** @type {any} */ (reads[n]).repos.length,
-    );
-    const first =
-      (S.stacks.size ? withRepos.find((n) => S.stacks.has(n)) : null) ??
-      withRepos[0] ??
-      null;
-    history.pushState(null, "", restoreHref(first));
-    dispatchEvent(new PopStateEvent("popstate"));
-  };
-
-  /** "Drill them now…": every repository never drilled, each its own Verify restore. */
-  const openDrills = () => {
-    const never = allRepos(reads).filter(
-      (r) => drillState(r) === "never" && r.newest_snapshot,
-    );
-    /** @type {{close: () => void} | null} */
-    let dlg = null;
-    const list = h(
-      "ul",
-      { class: "bk-drill-list" },
-      ...never.map((r) => {
-        const b = viaForm(
-          button("Verify restore…", {
-            cls: "kp-button--sm kp-button--secondary",
-            title:
-              "Restore the newest snapshot into the drill's scratch directory and judge it",
-            attrs: { "data-action": "verify-restore" },
-            onClick: () => {
-              dlg?.close();
-              void openAction(r.stack, "verify-restore", {
-                preset: {
-                  app: r.owner,
-                  snapshot: /** @type {any} */ (r.newest_snapshot).short_id,
-                },
-              });
-            },
-          }),
-          "verify-restore",
-        );
-        return h(
-          "li",
-          null,
-          stackMark(hueOf(r.stack)),
-          h("span", { class: "mono" }, `${r.stack}/${r.owner}`),
-          h(
-            "span",
-            { class: "bk-hint" },
-            `newest ${humanDuration(nowS() - (r.newest_snapshot?.time ?? nowS()))} ago`,
-          ),
-          b,
-        );
-      }),
-    );
-    dlg = openDialog({
-      title: "Drill the repositories never drilled",
-      description:
-        "Verify restore restores a repository's newest snapshot into the drill's scratch directory, judges it as the nightly drill does, and empties the scratch again; nothing live is touched. Each runs as its own job.",
-      body: [
-        list,
-        h(
-          "p",
-          { class: "bk-hint" },
-          "The Restore drills tile counts the nightly round's own drills, one repository a night in turn; a verify you start here reports in its job.",
-        ),
-      ],
-      wide: true,
-      id: "bk-drills",
-    });
-  };
 
   // ── loading ───────────────────────────────────────────────────────────
   /**
@@ -1781,13 +2068,21 @@ export function mount(root) {
       unread(r) &&
       Date.now() - startedAt[name] < UNREAD_GIVE_UP_MS
     ) {
-      reads = { ...reads, [name]: r };
+      // Still unread by the host: the stack stays "reading…" (with how long
+      // it has waited) until it answers or the give-up window ends.
+      reads = { ...reads, [name]: { status: "pending" } };
       paintAll();
       await new Promise((res) => setTimeout(res, wait));
       wait = Math.min(wait * 2, 15000);
       r = await readOne(name, false);
     }
     if (abort.signal.aborted) return;
+    // fix-224: a stack that never settles is named, with Retry.
+    if (unread(r))
+      r = {
+        status: "failed",
+        reason: `the host did not answer within ${Math.round(UNREAD_GIVE_UP_MS / 1000)} s`,
+      };
     reads = { ...reads, [name]: r };
     readAt = nowS();
     paintAll();
@@ -1817,7 +2112,9 @@ export function mount(root) {
         .sort((/** @type {string} */ a, /** @type {string} */ b) =>
           a.localeCompare(b),
         );
-      hues = stackHues(names.map((stack) => ({ stack })));
+      vmids.clear();
+      for (const s of fleet?.stacks ?? [])
+        if (s.vmid != null) vmids.set(s.name, Number(s.vmid));
       for (const s of [...S.stacks])
         if (fleet && !names.includes(s)) S.stacks.delete(s);
       reads = Object.fromEntries(
@@ -1825,7 +2122,7 @@ export function mount(root) {
       );
       for (const n of names) delete startedAt[n];
       if (S.night)
-        S.offset = offsetFor(nightsNow(nowS()).current, S.night, N());
+        S.offset = offsetFor(nn().current, S.night, RANGES[S.range].n);
       paintAll();
       if (!fleet) return;
       void loadRetired();
@@ -1919,23 +2216,13 @@ export function mount(root) {
     if (document.querySelector("dialog[open]")) return;
     if (e.key === "/" && !inField && !e.ctrlKey && !e.metaKey) {
       e.preventDefault();
-      search.focus();
+      /** @type {HTMLInputElement | null} */ (
+        shell.wrap.querySelector("[data-kp-datatable-search]")
+      )?.focus();
     } else if (e.key === "Escape" && !inField && S.night) pin(null);
   };
   document.addEventListener("keydown", onKey);
   cleanups.push(() => document.removeEventListener("keydown", onKey));
-
-  // Rotating to a phone (or back) changes how many nights fit.
-  let lastN = N();
-  const onResize = () => {
-    if (N() === lastN) return;
-    lastN = N();
-    if (S.night) S.offset = offsetFor(nightsNow(nowS()).current, S.night, N());
-    else S.offset = 0;
-    paintHeat();
-  };
-  addEventListener("resize", onResize);
-  cleanups.push(() => removeEventListener("resize", onResize));
 
   ret.el.addEventListener("toggle", () => {
     if (/** @type {HTMLDetailsElement} */ (ret.el).open) paintRetired();
@@ -1944,6 +2231,12 @@ export function mount(root) {
   if (fromUrl.section === "coverage") cov.el.scrollIntoView({ block: "start" });
   if (fromUrl.section === "removed") ret.el.scrollIntoView({ block: "start" });
 
+  // The legacy address of the Drill filter (`?drills=never`) still applies.
+  if (params.get("drills") === "never")
+    table()?.filter(COL.drill, ["never drilled"]);
+  const legacyQ = params.get("q");
+  if (legacyQ) table()?.query(legacyQ);
+
   void loadAll(false);
   return () => {
     abort.abort();
@@ -1951,32 +2244,26 @@ export function mount(root) {
   };
 }
 
+/** This month, in the viewer's zone, for the calendar's first sight. */
+function monthOfNow() {
+  const n = nightsNow(nowS()).current;
+  return { year: Number(n.slice(0, 4)), month: Number(n.slice(5, 7)) };
+}
+
+/** @param {number} bytes */
+const sizeTextOf = (bytes) => (bytes <= 0 ? "0 B" : sizeText(bytes));
+
 /**
- * j / k (and the arrows) move between the table's rows, Enter opens one.
- * @param {HTMLElement} card
+ * The moment the nightly round is planned on a night: 03:00 in Brussels,
+ * found by trying summer and winter time (format.js owns the zone).
+ * @param {string} iso YYYY-MM-DD
  */
-function rowKeys(card) {
-  card.addEventListener("keydown", (e) => {
-    if (!["j", "k", "ArrowDown", "ArrowUp", "Enter"].includes(e.key)) return;
-    const t = /** @type {HTMLElement} */ (e.target);
-    if (/^(INPUT|TEXTAREA|SELECT|BUTTON|A)$/.test(t.tagName)) return;
-    const items = /** @type {HTMLElement[]} */ ([
-      ...card.querySelectorAll("tr[tabindex]"),
-    ]).filter((x) => x.offsetParent);
-    const i = items.indexOf(
-      /** @type {HTMLElement} */ (document.activeElement),
-    );
-    if (e.key === "Enter") {
-      if (i >= 0) {
-        e.preventDefault();
-        items[i].click();
-      }
-      return;
-    }
-    e.preventDefault();
-    const step = e.key === "j" || e.key === "ArrowDown" ? 1 : -1;
-    items[Math.max(0, Math.min(items.length - 1, i + step))]?.focus();
-  });
+function plannedMs(iso) {
+  for (const off of ["+02:00", "+01:00"]) {
+    const ms = Date.parse(`${iso}T${PLANNED_AT}:00${off}`);
+    if (formatClock(ms / 1000) === PLANNED_AT) return ms;
+  }
+  return Date.parse(`${iso}T${PLANNED_AT}:00+01:00`);
 }
 
 /**
@@ -1984,8 +2271,9 @@ function rowKeys(card) {
  * read-only.
  * @param {string} stack
  * @param {Repo} r
+ * @param {string} [pick] the snapshot to start on
  */
-function openFileDialog(stack, r) {
+function openFileDialog(stack, r, pick) {
   const now = Math.floor(Date.now() / 1000);
   const id = `${stack}-${r.owner}`;
   const snap = /** @type {HTMLSelectElement} */ (
@@ -2003,6 +2291,12 @@ function openFileDialog(stack, r) {
       ),
     ),
   );
+  if (pick) {
+    const row = snapshotPickerRows(r.snapshots ?? [], now).find(
+      (x) => x.shortId === pick,
+    );
+    if (row) snap.value = row.value;
+  }
   const path = /** @type {HTMLInputElement} */ (
     h("input", {
       class: "kp-field__input",

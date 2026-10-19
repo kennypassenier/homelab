@@ -20,8 +20,12 @@ import { declare, drivable } from "../drivable.js";
 import {
   LEVELS,
   defaultLevels,
+  BUCKET_S,
+  bucketStart,
   counts,
   countText,
+  densityBuckets,
+  inRange,
   keyAction,
   lineShown,
   logFilterFromParams,
@@ -41,6 +45,32 @@ import { current, listen, subscribe } from "../store.js";
 import { countOf, emptyState, kbd, stackMark, toolbar } from "../ui.js";
 import { setParams } from "../urlstate.js";
 import { attachLogs } from "/static/kp/js/log.js";
+import { gridRow, formGrid } from "../gridrow.js";
+import { formatClock, formatDateTime } from "../format.js";
+import {
+  TOGGLE_CHANGED_EVENT,
+  attachToggles,
+  toggle as toggleOf,
+} from "/static/kp/js/toggle.js";
+import {
+  SEGMENTED_EVENT,
+  attachSegmented,
+  setSegmentedValues,
+} from "/static/kp/js/segmented.js";
+import {
+  UPTIME_PICK_EVENT,
+  attachUptimes,
+  setUptime,
+} from "/static/kp/js/uptime.js";
+import {
+  HEAT_PICK_EVENT,
+  HEAT_ROW_EVENT,
+  attachHeats,
+  setHeat,
+  setHeatPick,
+  setHeatRows,
+} from "/static/kp/js/heat.js";
+import { attachHoverCards } from "/static/kp/js/hovercard.js";
 
 /** Lines kept in the page, as the server's ring. */
 const KEEP = 2000;
@@ -90,6 +120,10 @@ export function mountHostLog(root, opts) {
   let unseen = 0;
   /** @type {number | null} */
   let open = null;
+  /** The five minutes (start, unix seconds) the lines are narrowed to. @type {number | null} */
+  let range = null;
+  /** The picture over the lines: sources by time (opens first) or the strip. @type {"grid" | "strip"} */
+  let picture = "grid";
 
   const side = h("aside", {
     class: "hl-side",
@@ -178,14 +212,282 @@ export function mountHostLog(root, opts) {
     list,
     blocks,
   );
+  // ── the levels as chips, exact counts (feat-kp11demo-7) ───────────────
+  const levelBtn = (/** @type {string} */ value, /** @type {string} */ label) =>
+    drivable(
+      h(
+        "button",
+        {
+          class: "kp-button",
+          type: "button",
+          "data-kp-toggle": "",
+          "data-kp-look": "chip",
+          "data-kp-toggle-value": value,
+          "data-kp-count": "0",
+          "aria-pressed": String(f.levels.has(value)),
+          title: `Show or hide the ${label.toLowerCase()} lines; several levels can be on`,
+        },
+        label,
+      ),
+      opts.drive.level,
+      value,
+    );
+  const levelsEl = h(
+    "div",
+    {
+      class: "kp-toggles hl-levels",
+      role: "group",
+      "aria-label": "Level",
+      "data-kp-toggle-group": "level",
+    },
+    ...LEVELS.map((lv) => levelBtn(lv.value, lv.label)),
+  );
+  const levelRead = h("span", { class: "hl-levelread", role: "status" });
+  /** @param {Record<string, number>} byLevel */
+  const paintLevels = (byLevel) => {
+    for (const b of /** @type {HTMLElement[]} */ ([
+      ...levelsEl.querySelectorAll("button"),
+    ])) {
+      const v = b.getAttribute("data-kp-toggle-value") ?? "";
+      b.setAttribute("data-kp-count", String(byLevel[v] ?? 0));
+      toggleOf(b)?.setCount(byLevel[v] ?? 0);
+      b.setAttribute("aria-pressed", String(f.levels.has(v)));
+    }
+    levelRead.textContent = loaded
+      ? `${Object.values(byLevel)
+          .reduce((a, n) => a + n, 0)
+          .toLocaleString("en-GB")} lines in the window`
+      : "";
+  };
+  levelsEl.addEventListener(TOGGLE_CHANGED_EVENT, (e) => {
+    const keys = /** @type {CustomEvent} */ (e).detail.pressedKeys ?? [];
+    const levels = new Set(keys.length ? keys : LEVELS.map((x) => x.value));
+    f = { ...f, levels };
+    saveLogLevels(levels);
+    changed();
+  });
+
+  // ── where in the window did it happen (feat-kp11demo-7) ───────────────
+  const pictureSeg = h(
+    "div",
+    {
+      class: "kp-segmented",
+      "data-kp-segmented": "single",
+      role: "radiogroup",
+      "aria-label": "Picture of the window",
+    },
+    h(
+      "button",
+      {
+        type: "button",
+        class: "kp-segmented__item",
+        role: "radio",
+        "aria-checked": "true",
+        "data-value": "grid",
+      },
+      "Sources by time",
+    ),
+    h(
+      "button",
+      {
+        type: "button",
+        class: "kp-segmented__item",
+        role: "radio",
+        "aria-checked": "false",
+        "data-value": "strip",
+      },
+      "The strip",
+    ),
+  );
+  const pictureRead = h(
+    "span",
+    { class: "hl-levelread", role: "status" },
+    "Press a cell to look at those five minutes.",
+  );
+  const stripEl = h("div", {
+    class: "kp-uptime hl-strip",
+    "data-kp-uptime": "",
+    "data-kp-uptime-fit": "scroll",
+  });
+  const gridEl = h("div", {
+    class: "kp-heat hl-grid",
+    "data-kp-heat": "",
+    "data-kp-heat-toggle": "",
+  });
+  const pictureBox = h("div", { class: "hl-picture" }, gridEl, stripEl);
+  const pictureRetry = h(
+    "button",
+    { type: "button", class: "kp-button", hidden: "" },
+    "Try again",
+  );
+  pictureRetry.addEventListener("click", () => void read());
+  const density = formGrid(
+    [
+      gridRow({
+        label: "Where",
+        hideLabel: true,
+        control: pictureSeg,
+        value: pictureRead,
+      }),
+      h(
+        "div",
+        { "data-kp-formgrid-span": "all", class: "hl-picturewrap" },
+        pictureBox,
+        pictureRetry,
+      ),
+    ],
+    "hl-density",
+  );
+  const levelsRow = formGrid(
+    [
+      gridRow({
+        label: "Levels",
+        control: levelsEl,
+        value: levelRead,
+        wide: false,
+      }),
+    ],
+    "hl-levelsrow",
+  );
+  const qualify = (/** @type {number} */ ts) => formatDateTime(ts);
+  const paintDensity = () => {
+    const buckets = loaded && !failure ? densityBuckets(lines) : [];
+    const sources = allSources();
+    stripEl.hidden = picture !== "strip";
+    gridEl.hidden = picture !== "grid";
+    pictureRetry.hidden = !failure;
+    setSegmentedValues(pictureSeg, [picture]);
+    const state = !loaded
+      ? "loading"
+      : failure
+        ? "error"
+        : buckets.length
+          ? "ready"
+          : "empty";
+    const every = Math.max(1, Math.round(buckets.length / 12));
+    const colour = (/** @type {number} */ i) => `var(--chart-${(i % 5) + 1})`;
+    setUptime(stripEl, {
+      label: "Lines in the window",
+      periods: buckets.map((b) => ({
+        key: String(b.start),
+        label: formatClock(b.start),
+        state:
+          b.worst === "critical"
+            ? "down"
+            : b.worst === "warning"
+              ? "degraded"
+              : b.count
+                ? "up"
+                : "none",
+        tip: `${qualify(b.start)}: ${b.count.toLocaleString("en-GB")} ${b.count === 1 ? "line" : "lines"}${b.worst === "critical" ? ", errors" : b.worst === "warning" ? ", warnings" : ""}`,
+      })),
+      from: buckets.length ? qualify(buckets[0].start) : "",
+      to: buckets.length
+        ? qualify(buckets[buckets.length - 1].start + BUCKET_S)
+        : "",
+      count: Math.max(buckets.length, 1),
+      state,
+      error: failure ?? undefined,
+    });
+    setHeat(gridEl, {
+      columns: buckets.map((b, i) => ({
+        key: String(b.start),
+        label: i % every === 0 ? formatClock(b.start) : "",
+        minor: i % every !== 0,
+      })),
+      rows: sources.map((src, i) => ({
+        key: src,
+        label: sourceLabel(src),
+        mark: src === "HOST" ? "var(--muted-foreground)" : colour(i),
+        pressed: !sourceOn(src, f),
+        cells: buckets.map((b) => {
+          const x = b.bySource.get(src);
+          const tone = !x
+            ? "muted"
+            : x.worst === "critical"
+              ? "bad"
+              : x.worst === "warning"
+                ? "warn"
+                : "ok";
+          return {
+            tone: /** @type {any} */ (tone),
+            label: x
+              ? `${x.count.toLocaleString("en-GB")} ${x.count === 1 ? "line" : "lines"}${x.worst === "critical" ? ", errors" : x.worst === "warning" ? ", warnings" : ""}`
+              : "nothing logged",
+            tip: `${sourceLabel(src)} · ${qualify(b.start)}: ${x ? `${x.count.toLocaleString("en-GB")} lines` : "nothing logged"}`,
+          };
+        }),
+      })),
+      toggle: true,
+      every,
+      state,
+      message:
+        failure ??
+        "No lines yet: the host has printed nothing since the dashboard started.",
+      skeleton: { rows: Math.max(sources.length, 3), columns: 24 },
+      label: "Sources against five-minute columns",
+      picked: range == null ? null : String(range),
+    });
+    // sources shown, as the side column says
+    setHeatRows(
+      gridEl,
+      sources.filter((s2) => !sourceOn(s2, f)),
+    );
+  };
+  stripEl.addEventListener(UPTIME_PICK_EVENT, (e) => {
+    const key = Number(/** @type {CustomEvent} */ (e).detail.key);
+    const b = densityBuckets(lines).find((x) => x.start === key);
+    if (!b || b.first == null) return;
+    const el = list.querySelector(`.kp-log__line[data-seq="${b.first}"]`);
+    setFollow(false);
+    el?.scrollIntoView({ block: "start" });
+    pictureRead.textContent = el
+      ? `Jumped to ${formatClock(b.start)}, line ${b.first}.`
+      : `${formatClock(b.start)}: its lines are hidden by the filters.`;
+  });
+  gridEl.addEventListener(HEAT_PICK_EVENT, (e) => {
+    const d = /** @type {CustomEvent} */ (e).detail;
+    range = d.picked ? Number(d.colKey) : null;
+    pictureRead.textContent = d.picked
+      ? `Showing the lines of ${formatClock(Number(d.colKey))} to ${formatClock(Number(d.colKey) + BUCKET_S)} only.`
+      : "Press a cell to look at those five minutes.";
+    paintLines();
+  });
+  gridEl.addEventListener(HEAT_ROW_EVENT, (e) => {
+    const off = new Set(/** @type {CustomEvent} */ (e).detail.keys);
+    f = {
+      ...f,
+      off: new Set(allSources().filter((x) => off.has(x))),
+      only: null,
+    };
+    changed();
+  });
+  pictureSeg.addEventListener(SEGMENTED_EVENT, (e) => {
+    picture =
+      /** @type {CustomEvent} */ (e).detail.value === "strip"
+        ? "strip"
+        : "grid";
+    paintDensity();
+  });
+  void bucketStart;
+
   const term = h(
     "section",
     { class: "hl-term", "aria-label": opts.label },
     tb.el,
+    levelsRow,
+    density,
     h("div", { class: "hl-outwrap" }, out, newPill),
     ...(opts.foot ? [opts.foot] : []),
   );
   root.replaceChildren(h("div", { class: "hl" }, side, term));
+  const detachKp = [
+    attachToggles(root),
+    attachSegmented(root),
+    attachUptimes(root),
+    attachHeats(root),
+    attachHoverCards(root),
+  ];
 
   const fleetNames = () => (current().fleet?.stacks ?? []).map((s) => s.name);
   const allSources = () => sourceList(fleetNames(), seen);
@@ -278,39 +580,6 @@ export function mountHostLog(root, opts) {
     );
     return { label, input, count };
   };
-  const levelRows = LEVELS.map((lv) => {
-    const input = /** @type {HTMLInputElement} */ (
-      drivable(
-        h("input", {
-          type: "checkbox",
-          "aria-label": `Show the ${lv.label.toLowerCase()} lines`,
-        }),
-        opts.drive.level,
-        lv.value,
-      )
-    );
-    input.addEventListener("change", () => {
-      const levels = new Set(f.levels);
-      if (levels.has(lv.value)) levels.delete(lv.value);
-      else levels.add(lv.value);
-      f = { ...f, levels };
-      saveLogLevels(levels);
-      changed();
-    });
-    const count = h("small");
-    const label = h(
-      "label",
-      {
-        class: "hl-opt",
-        title: `Show or hide the ${lv.label.toLowerCase()} lines; several levels can be on`,
-      },
-      input,
-      h("span", { class: `hl-dot hl-dot--${lv.dot}`, "aria-hidden": "true" }),
-      h("span", null, lv.label),
-      count,
-    );
-    return { value: lv.value, input, count, label };
-  });
   const reset = drivable(
     h(
       "button",
@@ -330,12 +599,6 @@ export function mountHostLog(root, opts) {
   const hint = h("p", { class: "hl-hint" }, "Hover a source for “only”.");
   side.replaceChildren(
     h("div", { class: "hl-group" }, h("h3", null, "Source"), srcOpts),
-    h(
-      "div",
-      { class: "hl-group" },
-      h("h3", null, "Level"),
-      h("div", { class: "hl-opts" }, ...levelRows.map((r) => r.label)),
-    ),
     h("div", { class: "hl-sidefoot" }, reset, hint),
   );
 
@@ -361,10 +624,7 @@ export function mountHostLog(root, opts) {
       row.label.classList.toggle("hl-opt--off", !on);
       row.count.textContent = String(c.bySource.get(s) ?? 0);
     }
-    for (const r of levelRows) {
-      r.input.checked = f.levels.has(r.value);
-      r.count.textContent = String(c.byLevel[r.value]);
-    }
+    paintLevels(c.byLevel);
     const n = narrowed(f);
     reset.hidden = !n;
     hint.hidden = n;
@@ -546,7 +806,8 @@ export function mountHostLog(root, opts) {
     ];
   };
 
-  const shownLines = () => lines.filter((l) => lineShown(l, f));
+  const shownLines = () =>
+    lines.filter((l) => lineShown(l, f) && inRange(l, range));
 
   const paintCount = () => {
     countEl.textContent = loaded
@@ -624,6 +885,7 @@ export function mountHostLog(root, opts) {
     }
     attachLogs(list);
     paintCount();
+    paintDensity();
     if (follow) toTail();
   };
 
@@ -634,6 +896,7 @@ export function mountHostLog(root, opts) {
     requestAnimationFrame(() => {
       sideQueued = false;
       paintSide();
+      paintDensity();
     });
   };
 
@@ -685,7 +948,7 @@ export function mountHostLog(root, opts) {
     }
     seen.add(l.source);
     queueSide();
-    if (!loaded || !lineShown(l, f)) {
+    if (!loaded || !lineShown(l, f) || !inRange(l, range)) {
       paintCount();
       return;
     }
@@ -839,6 +1102,7 @@ export function mountHostLog(root, opts) {
       unsub();
       clearInterval(timer);
       document.removeEventListener("keydown", onKey);
+      for (const d of detachKp) d();
     },
     setFollow,
     following: () => follow,

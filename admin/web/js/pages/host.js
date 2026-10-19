@@ -38,7 +38,6 @@ import {
   hostSettingsView,
   hostTile,
   hostUptime,
-  latencyBars,
   rootGrowth,
   rootVolumeLine,
   settingVisible,
@@ -58,13 +57,53 @@ import {
   pageHeader,
   section,
   segSwitch,
-  shareBar,
-  skeleton,
   sortableTable,
+  skeleton,
   swatch,
   toggleGroup,
 } from "../ui.js";
 import { attachTrendCharts, setTrendData } from "/static/kp/js/chart.js";
+import {
+  REFRESH_EVENT,
+  attachRefresh,
+  refreshOf,
+} from "/static/kp/js/auto-refresh.js";
+import { attachSegmented, SEGMENTED_EVENT } from "/static/kp/js/segmented.js";
+import {
+  VIEW_EVENT,
+  attachDataTables,
+  dataTable as tableOf,
+} from "/static/kp/js/datatable.js";
+import { attachBarCells, setBarCell } from "/static/kp/js/barcell.js";
+import { attachStackbars, setStackbar } from "/static/kp/js/stackbar.js";
+import { attachUptimes, setUptime } from "/static/kp/js/uptime.js";
+import {
+  ENTITY_ACTION_EVENT,
+  ENTITY_GRID_RETRY_EVENT,
+  attachEntityCards,
+  setEntityGrid,
+  setEntityGridState,
+} from "/static/kp/js/entity-card.js";
+import {
+  BULLETS_PICK_EVENT,
+  BULLETS_RETRY_EVENT,
+  attachBullets,
+  setBullets,
+} from "/static/kp/js/bullets.js";
+import {
+  attachStatusLists,
+  buildStatusList,
+  countStatus,
+} from "/static/kp/js/statusrow.js";
+import {
+  CARD_RETRY_EVENT,
+  attachCardStates,
+  setCardState,
+} from "/static/kp/js/card-state.js";
+import { attachFootprints } from "/static/kp/js/footprint.js";
+import { attachHoverCards } from "/static/kp/js/hovercard.js";
+import { gridRow, formGrid } from "../gridrow.js";
+import { setParams } from "../urlstate.js";
 
 /** Seconds between two readings of the container list and the ping. */
 const EVERY_S = 30;
@@ -336,23 +375,21 @@ export function mount(root, ctx) {
   );
 
   // ── Containers ────────────────────────────────────────────────────────
+  // The demo's three views of the same guests (feat-kp11demo-11): a table
+  // you can sort, filter and open, cards of one height with two meters, and
+  // the pressure list that puts the guest closest to its memory limit first.
   /** @type {import("../host.js").Guest[] | null} */
   let guests = null;
+  /** @type {string | null} */
+  let guestsWhy = null;
+  const q0 = new URLSearchParams(location.search);
+  /** @type {"table" | "cards" | "pressure"} */
+  let gView = ["table", "cards", "pressure"].includes(
+    q0.get("containers") ?? "",
+  )
+    ? /** @type {any} */ (q0.get("containers"))
+    : "table";
   let gShow = new Set();
-  let gQ = "";
-  const gSearch = /** @type {HTMLInputElement} */ (
-    h("input", {
-      class: "hk-search",
-      type: "search",
-      id: GUEST_SEARCH,
-      placeholder: "Search containers   /",
-      "aria-label": "Search containers",
-      oninput: (/** @type {Event} */ e) => {
-        gQ = /** @type {HTMLInputElement} */ (e.target).value;
-        filterGuests();
-      },
-    })
-  );
   const gFilter = toggleGroup({
     label: "Status",
     all: { label: "All", hint: "Every container, running or not" },
@@ -370,87 +407,223 @@ export function mount(root, ctx) {
     ],
     onChange: (on) => {
       gShow = on;
-      filterGuests();
+      gDt()?.filter(3, on.size ? [...on] : null);
     },
     drive: { id: GUEST_FILTER },
   });
-  const gBody = h("tbody", { id: "host-guests" });
-  const gTable = /** @type {HTMLTableElement} */ (
+  const gViewItem = (
+    /** @type {"table" | "cards" | "pressure"} */ v,
+    /** @type {string} */ label,
+  ) =>
     h(
-      "table",
-      { class: "hk-tbl" },
+      "button",
+      {
+        type: "button",
+        class: "kp-segmented__item",
+        role: "radio",
+        "aria-checked": String(gView === v),
+        "data-value": v,
+      },
+      label,
+    );
+  const gViewSeg = h(
+    "div",
+    {
+      class: "kp-segmented",
+      "data-kp-segmented": "single",
+      role: "radiogroup",
+      "aria-label": "View of the containers",
+    },
+    gViewItem("table", "Table"),
+    gViewItem("cards", "Cards"),
+    gViewItem("pressure", "Pressure"),
+  );
+  const gRead = h("span", { class: "hk-muted", role: "status" });
+  const gTbody = h("tbody", { id: "host-guests" });
+  const th = (
+    /** @type {string} */ label,
+    /** @type {Record<string, string>} */ a = {},
+  ) => h("th", { scope: "col", ...a }, label);
+  const gTableEl = h(
+    "div",
+    {
+      class: "kp-datatable hk-dt",
+      id: "host-containers-table",
+      "data-kp-datatable": "",
+      "data-kp-cards": "",
+      "data-kp-expandable": "",
+      "data-kp-page-size": "100",
+      "data-kp-page-sizes": "none",
+      "data-kp-sort-multi": "click",
+      "data-kp-remember": "host-containers",
+      "data-kp-busy-overlay": "",
+      "data-kp-state": "loading",
+    },
+    h(
+      "div",
+      { class: "kp-datatable__bar" },
+      h("input", {
+        class: "kp-datatable__search",
+        type: "search",
+        id: GUEST_SEARCH,
+        "data-kp-datatable-search": "",
+        placeholder: "Search the containers   /",
+        "aria-label": "Search the containers (press / to jump here)",
+      }),
+    ),
+    h(
+      "div",
+      {
+        class: "kp-alert kp-alert--destructive",
+        "data-kp-datatable-failed": "",
+        role: "alert",
+        hidden: "",
+      },
       h(
-        "thead",
-        null,
+        "p",
+        { class: "kp-alert__label kp-stateplate__title" },
+        "The guests could not be read",
+      ),
+      h("p", { "data-kp-datatable-failed-reason": "" }),
+      h(
+        "button",
+        {
+          type: "button",
+          class: "kp-button",
+          "data-kp-datatable-retry": "",
+        },
+        "Try again",
+      ),
+    ),
+    h(
+      "div",
+      { class: "kp-table-wrap" },
+      h(
+        "table",
+        { class: "kp-table" },
+        h("caption", { class: "kp-sr-only" }, "Guests on the host"),
         h(
-          "tr",
+          "thead",
           null,
-          h("th", { class: "n" }, "ID"),
-          h("th", null, "Container"),
-          h("th", null, "Status"),
-          h("th", { class: "hk-hide-phone" }, "Memory"),
           h(
-            "th",
-            { class: "n hk-hide-phone", title: "Share of one core" },
-            "CPU",
+            "tr",
+            null,
+            th("Guest", { "data-kp-sort": "number" }),
+            th("Stack", { "data-kp-sort": "text" }),
+            th("State", { "data-kp-sort": "text", "data-kp-filter": "choice" }),
+            th("CPU", { "data-kp-sort": "number" }),
+            th("Memory", { "data-kp-sort": "number" }),
+            th("Lock", { "data-kp-sort": "text" }),
+            th("Kind", { "data-kp-sort": "text", "data-kp-filter": "choice" }),
           ),
-          h("th", null, "Stack"),
+        ),
+        gTbody,
+      ),
+    ),
+    h(
+      "div",
+      { class: "kp-empty", "data-kp-datatable-empty": "", hidden: "" },
+      h(
+        "div",
+        { "data-kp-datatable-empty-none": "" },
+        h("p", { class: "kp-empty__title" }, "No guests on this host"),
+        h("p", null, "Create a stack and its container shows here."),
+      ),
+      h(
+        "div",
+        { "data-kp-datatable-empty-nomatch": "", hidden: "" },
+        h("p", { class: "kp-empty__title" }, "No guest matches"),
+        h(
+          "button",
+          {
+            type: "button",
+            class: "kp-button kp-button--secondary",
+            "data-kp-datatable-clear": "",
+          },
+          "Clear the search and filters",
         ),
       ),
-      gBody,
-    )
+    ),
+    h(
+      "div",
+      { class: "kp-datatable__bar" },
+      h("p", {
+        class: "kp-datatable__status",
+        "data-kp-datatable-status": "",
+        role: "status",
+        "aria-live": "polite",
+      }),
+      h("div", { class: "kp-datatable__pager", "data-kp-datatable-pager": "" }),
+    ),
   );
-  const gSort = sortableTable(gTable, {
-    drive: { id: SORT_GUESTS },
-    remember: "host-containers",
+  const gCards = h("div", {
+    class: "kp-entity-grid",
+    "data-kp-entity-grid": "",
+    "data-kp-entity-link": "/stacks/{key}",
+    role: "list",
   });
+  const gBullets = h("div", { class: "kp-bullets", "data-kp-bullets": "" });
+  const gViews = h("div", { class: "hk-ho-view" }, gTableEl, gCards, gBullets);
+  const gDt = () => tableOf(gTableEl);
   const guestsAgo = agoEl("read");
   const guestsCard = section({
     id: "host-containers",
     title: "Containers",
-    desc: "Every container and VM on the host, managed by this orchestrator or not.",
+    desc: "Every container and VM on the host, managed by this orchestrator or not: as a table, as cards with meters, or as a pressure list.",
     foot: [`Read with pct list every ${EVERY_S} s`, guestsAgo],
   });
   guestsCard.body.append(
-    h("div", { class: "hk-filters" }, gSearch, gFilter.el),
-    gSort.line,
-    h("div", { class: "hk-scroll" }, gTable),
+    formGrid(
+      [
+        gridRow({
+          label: "View",
+          hideLabel: true,
+          control: gViewSeg,
+          value: gRead,
+        }),
+        gridRow({ label: "Status", hideLabel: true, control: gFilter.el }),
+      ],
+      "hk-toolbar",
+    ),
+    gViews,
   );
-  /** @param {number} n */
-  const skeletonRows = (n) =>
-    Array.from({ length: n }, () =>
-      h(
-        "tr",
-        { "aria-hidden": "true" },
-        Array.from({ length: 6 }, (_, i) =>
-          h(
-            "td",
-            { class: i === 3 || i === 4 ? "hk-hide-phone" : null },
-            h("span", { class: "hk-sk kp-skeleton" }),
-          ),
-        ),
-      ),
-    );
-  gBody.dataset.kpState = "loading";
-  gBody.setAttribute(
-    "aria-label",
-    "Asking the host for its containers (pct list)…",
-  );
-  gBody.replaceChildren(...skeletonRows(5));
-  const filterGuests = () => {
-    const rows = [...gBody.querySelectorAll("tr[data-vmid]")];
-    if (!guests) return;
-    const view = guestTable(guests, current().fleet);
-    const vis = guestVisible(view, { show: gShow, q: gQ });
-    for (const tr of rows) {
-      const i = view.findIndex(
-        (r) => String(r.vmid) === /** @type {HTMLElement} */ (tr).dataset.vmid,
-      );
-      /** @type {HTMLElement} */ (tr).hidden = i < 0 || !vis[i];
-    }
-  };
+  /** @param {number | null} used @param {number | null} max */
+  const share = (used, max) => (used != null && max ? used / max : null);
   const paintGuests = () => {
-    if (!guests) return;
+    const dt = gDt();
+    const showFor = (/** @type {typeof gView} */ v) => {
+      gTableEl.hidden = v !== "table";
+      gCards.hidden = v !== "cards";
+      gBullets.hidden = v !== "pressure";
+    };
+    showFor(gView);
+    if (!guests) {
+      if (guestsWhy) {
+        dt?.busy(null);
+        dt?.fail(guestsWhy);
+        setEntityGridState(gCards, "error", { message: guestsWhy });
+        setBullets(gBullets, {
+          threshold: 0.75,
+          rows: [],
+          state: "error",
+          message: guestsWhy,
+        });
+      } else {
+        dt?.busy({
+          text: "Asking the host for its containers (pct list)…",
+          overlay: true,
+        });
+        dt?.state("loading");
+        setEntityGridState(gCards, "loading");
+        setBullets(gBullets, {
+          threshold: 0.75,
+          rows: [],
+          state: "loading",
+          loadingWords: "Reading the guests…",
+        });
+      }
+      return;
+    }
     const view = guestTable(guests, current().fleet);
     const running = view.filter((r) => r.running).length;
     gFilter.counts({
@@ -458,93 +631,219 @@ export function mount(root, ctx) {
       running,
       stopped: view.length - running,
     });
-    if (!view.length) {
-      gBody.replaceChildren(
-        h(
-          "tr",
-          { class: "hk-empty-row" },
-          h("td", { colspan: 6 }, "The host lists no containers."),
-        ),
-      );
-      return;
-    }
-    gBody.replaceChildren(
-      ...view.map((g) =>
-        h(
+    // the table
+    gTbody.replaceChildren(
+      ...view.map((g) => {
+        const tr = h(
           "tr",
           {
+            "data-kp-row-key": String(g.vmid),
             "data-vmid": g.vmid,
             "data-status": g.running ? "running" : "stopped",
           },
-          h("td", { class: "n mono" }, g.vmid),
           h(
             "td",
-            null,
+            { "data-label": "Guest", "data-kp-sort-value": String(g.vmid) },
+            h("b", null, g.name || `CT ${g.vmid}`),
+            " ",
             h(
-              "div",
-              { class: "hk-name" },
-              // fix-371-1: the host's fleet snapshot names only its
-              // stacks' guests; any other shows its number.
-              g.name
-                ? h("span", { class: "mono" }, g.name)
-                : h("span", { class: "hk-muted" }, `CT ${g.vmid}`),
-              g.lock ? h("small", null, `lock: ${g.lock}`) : null,
+              "span",
+              { class: "hk-ct" },
+              `${g.kind === "unmanaged" && g.vmid <= 101 ? "VM" : "CT"} ${g.vmid}`,
             ),
           ),
           h(
             "td",
-            null,
+            { "data-label": "Stack" },
+            g.stack
+              ? h("a", { class: "hk-link", href: stackHref(g.stack) }, g.stack)
+              : h("span", { class: "hk-muted" }, "—"),
+          ),
+          h(
+            "td",
+            {
+              "data-label": "State",
+              "data-kp-filter-value": g.running ? "running" : "stopped",
+            },
             h(
               "span",
-              { class: "hk-status" },
-              dot(g.running ? "ok" : g.tone === "bad" ? "bad" : ""),
+              {
+                class: `kp-badge${g.running ? " kp-badge--success" : g.tone === "bad" ? " kp-badge--destructive" : ""}`,
+              },
               g.status,
             ),
           ),
           h(
             "td",
-            { class: "hk-hide-phone", "data-sort": g.ramUsed ?? -1 },
-            g.ramUsed != null && g.ramMax
-              ? shareBar(
-                  (g.ramUsed / g.ramMax) * 100,
-                  `${gib(g.ramUsed)} / ${gib(g.ramMax)} GiB`,
-                )
-              : h(
-                  "span",
-                  {
-                    class: "hk-muted",
-                    title: g.running
-                      ? current().fleet?.host.guests_usage
-                        ? "Not in the host's last reading yet"
-                        : "This host version measures only the containers it manages"
-                      : null,
-                  },
-                  "—",
-                ),
+            { "data-label": "CPU" },
+            h("span", {
+              class: "kp-bar-cell",
+              "data-kp-bar": "",
+              "data-hk-cpu": String(g.vmid),
+            }),
           ),
           h(
             "td",
-            { class: "n hk-hide-phone", "data-sort": g.cpuPct ?? -1 },
-            g.cpuPct == null ? "—" : `${g.cpuPct}%`,
+            { "data-label": "Memory" },
+            h("span", {
+              class: "kp-bar-cell",
+              "data-kp-bar": "",
+              "data-hk-mem": String(g.vmid),
+            }),
           ),
+          h("td", { "data-label": "Lock" }, g.lock || "—"),
           h(
             "td",
-            { "data-sort": g.stack ?? `~${g.kind}` },
-            g.stack
-              ? h("a", { class: "hk-link", href: stackHref(g.stack) }, g.stack)
-              : h(
-                  "span",
-                  { class: "hk-tag" },
-                  g.kind === "template" ? "template" : "not managed",
-                ),
+            { "data-label": "Kind", "data-kp-filter-value": g.kind },
+            g.kind === "unmanaged" ? "not managed" : g.kind,
           ),
-        ),
-      ),
+        );
+        return tr;
+      }),
     );
-    // A re-paint keeps the sort the person chose.
-    gSort.apply();
-    filterGuests();
+    attachBarCells(gTableEl);
+    for (const g of view) {
+      const cpu = gTbody.querySelector(`[data-hk-cpu="${g.vmid}"]`);
+      const mem = gTbody.querySelector(`[data-hk-mem="${g.vmid}"]`);
+      const s = share(g.ramUsed, g.ramMax);
+      if (cpu)
+        setBarCell(/** @type {HTMLElement} */ (cpu), {
+          value: g.cpuPct == null ? null : g.cpuPct / 100,
+          text: g.cpuPct == null ? "—" : `${g.cpuPct} %`,
+          sortValue: g.cpuPct ?? -1,
+          label: "of one core",
+        });
+      if (mem)
+        setBarCell(/** @type {HTMLElement} */ (mem), {
+          value: s,
+          text:
+            g.ramUsed == null || g.ramMax == null
+              ? "—"
+              : `${gib(g.ramUsed)} of ${gib(g.ramMax)} GiB`,
+          sortValue: s ?? -1,
+          warnAt: 0.75,
+          badAt: 0.9,
+          label: "of its memory",
+        });
+    }
+    dt?.refresh();
+    dt?.busy(null);
+    dt?.state("ready");
+    const th2 = /** @type {HTMLElement[]} */ ([
+      ...gTableEl.querySelectorAll("thead th[data-kp-sort]"),
+    ]);
+    ["id", "stack", "status", "cpu", "memory"].forEach((k, i) => {
+      if (th2[i]) drivable(th2[i], SORT_GUESTS, k);
+    });
+    // the cards
+    setEntityGrid(
+      gCards,
+      view.map((g) => ({
+        key: String(g.vmid),
+        name: g.name || `CT ${g.vmid}`,
+        vmid: String(g.vmid),
+        state: {
+          label: g.status,
+          tone: g.running
+            ? "success"
+            : g.tone === "bad"
+              ? "destructive"
+              : undefined,
+        },
+        figures: [
+          {
+            value: g.stack ?? (g.kind === "template" ? "template" : "none"),
+            label: "stack",
+          },
+          { value: g.lock || "none", label: "lock" },
+        ],
+        flags:
+          g.kind === "unmanaged"
+            ? [{ label: "not managed", tone: "warning" }]
+            : [],
+        meters: [
+          { label: "CPU", value: g.cpuPct == null ? null : g.cpuPct / 100 },
+          {
+            label: "RAM",
+            value: share(g.ramUsed, g.ramMax),
+            text:
+              g.ramUsed == null || g.ramMax == null
+                ? undefined
+                : `${gib(g.ramUsed)} of ${gib(g.ramMax)} GiB`,
+          },
+        ],
+        actions: [
+          { id: "log", label: "Open its log" },
+          {
+            id: "stack",
+            label: "Open stack",
+            disabled: g.stack ? undefined : "This guest is not a stack",
+          },
+        ],
+      })),
+    );
+    // the pressure list
+    const withRam = view.filter((g) => g.ramUsed != null && g.ramMax);
+    setBullets(gBullets, {
+      threshold: 0.75,
+      bad: 0.9,
+      max: 1,
+      format: (v) => `${Math.round(v * 100)} %`,
+      rows: withRam.map((g) => ({
+        key: String(g.vmid),
+        lead: `CT ${g.vmid}`,
+        label: g.name || `CT ${g.vmid}`,
+        detail: `${gib(g.ramUsed ?? 0)} of ${gib(g.ramMax ?? 0)} GiB`,
+        value: share(g.ramUsed, g.ramMax),
+        pick: true,
+      })),
+      state: "ready",
+      emptyTitle: "No guest is running",
+      emptyText: "A running guest shows its memory share here.",
+      loadingRows: 8,
+    });
+    gRead.textContent =
+      gView === "pressure"
+        ? `Memory share of ${withRam.length.toLocaleString("en-GB")} running guests, worst first; amber from 75 %.`
+        : `${view.length.toLocaleString("en-GB")} guests: ${running.toLocaleString("en-GB")} running.`;
   };
+  gViewSeg.addEventListener(SEGMENTED_EVENT, (e) => {
+    const v = /** @type {CustomEvent} */ (e).detail.value;
+    gView = v === "cards" || v === "pressure" ? v : "table";
+    history.replaceState(
+      history.state,
+      "",
+      location.pathname +
+        setParams(location.search, {
+          containers: gView === "table" ? null : gView,
+        }),
+    );
+    paintGuests();
+  });
+  gViews.addEventListener(ENTITY_ACTION_EVENT, (e) => {
+    const d = /** @type {CustomEvent} */ (e).detail;
+    const g =
+      guests &&
+      guestTable(guests, current().fleet).find(
+        (x) => String(x.vmid) === String(d.key),
+      );
+    if (!g) return;
+    if (d.id === "stack" && g.stack) ctx.navigate(stackHref(g.stack));
+    else ctx.navigate("/activity?view=host-log");
+  });
+  gViews.addEventListener(BULLETS_PICK_EVENT, (e) => {
+    const key = /** @type {CustomEvent} */ (e).detail.key;
+    gViewSeg
+      .querySelector('[data-value="table"]')
+      ?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    gDt()?.expand([String(key)]);
+  });
+  for (const ev of [
+    "kp-datatable-retry",
+    ENTITY_GRID_RETRY_EVENT,
+    BULLETS_RETRY_EVENT,
+  ])
+    gViews.addEventListener(ev, () => void loadGuests().catch(() => {}));
   const loadGuests = async () => {
     const r = await fetchJson(
       "/data/host/guests",
@@ -552,44 +851,16 @@ export function mount(root, ctx) {
       abort.signal,
     );
     if (!r.ok) {
-      if (!guests)
-        gBody.replaceChildren(
-          h(
-            "tr",
-            null,
-            h(
-              "td",
-              { colspan: 6 },
-              h(
-                "div",
-                {
-                  class: "kp-alert kp-alert--destructive error",
-                  role: "alert",
-                },
-                h("strong", null, `Could not read ${r.error.what}`),
-                h("p", null, `Why: ${r.error.why}`),
-                r.error.fix ? h("p", null, `What to do: ${r.error.fix}`) : null,
-                h(
-                  "button",
-                  {
-                    type: "button",
-                    class: "kp-button kp-button--sm",
-                    onclick: () => void loadGuests().catch(() => {}),
-                  },
-                  "Try again",
-                ),
-              ),
-            ),
-          ),
-        );
-      return;
+      guestsWhy = `${r.error.why}${r.error.fix ? ` — ${r.error.fix}` : ""}`;
+      if (!guests) paintGuests();
+      return false;
     }
+    guestsWhy = null;
     guests = r.body.guests ?? [];
-    delete gBody.dataset.kpState;
-    gBody.removeAttribute("aria-label");
     paintGuests();
     setAgo(guestsAgo, r.body.measured_at);
     paintKpis();
+    return true;
   };
 
   // ── Host actions ──────────────────────────────────────────────────────
@@ -679,7 +950,45 @@ export function mount(root, ctx) {
   paintRunning();
 
   // ── Disk ──────────────────────────────────────────────────────────────
-  const diskBody = h("div", { id: "host-disk" });
+  // Two kp stack bars (feat-kp11demo-11): what fills the root volume, and
+  // the thin pool: what the guests wrote, and what they were promised on
+  // top of it (an amber part, so an over-promise runs the bar past the end).
+  const headRow = (
+    /** @type {string} */ title,
+    /** @type {string} */ sentence,
+    /** @type {HTMLElement} */ read,
+  ) =>
+    h(
+      "div",
+      { class: "kp-formgrid__row hk-disk__head" },
+      h("h3", { class: "kp-formgrid__label" }, title),
+      h("p", { class: "kp-formgrid__control" }, sentence),
+      read,
+    );
+  const rootRead = h("p", {
+    class: "kp-formgrid__value",
+    id: "host-disk-read",
+    role: "status",
+  });
+  const poolRead = h("p", {
+    class: "kp-formgrid__value",
+    id: "host-pool-read",
+    role: "status",
+  });
+  const rootBar = h("figure", { class: "kp-stackbar kp-stackbar--lg" });
+  const poolBar = h("figure", { class: "kp-stackbar kp-stackbar--lg" });
+  const diskBody = h(
+    "div",
+    { id: "host-disk", class: "kp-formgrid hk-disk" },
+    headRow("Root volume", "What fills the host's own disk.", rootRead),
+    rootBar,
+    headRow(
+      "Thin pool for the guests",
+      "Written by the guests, against what all guests were promised.",
+      poolRead,
+    ),
+    poolBar,
+  );
   const growthLine = h("span", { id: "host-growth" }, "Growth: reading…");
   const diskAgo = agoEl("read");
   const diskCard = section({
@@ -689,112 +998,79 @@ export function mount(root, ctx) {
     foot: [growthLine, diskAgo],
   });
   diskCard.body.append(diskBody);
+  const gbText = (/** @type {number} */ gb) => `${Math.round(gb)} GB`;
   const paintDisk = () => {
     const f = current().fleet;
     const d = f ? diskBreakdown(f) : null;
-    if (!d) {
-      diskBody.replaceChildren(
-        h(
-          "p",
-          { class: "hk-muted", role: "status" },
-          "The host has not read its disks yet.",
-        ),
-      );
+    if (!f) {
+      for (const bar of [rootBar, poolBar])
+        setStackbar(bar, {
+          title: "Reading the disks",
+          parts: [],
+          state: "loading",
+        });
       return;
     }
-    const colour = (/** @type {number} */ i) => `var(--chart-${(i % 5) + 1})`;
-    const bar = h("div", {
-      class: "hk-stack-bar",
-      role: "img",
-      "aria-label": `What fills the root volume: ${d.dirs.map((x) => `${x.path} ${Math.round(x.gb)} GB`).join(", ")}, ${d.freeGb} GB free`,
+    if (!d) {
+      for (const bar of [rootBar, poolBar])
+        setStackbar(bar, {
+          title: "Disk",
+          parts: [],
+          state: "empty",
+          message: "The host has not read its disks yet.",
+        });
+      return;
+    }
+    const used = d.dirs.reduce((a, x) => a + x.gb, 0);
+    setStackbar(rootBar, {
+      title: "Root volume",
+      total: d.rootGb,
+      format: gbText,
+      restLabel: "Free",
+      marks: [{ at: 0.8, label: "80 % warning level" }],
+      parts: d.dirs.map((x) => ({ key: x.path, label: x.path, value: x.gb })),
+      state: "ready",
+      label: "What fills the root volume",
     });
-    d.dirs.forEach((x, i) => {
-      const seg = h("i", { title: `${x.path} ${x.gb.toFixed(0)} GB` });
-      seg.style.width = `${x.pct}%`;
-      seg.style.background = colour(i);
-      bar.append(seg);
-    });
-    diskBody.replaceChildren(
-      h(
-        "div",
-        { class: "hk-disk-line" },
-        h(
-          "span",
-          null,
-          h("b", null, "Root volume"),
-          ` · ${f ? rootVolumeLine(f) : ""}`,
-        ),
-        h("span", { class: "num" }, `${d.usedPct}% used`),
-      ),
-      bar,
-      h(
-        "div",
-        { class: "hk-dirs" },
-        d.dirs.map((x, i) =>
-          h(
-            "div",
-            null,
-            swatch(colour(i)),
-            h("span", { class: "mono" }, x.path),
-            h("span", { class: "num hk-muted" }, `${x.gb.toFixed(0)} GB`),
-          ),
-        ),
-        h(
-          "div",
-          null,
-          swatch("var(--muted)"),
-          h("span", null, "free"),
-          h("span", { class: "num hk-muted" }, `${d.freeGb} GB`),
-        ),
-      ),
-      h(
-        "div",
-        { class: "hk-pool" },
-        h(
-          "div",
-          null,
-          h("span", null, "Thin pool"),
-          h("b", null, `${Math.round(d.poolGb)} GB`),
-        ),
-        h(
-          "div",
-          { id: "host-pool-promised" },
-          h("span", null, "Promised to guests"),
-          d.pool
-            ? h("b", { title: d.pool.promisedNote }, d.pool.promised)
-            : h(
-                "b",
-                { class: "hk-muted" },
-                "not reported by this host version",
-              ),
-        ),
-        h(
-          "div",
-          { id: "host-pool-written" },
-          h("span", null, "Really written"),
-          d.pool
-            ? h("b", null, d.pool.written)
-            : h(
-                "b",
-                { class: "hk-muted" },
-                "not reported by this host version",
-              ),
-        ),
-        h(
-          "div",
-          { id: "host-pool-free" },
-          h("span", null, "Free in the pool"),
-          d.pool
-            ? h("b", null, d.pool.free)
-            : h(
-                "b",
-                { class: "hk-muted" },
-                "not reported by this host version",
-              ),
-        ),
-      ),
-    );
-    setAgo(diskAgo, f?.host.disk_detail?.measured_at ?? null);
+    rootRead.textContent = `${rootVolumeLine(f)}: ${gbText(used)} of ${gbText(d.rootGb)} in the biggest folders, ${d.usedPct}% used.`;
+    const t = f.host.disk_detail?.thin_pool;
+    if (!d.poolGb || !t) {
+      setStackbar(poolBar, {
+        title: "Thin pool",
+        parts: [],
+        state: "empty",
+        message: "This host version does not report its thin pool.",
+      });
+      poolRead.textContent = "Not reported by this host version.";
+    } else {
+      const written = (d.poolGb * t.data_pct) / 100;
+      const unwritten = Math.max(0, t.promised_gb - written);
+      setStackbar(poolBar, {
+        title: "Thin pool",
+        total: d.poolGb,
+        format: gbText,
+        restLabel: "Free in the pool",
+        marks: [],
+        parts: [
+          { key: "written", label: "Written by the guests", value: written },
+          ...(unwritten > 0
+            ? [
+                {
+                  key: "promised",
+                  label: "Promised, not written yet",
+                  value: unwritten,
+                  tone: /** @type {const} */ ("warning"),
+                },
+              ]
+            : []),
+        ],
+        state: "ready",
+        label: "Thin pool: written and promised",
+      });
+      const over = t.promised_gb - d.poolGb;
+      poolRead.textContent = `${gbText(written)} written of ${gbText(d.poolGb)}; ${gbText(t.promised_gb)} promised${over > 0 ? `, ${gbText(over)} more than the pool holds` : ""}.`;
+    }
+    setAgo(diskAgo, f.host.disk_detail?.measured_at ?? null);
   };
   const loadGrowth = async () => {
     const r = await fetchJson("/data/disk-growth", "disk growth", abort.signal);
@@ -809,17 +1085,19 @@ export function mount(root, ctx) {
   };
 
   // ── Connection ────────────────────────────────────────────────────────
-  /** @type {number[]} */
+  /** @type {(number | null)[]} */
   const pings = [];
+  let pingedOnce = false;
   /** @type {any} */
   let lineFacts = null;
   let lineOk = /** @type {boolean | null} */ (null);
   const facts = h("dl", { class: "hk-facts", id: "host-line" });
   const lat = h("div", {
-    class: "hk-lat",
+    class: "kp-uptime",
     id: "host-lat",
-    role: "img",
-    "aria-label": "No ping yet",
+    "data-kp-uptime": "",
+    "data-kp-uptime-count": "12",
+    "data-kp-uptime-fit": "scroll",
   });
   const pingDot = dot("");
   const pingOut = h("span", { id: "host-ping-out" }, "Pinging…");
@@ -910,15 +1188,24 @@ export function mount(root, ctx) {
     facts.replaceChildren(
       ...rows.flatMap(([k, v]) => [h("dt", null, k), h("dd", null, v)]),
     );
-    const l = latencyBars(pings);
-    lat.setAttribute("aria-label", l.label);
-    lat.replaceChildren(
-      ...l.heights.map((hgt) => {
-        const i = h("i");
-        i.style.height = `${hgt}%`;
-        return i;
-      }),
-    );
+    setUptime(lat, {
+      label: "Line to the host",
+      periods: pings.map((ms, i) => ({
+        key: `p${i}`,
+        label:
+          i === pings.length - 1 ? "Now" : `${pings.length - 1 - i} pings ago`,
+        state: ms == null ? "down" : ms > 30 ? "degraded" : "up",
+        tip:
+          ms == null
+            ? "no answer"
+            : `answered in ${ms} ms${ms > 30 ? " (slow)" : ""}`,
+      })),
+      from: `${Math.max(pings.length, 1)} pings ago`,
+      to: "Now",
+      count: PINGS,
+      state: pings.length ? "ready" : pingedOnce ? "empty" : "loading",
+      open: "info",
+    });
     pingCount.textContent = pings.length
       ? `last ${pings.length} ping${pings.length === 1 ? "" : "s"}`
       : "no ping yet";
@@ -928,8 +1215,11 @@ export function mount(root, ctx) {
     pingOut.textContent = "Pinging…";
     const r = await fetchJson("/data/ping", "the ping", abort.signal);
     pingBtn.removeAttribute("disabled");
+    pingedOnce = true;
     if (!r.ok) {
       lineOk = false;
+      pings.push(null);
+      while (pings.length > PINGS) pings.shift();
       pingOut.textContent = `No answer: ${r.error.why}`;
     } else {
       lineFacts = r.body.facts;
@@ -938,7 +1228,7 @@ export function mount(root, ctx) {
       // trips it measured, so the strip opens full (the demo's twelve).
       const recent = Array.isArray(r.body.recent) ? r.body.recent : null;
       if (recent && recent.length) pings.splice(0, pings.length, ...recent);
-      else pings.push(r.body.ms);
+      else pings.push(r.body.ok ? r.body.ms : null);
       while (pings.length > PINGS) pings.shift();
       pingOut.textContent = r.body.ok
         ? `Answered in ${r.body.ms} ms: ${r.body.message}`
@@ -971,6 +1261,7 @@ export function mount(root, ctx) {
           ],
     );
     paintLine();
+    return lineOk === true;
   };
 
   // ── About, Templates ──────────────────────────────────────────────────
@@ -1102,6 +1393,11 @@ export function mount(root, ctx) {
   };
 
   // ── Host checks ───────────────────────────────────────────────────────
+  // The doctor's checks as a kp status list (feat-kp11demo-11): a mark, the
+  // check, its detail and, under a warning or a failure, the remedy the host
+  // already computed. The read takes about 30 s: the card lays the theme's
+  // busy card over the list with the seconds it has run; no progress is
+  // invented, because the host reports none.
   const checksBtn = drivable(
     h(
       "button",
@@ -1115,83 +1411,144 @@ export function mount(root, ctx) {
     ),
     READ_CHECKS,
   );
-  const checksNote = h(
-    "p",
-    { role: "status", id: "host-checks-note" },
-    "Not read yet. Reading takes about 30 s on pve; the result stays here until you leave.",
+  const checksNote = h("p", { role: "status", id: "host-checks-note" });
+  let checksList = h("ul", { class: "kp-statuslist", id: "host-checks" });
+  const checksKp = h(
+    "section",
+    {
+      class: "kp-card hk-checkscard",
+      "data-kp-state": "empty",
+      "aria-label": "Host checks",
+    },
+    h(
+      "div",
+      { class: "kp-card__stage" },
+      h("div", { class: "kp-card__data" }, checksList),
+    ),
   );
-  const checksList = h("ul", {
-    class: "hk-checks",
-    id: "host-checks",
-    hidden: true,
-  });
   const checksCard = section({
     id: "host-checks-card",
     title: "Host checks",
     desc: "The doctor's checks about the host itself: disk, state file, clock, certificates.",
   });
   checksCard.body.append(
-    h("div", { class: "hk-checks-empty" }, checksNote, checksBtn),
-    checksList,
+    formGrid([
+      gridRow({
+        label: "Checks",
+        control: checksNote,
+        actions: checksBtn,
+        wide: true,
+      }),
+    ]),
+    checksKp,
   );
+  const notRead = () =>
+    setCardState(checksKp, "empty", {
+      title: "Not read yet",
+      text: "Reading takes about 30 s on pve; the result stays here until you leave.",
+      action: null,
+    });
+  notRead();
+  checksNote.textContent = "Not read yet. Press Run checks to read them.";
   /** @param {any} report */
   const paintChecks = (report) => {
     const rows = doctorRows({ ...report, checks: hostChecks(report) });
-    checksList.hidden = false;
-    checksList.replaceChildren(
-      ...rows.map((x) =>
-        h(
-          "li",
-          { "data-health": x.health.label },
-          dot(x.health.tone),
-          h("span", null, h("b", null, x.name), ` · ${x.health.label}`),
-          h("small", null, x.detail),
-        ),
-      ),
+    const next = buildStatusList(
+      rows.map((x) => ({
+        id: x.name,
+        label: x.name,
+        state:
+          x.health.tone === "ok"
+            ? "ok"
+            : x.health.tone === "warn"
+              ? "warn"
+              : "failed",
+        detail: x.detail,
+        fix: x.remedy || "",
+      })),
+      { label: "Host checks", retry: false },
     );
+    next.id = "host-checks";
+    checksList.replaceWith(next);
+    checksList = next;
+    attachStatusLists(checksKp);
+    const c = countStatus(checksList);
+    checksNote.textContent = rows.length
+      ? `${c.ok.toLocaleString("en-GB")} of ${c.total.toLocaleString("en-GB")} checks pass, ${c.warn.toLocaleString("en-GB")} with a reservation, ${c.failed.toLocaleString("en-GB")} failed`
+      : "The host reports no host-level checks.";
+    setCardState(checksKp, rows.length ? "ready" : "empty", {
+      title: "The host has no checks yet",
+      text: "The first read after the host starts fills this list.",
+    });
     return rows.length;
   };
-  /** The note with the one spinner a running read shows. @param {string} t */
-  const busyNote = (t) =>
-    checksNote.replaceChildren(
-      h("span", { class: "kp-spinner", "aria-hidden": "true" }),
-      " ",
-      t,
-    );
   let checking = false;
   const loadChecks = async () => {
     if (checking) return;
     checking = true;
     runChecks.setAttribute("disabled", "");
     checksBtn.setAttribute("disabled", "");
-    // Invariant 55 (a slow read): one loading indicator while it runs.
-    busyNote("The doctor is running on the host (about 30 s)…");
     const began = Date.now();
+    let haveRows = false;
+    const words = () =>
+      `The doctor is running on the host (about 30 s): ${Math.round((Date.now() - began) / 1000)} s so far…`;
+    if (!haveRows) setCardState(checksKp, "loading", { words: words() });
+    checksNote.textContent = "The doctor is running on the host (about 30 s).";
+    const tick = setInterval(() => {
+      if (!haveRows) setCardState(checksKp, "loading", { words: words() });
+      else checksNote.textContent = words();
+    }, 1000);
     try {
       const r = await slowReport(
         "/data/doctor",
         "the doctor",
         abort.signal,
         (b) => {
-          const n = paintChecks(b.report);
-          busyNote(
-            `${n} host-level checks, the last reading, while the host runs the doctor again.`,
-          );
+          if (!hostChecks(b.report).length) return;
+          paintChecks(b.report);
+          haveRows = true;
+          checksNote.textContent = `The last reading, while the host runs the doctor again.`;
         },
       );
       const secs = Math.round((Date.now() - began) / 1000);
       if (!r.ok) {
+        setCardState(checksKp, "error", {
+          title: "The doctor did not answer",
+          text: `After ${humanDuration(secs)}: ${r.error.why}`,
+        });
         checksNote.textContent = `The doctor did not answer (after ${humanDuration(secs)}): ${r.error.why}`;
         return;
       }
       const n = paintChecks(r.report);
-      checksNote.textContent = `${n} host-level checks, read in ${humanDuration(secs)}.`;
+      checksNote.textContent = `${checksNote.textContent}, read in ${humanDuration(secs)}.`;
+      void n;
     } finally {
+      clearInterval(tick);
       checking = false;
       runChecks.removeAttribute("disabled");
       checksBtn.removeAttribute("disabled");
     }
   };
+  checksKp.addEventListener(
+    CARD_RETRY_EVENT,
+    () => void loadChecks().catch(() => {}),
+  );
+
+  /** @param {number} n */
+  const skeletonRows = (n) =>
+    Array.from({ length: n }, () =>
+      h(
+        "tr",
+        { "aria-hidden": "true" },
+        Array.from({ length: 6 }, (_, i) =>
+          h(
+            "td",
+            { class: i === 3 || i === 4 ? "hk-hide-phone" : null },
+            h("span", { class: "hk-sk kp-skeleton" }),
+          ),
+        ),
+      ),
+    );
 
   // ── Host settings (host.toml) ─────────────────────────────────────────
   /** @type {import("../host.js").SettingRow[]} */
@@ -1370,21 +1727,63 @@ export function mount(root, ctx) {
     filterSettings();
   };
 
+  // ── one refresh control (feat-kp11demo-11) ────────────────────────────
+  // Replaces the three timers: the figures, the containers and the line to
+  // the host are read together, at the interval you choose; R reads now.
+  const refreshEl = h("div", {
+    class: "kp-refresh",
+    "data-kp-refresh": String(EVERY_S),
+    "data-kp-look": "segmented",
+    "data-kp-refresh-choices": "0,15,30,60,300",
+    "data-kp-remember": "host-refresh",
+    "data-kp-stale-after": String(EVERY_S * 3),
+  });
+  const refreshRead = h(
+    "span",
+    { class: "hk-muted", role: "status" },
+    "The figures, the containers and the line to the host are read together.",
+  );
+  const refreshRow = formGrid(
+    [
+      gridRow({
+        label: "Refresh",
+        control: refreshEl,
+        value: refreshRead,
+        wide: true,
+      }),
+    ],
+    "hk-refresh",
+  );
+  refreshEl.addEventListener(REFRESH_EVENT, (e) => {
+    const d = /** @type {CustomEvent} */ (e).detail;
+    void Promise.all([
+      loadGuests(),
+      loadTrend().then(() => true),
+      ping().then(() => true),
+    ])
+      .then((all) => {
+        const ok = all.every(Boolean);
+        d.done(ok);
+        refreshRead.textContent = ok
+          ? "Read the host figures, the containers and the line to the host."
+          : "The last read failed; the figures stay as they were.";
+      })
+      .catch(() => d.done(false));
+  });
+  void refreshOf;
+  void VIEW_EVENT;
+
   // ── assemble ──────────────────────────────────────────────────────────
   root.replaceChildren(
     head.el,
     attention.el,
     kpisEl,
+    refreshRow,
+    guestsCard.el,
     h(
       "div",
       { class: "hk-cols" },
-      h(
-        "div",
-        { class: "hk-col-main" },
-        guestsCard.el,
-        actionsCard.el,
-        diskCard.el,
-      ),
+      h("div", { class: "hk-col-main" }, actionsCard.el, diskCard.el),
       h(
         "div",
         { class: "hk-col-side" },
@@ -1399,10 +1798,75 @@ export function mount(root, ctx) {
       ["/", "search containers"],
       ["click a header", "sort"],
       ["G H", "go to Host"],
-      ["R", "run host checks"],
+      ["R", "refresh now"],
       ["Esc", "show every container"],
       ["Ctrl K", "any host action"],
     ]),
+  );
+
+  const tableDetach = attachDataTables(guestsCard.body, {
+    detail: (row) => {
+      const g = guests
+        ? guestTable(guests, current().fleet).find(
+            (x) => String(x.vmid) === row.dataset.kpRowKey,
+          )
+        : null;
+      if (!g) return null;
+      return formGrid([
+        gridRow({
+          label: g.name || `CT ${g.vmid}`,
+          control: h(
+            "p",
+            { class: "hk-detail" },
+            `${g.name || `CT ${g.vmid}`} is ${g.status}${g.lock ? `, locked by ${g.lock}` : ""}. ${g.ramUsed == null ? "It is not running, so it has no CPU or memory figures." : `It uses ${gib(g.ramUsed)} of its ${gib(g.ramMax ?? 0)} GiB and ${g.cpuPct ?? 0} % of one core.`}`,
+          ),
+          actions: [
+            g.stack
+              ? h(
+                  "a",
+                  {
+                    class: "kp-button kp-button--sm",
+                    href: stackHref(g.stack),
+                  },
+                  "Open stack",
+                )
+              : h(
+                  "button",
+                  {
+                    type: "button",
+                    class: "kp-button kp-button--sm",
+                    disabled: "",
+                    "data-kp-disabled-reason": "This guest is not a stack",
+                  },
+                  "Open stack",
+                ),
+            h(
+              "a",
+              {
+                class: "kp-button kp-button--sm",
+                href: `/activity?view=host-log${g.stack ? `&source=${encodeURIComponent(g.stack)}` : ""}`,
+              },
+              "Open its log",
+            ),
+          ],
+          buttons: true,
+        }),
+      ]);
+    },
+  });
+  stops.push(
+    tableDetach,
+    attachSegmented(root),
+    attachBarCells(root),
+    attachStackbars(root),
+    attachUptimes(root),
+    attachEntityCards(root),
+    attachBullets(root),
+    attachStatusLists(root),
+    attachCardStates(root),
+    attachHoverCards(root),
+    attachFootprints(root),
+    attachRefresh(root),
   );
 
   const paintKpis = () => {
@@ -1442,7 +1906,7 @@ export function mount(root, ctx) {
     paintLine();
   };
 
-  // `/` searches the containers, `r` runs the host checks, Esc shows every
+  // `/` searches the containers, `r` reads everything now (kp's refresh), Esc shows every
   // container again (never while typing, never with a modifier).
   /** @param {KeyboardEvent} e */
   const keys = (e) => {
@@ -1456,11 +1920,9 @@ export function mount(root, ctx) {
       return;
     if (e.key === "/") {
       e.preventDefault();
-      gSearch.focus();
-    } else if (e.key === "r" || e.key === "R") {
-      if (document.querySelector("dialog[open]")) return;
-      e.preventDefault();
-      void loadChecks().catch(() => {});
+      /** @type {HTMLInputElement | null} */ (
+        gTableEl.querySelector("[data-kp-datatable-search]")
+      )?.focus();
     } else if (e.key === "Escape") {
       if (document.querySelector("dialog[open]")) return;
       gFilter.reset();
@@ -1473,20 +1935,12 @@ export function mount(root, ctx) {
     paintGuests();
   });
   render();
-  void loadGuests().catch(() => {});
   void loadSettings().catch(() => {});
   void loadTemplates().catch(() => {});
   void loadGrowth().catch(() => {});
-  void loadTrend().catch(() => {});
-  void ping().catch(() => {});
-  const trendTimer = setInterval(
-    () => void loadTrend().catch(() => {}),
-    TREND_EVERY_S * 1000,
-  );
-  const timer = setInterval(() => {
-    void loadGuests().catch(() => {});
-    void ping().catch(() => {});
-  }, EVERY_S * 1000);
+  // The first read of the figures, the containers and the line goes through
+  // the refresh control, so its "updated … ago" is true from the start.
+  refreshOf(refreshEl)?.now();
   // redesign-final-h5: `/host?section=doctor` (the old Doctor's address)
   // opens this page on its Host checks card and reads them, instead of
   // mounting the retired Doctor page inside it.
@@ -1498,8 +1952,6 @@ export function mount(root, ctx) {
   }
   return () => {
     abort.abort();
-    clearInterval(timer);
-    clearInterval(trendTimer);
     unsub();
     document.removeEventListener("keydown", keys);
     stops.forEach((s) => s());

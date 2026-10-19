@@ -1,5 +1,3 @@
-// The kp-themes module chassis-rs serves at /static/kp/js/as-of.js (kp-themes 10.1.1),
-// copied from kp-themes js/as-of.d.ts: chassis serves the module, not its types.
 /**
  * The elements under `root` now, to attach against later.
  * @param {ParentNode} root

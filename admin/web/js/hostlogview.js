@@ -210,3 +210,68 @@ export function keyAction(key, tag, role) {
   if (key === "End") return "tail";
   return null;
 }
+
+// ── feat-kpadopt-2 (kp-themes 11.0.0, the approved app-homelab-backups
+// demo, feat-kp11demo-7): where in the 2,000-line window things happened.
+// The strip and the grid of sources against five-minute columns are drawn
+// from these buckets; a press on a column narrows the lines to its five
+// minutes. Pure.
+
+/** Seconds in one column of the density strip and grid. */
+export const BUCKET_S = 300;
+
+/** @typedef {"critical" | "warning" | "info" | "none"} Worst */
+/** @type {Record<Worst, number>} */
+const RANK = { none: 0, info: 1, warning: 2, critical: 3 };
+
+/** The start of the five minutes a moment falls in. @param {number} ts */
+export const bucketStart = (ts) => Math.floor(ts / BUCKET_S) * BUCKET_S;
+
+/**
+ * Whether a line falls in a five-minute range (`[start, start + 300)`).
+ * @param {HostLine} l
+ * @param {number | null} start
+ */
+export const inRange = (l, start) =>
+  start == null || (l.ts >= start && l.ts < start + BUCKET_S);
+
+/**
+ * Every five minutes from the first line to the last, with the worst level
+ * logged in them, overall and per source, and the number of the first line
+ * (to jump to). Quiet five minutes are kept: a gap is information.
+ * @param {HostLine[]} lines oldest first
+ * @returns {{start: number, count: number, worst: Worst, first: number | null,
+ *   bySource: Map<string, {count: number, worst: Worst}>}[]}
+ */
+export function densityBuckets(lines) {
+  if (!lines.length) return [];
+  const from = bucketStart(lines[0].ts);
+  const to = bucketStart(lines[lines.length - 1].ts);
+  /** @type {Map<number, {start: number, count: number, worst: Worst, first: number | null, bySource: Map<string, {count: number, worst: Worst}>}>} */
+  const by = new Map();
+  for (let t = from; t <= to; t += BUCKET_S)
+    by.set(t, {
+      start: t,
+      count: 0,
+      worst: "none",
+      first: null,
+      bySource: new Map(),
+    });
+  for (const l of lines) {
+    const b = by.get(bucketStart(l.ts));
+    if (!b) continue;
+    const lv = levelBucket(l.level);
+    const level = /** @type {Worst} */ (lv === "debug" ? "info" : lv);
+    b.count++;
+    b.first ??= l.seq;
+    if (RANK[level] > RANK[b.worst]) b.worst = level;
+    const s = b.bySource.get(l.source) ?? {
+      count: 0,
+      worst: /** @type {Worst} */ ("none"),
+    };
+    s.count++;
+    if (RANK[level] > RANK[s.worst]) s.worst = level;
+    b.bySource.set(l.source, s);
+  }
+  return [...by.values()];
+}

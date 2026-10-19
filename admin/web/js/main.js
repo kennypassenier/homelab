@@ -63,7 +63,6 @@ import { scopeOf } from "./updateflow.js";
 import { mount as systemPage } from "./pages/system.js";
 import { mount as metricsPage } from "./pages/metrics.js";
 import { mount as fleetviewPage } from "./pages/fleetview.js";
-import { mount as backupCalendarPage } from "./pages/backupcalendar.js";
 import { mount as passkeysPage } from "./pages/passkeys.js";
 import { mountVersions } from "./versions.js";
 import { installSortClick } from "./sortclick.js";
@@ -181,7 +180,6 @@ const VIEW_MOUNTS = {
   // redesign-activity: Activity draws these as its own views.
   log: (root) => activity(root, { navigate }),
   schedules: (root) => activity(root, { navigate }),
-  backupcalendar: (root) => backupCalendarPage(root),
   retired: (root) => retired(root),
   passkeys: (root) => passkeysPage(root),
   // redesign-final-h5: the Doctor's old address opens Host on its checks.

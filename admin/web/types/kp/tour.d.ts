@@ -1,5 +1,3 @@
-// The kp-themes module chassis-rs serves at /static/kp/js/tour.js (kp-themes 10.1.1),
-// copied from kp-themes js/tour.d.ts: chassis serves the module, not its types.
 export type Strings = import("./strings.js").Strings;
 export type TourStep = {
   target: string | (() => Element | null);

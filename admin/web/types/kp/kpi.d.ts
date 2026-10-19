@@ -1,5 +1,3 @@
-// The kp-themes module chassis-rs serves at /static/kp/js/kpi.js (kp-themes 10.1.1),
-// copied from kp-themes js/kpi.d.ts: chassis serves the module, not its types.
 /** An inline SVG drawn from the numbers in its attribute. */
 export declare const SPARK = "svg[data-kp-spark]";
 /**

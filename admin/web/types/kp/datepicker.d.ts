@@ -1,5 +1,3 @@
-// The kp-themes module chassis-rs serves at /static/kp/js/datepicker.js (kp-themes 10.1.1),
-// copied from kp-themes js/datepicker.d.ts: chassis serves the module, not its types.
 /** Fired when a date is chosen, typed or set. A contract value [TH26]: `{ iso, date, source }`. */
 export declare const DATE_EVENT = "kp-date-change";
 /** Fired when the panel opens or closes: `{ open }`. */

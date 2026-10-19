@@ -1,36 +1,64 @@
 // redesign-final-h3 (3.71.0's final review, 2026-10-04; FLOWS.md §5, task
-// 5): the Restore flow as the approved flows/restore.html — Which app ·
-// Which night · Confirm · Restore and check, on a page of its own like the
-// Update flow (`/backups/restore?stack=…[&app=…][&snapshot=…]`), with the
-// breadcrumb Backups / <stack> / Restore. Every Restore… (Backups, the
-// stack hub, the palette) lands here; Live view's own driven form still
-// opens the action's dialog. The run is the catalog's restore action, so
-// the host does what it always did: the safety copy first, then the night
-// put back; its steps and log follow below (the job panel).
+// 5): the Restore flow on a page of its own like the Update flow
+// (`/backups/restore?stack=…[&app=…][&snapshot=…]`), with the breadcrumb
+// Backups / <stack> / Restore. Rebuilt on kp-themes 11.0.0 from the demo
+// Kenny approved on 2026-10-19 (app-homelab-backups, feat-kp11demo-8): a kp
+// wizard of four steps you can click back to — What (the stack and the
+// app), Which night (a dated picker, the newest chosen), Check (the restore
+// point, the command the host would run, the safety copy acknowledged, the
+// stack's name typed) and Restore (the steps of the job, live). Every
+// Restore… (Backups, the stack hub, the palette) lands here; Live view's own
+// driven form still opens the action's dialog. The run is the catalog's
+// restore action, so the host does what it always did: the safety copy
+// first, then the night put back; its log follows below (the job panel).
 
-import { catalogReady, send } from "../act.js";
+import { act, catalogReady, onAct, send } from "../act.js";
 import { refusalCallout } from "../actui.js";
-import { actionForm } from "../actionforms.js";
-import { fetchJson, h } from "../dom.js";
-import { declare, declareField, drivable } from "../drivable.js";
-import { humanDuration } from "../format.js";
+import { actionForm, previewArgs } from "../actionforms.js";
+import { ensureStyle, fetchJson, h } from "../dom.js";
+import { declare, declareField, drivable, viaForm } from "../drivable.js";
+import { humanBytes } from "../backupsview.js";
+import { jobSteps } from "../jobs.js";
 import { mountJobPanel } from "../jobpanel.js";
-import {
-  restoreHref,
-  restoreNights,
-  restoreStep,
-  whatWillHappen,
-} from "../restoreflow.js";
+import { previewGate } from "../previewgate.js";
+import { restoreHref, restoreNights, whatWillHappen } from "../restoreflow.js";
 import { current, subscribe } from "../store.js";
+import { openAction } from "../actiondialog.js";
+import { pageHeader } from "../ui.js";
+import { gridRow, formGrid, buttonGroup } from "../gridrow.js";
+import { drawnSelect } from "/static/kp/js/combobox.js";
 import {
-  dot,
-  ensureStyle,
-  pageHeader,
-  section,
-  skeletonLines,
-  stepper,
-  emptyState,
-} from "../ui.js";
+  BEFORE_STEP_EVENT,
+  STEP_EVENT,
+  attachWizards,
+  wizard,
+} from "/static/kp/js/wizard.js";
+import {
+  DATED_EVENT,
+  DATED_RETRY_EVENT,
+  attachDatedOptions,
+  datedValue,
+  setDatedOptions,
+  setDatedState,
+} from "/static/kp/js/dated-options.js";
+import { runMoment } from "/static/kp/js/runs.js";
+import { setCode } from "/static/kp/js/code.js";
+import {
+  attachSteplists,
+  buildSteplist,
+  setStep,
+} from "/static/kp/js/steplist.js";
+import { ACK_EVENT, ackGate, attachAckGates } from "/static/kp/js/ack-gate.js";
+import {
+  TYPE_CONFIRM_EVENT,
+  attachTypeConfirms,
+} from "/static/kp/js/components.js";
+import { attachDisabledReasons } from "/static/kp/js/reason.js";
+import {
+  CARD_RETRY_EVENT,
+  attachCardStates,
+  setCardState,
+} from "/static/kp/js/card-state.js";
 
 const STACK = declare({
   id: "restore-stack",
@@ -66,6 +94,11 @@ const CONFIRM = declareField({
   page: "restore",
   what: "the stack's name, typed to confirm the restore",
 });
+const STACK_FIELD = declareField({
+  id: "rs-stack",
+  page: "restore",
+  what: "the stack whose apps the flow lists",
+});
 const GO = declare({
   id: "restore-go",
   page: "restore",
@@ -78,6 +111,29 @@ const CANCEL = declare({
   opens: "view",
   what: "leave the Restore flow for the stack's Backups tab",
 });
+const RETRY = declare({
+  id: "restore-retry",
+  page: "restore",
+  opens: "run",
+  what: "run the restore again after it stopped",
+  shows: "when the restore stopped",
+});
+
+const STEPS = /** @type {const} */ ([
+  "What",
+  "Which night",
+  "Check",
+  "Restore",
+]);
+
+/** The job step states the kp step list knows. @type {Record<string, import("/static/kp/js/steplist.js").StepState>} */
+const STEP_STATE = {
+  ok: "done",
+  bad: "failed",
+  run: "running",
+  wait: "pending",
+  skip: "skipped",
+};
 
 /**
  * @param {HTMLElement} root
@@ -89,64 +145,150 @@ export function mount(root, ctx) {
   root.classList.add("rs-page");
   const q = new URLSearchParams(location.search);
   const abort = new AbortController();
+  /** @type {(() => void)[]} */
+  const cleanups = [];
   const names = () => (current().fleet?.stacks ?? []).map((s) => s.name);
+  const vmidOf = (/** @type {string} */ n) =>
+    (current().fleet?.stacks ?? []).find((s) => s.name === n)?.vmid ?? null;
   const stack = q.get("stack") ?? names()[0] ?? null;
-  /** @type {{app: string | null, night: string | null, running: boolean}} */
-  const S = { app: q.get("app"), night: q.get("snapshot"), running: false };
+  /** @type {{app: string | null, night: string | null, running: boolean, matched: boolean, acked: boolean, via: boolean}} */
+  const S = {
+    app: q.get("app"),
+    night: q.get("snapshot"),
+    running: false,
+    matched: false,
+    acked: false,
+    via: false,
+  };
   /** @type {any} */
   let read = null;
+  /** @type {"loading" | "ready" | "empty" | "error"} */
+  let readState = "loading";
+  /** @type {"ready" | "loading" | "empty" | "error"} */
+  let nightsState = "ready";
   /** @type {null | (() => void)} */
   let stopJob = null;
+  /** @type {null | (() => void)} */
+  let stopSteps = null;
+  let previewSeq = 0;
+  /** @type {{ready: boolean, reason: string}} */
+  let gate = { ready: false, reason: "Reading what this would do…" };
 
   const head = pageHeader({
     title: stack ? `Restore ${stack}` : "Restore",
     desc: "Put one app's data back as it was on a chosen night. Today's data is copied aside first, so a restore can itself be undone.",
   });
-  const steps = stepper([
-    "Which app",
-    "Which night",
-    "Confirm",
-    "Restore and check",
-  ]);
-  const stacksRow = h("nav", {
-    class: "rs-stacks",
-    "aria-label": "Restore from another stack",
-  });
-  const appsCard = section({
-    id: "restore-apps",
-    title: "1 · Which app",
-    desc: "Only apps that keep data have backups. Pick one.",
-  });
-  const nightsCard = section({
-    id: "restore-nights",
-    title: "2 · Which night",
-    desc: "Pick the newest night before the problem started. Nights are listed newest first; a missed night is shown, not hidden.",
-  });
-  const what = h("ol", { class: "rs-what", id: "restore-what" });
-  const typed = /** @type {HTMLInputElement} */ (
-    h("input", {
-      class: "kp-field__input rs-type",
-      id: CONFIRM,
-      autocomplete: "off",
-      spellcheck: "false",
+
+  // ── step 1: the stack and the app ────────────────────────────────────
+  const stackSel = /** @type {HTMLSelectElement} */ (
+    h("select", {
+      class: "kp-field__input",
+      id: STACK_FIELD,
+      "data-kp-select": "",
     })
   );
+  const tiles = h("fieldset", {
+    class: "kp-fieldset",
+    "data-kp-layout": "tiles",
+    "aria-labelledby": "rs-tiles-label",
+  });
+  const facts = h("ul", {
+    class: "rs-facts",
+    "aria-label": "What this restores",
+  });
+  const step1Card = h(
+    "section",
+    {
+      class: "kp-card rs-card",
+      "data-kp-state": "loading",
+      "aria-label": "What to restore",
+    },
+    h(
+      "div",
+      { class: "kp-card__stage" },
+      h(
+        "div",
+        { class: "kp-card__data" },
+        formGrid([
+          gridRow({
+            label: "Stack",
+            labelFor: "rs-stack",
+            control: stackSel,
+            value: h(
+              "span",
+              { class: "rs-hint" },
+              "The stack the app lives in.",
+            ),
+          }),
+          gridRow({
+            label: "App to bring back",
+            labelId: "rs-tiles-label",
+            control: tiles,
+            wide: true,
+          }),
+          gridRow({
+            label: "What it restores",
+            control: facts,
+            wide: true,
+          }),
+        ]),
+      ),
+    ),
+  );
+
+  // ── step 2: the night ────────────────────────────────────────────────
+  const dated = h("div", {
+    class: "kp-dated",
+    "data-kp-dated": "",
+    "aria-label": "Night to restore from",
+  });
+  const step2Body = formGrid([
+    gridRow({
+      label: "Night to restore from",
+      labelId: "rs-night-label",
+      control: dated,
+      wide: true,
+    }),
+  ]);
+
+  // ── step 3: check ────────────────────────────────────────────────────
+  const point = h("p", { class: "kp-formgrid__control rs-point" }, "…");
+  point.setAttribute("data-kp-formgrid-span", "wide");
+  const codeEl = h("figure", { class: "kp-code", "data-kp-code": "" });
+  const ack = h(
+    "div",
+    {
+      class: "kp-alert kp-alert--warning",
+      "data-kp-ack": "",
+      "data-kp-ack-key": "aside",
+      "data-kp-ack-label":
+        "I understand today's data is copied aside and kept for 7 days",
+    },
+    h(
+      "div",
+      { class: "kp-alert__body" },
+      h("strong", null, "Today's data is replaced."),
+      " A copy of it is set aside first and stays for 7 days, so this step can be undone by restoring that copy.",
+    ),
+  );
+  const typeBox = h("div", { class: "rs-typebox" });
   const go = /** @type {HTMLButtonElement} */ (
     drivable(
       h(
         "button",
         {
           type: "button",
-          class: "kp-button kp-button--primary",
+          class: "kp-button kp-button--destructive",
           id: "restore-go",
-          "aria-disabled": "true",
-          title: "Type the stack's name first",
+          disabled: "",
+          title: "Pick an app and a night first",
         },
         "Restore",
       ),
       GO,
     )
   );
+  const err = h("div", { class: "rs-err" });
   const cancel = drivable(
     h(
       "a",
@@ -161,61 +303,148 @@ export function mount(root, ctx) {
     ),
     CANCEL,
   );
-  const err = h("div");
-  const confirmCard = section({
-    id: "restore-confirm-card",
-    title: "3 · What will happen",
-    desc: "Read, then type the stack's name to confirm.",
+  const checkBody = h(
+    "div",
+    { class: "rs-check kp-formgrid" },
+    gridRow({
+      label: "Restore point",
+      control: point,
+      wide: true,
+    }),
+    gridRow({
+      label: "Command",
+      control: codeEl,
+      wide: true,
+    }),
+    h("div", { "data-kp-formgrid-span": "all" }, ack),
+    gridRow({ label: "Confirm", control: typeBox, wide: true }),
+    gridRow({
+      buttons: true,
+      control: buttonGroup([cancel, go]),
+    }),
+    h("div", { "data-kp-formgrid-span": "all" }, err),
+  );
+
+  // ── step 4: the run ──────────────────────────────────────────────────
+  const runTitle = h(
+    "p",
+    { class: "kp-formgrid__control rs-point" },
+    "Restoring…",
+  );
+  runTitle.setAttribute("data-kp-formgrid-span", "wide");
+  let steps = h("ol", {
+    class: "kp-steplist",
+    "aria-label": "Restore progress",
   });
-  confirmCard.body.append(
-    what,
+  const stepsBox = h("div", { class: "rs-steps" }, steps);
+  const jobBox = h("div", { class: "rs-job" });
+  const retryBtn = drivable(
     h(
-      "label",
-      { class: "rs-confirm", for: CONFIRM },
-      h("span", null, "Type ", h("b", null, stack ?? ""), " to confirm"),
-      typed,
+      "button",
+      { type: "button", class: "kp-button kp-button--primary" },
+      "Try again",
     ),
-    err,
+    RETRY,
+  );
+  const backBtn = h(
+    "button",
+    { type: "button", class: "kp-button" },
+    "Back to Check",
+  );
+  const runActions = gridRow({
+    buttons: true,
+    control: buttonGroup([retryBtn, backBtn]),
+    hidden: true,
+  });
+  const runBody = h(
+    "div",
+    { class: "rs-run kp-formgrid" },
+    gridRow({ label: "Restoring", control: runTitle, wide: true }),
+    gridRow({ label: "Progress", control: stepsBox, wide: true }),
+    runActions,
+    gridRow({ label: "Log", control: jobBox, wide: true }),
+  );
+
+  const wiz = h(
+    "div",
+    { class: "kp-wizard", "data-kp-wizard": "", "data-kp-navigable": "" },
+    h(
+      "ol",
+      { class: "kp-wizard__steps" },
+      ...STEPS.map((s) => h("li", { "data-kp-step-label": "" }, s)),
+    ),
+    h(
+      "section",
+      { "data-kp-step": "", "aria-label": "What to restore" },
+      h("div", { class: "rs-step" }, step1Card),
+    ),
+    h(
+      "section",
+      { "data-kp-step": "", hidden: "", "aria-label": "Which night" },
+      h("div", { class: "rs-step" }, step2Body),
+    ),
+    h(
+      "section",
+      { "data-kp-step": "", hidden: "", "aria-label": "Check" },
+      h("div", { class: "rs-step rs-step--check" }, checkBody),
+    ),
+    h(
+      "section",
+      { "data-kp-step": "", hidden: "", "aria-label": "Restoring" },
+      h("div", { class: "rs-step" }, runBody),
+    ),
     h(
       "div",
-      { class: "rs-foot" },
+      { class: "kp-wizard__actions" },
       h(
-        "span",
-        { class: "rs-hint", id: "restore-hint" },
-        "Nothing has run yet.",
+        "button",
+        { type: "button", class: "kp-button", "data-kp-wizard-back": "" },
+        "Back",
       ),
-      h("div", { class: "rs-acts" }, cancel, go),
+      h(
+        "button",
+        {
+          type: "button",
+          class: "kp-button kp-button--primary",
+          "data-kp-wizard-next": "",
+        },
+        "Next",
+      ),
     ),
   );
-  const runCard = section({
-    id: "restore-run",
-    title: "4 · Restoring",
-    desc: "You can leave this page; the running pill in the bar follows the job.",
-  });
-  runCard.el.hidden = true;
-
-  root.replaceChildren(
-    head.el,
-    steps.el,
-    stacksRow,
-    appsCard.el,
-    nightsCard.el,
-    confirmCard.el,
-    runCard.el,
+  const next = /** @type {HTMLButtonElement} */ (
+    wiz.querySelector("[data-kp-wizard-next]")
+  );
+  const back = /** @type {HTMLButtonElement} */ (
+    wiz.querySelector("[data-kp-wizard-back]")
   );
 
+  root.replaceChildren(head.el, wiz);
+
   if (!stack) {
-    appsCard.body.replaceChildren(
-      emptyState({
-        title: "No stack to restore",
-        text: "The host manages no stack yet; once one has backups, its apps show up here.",
-      }),
-    );
+    setCardState(step1Card, "empty", {
+      title: "No stack to restore",
+      text: "The host manages no stack yet; once one has backups, its apps show up here.",
+    });
     return () => abort.abort();
   }
-  appsCard.body.replaceChildren(skeletonLines(2, "Reading the backups"));
-  nightsCard.body.replaceChildren(skeletonLines(3, "Reading the nights"));
 
+  cleanups.push(
+    attachCardStates(root),
+    attachDatedOptions(root),
+    attachSteplists(root),
+    attachAckGates(root),
+    attachDisabledReasons(root),
+  );
+  const wizards = attachWizards(root, {
+    navigableLabels: true,
+    beforeStep: () => true,
+  });
+  cleanups.push(wizards);
+  const w = () =>
+    /** @type {import("/static/kp/js/wizard.js").WizardHandle} */ (wizard(wiz));
+
+  // ── data ─────────────────────────────────────────────────────────────
   /** The repositories (apps) with at least one snapshot. */
   const repos = () =>
     /** @type {any[]} */ (read?.repos ?? []).filter(
@@ -224,9 +453,13 @@ export function mount(root, ctx) {
   const repoOf = (/** @type {string | null} */ app) =>
     repos().find((r) => r.owner === app) ?? null;
   const nights = () =>
-    restoreNights(repoOf(S.app)?.snapshots ?? [], Date.now() / 1000);
+    restoreNights(repoOf(S.app)?.snapshots ?? [], Date.now() / 1000, 30);
   const nightLabel = () =>
     nights().find((n) => n.key === S.night)?.label ?? "the chosen night";
+  const snapOf = () =>
+    repoOf(S.app)?.snapshots?.find(
+      (/** @type {any} */ x) => x.short_id === S.night,
+    ) ?? null;
 
   /** Keep the address in step with the choice (back and reload land here). */
   const keepUrl = () => {
@@ -235,162 +468,389 @@ export function mount(root, ctx) {
       history.replaceState(history.state, "", href);
   };
 
+  // ── painting ─────────────────────────────────────────────────────────
   const paintStacks = () => {
     const list = names();
-    stacksRow.replaceChildren(
-      h("span", { class: "rs-hint" }, "Stack"),
-      ...list.map((n) =>
-        drivable(
-          h(
-            "a",
-            {
-              class: `rs-stack${n === stack ? " is-on" : ""}`,
-              href: restoreHref(n),
-              "aria-current": n === stack ? "page" : null,
-              title: `Restore one of ${n}'s apps instead`,
-              onclick: (/** @type {MouseEvent} */ e) => {
-                e.preventDefault();
-                ctx.navigate(restoreHref(n));
-              },
-            },
-            n,
-          ),
-          STACK,
-          n,
-        ),
-      ),
+    stackSel.replaceChildren(
+      ...list.map((n) => {
+        const o = h(
+          "option",
+          { value: n },
+          `${n}${vmidOf(n) != null ? ` (CT ${vmidOf(n)})` : ""}`,
+        );
+        drivable(o, STACK, n);
+        o.addEventListener("click", () => pickStack(n));
+        return o;
+      }),
     );
+    stackSel.value = stack;
+    drawnSelect(stackSel)?.refresh();
   };
+  const pickStack = (/** @type {string} */ n) => {
+    if (n !== stack) ctx.navigate(restoreHref(n));
+  };
+  stackSel.addEventListener("change", () => pickStack(stackSel.value));
 
-  /** @param {any} r @param {string} label @param {Node} small @param {boolean} on @param {() => void} pick */
-  const card = (r, label, small, on, pick) =>
-    h(
-      "button",
-      {
-        type: "button",
-        class: `rs-pick${on ? " is-on" : ""}`,
-        "aria-pressed": String(on),
-        onclick: pick,
-        ...r,
-      },
-      h("strong", null, label),
-      h("small", null, small),
-    );
-
-  const paint = () => {
-    steps.set(restoreStep(S));
-    const now = Date.now() / 1000;
+  const paintApps = () => {
     const rs = repos();
-    if (!rs.length) {
-      appsCard.body.replaceChildren(
-        emptyState({
-          title: `${stack} has no snapshots yet`,
-          text: "Once its first backup has run, its apps and their nights show up here.",
-        }),
-      );
-      nightsCard.body.replaceChildren();
+    if (readState === "ready") {
+      setCardState(step1Card, "ready");
+    } else if (readState === "empty") {
+      setCardState(step1Card, "empty", {
+        title: `${stack} has no snapshots yet`,
+        text: "Once its first backup has run, its apps and their nights show up here.",
+      });
+    } else if (readState === "error") {
+      setCardState(step1Card, "error", {
+        title: "The backups could not be read",
+        text: read?.error ?? "The host did not answer. Nothing was changed.",
+      });
     } else {
-      appsCard.body.replaceChildren(
+      setCardState(step1Card, "loading", { words: "Reading the backups…" });
+    }
+    tiles.replaceChildren();
+    for (const r of rs) {
+      const now = Date.now() / 1000;
+      const newest = Math.max(
+        ...r.snapshots.map((/** @type {any} */ s) => s.time),
+      );
+      const label = h(
+        "label",
+        { class: "kp-field__option" },
+        h("input", {
+          class: "kp-field__check",
+          type: "radio",
+          name: "rs-app",
+          value: r.owner,
+          checked: r.owner === S.app ? "" : null,
+        }),
+        h("span", { class: "kp-field__option-title" }, r.owner),
         h(
-          "div",
-          { class: "rs-grid", role: "group", "aria-label": "Which app" },
-          ...rs.map((r) =>
-            drivable(
-              card(
-                { "data-app": r.owner },
-                r.owner,
-                h(
-                  "span",
-                  null,
-                  `${r.snapshots.length} ${r.snapshots.length === 1 ? "snapshot" : "snapshots"} · newest ${humanDuration(now - Math.max(...r.snapshots.map((/** @type {any} */ s) => s.time)))} ago`,
-                ),
-                r.owner === S.app,
-                () => {
-                  if (S.app !== r.owner) S.night = null;
-                  S.app = r.owner;
-                  keepUrl();
-                  paint();
-                },
-              ),
-              APP,
-              r.owner,
-            ),
-          ),
+          "span",
+          { class: "kp-field__option-hint" },
+          `${r.snapshots.length} ${r.snapshots.length === 1 ? "snapshot" : "snapshots"}, newest ${Math.max(0, Math.round((now - newest) / 3600))} h ago`,
         ),
       );
-      nightsCard.body.replaceChildren(
-        S.app
-          ? h(
-              "div",
-              { class: "rs-grid", role: "group", "aria-label": "Which night" },
-              ...nights().map((n) =>
-                n.missed
-                  ? h(
-                      "div",
-                      {
-                        class: "rs-pick rs-pick--missed",
-                        "aria-disabled": "true",
-                      },
-                      h("strong", null, n.label),
-                      h("small", null, dot("bad"), " no snapshot (missed)"),
-                    )
-                  : drivable(
-                      card(
-                        { "data-night": n.key },
-                        n.label,
-                        h("span", { class: "mono" }, `snapshot ${n.key}`),
-                        n.key === S.night,
-                        () => {
-                          S.night = n.key;
-                          keepUrl();
-                          paint();
-                        },
-                      ),
-                      NIGHT,
-                      n.key,
-                    ),
-              ),
-            )
-          : h("p", { class: "rs-hint" }, "Pick an app first."),
-      );
+      drivable(label, APP, r.owner);
+      tiles.append(label);
     }
-    what.replaceChildren(
-      ...(S.app && S.night
+    const rep = repoOf(S.app);
+    facts.replaceChildren(
+      ...(rep
         ? whatWillHappen({
             stack,
-            app: S.app,
-            night: nightLabel(),
+            app: /** @type {string} */ (S.app),
+            night: S.night ? nightLabel() : "the night you pick next",
             native: read?.native === true,
           }).map((l) => h("li", null, l))
-        : [h("li", { class: "rs-hint" }, "Pick an app and a night first.")]),
+        : [
+            h(
+              "li",
+              null,
+              "Pick an app first; this list then says what a restore of it does.",
+            ),
+          ]),
     );
-    const ready =
-      !S.running && !!S.app && !!S.night && typed.value.trim() === stack;
-    // Held back, never dead: a press before it is ready says what is
-    // missing and goes there (and Live view can always press it).
-    go.setAttribute("aria-disabled", String(!ready));
-    go.title = ready
-      ? `Restore ${S.app} from ${nightLabel()}, the safety copy first`
-      : !S.app || !S.night
-        ? "Pick an app and a night first"
-        : `Type ${stack} first`;
+    gateNext();
   };
-  typed.addEventListener("input", paint);
-  typed.addEventListener("focus", () => steps.set(Math.max(3, restoreStep(S))));
 
-  go.addEventListener("click", async () => {
-    if (go.getAttribute("aria-disabled") === "true") {
-      if (S.running) return;
-      const hint = /** @type {HTMLElement} */ (
-        root.querySelector("#restore-hint")
-      );
-      hint.textContent = go.title;
-      if (!S.app) appsCard.el.scrollIntoView({ block: "nearest" });
-      else if (!S.night) nightsCard.el.scrollIntoView({ block: "nearest" });
-      else typed.focus();
+  const pending = () => nightsState === "loading";
+  const paintNights = () => {
+    const list = nights();
+    if (readState !== "ready" || !S.app) {
+      setDatedOptions(dated, []);
+      setDatedState(dated, readState === "loading" ? "loading" : "empty", {
+        reason: S.app ? `${S.app} has no snapshot yet` : "Pick an app first",
+        action: null,
+      });
+      gateNext();
       return;
     }
+    if (nightsState === "ready") {
+      if (!list.some((n) => !n.missed)) {
+        const take = h(
+          "button",
+          { type: "button", class: "kp-button kp-button--primary" },
+          "Take a snapshot now",
+        );
+        take.addEventListener("click", () => void openAction(stack, "backup"));
+        setDatedOptions(dated, []);
+        setDatedState(dated, "empty", {
+          reason: `${S.app} has no snapshot yet`,
+          action: take,
+        });
+      } else {
+        setDatedOptions(
+          dated,
+          list.map((n) =>
+            n.missed
+              ? {
+                  value: n.key,
+                  label: n.label,
+                  when: Date.parse(`${n.key.slice(7)}T12:00:00Z`),
+                  meta: "—",
+                  disabled: "no snapshot (missed)",
+                }
+              : {
+                  value: n.key,
+                  label: n.label,
+                  when: /** @type {any} */ (n.snap).time * 1000,
+                  meta:
+                    humanBytes(/** @type {any} */ (n.snap).size_bytes) ?? "—",
+                },
+          ),
+          S.night && list.some((n) => n.key === S.night && !n.missed)
+            ? S.night
+            : null,
+        );
+        const chosen = datedValue(dated);
+        if (chosen && !chosen.startsWith("missed:")) S.night = chosen;
+        decorateNights();
+      }
+    } else {
+      setDatedState(dated, nightsState === "empty" ? "empty" : nightsState, {
+        title: "The nights could not be read",
+        text: "The host did not answer. Nothing was changed.",
+        reason: `${S.app} has no snapshot yet`,
+      });
+    }
+    keepUrl();
+    gateNext();
+  };
+  const decorateNights = () => {
+    // The package draws few nights as radios and many as a combobox list.
+    for (const el of /** @type {HTMLElement[]} */ ([
+      ...dated.querySelectorAll("input[type=radio], [role=option][data-value]"),
+    ])) {
+      const v = el instanceof HTMLInputElement ? el.value : el.dataset.value;
+      if (v && !v.startsWith("missed:")) drivable(el, NIGHT, v);
+    }
+  };
+
+  {
+    // The package redraws its night list; mark the radios again each time.
+    const mo = new MutationObserver(() => decorateNights());
+    mo.observe(dated, { childList: true, subtree: true });
+    cleanups.push(() => mo.disconnect());
+  }
+
+  /** Next waits for what the step needs, and says what, on hover and focus. */
+  function gateNext() {
+    const at = w()?.step() ?? 0;
+    let reason = "";
+    if (at === 0 && (readState !== "ready" || !S.app))
+      reason =
+        readState === "loading"
+          ? "The backups are still being read"
+          : readState === "ready"
+            ? "Pick the app whose data comes back"
+            : "There is nothing to restore yet";
+    if (
+      at === 1 &&
+      (nightsState !== "ready" || !S.night || S.night.startsWith("missed:"))
+    )
+      reason =
+        nightsState === "loading"
+          ? "The nights are still being read"
+          : nightsState !== "ready"
+            ? "There is no night to restore from yet"
+            : "Pick a night that has a snapshot";
+    next.disabled = reason !== "";
+    if (reason) next.setAttribute("data-kp-disabled-reason", reason);
+    else next.removeAttribute("data-kp-disabled-reason");
+    attachDisabledReasons(root);
+  }
+
+  /** The Restore button waits for the preview, the tick and the name. */
+  const armGo = () => {
+    const ready =
+      !S.running && !!S.app && !!S.night && S.matched && S.acked && gate.ready;
+    go.disabled = !ready;
+    go.setAttribute("aria-disabled", String(!ready));
+    const reason =
+      !S.app || !S.night
+        ? "Pick an app and a night first"
+        : !gate.ready
+          ? gate.reason
+          : !S.acked
+            ? `Tick "I understand today's data is copied aside" first`
+            : !S.matched
+              ? `Type ${stack} exactly first`
+              : "";
+    if (reason) go.setAttribute("data-kp-disabled-reason", reason);
+    else go.removeAttribute("data-kp-disabled-reason");
+    go.title = ready
+      ? `Restore ${S.app} from ${nightLabel()}, the safety copy first`
+      : reason;
+    attachDisabledReasons(root);
+  };
+
+  /** The Check step: restore point, the command the host would run, the guards. */
+  const checkStep = async () => {
+    const snap = snapOf();
+    point.textContent = snap
+      ? `Restore point: ${runMoment(snap.time * 1000, "Europe/Brussels", "en-GB")}. ${S.app} stops for about a minute; the rest of ${stack} keeps running.`
+      : "Restore point: pick an app and a night first.";
+    go.textContent = `Restore ${S.app ?? ""}`.trim();
+    // a fresh guard for every visit to this step
+    ackGate(ack)?.set(false);
+    S.acked = false;
+    S.matched = false;
+    typeBox.replaceChildren(h("div", { "data-kp-type-confirm": stack }));
+    attachTypeConfirms(typeBox);
+    const input = typeBox.querySelector("input");
+    if (input) {
+      input.id = CONFIRM;
+      input.setAttribute("autocomplete", "off");
+    }
+    armGo();
+    // The host's own preview: the command line, or why it cannot run.
+    const seq = ++previewSeq;
+    gate = { ready: false, reason: "Reading what this would do…" };
+    setCode(codeEl, {
+      title: "The command the host runs",
+      language: "Shell",
+      state: "loading",
+      loadingWords: "Reading what this would do…",
+    });
+    armGo();
+    const catalog = await catalogReady();
+    const kind = read?.native === true ? "restore-native" : "restore";
+    const entry = catalog?.actions.find((a) => a.action === kind);
+    if (!catalog || !entry || seq !== previewSeq) {
+      if (seq === previewSeq) {
+        gate = {
+          ready: false,
+          reason:
+            "The dashboard does not know the restore action; reload the page.",
+        };
+        setCode(codeEl, {
+          title: "The command the host runs",
+          state: "error",
+          message: gate.reason,
+        });
+        armGo();
+      }
+      return;
+    }
+    const form = actionForm(entry, {
+      stack,
+      selfStack: catalog.self_stack,
+      hostTarget: catalog.host_target,
+    });
+    if (form.refused) {
+      gate = { ready: false, reason: form.refused };
+      setCode(codeEl, {
+        title: "The command the host runs",
+        state: "error",
+        message: form.refused,
+      });
+      armGo();
+      return;
+    }
+    const body = previewArgs(
+      form,
+      /** @type {any} */ (
+        read?.native === true
+          ? { snapshot: S.night ?? "" }
+          : { app: S.app ?? "", snapshot: S.night ?? "" }
+      ),
+    );
+    const r = await send(
+      "POST",
+      form.previewPath,
+      body,
+      `the preview of ${form.title}`,
+    );
+    if (seq !== previewSeq) return;
+    if (!r.ok) {
+      const g = previewGate(form, null, r.error);
+      gate = { ready: false, reason: g.reason };
+      setCode(codeEl, {
+        title: "The command the host runs",
+        state: "error",
+        message: g.reason,
+      });
+    } else {
+      const g = previewGate(form, r.body, null);
+      gate = { ready: g.ready, reason: g.reason };
+      const cli = r.body.cli;
+      if (cli)
+        setCode(codeEl, {
+          title: "The command the host runs",
+          language: "Shell",
+          text: String(cli),
+          copy: true,
+        });
+      else
+        setCode(codeEl, {
+          title: "The command the host runs",
+          state: "empty",
+          message:
+            g.notes[0] ?? "The host gave no command line for this restore.",
+        });
+    }
+    armGo();
+  };
+
+  // ── the run ──────────────────────────────────────────────────────────
+  const stepRows = (
+    /** @type {any} */ j,
+    /** @type {Map<number, string>} */ names2,
+  ) =>
+    jobSteps(j, names2).map((row, i) => ({
+      id: `s${i}`,
+      title: row.title,
+      note: row.desc ?? "",
+      state: STEP_STATE[row.state] ?? "pending",
+    }));
+
+  /** @param {number} jobId */
+  const followJob = (jobId) => {
+    stopSteps?.();
+    /** @type {Map<number, string>} */
+    const stepNames = new Map();
+    let sig = "";
+    const paint = () => {
+      const j = act.jobs.find((x) => x.job === jobId);
+      if (!j) return;
+      if (j.progress) stepNames.set(j.progress.n, j.progress.step);
+      const rows = stepRows(j, stepNames);
+      const s2 = JSON.stringify(rows);
+      if (s2 !== sig) {
+        sig = s2;
+        const fresh = buildSteplist(rows, { label: `Restoring ${S.app}` });
+        steps.replaceWith(fresh);
+        steps = fresh;
+        attachSteplists(stepsBox);
+      }
+      const ended = ["done", "failed", "cancelled", "lost", "refused"].includes(
+        j.state,
+      );
+      const snap = snapOf();
+      const at = snap
+        ? runMoment(snap.time * 1000, "Europe/Brussels", "en-GB")
+        : "";
+      if (j.state === "done") {
+        runTitle.textContent = `${S.app} is back at ${at}.`;
+      } else if (ended) {
+        runTitle.textContent = `Restoring ${S.app} stopped${j.message ? `: ${j.message}` : ""}. Today's data is safe in the copy set aside.`;
+      } else {
+        runTitle.textContent = `Restoring ${S.app} to ${at}`;
+      }
+      runActions.hidden = !(ended && j.state !== "done");
+      back.disabled = !ended;
+      S.running = !ended;
+      if (ended) armGo();
+    };
+    const off = onAct("jobs", paint);
+    paint();
+    stopSteps = off;
+  };
+
+  const run = async () => {
     if (!S.app || !S.night) return;
+    err.replaceChildren();
     const native = read?.native === true;
     const kind = native ? "restore-native" : "restore";
     const catalog = await catalogReady();
@@ -417,8 +877,8 @@ export function mount(root, ctx) {
       return;
     }
     S.running = true;
-    paint();
-    err.replaceChildren(h("p", { class: "rs-hint" }, "Sending…"));
+    armGo();
+    go.setAttribute("aria-busy", "true");
     const r = await send(
       "POST",
       form.runPath,
@@ -427,52 +887,146 @@ export function mount(root, ctx) {
         : { confirm: stack, app: S.app, snapshot: S.night },
       form.title,
     );
+    go.removeAttribute("aria-busy");
     if (!r.ok) {
       S.running = false;
       err.replaceChildren(refusalCallout(r.error));
-      paint();
+      armGo();
       return;
     }
-    err.replaceChildren();
+    stopJob?.();
     const panel = mountJobPanel(/** @type {number} */ (r.body.job), {
       compact: true,
-      steps: true,
+      steps: false,
     });
     stopJob = panel.stop;
-    runCard.el.hidden = false;
-    runCard.body.replaceChildren(panel.element);
-    runCard.el.scrollIntoView({ block: "nearest" });
+    jobBox.replaceChildren(panel.element);
+    S.via = true;
+    await w().goTo(3);
+    S.via = false;
+    followJob(/** @type {number} */ (r.body.job));
+  };
+  go.addEventListener("click", () => {
+    if (go.disabled || go.getAttribute("aria-disabled") === "true") return;
+    void run();
+  });
+  retryBtn.addEventListener("click", () => void run());
+  backBtn.addEventListener("click", () => void w().goTo(2));
+
+  // ── wizard ───────────────────────────────────────────────────────────
+  wiz.addEventListener(BEFORE_STEP_EVENT, (e) => {
+    const d = /** @type {CustomEvent} */ (e).detail;
+    if (S.via) return;
+    // The last step is reached by the Restore button only.
+    if (d.to === 3 && !S.running) e.preventDefault();
+    if (
+      d.direction === "forward" &&
+      d.from === 0 &&
+      (readState !== "ready" || !S.app)
+    )
+      e.preventDefault();
+    if (
+      d.direction === "forward" &&
+      d.from === 1 &&
+      (nightsState !== "ready" || !S.night || S.night.startsWith("missed:"))
+    )
+      e.preventDefault();
+  });
+  wiz.addEventListener(STEP_EVENT, (e) => {
+    const d = /** @type {CustomEvent} */ (e).detail;
+    next.hidden = d.step >= 2;
+    back.hidden = d.step === 3 && S.running;
+    if (d.step === 0) paintApps();
+    if (d.step === 1) paintNights();
+    if (d.step === 2) void checkStep();
+    gateNext();
   });
 
+  tiles.addEventListener("change", (e) => {
+    const input = /** @type {HTMLInputElement} */ (e.target);
+    S.app = input.value;
+    S.night = null;
+    keepUrl();
+    paintApps();
+  });
+  dated.addEventListener(DATED_EVENT, () => {
+    const v = datedValue(dated);
+    S.night = v && !v.startsWith("missed:") ? v : null;
+    keepUrl();
+    gateNext();
+  });
+  dated.addEventListener(DATED_RETRY_EVENT, () => void load());
+  root.addEventListener(TYPE_CONFIRM_EVENT, (e) => {
+    S.matched = Boolean(/** @type {CustomEvent} */ (e).detail.matched);
+    armGo();
+  });
+  root.addEventListener(ACK_EVENT, (e) => {
+    S.acked = Boolean(/** @type {CustomEvent} */ (e).detail.checked);
+    armGo();
+  });
+  step1Card.addEventListener(CARD_RETRY_EVENT, () => void load());
+
+  // ── load ─────────────────────────────────────────────────────────────
   const load = async () => {
+    readState = "loading";
+    nightsState = "loading";
+    paintApps();
+    paintNights();
     const enc = encodeURIComponent(stack);
     const b = await fetchJson(
       `/data/backups/${enc}`,
       `${stack}'s backups`,
       abort.signal,
-    );
-    if (!b.ok) {
-      appsCard.body.replaceChildren(
-        refusalCallout(b.error, "destructive", "Not read"),
-      );
-      nightsCard.body.replaceChildren();
+    ).catch(() => null);
+    if (abort.signal.aborted) return;
+    if (!b || !b.ok) {
+      read = {
+        error:
+          b && !b.ok
+            ? b.error.fix
+              ? `${b.error.why} — ${b.error.fix}`
+              : b.error.why
+            : "The host did not answer.",
+      };
+      readState = "error";
+      nightsState = "error";
+      paintApps();
+      paintNights();
       return;
     }
     read = b.body;
     // An address that names an app without its snapshots, or none: the
     // only app is picked; a snapshot the app does not have is dropped.
     const rs = repos();
+    readState = rs.length ? "ready" : "empty";
+    nightsState = rs.length ? "ready" : "empty";
     if (!S.app && rs.length === 1) S.app = rs[0].owner;
     if (S.app && !repoOf(S.app)) S.app = null;
     if (S.night && !nights().some((n) => n.key === S.night)) S.night = null;
-    paint();
+    paintApps();
+    paintNights();
+    // An address that carries the choice lands on the step it needs.
+    if (S.app && S.night && w().step() === 0) {
+      S.via = true;
+      await w().goTo(2);
+      S.via = false;
+    } else if (S.app && w().step() === 0) {
+      S.via = true;
+      await w().goTo(1);
+      S.via = false;
+    }
   };
   paintStacks();
+  paintApps();
+  paintNights();
+  next.hidden = false;
   const unsub = subscribe(paintStacks);
-  void load().catch(() => {});
+  void load();
   return () => {
     abort.abort();
     unsub();
     stopJob?.();
+    stopSteps?.();
+    for (const c of cleanups) c();
   };
 }

@@ -1,67 +1,107 @@
-// The Firewall page (redesign-firewall, release 3.71.0; Kenny approved
-// the demo 2026-10-03: ~/.local/share/homelab/redesign-3.71/firewall.html,
-// implemented exactly). It lives under System. Top to bottom: the header
-// ("working copy <commit>", Topology and Edit rules…), four KPI tiles, one
-// attention row per stack whose firewall is not in force (worst first,
-// each with its fix), then Stacks and "Who may reach whom" side by side —
-// a click on a stack (a row, or a name on the matrix) lights it up, each
-// click turning one on or off, Esc or Show all resetting — and last the
-// Rules card: one stack at a time, inbound beside outbound in the order
-// Proxmox reads them; hovering a rule outlines the squares it decides.
+// The Firewall page (redesign-firewall, release 3.71.0; rebuilt on kp-themes
+// 11.0.0 from the demo Kenny approved on 2026-10-19, app-homelab-backups,
+// feat-kp11demo-3). It lives under System. Top to bottom: the header
+// ("working copy <commit>", Topology), what needs a look (one alert per
+// stack whose firewall is not in force, each with its Compare… and its
+// fix), four totals (In force; No firewall, Live differs from files and Open
+// paths filter the stacks and light the matrix), the stacks as one datatable,
+// "Who can reach whom" as a matrix you can read live, from the files or as
+// the differences — or as lines around one stack — a hop-by-hop trace of one
+// pair, the rules as one grouped table, and the guard in front of editing a
+// stack whose management is open.
 //
-// feat-firewall-2 still holds: everything is read from the working
-// copy's stack files (`/data/firewall`), and what the host says pve
-// enforces wins over the declaration (fix-207). Edits go through each
-// stack hub's Settings (FLOWS.md: the stack's Firewall tab merged there).
+// feat-firewall-2 still holds: everything is read from the working copy's
+// stack files (`/data/firewall`), and what the host says pve enforces wins
+// over the declaration (fix-207). Edits go through each stack hub's Settings
+// (FLOWS.md: the stack's Firewall tab merged there).
 //
 // `fwSummary` (fwview.js, re-exported here) is the one-stack summary the
 // stack hub's Settings tab draws.
 
 import { agoEl, setAgo } from "../ago.js";
-import { fetchJson, h, tableBlock } from "../dom.js";
-import { declare, drivable } from "../drivable.js";
+import { bindTableUrl, ensureStyle, fetchJson, h } from "../dom.js";
+import { declare, declareField, drivable } from "../drivable.js";
 import { failSummary } from "../settingsview.js";
 import {
+  allPorts,
   busiestStack,
+  cellIn,
   cellLabel,
   cellOf,
   cellWords,
-  defaultCell,
+  diffWords,
   fwAttention,
   fwKpis,
+  fwSets,
   fwState,
+  pairDiffers,
   portsText,
+  reachCounts,
   ruleHits,
-  ruleMatches,
-  ruleOrderText,
   rulesFor,
+  ruleOrderText,
+  traceHops,
 } from "../fwview.js";
+import { gridRow, formGrid } from "../gridrow.js";
 import { stackHref } from "../router.js";
 import { listen } from "../store.js";
 import {
-  countOf,
   attentionBand,
-  chip,
-  dot,
-  emptyState,
-  ensureStyle,
+  button,
   failBand,
-  failNote,
-  highlight,
   kpiStrip,
   pageHeader,
-  pageTip,
-  rowKeys,
-  section,
-  segSwitch,
-  skeleton,
-  skeletonTable,
-  stackMark,
-  toggleChips,
-  toolbar,
 } from "../ui.js";
 import { setParams } from "../urlstate.js";
-import { attachDataTables, dataTable } from "/static/kp/js/datatable.js";
+import {
+  VIEW_EVENT,
+  attachDataTables,
+  dataTable,
+} from "/static/kp/js/datatable.js";
+import {
+  MATRIX_LIGHT_EVENT,
+  MATRIX_PICK_EVENT,
+  attachMatrices,
+  setMatrix,
+  setMatrixLit,
+  setMatrixPick,
+} from "/static/kp/js/heat.js";
+import { attachFootprints } from "/static/kp/js/footprint.js";
+import { attachIdmarks } from "/static/kp/js/idmark.js";
+import { attachHoverCards } from "/static/kp/js/hovercard.js";
+import { attachKeys, setKeys } from "/static/kp/js/keys.js";
+import {
+  SEGMENTED_EVENT,
+  attachSegmented,
+  setSegmentedValues,
+} from "/static/kp/js/segmented.js";
+import {
+  TRACE_RETRY_EVENT,
+  TRACE_RULE_EVENT,
+  TRACE_SWAP_EVENT,
+  attachTraces,
+  setTrace,
+  trace,
+  traceSummary,
+} from "/static/kp/js/path-trace.js";
+import { USES_PIN_EVENT } from "/static/kp/js/uses-map.js";
+import {
+  CHANGE_EVENT,
+  attachComboboxes,
+  combobox,
+} from "/static/kp/js/combobox.js";
+import {
+  TOGGLE_CHANGED_EVENT,
+  attachToggles,
+  toggle as toggleOf,
+} from "/static/kp/js/toggle.js";
+import { ACK_EVENT, ackGate, attachAckGates } from "/static/kp/js/ack-gate.js";
+import {
+  CARD_RETRY_EVENT,
+  attachCardStates,
+  setCardState,
+} from "/static/kp/js/card-state.js";
+import { attachDisabledReasons } from "/static/kp/js/reason.js";
 
 export { fwSummary } from "../fwview.js";
 
@@ -102,7 +142,7 @@ const RULE_STACK = declare({
   page: "firewall",
   opens: "view",
   row: "<stack>",
-  what: "show one stack's rules in the Rules card",
+  what: "show only one stack's rules in the Rules table (again shows every stack)",
 });
 const RULE = declare({
   id: "firewall-rule",
@@ -116,16 +156,14 @@ const DECIDED_BY = declare({
   page: "firewall",
   opens: "view",
   row: "<stack>/<in|out>/<n>",
-  what: "jump from the pinned square to a rule that decides it",
+  what: "jump from the traced pair to the rule that decides it",
 });
 const CLEAR_RULES = declare({
   id: "firewall-clear-rule-filter",
   page: "firewall",
   opens: "view",
-  what: "clear the Rules card's search and action filter",
+  what: "clear the Rules table's search and action filter",
   shows: "while the rule search or filter narrows the rules",
-  // Each direction's empty rule list draws one; both clear the same filter.
-  twins: true,
 });
 const TOPOLOGY = declare({
   id: "firewall-topology",
@@ -137,20 +175,27 @@ const EDIT_RULES = declare({
   id: "firewall-edit-rules",
   page: "firewall",
   opens: "view",
-  what: "go to the chosen stack's firewall on its Settings (the header's Edit rules…)",
+  what: "go to the chosen stack's firewall on its Settings (Edit rules…, guarded when its management is open)",
 });
 const EDIT_THESE = declare({
   id: "firewall-edit-these-rules",
   page: "firewall",
   opens: "view",
-  what: "go to the Rules card's stack's firewall on its Settings",
+  what: "go to the Rules table's stack's firewall on its Settings",
 });
 const FIX = declare({
   id: "firewall-fix",
   page: "firewall",
   opens: "view",
   row: "<stack>",
-  what: "go to a stack's firewall on its Settings from its attention row (Declare… or Compare…)",
+  what: "go to a stack's firewall on its Settings from its attention row (Declare… or Fix…)",
+});
+const COMPARE = declare({
+  id: "firewall-compare",
+  page: "firewall",
+  opens: "view",
+  row: "<stack>",
+  what: "light a stack in the matrix with the Differences reading on (Compare…)",
 });
 const OPEN_STACK = declare({
   id: "firewall-open-stack",
@@ -185,7 +230,7 @@ const UNLIGHT = declare({
   page: "firewall",
   opens: "view",
   row: "<stack>",
-  what: "turn one lit stack off from its chip above the matrix",
+  what: "turn one lit stack off from the reading above the matrix",
   shows: "while a stack is lit",
   reach: [{ do: "click", control: "firewall-light", row: "*" }],
 });
@@ -200,14 +245,14 @@ const ACTION_FILTER = declare({
   id: "firewall-action-filter",
   page: "firewall",
   opens: "view",
-  row: "ACCEPT|DROP",
-  what: "show only ACCEPT or only DROP rules (again shows every rule)",
+  row: "all|ACCEPT|DROP",
+  what: "show only ACCEPT or only DROP rules (again shows every rule), or All",
 });
 const RULE_SEARCH = declare({
   id: "firewall-rule-search",
   page: "firewall",
   opens: "view",
-  what: "the Rules card's filter box (address, port, stack or why)",
+  what: "the Rules table's search box (address, port, stack or why)",
 });
 const EDIT_RULE = declare({
   id: "firewall-edit-rule",
@@ -216,10 +261,7 @@ const EDIT_RULE = declare({
   row: "<stack>/<in|out>/<n>",
   what: "go to an opened rule's stack firewall on its Settings",
   shows: "in an opened rule",
-  reach: [
-    { do: "click", control: "firewall-light", row: "*" },
-    { do: "click", control: "firewall-rule", row: "*" },
-  ],
+  reach: [{ do: "click", control: "firewall-rule", row: "*" }],
 });
 const RULE_UP = declare({
   id: "firewall-rule-move-up",
@@ -228,10 +270,7 @@ const RULE_UP = declare({
   row: "<stack>/<in|out>/<n>",
   what: "move an opened rule one place up: its stack's firewall editor opens with the move staged for review",
   shows: "in an opened rule that is not the first",
-  reach: [
-    { do: "click", control: "firewall-light", row: "*" },
-    { do: "click", control: "firewall-rule", row: "*" },
-  ],
+  reach: [{ do: "click", control: "firewall-rule", row: "*" }],
 });
 const RULE_OFF = declare({
   id: "firewall-rule-disable",
@@ -239,6 +278,8 @@ const RULE_OFF = declare({
   opens: "view",
   row: "<stack>/<in|out>/<n>",
   what: "switch an opened rule off (or back on): its stack's firewall editor opens with the change staged for review",
+  shows: "in an opened rule",
+  reach: [{ do: "click", control: "firewall-rule", row: "*" }],
 });
 const SORT = declare({
   id: "firewall-sort",
@@ -247,9 +288,169 @@ const SORT = declare({
   row: "stack|state|rules",
   what: "sort the Stacks table by a column (again flips it, a third time clears)",
 });
+const KPI = declare({
+  id: "firewall-total",
+  page: "firewall",
+  opens: "view",
+  row: "none|differs|open",
+  what: "show only the stacks a total counts, and light them in the matrix (again shows every stack)",
+});
+const VIEW = declare({
+  id: "firewall-view",
+  page: "firewall",
+  opens: "view",
+  row: "grid|lines",
+  what: "read the reachability as the full grid or as lines around one stack",
+});
+const COMPARE_MODE = declare({
+  id: "firewall-compare-mode",
+  page: "firewall",
+  opens: "view",
+  row: "live|files|differences",
+  what: "what the matrix shows: what pve enforces now, what the stack files declare, or only the pairs where they differ",
+});
+const TRACE_FROM = declare({
+  id: "firewall-trace-from",
+  page: "firewall",
+  opens: "view",
+  what: "the stack a traced connection starts at",
+});
+const TRACE_TO = declare({
+  id: "firewall-trace-to",
+  page: "firewall",
+  opens: "view",
+  what: "the stack a traced connection goes to",
+});
+const TRACE_PORT = declare({
+  id: "firewall-trace-port",
+  page: "firewall",
+  opens: "view",
+  what: "the port of the traced connection, or any port the rules allow",
+});
+// review M5: the page's own form fields (the controls above are what Live
+// view presses; these are the ids the inputs carry in the page).
+declareField({
+  id: "fw-follow",
+  page: "firewall",
+  what: "the stack the Lines view follows",
+});
+declareField({
+  id: "fw-trace-from",
+  page: "firewall",
+  what: "the stack a traced connection starts at",
+});
+declareField({
+  id: "fw-trace-to",
+  page: "firewall",
+  what: "the stack a traced connection goes to",
+});
+declareField({
+  id: "fw-trace-port",
+  page: "firewall",
+  what: "the port of the traced connection",
+});
+const FOLLOW_STACK = declare({
+  id: "firewall-follow",
+  page: "firewall",
+  opens: "view",
+  what: "the stack the Lines view follows",
+  shows: "in the Lines view",
+  reach: [{ do: "click", control: "firewall-view", row: "lines" }],
+});
+const TRACE_COPY = declare({
+  id: "firewall-trace-copy",
+  page: "firewall",
+  opens: "run",
+  what: "copy the trace as text",
+});
+const TRACE_SWAP_BTN = declare({
+  id: "firewall-trace-swap",
+  page: "firewall",
+  opens: "view",
+  what: "turn the traced pair round (From and To change places; key S)",
+});
+const GUARD_STACK = declare({
+  id: "firewall-guard-stack",
+  page: "firewall",
+  opens: "view",
+  row: "<stack>",
+  what: "choose the stack whose rules Edit rules… opens",
+});
 
 /** The settings address of a stack's firewall. @param {string} s */
 const fwHref = (s) => `${stackHref(s, "settings")}?section=firewall`;
+
+/** @param {string} href */
+const go = (href) => {
+  history.pushState(null, "", href);
+  dispatchEvent(new PopStateEvent("popstate"));
+};
+
+/** @param {string} k */
+const idmark = (k) =>
+  h("span", {
+    class: "kp-idmark kp-idmark--pattern",
+    "data-kp-idmark": k,
+    "aria-hidden": "true",
+  });
+
+/** The badge tone of a firewall state. */
+const BADGE = /** @type {const} */ ({
+  ok: "success",
+  warn: "warning",
+  bad: "destructive",
+});
+
+/**
+ * One panel of the page: a form grid whose first row names the part (the
+ * label track), says in one sentence what it does (the control track) and
+ * carries the part's live reading (the value track); the part itself spans
+ * every track under it.
+ * @param {{title: string, desc: string, id?: string, span?: string}} spec
+ */
+function panel(spec) {
+  const read = h("p", {
+    class: "kp-formgrid__value fw-panel__read",
+    role: "status",
+  });
+  const el = h(
+    "section",
+    {
+      class: `fw-panel kp-formgrid${spec.span ? ` fw-c${spec.span}` : ""}`,
+      "data-kp-formgrid-label": "fit",
+      id: spec.id ?? null,
+      "aria-label": spec.title,
+    },
+    h(
+      "div",
+      { class: "kp-formgrid__row fw-panel__head" },
+      h("h2", { class: "kp-formgrid__label" }, spec.title),
+      h("p", { class: "kp-formgrid__control" }, spec.desc),
+      read,
+    ),
+  );
+  return { el, read };
+}
+
+/**
+ * A kp card around an area that loads, comes up empty or fails: the busy
+ * card, the empty plate and the failed plate with a normal-size retry.
+ * @param {string} label
+ * @param {Node[]} body
+ */
+function card(label, body) {
+  const data = h("div", { class: "kp-card__data" }, ...body);
+  const el = h(
+    "section",
+    {
+      class: "kp-card fw-card",
+      "data-kp-state": "loading",
+      "aria-label": label,
+    },
+    h("div", { class: "kp-card__stage" }, data),
+  );
+  return { el, data };
+}
 
 /**
  * @param {HTMLElement} root
@@ -260,50 +461,57 @@ export function mount(root) {
   ensureStyle("/css/pages/firewall.css");
   root.classList.add("cf-page", "fw-page");
   const abort = new AbortController();
+  /** @type {(() => void)[]} */
+  const cleanups = [() => root.classList.remove("cf-page", "fw-page")];
   const q0 = new URLSearchParams(location.search);
 
   /** @type {FirewallRead | null} */
   let data = null;
+  /** @type {"loading" | "ready" | "empty" | "error"} */
+  let state = "loading";
+  let failure = "";
   const S = {
     /** @type {Set<string>} lit stacks */
-    focus: new Set((q0.get("lit") ?? "").split(",").filter(Boolean)),
-    /** the stack whose rules show */
+    lit: new Set((q0.get("lit") ?? "").split(",").filter(Boolean)),
+    /** the rules table's stack, "" for all */
     stack: q0.get("stack") ?? "",
     /** the pinned cell, "from>to" */
     cell: q0.get("cell") ?? "",
-    /** @type {Set<string>} */
-    act: new Set(),
-    q: (q0.get("q") ?? "").toLowerCase(),
-    /** @type {string | null} the open rule, "stack/dir/n" */
-    open: null,
-    /** @type {RuleRow | null} */
-    hot: null,
+    /** @type {"live" | "files" | "differences"} */
+    mode: ["live", "files", "differences"].includes(q0.get("compare") ?? "")
+      ? /** @type {any} */ (q0.get("compare"))
+      : "live",
+    /** @type {"grid" | "lines"} */
+    view: q0.get("view") === "lines" ? "lines" : "grid",
+    /** @type {"calm" | "caution"} how a pair that can connect is coloured */
+    tone: "calm",
+    /** @type {Set<string>} totals pressed */
+    totals: new Set(),
+    /** the stack the Lines view follows */
+    follow: q0.get("follow") ?? "",
+    from: q0.get("from") ?? "",
+    to: q0.get("to") ?? "",
+    port: "any",
+    /** @type {"first-refusal" | "all"} */
+    stop: "first-refusal",
+    /** the stack the guard has chosen */
+    guard: "",
   };
   const keepUrl = () => {
     const next = setParams(location.search, {
-      lit: [...S.focus].join(","),
+      lit: [...S.lit].join(","),
       stack: S.stack,
       cell: S.cell,
-      q: S.q,
+      compare: S.mode === "live" ? null : S.mode,
+      view: S.view === "grid" ? null : S.view,
+      follow: S.view === "lines" ? S.follow : null,
     });
     history.replaceState(history.state, "", `${location.pathname}${next}`);
   };
 
   // ── header ────────────────────────────────────────────────────────────
-  const commit = h("span", { class: "cf-mono" }, skeleton("10ch"));
+  const commit = h("span", { class: "cf-mono" }, "…");
   const live = h("span", { class: "cf-live" }, "working copy ", commit);
-  const editRules = /** @type {HTMLAnchorElement} */ (
-    h(
-      "a",
-      {
-        class: "kp-button kp-button--primary",
-        href: "/firewall",
-        title: "Edit the selected stack's rules on its Settings",
-      },
-      "Edit rules…",
-    )
-  );
-  drivable(editRules, EDIT_RULES);
   const head = pageHeader({
     title: "Firewall",
     desc: "What each container's Proxmox firewall lets through, read from the stack files. See who can reach whom, spot what is unprotected, and jump to a stack's rules to change them.",
@@ -322,962 +530,1796 @@ export function mount(root) {
         TOPOLOGY,
       ),
     ],
-    primary: editRules,
   });
+  const fail = failBand({ drive: { id: TRY_AGAIN } });
 
-  // ── KPIs and attention ────────────────────────────────────────────────
+  // ── what needs a look ─────────────────────────────────────────────────
+  const attention = attentionBand([]);
+  const needs = panel({
+    title: "Needs a look",
+    desc: "Stacks whose live firewall is not what the file says, worst first, each with its fix.",
+    id: "fw-needs",
+    span: "12",
+  });
+  needs.el.append(attention.el);
+
+  // ── totals ────────────────────────────────────────────────────────────
+  const totals = panel({
+    title: "Totals",
+    desc: "Press a tile to show only the stacks it counts.",
+    id: "fw-totals",
+    span: "12",
+  });
   const kpis = kpiStrip(
     [
       {
         key: "protected",
-        label: "Protected",
-        ctx: "stacks with rules in force",
+        label: "In force",
+        ctx: "stacks with a firewall that pve enforces",
       },
       {
-        key: "unprotected",
-        label: "Unprotected",
-        ctx: "stacks whose file declares no firewall",
+        key: "none",
+        label: "No firewall",
+        ctx: "",
+        toggle: {
+          pressed: false,
+          onToggle: () => pressTotal("none"),
+          drive: { id: KPI, row: "none" },
+        },
+      },
+      {
+        key: "differs",
+        label: "Live differs from files",
+        ctx: "",
+        toggle: {
+          pressed: false,
+          onToggle: () => pressTotal("differs"),
+          drive: { id: KPI, row: "differs" },
+        },
       },
       {
         key: "open",
         label: "Open paths",
-        ctx: "pairs where every port gets through",
+        ctx: "",
+        toggle: {
+          pressed: false,
+          onToggle: () => pressTotal("open"),
+          drive: { id: KPI, row: "open" },
+        },
       },
-      { key: "rules", label: "Rules", ctx: "" },
     ],
-    { loading: true },
+    { loading: true, label: "Firewall at a glance" },
   );
-  kpis.el.setAttribute("aria-label", "Firewall totals");
-  const attention = attentionBand([]);
-  const fail = failBand({ drive: { id: TRY_AGAIN } });
+  totals.el.append(kpis.el);
 
-  // ── stacks card ───────────────────────────────────────────────────────
-  const stBox = h("div", { class: "cf-table-wrap" }, skeletonTable(5, 5));
-  const ago = agoEl("read");
-  const foot = h(
-    "div",
-    { class: "cf-card__foot" },
-    h("span", null, skeleton("40%")),
-    h("span", null, ""),
-  );
-  const stacksCard = section({
-    title: "Stacks",
-    desc: "Each container's firewall: whether it is in force, its default policies and how many rules it has. Click rows to light stacks up; each click turns one on or off.",
+  // ── the stacks ────────────────────────────────────────────────────────
+  const stacks = panel({
+    title: "The stacks",
+    desc: "Every stack with its firewall state, its default policies and what it reaches. Press a row to light the stack in the matrix.",
     id: "fw-stacks",
+    span: "12",
   });
-  stacksCard.el.classList.add("cf-card", "cf-span-6");
-  stacksCard.body.append(stBox);
-  stacksCard.el.append(foot);
+  const ago = agoEl("read");
+  const stTable = h(
+    "div",
+    {
+      class: "kp-datatable fw-stacks-dt",
+      id: "fw-stack-table",
+      "data-kp-datatable": "",
+      "data-kp-cards": "",
+      "data-kp-page-size": "100",
+      "data-kp-page-sizes": "none",
+      "data-kp-sort-multi": "",
+      "data-kp-remember": "firewall-stacks",
+      "data-kp-busy-overlay": "",
+      "data-kp-state": "loading",
+    },
+    h(
+      "div",
+      { class: "kp-datatable__bar" },
+      h("input", {
+        class: "kp-datatable__search",
+        type: "search",
+        "data-kp-datatable-search": "",
+        placeholder: "Search the stacks",
+        "aria-label": "Search the stacks",
+      }),
+    ),
+    h(
+      "div",
+      {
+        class: "kp-alert kp-alert--destructive",
+        "data-kp-datatable-failed": "",
+        role: "alert",
+        hidden: "",
+      },
+      h(
+        "p",
+        { class: "kp-alert__label kp-stateplate__title" },
+        "The firewalls could not be read",
+      ),
+      h("p", { "data-kp-datatable-failed-reason": "" }),
+      h(
+        "button",
+        { type: "button", class: "kp-button", "data-kp-datatable-retry": "" },
+        "Try again",
+      ),
+    ),
+    h(
+      "div",
+      { class: "kp-table-wrap" },
+      h(
+        "table",
+        { class: "kp-table" },
+        h("caption", { class: "kp-sr-only" }, "Stacks and their firewalls"),
+        h(
+          "thead",
+          null,
+          h(
+            "tr",
+            null,
+            h("th", { scope: "col", "data-kp-sort": "text" }, "Stack"),
+            h(
+              "th",
+              {
+                scope: "col",
+                "data-kp-sort": "text",
+                "data-kp-filter": "choice",
+                "data-kp-sort-order":
+                  "no firewall,declared, switched off,live differs from files,in force",
+              },
+              "Firewall",
+            ),
+            h("th", { scope: "col", "data-kp-sort": "text" }, "Inbound"),
+            h("th", { scope: "col", "data-kp-sort": "text" }, "Outbound"),
+            h(
+              "th",
+              { scope: "col", "data-kp-sort": "number", class: "kp-text-end" },
+              "Rules",
+            ),
+            h(
+              "th",
+              { scope: "col", "data-kp-sort": "number", class: "kp-text-end" },
+              "Reaches",
+            ),
+            h(
+              "th",
+              { scope: "col", "data-kp-sort": "number", class: "kp-text-end" },
+              "Reached by",
+            ),
+            h("th", { scope: "col" }, "Actions"),
+          ),
+        ),
+        h("tbody"),
+      ),
+    ),
+    h(
+      "div",
+      { class: "kp-empty", "data-kp-datatable-empty": "", hidden: "" },
+      h(
+        "div",
+        { "data-kp-datatable-empty-none": "" },
+        h("p", { class: "kp-empty__title" }, "No stack files"),
+        h(
+          "p",
+          null,
+          "The working copy holds no stack files, so there is no firewall to show.",
+        ),
+      ),
+      h(
+        "div",
+        { "data-kp-datatable-empty-nomatch": "", hidden: "" },
+        h("p", { class: "kp-empty__title" }, "No stack matches"),
+        h(
+          "button",
+          {
+            type: "button",
+            class: "kp-button kp-button--secondary",
+            "data-kp-datatable-clear": "",
+          },
+          "Clear the search and filters",
+        ),
+      ),
+    ),
+    h(
+      "div",
+      { class: "kp-datatable__bar" },
+      h("p", {
+        class: "kp-datatable__status",
+        "data-kp-datatable-status": "",
+        role: "status",
+        "aria-live": "polite",
+      }),
+      h("div", { class: "kp-datatable__pager", "data-kp-datatable-pager": "" }),
+    ),
+  );
+  const stBody = /** @type {HTMLElement} */ (stTable.querySelector("tbody"));
+  stacks.el.append(h("div", { class: "fw-table" }, stTable));
+  const foot = h("p", { class: "fw-foot" }, ago);
 
-  // ── matrix card ───────────────────────────────────────────────────────
-  const mxActive = h("div", { class: "cf-active" });
-  const mx = h("div", {
-    class: "fw-mx",
-    role: "grid",
-    "aria-label": "Row may reach column",
+  // ── the matrix and its lines ──────────────────────────────────────────
+  const mxp = panel({
+    title: "Who can reach whom",
+    desc: "From a row to a column: the ports a connection may use. Press a cell to read it and to trace it below.",
+    id: "fw-matrix",
+    span: "12",
+  });
+  const viewItem = (/** @type {string} */ v, /** @type {string} */ label) =>
+    drivable(
+      h(
+        "button",
+        {
+          type: "button",
+          class: "kp-segmented__item",
+          role: "radio",
+          "aria-checked": String(S.view === v),
+          "data-value": v,
+        },
+        label,
+      ),
+      VIEW,
+      v,
+    );
+  const modeItem = (/** @type {string} */ v, /** @type {string} */ label) =>
+    drivable(
+      h(
+        "button",
+        {
+          type: "button",
+          class: "kp-segmented__item",
+          role: "radio",
+          "aria-checked": String(S.mode === v),
+          "data-value": v,
+        },
+        label,
+      ),
+      COMPARE_MODE,
+      v,
+    );
+  const viewSeg = h(
+    "div",
+    {
+      class: "kp-segmented",
+      "data-kp-segmented": "single",
+      role: "radiogroup",
+      "aria-label": "View",
+    },
+    viewItem("grid", "Grid"),
+    viewItem("lines", "Lines"),
+  );
+  const modeSeg = h(
+    "div",
+    {
+      class: "kp-segmented",
+      "data-kp-segmented": "single",
+      role: "radiogroup",
+      "aria-label": "Compare",
+    },
+    modeItem("live", "Live"),
+    modeItem("files", "Files"),
+    modeItem("differences", "Differences"),
+  );
+  const mxAgo = agoEl("read");
+  const lit = h("p", { class: "kp-formgrid__control fw-lit", role: "status" });
+  const showAll = drivable(
+    button("Show all", {
+      cls: "kp-button--sm kp-button--ghost",
+      title: "Turn every lit stack off (Esc)",
+      onClick: () => {
+        S.lit.clear();
+        paintAll();
+      },
+    }),
+    SHOW_ALL,
+  );
+  const mxEl = h("div", {
+    class: "kp-matrix",
+    "data-kp-matrix": "",
+    "data-kp-matrix-select": "follow",
   });
   const legend = h(
+    "ul",
+    { class: "kp-heat__legend", "aria-label": "Legend" },
+    ...[
+      ["ok", "some ports"],
+      ["bad", "every port (target unprotected)"],
+      ["muted", "nothing"],
+      ["warn", "differs from the files"],
+    ].map(([t, w]) =>
+      h(
+        "li",
+        null,
+        h("span", { class: "kp-heat__swatch", "data-kp-tone": t }),
+        ` ${w}`,
+      ),
+    ),
+    h(
+      "li",
+      { "data-kp-end": "" },
+      h("span", { class: "kp-keys", "data-fw-keys": "" }),
+    ),
+  );
+  const followSel = /** @type {HTMLSelectElement} */ (
+    h("select", {
+      class: "kp-field__input",
+      id: "fw-follow",
+      "data-kp-select": "",
+    })
+  );
+  const followRow = gridRow({
+    label: "Follow",
+    labelFor: "fw-follow",
+    control: followSel,
+    value: h(
+      "span",
+      { class: "fw-hint" },
+      "Lines show one stack at a time: what it reaches and what reaches it.",
+    ),
+    hidden: true,
+  });
+  const reachMap = h("div", {
+    class: "kp-matrix fw-lines",
+    "data-kp-matrix": "",
+    "data-kp-view": "lines",
+    "data-kp-lines-shape": "curve",
+    "data-kp-lines-side": "sources-left",
+  });
+  const reachedMap = h("div", {
+    class: "kp-matrix fw-lines",
+    "data-kp-matrix": "",
+    "data-kp-view": "lines",
+    "data-kp-lines-shape": "curve",
+    "data-kp-lines-side": "sources-right",
+  });
+  const linesBox = h(
     "div",
-    { class: "fw-legend" },
-    h("span", null, h("i", { class: "fw-legend--some" }), "some ports"),
+    { class: "fw-lines-box", hidden: "" },
     h(
-      "span",
-      null,
-      h("i", { class: "fw-legend--open" }),
-      "every port (target unprotected)",
+      "div",
+      { class: "fw-lines-col" },
+      h(
+        "h3",
+        { class: "fw-lines-title", "data-fw-reached-title": "" },
+        "Reached by",
+      ),
+      reachedMap,
     ),
-    h("span", null, h("i", { class: "fw-legend--none" }), "nothing"),
     h(
-      "span",
-      null,
-      h("i", { class: "fw-legend--stopped" }),
-      "dropped at the source",
+      "div",
+      { class: "fw-lines-col" },
+      h(
+        "h3",
+        { class: "fw-lines-title", "data-fw-reaches-title": "" },
+        "Reaches",
+      ),
+      reachMap,
     ),
   );
-  const pathBox = h("div", { class: "fw-path", "aria-live": "polite" });
-  const mxCard = section({
-    title: "Who may reach whom",
-    desc: "Read row to column: the ports the row's container may open on the column's, after both firewalls. Hover a square for its story, click to pin it.",
-    id: "fw-matrix",
-  });
-  mxCard.el.classList.add("cf-card", "cf-span-6");
-  mxCard.body.classList.add("fw-mx-body");
-  mxCard.body.append(mxActive, mx, legend, pathBox);
+  const mxCard = card("Who can reach whom", [mxEl, linesBox]);
+  mxp.el.append(
+    gridRow({
+      label: "Compare",
+      hideLabel: true,
+      control: modeSeg,
+      value: mxAgo,
+    }),
+    gridRow({ label: "View", hideLabel: true, control: viewSeg }),
+    followRow,
+    gridRow({ label: "Lit", control: lit, actions: showAll }),
+    h("div", { class: "fw-matrix", "data-fw-span": "all" }, mxCard.el),
+    legend,
+  );
 
-  // ── rules card ────────────────────────────────────────────────────────
-  // One button per stack with rules; the set changes with each read, so
-  // the switch is drawn again in place (ui.js segSwitch has fixed items).
-  /** @param {{value: string, label: string, hint?: string}[]} items */
-  const ruleStackSeg = (items) =>
-    segSwitch({
-      label: "Stack",
-      items,
-      value: S.stack,
-      onChange: (v) => {
-        S.stack = v;
-        S.open = null;
-        keepUrl();
-        paintRules();
-      },
-      mark: (b, v) => void drivable(b, RULE_STACK, v),
-    });
-  let stackSeg = ruleStackSeg([]);
-  const acts = toggleChips({
-    label: "Show",
-    chips: [
-      {
-        value: "ACCEPT",
-        label: "ACCEPT",
-        hint: "Show only ACCEPT rules; again shows every rule",
-      },
-      {
-        value: "DROP",
-        label: "DROP",
-        hint: "Show only DROP rules; again shows every rule",
-      },
-    ],
-    onChange: (sel) => {
-      S.act = sel;
-      paintRules();
-    },
-    drive: { id: ACTION_FILTER },
+  // ── the trace ─────────────────────────────────────────────────────────
+  const trp = panel({
+    title: "Can this stack reach that one?",
+    desc: "Pick a source, a target and a port, and see where the connection goes through or stops, with the rule that decides.",
+    id: "fw-trace",
+    span: "12",
   });
-  const ruleCount = h("span", { class: "cf-count" });
-  const tb = toolbar({
-    search: {
-      placeholder: "Filter by address, port, stack or why",
-      label: "Filter rules",
-      value: S.q,
-      onInput: (v) => {
-        S.q = v.trim().toLowerCase();
-        keepUrl();
-        paintRules();
-      },
-    },
-    groups: [acts.el],
-    state: [ruleCount],
-  });
-  if (tb.search) drivable(tb.search, RULE_SEARCH);
-  // The demo's order: the ACCEPT / DROP toggles first, then the search
-  // with its "/", the count against the right edge (redesign-config-9).
-  {
-    const filters = tb.el.querySelector(".nx-tb__filters");
-    if (filters) tb.el.prepend(filters);
-    tb.el.classList.add("fw-tb");
+  /** @param {string} id */
+  function comboBox(id) {
+    return h(
+      "div",
+      { class: "kp-combobox", "data-kp-combobox": "" },
+      h("input", {
+        class: "kp-combobox__input",
+        id,
+        type: "text",
+        role: "combobox",
+        autocomplete: "off",
+        "aria-expanded": "false",
+        "aria-controls": `${id}-list`,
+      }),
+      h("ul", {
+        class: "kp-combobox__list",
+        id: `${id}-list`,
+        role: "listbox",
+        hidden: "",
+      }),
+      h("p", {
+        class: "kp-combobox__status",
+        "data-kp-combobox-status": "",
+        role: "status",
+        "aria-live": "polite",
+      }),
+    );
   }
-  const rulesBody = h("div", { class: "fw-rules2" });
-  const editThese = /** @type {HTMLAnchorElement} */ (
-    h(
-      "a",
-      {
-        class: "kp-button kp-button--sm",
-        href: "/firewall",
-        title: "Edit these rules on the stack's Settings",
-      },
-      "Edit these rules",
-    )
+  const fromBox = comboBox("fw-trace-from");
+  const toBox = comboBox("fw-trace-to");
+  const portSel = /** @type {HTMLSelectElement} */ (
+    h("select", {
+      class: "kp-field__input",
+      id: "fw-trace-port",
+      "data-kp-select": "",
+    })
   );
-  drivable(editThese, EDIT_THESE);
-  const rulesCard = section({
-    title: "Rules",
-    desc: "One stack at a time, inbound beside outbound, in the order Proxmox reads them. Hover a rule to see the squares it decides; click it for details.",
-    id: "fw-rules",
-    tools: [editThese],
+  const traceEl = h("div", {
+    class: "kp-trace",
+    "data-kp-trace": "",
+    "data-kp-trace-copy": "",
+    "data-kp-trace-swap": "",
+    "data-kp-trace-stop": S.stop,
   });
-  rulesCard.el.classList.add("cf-card");
-  rulesCard.body.classList.add("fw-rules-body");
-  rulesCard.body.append(stackSeg.el, tb.el, rulesBody);
+  const traceCard = card("The path", [traceEl]);
+  trp.el.append(
+    gridRow({ label: "From", labelFor: "fw-trace-from", control: fromBox }),
+    gridRow({ label: "To", labelFor: "fw-trace-to", control: toBox }),
+    gridRow({ label: "Port", labelFor: "fw-trace-port", control: portSel }),
+    h("div", { class: "fw-tracebox", "data-fw-span": "all" }, traceCard.el),
+  );
+
+  // ── the rules ─────────────────────────────────────────────────────────
+  const rup = panel({
+    title: "The rules",
+    desc: "Inbound rules guard a stack, outbound rules let it out. Open a rule to see which pairs it decides.",
+    id: "fw-rules",
+    span: "12",
+  });
+  const toggleBtn = (/** @type {string} */ v) =>
+    drivable(
+      h(
+        "button",
+        {
+          class: "kp-button",
+          type: "button",
+          "data-kp-toggle": "",
+          "data-kp-look": "chip",
+          "data-kp-toggle-value": v,
+          "data-kp-count": "0",
+        },
+        v,
+      ),
+      ACTION_FILTER,
+      v,
+    );
+  const toggles = h(
+    "div",
+    {
+      class: "kp-toggles",
+      role: "group",
+      "aria-label": "Action",
+      "data-kp-toggle-group": "action",
+      "data-kp-toggle-clear": "",
+    },
+    h(
+      "button",
+      {
+        class: "kp-button",
+        type: "button",
+        "data-kp-toggle": "",
+        "data-kp-toggle-all": "",
+        "data-kp-look": "chip",
+        "aria-pressed": "true",
+        "data-kp-count": "0",
+      },
+      "All",
+    ),
+    toggleBtn("ACCEPT"),
+    toggleBtn("DROP"),
+  );
+  const editThese = drivable(
+    button("Edit these rules", {
+      cls: "kp-button--sm",
+      title: "Edit the shown stack's rules on its Settings",
+      onClick: () => S.stack && go(fwHref(S.stack)),
+    }),
+    EDIT_THESE,
+  );
+  const ruTable = h("div", { class: "fw-table", "data-fw-rules-host": "" });
+  rup.el.append(
+    gridRow({
+      label: "Action",
+      hideLabel: true,
+      control: toggles,
+      actions: editThese,
+    }),
+    ruTable,
+  );
+
+  // ── the guard in front of editing ─────────────────────────────────────
+  const gdp = panel({
+    title: "Edit its rules",
+    desc: "Choose a stack, then open its rules on its Settings. A stack whose management is open asks for one tick first.",
+    id: "fw-guard",
+    span: "12",
+  });
+  const chips = h("div", {
+    class: "kp-toggles fw-chips",
+    role: "group",
+    "aria-label": "Stack",
+    "data-kp-toggle-group": "stack",
+    "data-kp-toggle-mode": "single",
+  });
+  const warn = h("div", { class: "kp-alert__body" });
+  const ack = h(
+    "div",
+    {
+      class: "kp-alert kp-alert--warning",
+      "data-kp-ack": "",
+      "data-kp-ack-for": "#fw-edit-go",
+      "data-kp-ack-key": "mgmt",
+      "data-kp-ack-label":
+        "I understand that a change here reaches the whole LAN",
+    },
+    warn,
+  );
+  const editGo = drivable(
+    h(
+      "button",
+      {
+        type: "button",
+        class: "kp-button kp-button--primary",
+        id: "fw-edit-go",
+      },
+      "Edit rules…",
+    ),
+    EDIT_RULES,
+  );
+  const guardCard = card("Edit its rules", [
+    formGrid([
+      gridRow({ label: "Stack", hideLabel: true, control: chips, wide: true }),
+      h("div", { "data-kp-formgrid-span": "all" }, ack),
+      gridRow({
+        buttons: true,
+        control: h("div", { class: "kp-formgrid__buttons" }, editGo),
+      }),
+    ]),
+  ]);
+  gdp.el.append(h("div", { "data-fw-span": "all" }, guardCard.el));
 
   root.replaceChildren(
     head.el,
     fail.el,
-    kpis.el,
-    attention.el,
-    h("div", { class: "cf-grid" }, stacksCard.el, mxCard.el),
-    rulesCard.el,
+    h(
+      "div",
+      { class: "fw-grid" },
+      needs.el,
+      totals.el,
+      stacks.el,
+      mxp.el,
+      trp.el,
+      rup.el,
+      gdp.el,
+      foot,
+    ),
   );
 
-  // ── painting ──────────────────────────────────────────────────────────
+  cleanups.push(
+    attachSegmented(root),
+    attachMatrices(root),
+    attachTraces(root),
+    attachToggles(root),
+    attachAckGates(root),
+    attachCardStates(root),
+    attachHoverCards(root),
+    attachFootprints(root),
+    attachKeys(root),
+    attachDisabledReasons(root),
+  );
+  const tables = attachDataTables(root, {
+    detail: (row) => ruleDetail(row.dataset.kpRowKey ?? ""),
+    decorate: (part, info) => {
+      if (info.kind === "row-toggle" && info.value)
+        drivable(part, RULE, info.value);
+    },
+  });
+  cleanups.push(tables);
+  const comboHandles = attachComboboxes(root);
+  cleanups.push(comboHandles);
+  setKeys(/** @type {HTMLElement} */ (root.querySelector("[data-fw-keys]")), [
+    [["←", "→", "↑", "↓"], "move"],
+    ["Enter", "pin the cell"],
+    ["S", "swap the traced pair"],
+    ["Esc", "show every stack"],
+  ]);
+  // What Live view reaches that the package draws itself.
+  const toggleAll = toggles.querySelector("[data-kp-toggle-all]");
+  if (toggleAll instanceof HTMLElement)
+    drivable(toggleAll, ACTION_FILTER, "all");
+  const fromInput = fromBox.querySelector("input");
+  if (fromInput) drivable(fromInput, TRACE_FROM);
+  const toInput = toBox.querySelector("input");
+  if (toInput) drivable(toInput, TRACE_TO);
+  drivable(portSel, TRACE_PORT);
+  drivable(followSel, FOLLOW_STACK);
+  /** The package may redraw its parts after a call returns; mark them again. */
+  const watch = (
+    /** @type {HTMLElement} */ el,
+    /** @type {() => void} */ fn,
+  ) => {
+    const mo = new MutationObserver(() => fn());
+    mo.observe(el, { childList: true, subtree: true });
+    cleanups.push(() => mo.disconnect());
+  };
+  const markTrace = () => {
+    const copy = traceEl.querySelector(".kp-trace__copy");
+    const swap = traceEl.querySelector(".kp-trace__swap");
+    if (copy instanceof HTMLElement) drivable(copy, TRACE_COPY);
+    if (swap instanceof HTMLElement) drivable(swap, TRACE_SWAP_BTN);
+    for (const chip of /** @type {HTMLElement[]} */ ([
+      ...traceEl.querySelectorAll(".kp-trace__rule"),
+    ])) {
+      const text = (chip.textContent ?? "").trim();
+      const r = ruleOfChip(text);
+      drivable(chip, DECIDED_BY, r ? `${r.stack}/${r.dir}/${r.n}` : text);
+    }
+  };
+  /** Live view reaches a header or a square by its name. */
+  const markMatrix = () => {
+    for (const head of /** @type {HTMLElement[]} */ ([
+      ...mxEl.querySelectorAll("button.kp-matrix__col, button.kp-matrix__row"),
+    ])) {
+      const k = head.dataset.key ?? "";
+      drivable(
+        head,
+        head.classList.contains("kp-matrix__col") ? LIGHT_COL : LIGHT_ROW,
+        k,
+      );
+    }
+    for (const c of /** @type {HTMLElement[]} */ ([
+      ...mxEl.querySelectorAll(".kp-matrix__cell[data-row-key][data-col-key]"),
+    ]))
+      drivable(c, CELL, `${c.dataset.rowKey}>${c.dataset.colKey}`);
+  };
+  /** The package adds its Clear button to a toggle group when one is pressed. */
+  const markClear = () => {
+    for (const b of /** @type {HTMLElement[]} */ ([
+      ...root.querySelectorAll(".kp-toggle__clear"),
+    ]))
+      drivable(b, CLEAR_RULES);
+  };
+  watch(root, markClear);
+  markClear();
+  watch(mxEl, markMatrix);
+  watch(traceEl, markTrace);
+  const stDt = () => dataTable(stTable);
+  const ruDt = () => {
+    const t = ruTable.querySelector(".kp-datatable");
+    return t ? dataTable(t) : null;
+  };
+  cleanups.push(bindTableUrl(stDt(), "firewall-stacks"));
+
+  // ── data views ────────────────────────────────────────────────────────
   const names = () =>
     data?.matrix?.stacks ?? data?.stacks.map((s) => s.stack) ?? [];
-  /** @param {string} n */
-  const toggleFocus = (n) => {
-    if (S.focus.has(n)) S.focus.delete(n);
-    else S.focus.add(n);
+
+  /** A cell in the page's colours. @param {Cell} c */
+  const cellView = (c) => {
+    const words = cellWords(c);
+    if (c.state === "open")
+      return {
+        tone: /** @type {const} */ ("bad"),
+        text: "all",
+        label: words,
+        tip: words,
+      };
+    if (c.state === "some")
+      return {
+        tone:
+          S.tone === "calm"
+            ? /** @type {const} */ ("ok")
+            : /** @type {const} */ ("warn"),
+        text: cellLabel(c),
+        label: words,
+        tip: words,
+        ringed: c.stopped_at_source.length > 0,
+      };
+    return c.stopped_at_source.length
+      ? {
+          tone: /** @type {const} */ ("bad"),
+          label: words,
+          tip: words,
+          ringed: true,
+        }
+      : { tone: /** @type {const} */ ("muted"), label: words, tip: words };
   };
-  const paintAll = () => {
-    keepUrl();
-    paintHeader();
-    paintStacks();
-    paintMx();
-    paintRules();
+
+  /** The cell of a pair in the reading on show. @param {string} r @param {string} c */
+  const cellFor = (r, c) => {
+    if (!data || r === c) return undefined;
+    if (S.mode === "differences") {
+      if (!pairDiffers(data, r, c))
+        return {
+          tone: /** @type {const} */ ("muted"),
+          label: "same live and in the files",
+          tip: "Live and files agree.",
+        };
+      const words = diffWords(data, r, c);
+      return {
+        tone: /** @type {const} */ ("warn"),
+        text: "≠",
+        label: words,
+        tip: words,
+      };
+    }
+    const cell = cellIn(data, r, c, S.mode === "files" ? "files" : "live");
+    return cell ? cellView(cell) : undefined;
+  };
+
+  /** @param {string} stack */
+  const toggleLit = (stack) => {
+    if (S.lit.has(stack)) S.lit.delete(stack);
+    else S.lit.add(stack);
   };
 
   const paintHeader = () => {
     if (!data) return;
     commit.replaceChildren(String(data.head?.commit ?? "").slice(0, 10) || "—");
     live.title = data.head?.subject ?? "";
-    const st = S.stack || data.stacks[0]?.stack || "";
-    editRules.href = st ? fwHref(st) : "/firewall";
-    editRules.title = st
-      ? `Edit ${st}'s rules on its Settings`
-      : "Edit a stack's rules on its Settings";
-    editThese.href = editRules.href;
+  };
+
+  // totals ----------------------------------------------------------------
+  const paintTotals = () => {
+    if (!data) {
+      for (const t of kpis.tiles.values()) t.set({ loading: true });
+      return;
+    }
     const k = fwKpis(data);
+    const sets = fwSets(data);
     kpis.tiles.get("protected")?.set({
       value: String(k.protected),
-      unit: `/ ${k.total}`,
+      unit: `of ${k.total}`,
       tone: k.protected < k.total ? "warn" : null,
+      meter: { pct: k.total ? (k.protected / k.total) * 100 : 0 },
+      ctx: "stacks with a firewall that pve enforces",
     });
-    kpis.tiles.get("unprotected")?.set({
-      value: String(k.unprotected),
-      tone: k.unprotected ? "bad" : null,
+    kpis.tiles.get("none")?.set({
+      value: String(sets.none.length),
+      tone: sets.none.length ? "bad" : null,
+      ctx: sets.none.join(", ") || "every stack declares one",
+      toggle: {
+        pressed: S.totals.has("none"),
+        onToggle: () => pressTotal("none"),
+      },
     });
-    kpis.tiles
-      .get("open")
-      ?.set({ value: String(k.open), tone: k.open ? "warn" : null });
-    kpis.tiles.get("rules")?.set({
-      value: String(k.rules),
-      ctx: `${k.drop} drop · ${k.accept} accept`,
+    kpis.tiles.get("differs")?.set({
+      value: String(sets.differs.length),
+      tone: sets.differs.length ? "warn" : null,
+      ctx: sets.differs.join(", ") || "live matches the files",
+      toggle: {
+        pressed: S.totals.has("differs"),
+        onToggle: () => pressTotal("differs"),
+      },
     });
-    for (const t of kpis.tiles.values()) delete t.el.dataset.loading;
-    attention.set(
-      fwAttention(data.stacks).map((a) => ({
-        key: a.stack,
-        tone: a.tone,
-        title: a.title,
-        text: a.text,
-        action: drivable(
+    kpis.tiles.get("open")?.set({
+      value: String(k.open),
+      tone: k.open ? "warn" : null,
+      ctx: sets.openTargets.length
+        ? `to ${sets.openTargets.join(" and ")}`
+        : "no target lets everything in",
+      toggle: {
+        pressed: S.totals.has("open"),
+        onToggle: () => pressTotal("open"),
+      },
+    });
+  };
+  /** The stacks the pressed totals count (none pressed: no filter). */
+  const totalKeys = () => {
+    if (!data || !S.totals.size) return [];
+    const sets = fwSets(data);
+    const map = {
+      none: sets.none,
+      differs: sets.differs,
+      open: sets.openTargets,
+    };
+    return [
+      ...new Set(
+        [...S.totals].flatMap(
+          (k) => map[/** @type {keyof typeof map} */ (k)] ?? [],
+        ),
+      ),
+    ];
+  };
+  /** @param {"none" | "differs" | "open"} k */
+  function pressTotal(k) {
+    if (S.totals.has(k)) S.totals.delete(k);
+    else S.totals.add(k);
+    applyTotals();
+    paintTotals();
+  }
+  const applyTotals = () => {
+    const keys = totalKeys();
+    stDt()?.filter(0, keys.length ? keys : null);
+    paintMx();
+    const n = names().length;
+    totals.read.textContent = !data
+      ? ""
+      : keys.length
+        ? `Showing ${keys.length.toLocaleString("en-GB")} of ${n.toLocaleString("en-GB")} stacks: ${keys.join(", ")}.`
+        : `Showing all ${n.toLocaleString("en-GB")} stacks.`;
+  };
+
+  // needs a look ----------------------------------------------------------
+  const paintNeeds = () => {
+    if (!data) return attention.set([]);
+    const items = fwAttention(data.stacks).map((a) => ({
+      key: a.stack,
+      tone: a.tone,
+      title: a.title,
+      text: a.text,
+      action: h(
+        "span",
+        { class: "fw-fixes" },
+        drivable(
+          button("Compare…", {
+            cls: "kp-button--sm",
+            title:
+              "Show the stack in the matrix with only the pairs where live and files differ",
+            onClick: () => {
+              S.mode = "differences";
+              S.lit = new Set([a.stack]);
+              paintAll();
+              mxp.el.scrollIntoView({ block: "start", behavior: "smooth" });
+            },
+          }),
+          COMPARE,
+          a.stack,
+        ),
+        drivable(
           h(
             "a",
             {
-              class: "kp-button kp-button--sm",
+              class: "kp-button kp-button--sm kp-button--secondary",
               href: fwHref(a.stack),
               title: a.hint,
             },
-            a.fix,
+            a.fix === "Compare…" ? "Fix…" : a.fix,
           ),
           FIX,
           a.stack,
         ),
-      })),
-    );
+      ),
+    }));
+    attention.set(items);
+    needs.read.textContent = items.length
+      ? `${items.length.toLocaleString("en-GB")} ${items.length === 1 ? "stack needs" : "stacks need"} a look.`
+      : "";
+    needs.el.hidden = items.length === 0;
   };
 
-  // The Stacks card is a kp datatable (Kenny's rule: sortable, a click for
-  // a second key, remembered per table; redesign-config-6). Its rows are
-  // drawn once per read; lighting a stack up only marks them.
-  /** @type {ReturnType<typeof tableBlock> | null} */
-  let stTable = null;
-  let detachSt = () => {};
+  // the stacks table -------------------------------------------------------
   /** @type {StackFw[] | null} */
   let stDrawn = null;
-  /** @param {StackFw} s */
-  const stackRow = (s) => {
-    const st = fwState(s);
-    const tr = h(
-      "tr",
-      {
-        class: "fw-row",
-        tabindex: "0",
-        "data-stack": s.stack,
-        "data-kp-row-key": s.stack,
-        "aria-selected": String(S.focus.has(s.stack)),
-        title:
-          "Click to light this stack up in the matrix (click again to turn it off) and show its rules",
-        onclick: (/** @type {MouseEvent} */ e) => {
-          if (/** @type {Element} */ (e.target).closest("a,button")) return;
-          toggleFocus(s.stack);
-          S.stack = s.stack;
-          S.open = null;
-          paintAll();
-        },
-      },
-      h(
-        "td",
-        { class: "cf-id", "data-label": "Stack" },
-        h(
-          "span",
-          { class: "fw-idcell" },
-          stackMark(s.stack, 16),
-          h(
-            "span",
-            { class: "fw-idcell__text" },
-            drivable(
-              h(
-                "a",
-                { href: stackHref(s.stack), title: `Open ${s.stack}` },
+  const paintStacks = () => {
+    const dt = stDt();
+    if (!dt) return;
+    if (!data) return;
+    const m = data.matrix;
+    if (stDrawn !== data.stacks) {
+      stDrawn = data.stacks;
+      stBody.replaceChildren(
+        ...data.stacks.map((s) => {
+          const st = fwState(s);
+          const rc = m ? reachCounts(m, s.stack) : { reaches: 0, reachedBy: 0 };
+          const tr = h(
+            "tr",
+            {
+              "data-kp-row-key": s.stack,
+              "aria-selected": String(S.lit.has(s.stack)),
+            },
+            h(
+              "td",
+              { "data-label": "Stack", "data-kp-filter-value": s.stack },
+              idmark(s.stack),
+              " ",
+              drivable(
+                h(
+                  "a",
+                  { href: stackHref(s.stack), title: `Open ${s.stack}` },
+                  h("b", null, s.stack),
+                ),
+                OPEN_STACK,
                 s.stack,
               ),
-              OPEN_STACK,
-              s.stack,
+              " ",
+              h(
+                "span",
+                {
+                  class: "fw-ct",
+                  ...(s.management_open
+                    ? {
+                        "data-kp-hovercard": `Management open: ${s.management_open}`,
+                      }
+                    : {}),
+                },
+                `CT ${s.vmid}`,
+              ),
             ),
-            h("small", { class: "cf-mono" }, `CT ${s.vmid} · ${s.ip}`),
-          ),
-        ),
-      ),
-      h(
-        "td",
-        { class: "nowrap", "data-label": "State" },
-        dot(st.tone, st.word),
-      ),
-      h(
-        "td",
-        { class: "kp-col-low", "data-label": "Default" },
-        s.policy_in
-          ? h(
-              "span",
-              { class: "fw-policy" },
-              h("b", null, "in"),
-              h(
-                "span",
-                { class: `fw-act fw-act--${s.policy_in}` },
-                s.policy_in,
-              ),
-              h("b", null, "out"),
-              h(
-                "span",
-                { class: `fw-act fw-act--${s.policy_out}` },
-                s.policy_out ?? "—",
-              ),
-            )
-          : h("span", { class: "cf-muted" }, "—"),
-      ),
-      h("td", { class: "num", "data-label": "Rules" }, String(s.rules)),
-      h(
-        "td",
-        { class: "cf-row-actions", "data-label": "" },
-        h(
-          "div",
-          { class: "kp-row-actions" },
-          drivable(
             h(
-              "a",
-              {
-                class: "kp-button kp-button--sm",
-                href: fwHref(s.stack),
-                title: s.declared
-                  ? "Edit on the stack's Settings"
-                  : "Declare a firewall for this stack on its Settings",
-              },
-              s.declared ? "Edit" : "Declare…",
+              "td",
+              { "data-label": "Firewall", "data-kp-filter-value": st.word },
+              h(
+                "span",
+                { class: `kp-badge kp-badge--${BADGE[st.tone]}` },
+                st.word,
+              ),
             ),
-            EDIT_STACK,
-            s.stack,
-          ),
-        ),
-      ),
-    );
-    drivable(tr, LIGHT, s.stack);
-    if (s.management_open)
-      pageTip().attach(/** @type {HTMLElement} */ (tr.children[2]), () => [
-        h("b", null, "Management network"),
-        h("span", null, s.management_open ?? ""),
+            h("td", { "data-label": "Inbound" }, s.policy_in ?? "—"),
+            h("td", { "data-label": "Outbound" }, s.policy_out ?? "—"),
+            h(
+              "td",
+              { "data-label": "Rules", class: "kp-text-end kp-numeric" },
+              String(s.rules),
+            ),
+            h(
+              "td",
+              { "data-label": "Reaches", class: "kp-text-end kp-numeric" },
+              String(rc.reaches),
+            ),
+            h(
+              "td",
+              { "data-label": "Reached by", class: "kp-text-end kp-numeric" },
+              String(rc.reachedBy),
+            ),
+            h(
+              "td",
+              { "data-label": "Actions" },
+              h(
+                "div",
+                { class: "kp-row-actions" },
+                drivable(
+                  h(
+                    "a",
+                    {
+                      class: "kp-button kp-button--sm",
+                      href: fwHref(s.stack),
+                      title: s.declared
+                        ? "Edit on the stack's Settings"
+                        : "Declare a firewall for this stack on its Settings",
+                    },
+                    s.declared ? "Edit" : "Declare…",
+                  ),
+                  EDIT_STACK,
+                  s.stack,
+                ),
+              ),
+            ),
+          );
+          drivable(tr, LIGHT, s.stack);
+          tr.addEventListener("click", (e) => {
+            if (/** @type {Element} */ (e.target).closest("a,button,input"))
+              return;
+            toggleLit(s.stack);
+            S.stack = s.stack;
+            paintAll();
+          });
+          return tr;
+        }),
+      );
+      attachIdmarks(stTable);
+      dt.refresh();
+      const ths = /** @type {HTMLElement[]} */ ([
+        ...stTable.querySelectorAll("thead th[data-kp-sort]"),
       ]);
-    return tr;
-  };
-  const markStacks = () => {
-    for (const tr of stBox.querySelectorAll("tr.fw-row"))
+      ["stack", "state", "", "", "rules"].forEach((k, i) => {
+        if (k && ths[i]) drivable(ths[i], SORT, k);
+      });
+    }
+    for (const tr of stBody.querySelectorAll("tr[data-kp-row-key]"))
       tr.setAttribute(
         "aria-selected",
         String(
-          S.focus.has(/** @type {HTMLElement} */ (tr).dataset.stack ?? ""),
+          S.lit.has(/** @type {HTMLElement} */ (tr).dataset.kpRowKey ?? ""),
         ),
       );
   };
 
-  const paintStacks = () => {
+  // the matrix --------------------------------------------------------------
+  const paintMx = () => {
     if (!data) return;
-    if (stDrawn === data.stacks) return markStacks();
-    stDrawn = data.stacks;
-    if (!data.stacks.length) {
-      detachSt();
-      stTable = null;
-      stBox.replaceChildren(
-        emptyState({
-          title: "No stack files",
-          text: "The working copy holds no stack files, so there is no firewall to show.",
-        }),
-      );
+    const m = data.matrix;
+    const ns = names();
+    const nodes = ns.map((k) => ({ key: k, label: k }));
+    if (!m) {
+      setMatrix(mxEl, {
+        rows: [],
+        columns: [],
+        state: "empty",
+        message:
+          "The host's answer carried no reachability matrix; it needs at least one stack with an address.",
+      });
       return;
     }
-    if (!stTable) {
-      stTable = tableBlock({
-        remember: "firewall-stacks",
-        caption: "Each stack's firewall",
-        captionHidden: true,
-        search: null,
-        busyOverlay: false,
-        nothing: "No stack files.",
-        columns: [
-          { label: "Stack", sort: "text", cls: "fw-col-stack" },
-          { label: "State", sort: "text" },
-          { label: "Default", sort: null, cls: "fw-col-default kp-col-low" },
-          { label: "Rules", sort: "number", cls: "num" },
-          { label: "Actions", sort: null, cls: "fw-col-acts" },
-        ],
-      });
-      stTable.wrap.classList.add("fw-stacks-dt");
-      // A phone gets kp's card layout (one card per stack, label: value),
-      // so no column is squeezed over its neighbour (redesign-config-1).
-      stTable.wrap.setAttribute("data-kp-cards", "");
-      stTable.tbody.closest("table")?.classList.add("fw-stacks");
-      stTable.tbody.replaceChildren(...data.stacks.map(stackRow));
-      stBox.replaceChildren(stTable.wrap);
-      detachSt = attachDataTables(stBox);
-      const ths = stTable.wrap.querySelectorAll("thead th");
-      ["stack", "state", "", "rules"].forEach((k, i) => {
-        if (k) drivable(/** @type {HTMLElement} */ (ths[i]), SORT, k);
-      });
-    } else {
-      stTable.tbody.replaceChildren(...data.stacks.map(stackRow));
-      dataTable(stTable.wrap)?.refresh();
-    }
-    stTable.ready();
+    const sets = fwSets(data);
+    const label =
+      S.mode === "files"
+        ? "What the stack files declare"
+        : S.mode === "differences"
+          ? "Pairs where live and files differ"
+          : "What pve enforces now";
+    setMatrix(mxEl, {
+      corner: "from ↓ to →",
+      rows: nodes,
+      columns: nodes,
+      label,
+      state: ns.length ? "ready" : "empty",
+      message: "No stack has a firewall declared yet.",
+      cell: cellFor,
+      lit: [...new Set([...S.lit, ...totalKeys()])],
+    });
+    markMatrix();
+    const pick = pinnedPair();
+    if (pick) setMatrixPick(mxEl, { row: pick[0], column: pick[1] });
+    const diff = ns.length
+      ? ns.flatMap((a) =>
+          ns.filter(
+            (b) => a !== b && pairDiffers(data ?? { stacks: [] }, a, b),
+          ),
+        ).length
+      : 0;
+    mxp.read.textContent =
+      S.mode === "differences"
+        ? `${diff.toLocaleString("en-GB")} ${diff === 1 ? "pair differs" : "pairs differ"} between live and the files.`
+        : pick
+          ? cellReading(pick)
+          : "Press a cell to read it in words.";
+    lit.textContent = S.lit.size
+      ? `Lit up: ${[...S.lit].join(", ")}.`
+      : "Press stack names to light them up; each press turns one on or off.";
+    showAll.hidden = S.lit.size === 0;
   };
 
-  const paintMx = () => {
-    const m = data?.matrix;
-    if (!m) {
-      if (data) {
-        mx.replaceChildren(
-          emptyState({
-            title: "No matrix yet",
-            text: "The host's answer carried no reachability matrix; it needs at least one stack with an address.",
-          }),
-        );
-        pathBox.hidden = true;
-      }
-      return;
+  /** @returns {[string, string] | null} the pinned pair */
+  const pinnedPair = () => {
+    if (!data?.matrix) return null;
+    if (S.cell.includes(">")) {
+      const [a, b] = S.cell.split(">");
+      if (cellOf(data.matrix, a, b)) return [a, b];
     }
+    return null;
+  };
+  /** @param {[string, string]} p */
+  const cellReading = (p) => {
+    const c = data
+      ? cellIn(data, p[0], p[1], S.mode === "files" ? "files" : "live")
+      : null;
+    return c ? cellWords(c) : "";
+  };
+
+  // lines (rebuilt: one stack and its neighbours) --------------------------
+  const paintLines = () => {
+    const isLines = S.view === "lines";
+    mxEl.hidden = isLines;
+    linesBox.hidden = !isLines;
+    legend.hidden = isLines;
+    followRow.hidden = !isLines;
+    if (!isLines || !data?.matrix) return;
+    const m = data.matrix;
     const ns = names();
-    mx.style.setProperty("--n", String(ns.length));
-    mx.classList.toggle("has-focus", S.focus.size > 0);
-    const pinned =
-      (S.cell &&
-        cellOf(m, .../** @type {[string, string]} */ (S.cell.split(">")))) ||
-      defaultCell(m);
-    /** @param {string} n @param {"col" | "row"} kind */
-    const nameBtn = (n, kind) => {
-      const b = h(
-        "button",
-        {
-          type: "button",
-          class: `fw-mx__${kind}`,
-          "aria-pressed": String(S.focus.has(n)),
-          title: `Light up ${n}'s ${kind === "col" ? "column and row" : "row and column"} (click again to turn it off; click more names to add them)`,
-          onclick: () => {
-            toggleFocus(n);
-            paintAll();
-          },
-        },
-        kind === "row" ? stackMark(n, 12) : null,
-        h("span", null, n),
-      );
-      return drivable(b, kind === "col" ? LIGHT_COL : LIGHT_ROW, n);
+    if (!S.follow || !ns.includes(S.follow))
+      S.follow =
+        (fwAttention(data.stacks)[0]?.stack ?? busiestStack(ns, m.rules)) ||
+        (ns[0] ?? "");
+    followSel.replaceChildren(...ns.map((n) => h("option", { value: n }, n)));
+    followSel.value = S.follow;
+    const me = S.follow;
+    const toStack = data.stacks.find((s) => s.stack === me);
+    const node = (/** @type {string} */ k) => {
+      const s = data?.stacks.find((x) => x.stack === k);
+      const off = s && fwState(s).word === "no firewall";
+      return {
+        key: k,
+        label: k,
+        sub: off
+          ? "no firewall: every stack reaches it"
+          : s
+            ? `CT ${s.vmid}, ${s.rules} rules`
+            : "",
+        tone: off ? /** @type {const} */ ("bad") : undefined,
+        href: stackHref(k),
+      };
     };
-    mx.replaceChildren(
-      h("span", { class: "cf-hint fw-mx__corner" }, "from ↓ to →"),
-      ...ns.map((n) => nameBtn(n, "col")),
-      ...ns.flatMap((from, ri) => [
-        nameBtn(from, "row"),
-        ...ns.map((to, ci) => {
-          if (from === to)
-            return h("span", {
-              class: "fw-mx__cell fw-mx__cell--self is-hot",
-              "aria-label": "itself",
-            });
-          const c = cellOf(m, from, to);
-          if (!c)
-            return h("span", {
-              class: "fw-mx__cell fw-mx__cell--none is-hot",
-              "aria-label": `${from} to ${to}: unknown`,
-            });
-          const hot = !S.focus.size || S.focus.has(from) || S.focus.has(to);
-          const isRule = !!S.hot && ruleHits(S.hot, from, to);
-          const isPinned = c === pinned;
-          const b = h(
-            "button",
-            {
-              type: "button",
-              class: `fw-mx__cell fw-mx__cell--${c.state}${c.stopped_at_source.length ? " fw-mx__cell--stopped" : ""}${hot ? " is-hot" : ""}${isRule ? " is-rule" : ""}`,
-              "aria-pressed": String(isPinned),
-              "aria-label": `${from} to ${to}: ${c.state}`,
-              tabindex: isPinned ? "0" : "-1",
-              "data-r": String(ri),
-              "data-c": String(ci),
-              onclick: () => {
-                S.cell = `${from}>${to}`;
-                keepUrl();
-                paintMx();
-              },
-            },
-            cellLabel(c),
-          );
-          drivable(b, CELL, `${from}>${to}`);
-          pageTip().attach(b, () => [
-            h("b", null, `${from} → ${to}`),
-            h("span", null, cellWords(c)),
-            c.stopped_at_source.length
-              ? dot(
-                  "bad",
-                  `${c.stopped_at_source.join(", ")} dropped on the way out of ${from}`,
-                )
-              : null,
-            h(
-              "span",
-              { class: "cf-hint" },
-              `${rulesFor(m, c).length} rule(s) decide this · click to pin`,
-            ),
-          ]);
-          return b;
-        }),
-      ]),
+    const reaches = ns.filter(
+      (k) => k !== me && data && cellIn(data, me, k)?.state === "some",
     );
-    // The pinned square's story.
-    if (pinned) {
-      const rs = rulesFor(m, pinned);
-      pathBox.hidden = false;
-      pathBox.replaceChildren(
-        h(
-          "div",
-          { class: "fw-path__top" },
-          h("strong", null, `${pinned.from} → ${pinned.to}`),
+    const reachedBy = ns.filter(
+      (k) =>
+        k !== me &&
+        (data ? (cellIn(data, k, me)?.state ?? "none") : "none") !== "none",
+    );
+    const countLabel = (/** @type {number} */ n) =>
+      `${n} ${n === 1 ? "stack" : "stacks"}`;
+    const base = {
+      corner: "",
+      view: /** @type {const} */ ("lines"),
+      countLabel,
+      sourcesLabel: "Sources",
+      usersLabel: "Reached stacks",
+    };
+    setMatrix(reachMap, {
+      ...base,
+      label: `${me} reaches`,
+      rows: [node(me)],
+      columns: reaches.map(node),
+      cell: (_r, c) =>
+        reaches.includes(c) ? { tone: /** @type {const} */ ("ok") } : null,
+      state: "ready",
+    });
+    setMatrix(reachedMap, {
+      ...base,
+      label: `${me} is reached by`,
+      rows: [node(me)],
+      columns: reachedBy.map(node),
+      cell: (_r, c) =>
+        reachedBy.includes(c) ? { tone: /** @type {const} */ ("ok") } : null,
+      state: "ready",
+    });
+    const t1 = linesBox.querySelector("[data-fw-reaches-title]");
+    const t2 = linesBox.querySelector("[data-fw-reached-title]");
+    if (t1)
+      t1.textContent = `${me} reaches ${reaches.length.toLocaleString("en-GB")} ${reaches.length === 1 ? "stack" : "stacks"}`;
+    if (t2)
+      t2.textContent = `${me} is reached by ${reachedBy.length.toLocaleString("en-GB")} ${reachedBy.length === 1 ? "stack" : "stacks"}`;
+    const open = toStack && fwState(toStack).word === "no firewall";
+    mxp.read.textContent = open
+      ? `${me} has no firewall: every stack reaches it on every port (the ${names().length - 1} open paths are not drawn).`
+      : `${me}: reaches ${reaches.length}, reached by ${reachedBy.length}. Only pairs with named ports are drawn.`;
+  };
+
+  // the trace ---------------------------------------------------------------
+  const paintTrace = () => {
+    const h2 = trace(traceEl);
+    if (state === "loading") return void h2?.setState("running");
+    if (state === "error")
+      return void h2?.setState("error", {
+        message: failure || "The firewall did not answer. Nothing was changed.",
+      });
+    if (!data?.matrix || !names().length) return void h2?.setState("empty");
+    if (!S.from || !S.to || S.from === S.to) {
+      trp.read.textContent =
+        S.from && S.from === S.to
+          ? "Pick two different stacks."
+          : "Pick a source and a target.";
+      return void h2?.setState("empty");
+    }
+    const hops = traceHops(data, S.from, S.to, S.port);
+    traceEl.setAttribute("data-kp-trace-stop", S.stop);
+    setTrace(traceEl, hops);
+    h2?.setState("ready");
+    setTrace(traceEl, hops);
+    trp.read.textContent = traceSummary(hops, S.stop);
+    markTrace();
+  };
+  /** The rule a chip names ("kyu in #3"). @param {string} text */
+  const ruleOfChip = (text) => {
+    const m = /^(\S+) (in|out) #(\d+)$/.exec(text);
+    if (!m || !data?.matrix) return null;
+    return (
+      data.matrix.rules.find(
+        (r) => r.stack === m[1] && r.dir === m[2] && String(r.n) === m[3],
+      ) ?? null
+    );
+  };
+  const fillTraceControls = () => {
+    const ns = names();
+    for (const [box, key] of /** @type {const} */ ([
+      [fromBox, "from"],
+      [toBox, "to"],
+    ])) {
+      const list = /** @type {HTMLElement} */ (
+        box.querySelector(".kp-combobox__list")
+      );
+      list.replaceChildren(
+        ...ns.map((n) =>
           h(
-            "span",
-            { class: "cf-hint" },
-            "Pinned · click another square to change",
+            "li",
+            {
+              class: "kp-combobox__option",
+              role: "option",
+              "data-kp-option": "",
+              "data-value": n,
+            },
+            n,
           ),
         ),
-        h("span", null, cellWords(pinned)),
-        pinned.stopped_at_source.length
-          ? dot(
-              "bad",
-              `${pinned.stopped_at_source.join(", ")} is let in by ${pinned.to} but dropped on the way out of ${pinned.from}`,
-            )
-          : "",
-        rs.length
-          ? h(
-              "div",
-              { class: "cf-row" },
-              h("span", { class: "cf-hint" }, "Decided by"),
-              rs.map((r) => {
-                const key = `${r.stack}/${r.dir}/${r.n}`;
-                const b = h(
-                  "button",
-                  {
-                    type: "button",
-                    class: "cf-chip cf-chip--btn",
-                    title: "Show this rule below",
-                    onclick: () => {
-                      S.stack = r.stack;
-                      S.open = key;
-                      S.act = new Set();
-                      acts.set([]);
-                      paintAll();
-                      rulesCard.el.scrollIntoView({
-                        behavior: "smooth",
-                        block: "start",
-                      });
-                    },
-                  },
-                  `${r.stack} #${r.n} ${r.dir}`,
-                );
-                return drivable(b, DECIDED_BY, key);
-              }),
-            )
-          : h("span", { class: "cf-hint" }, "Decided by the default policies."),
       );
-    } else pathBox.hidden = true;
-    const showAll = drivable(
-      h(
-        "button",
-        {
-          type: "button",
-          class: "cf-linkbtn",
-          title: "Turn every lit stack off (Esc)",
-          onclick: () => {
-            S.focus.clear();
-            paintAll();
-          },
-        },
-        "Show all",
-      ),
-      SHOW_ALL,
+      combobox(box)?.refresh?.();
+    }
+    const ports = data?.matrix ? allPorts(data.matrix) : [];
+    portSel.replaceChildren(
+      h("option", { value: "any" }, "Any port the rules allow"),
+      ...ports.map((p) => h("option", { value: p }, p)),
     );
-    mxActive.replaceChildren(
-      ...(S.focus.size
-        ? [
-            h("span", null, "Lit up:"),
-            ...[...S.focus].map((n) =>
-              h(
-                "span",
-                { class: "cf-tag" },
-                n,
-                drivable(
-                  h(
-                    "button",
-                    {
-                      type: "button",
-                      "aria-label": `Turn ${n} off`,
-                      title: "Turn this stack off",
-                      onclick: () => {
-                        S.focus.delete(n);
-                        paintAll();
-                      },
-                    },
-                    "×",
-                  ),
-                  UNLIGHT,
-                  n,
-                ),
-              ),
-            ),
-            showAll,
-          ]
-        : [
-            h(
-              "span",
-              null,
-              "Click names to light them up (each click turns one on or off) · Esc or Show all resets · arrow keys move between squares.",
-            ),
-          ]),
-    );
+    portSel.value = S.port;
+    putTrace();
+  };
+  let putting = false;
+  const putTrace = () => {
+    putting = true;
+    try {
+      combobox(fromBox)?.set([S.from]);
+      combobox(toBox)?.set([S.to]);
+      portSel.value = [...portSel.options].some((o) => o.value === S.port)
+        ? S.port
+        : "any";
+    } finally {
+      putting = false;
+    }
   };
 
-  mx.addEventListener("keydown", (e) => {
-    const t = /** @type {HTMLElement} */ (e.target);
-    if (!t.matches(".fw-mx__cell[data-r]")) return;
-    const step = /** @type {Record<string, [number, number]>} */ ({
-      ArrowRight: [0, 1],
-      ArrowLeft: [0, -1],
-      ArrowDown: [1, 0],
-      ArrowUp: [-1, 0],
-    })[e.key];
-    if (!step) return;
-    e.preventDefault();
-    const ns = names();
-    const n = ns.length;
-    let r = Number(t.dataset.r);
-    let c = Number(t.dataset.c);
-    for (let i = 0; i < n; i++) {
-      r = (r + step[0] + n) % n;
-      c = (c + step[1] + n) % n;
-      if (r !== c) break;
-    }
-    S.cell = `${ns[r]}>${ns[c]}`;
-    keepUrl();
-    paintMx();
-    /** @type {HTMLElement | null} */ (
-      mx.querySelector(`.fw-mx__cell[data-r="${r}"][data-c="${c}"]`)
-    )?.focus();
-  });
-
+  // the rules table ---------------------------------------------------------
+  const ruleKey = (/** @type {RuleRow} */ r) => `${r.stack}/${r.dir}/${r.n}`;
+  /** @param {string} key */
+  const ruleDetail = (key) => {
+    const m = data?.matrix;
+    const r = m?.rules.find((x) => ruleKey(x) === key);
+    if (!m || !r) return null;
+    const pairs = m.cells.filter((c) => ruleHits(r, c.from, c.to));
+    const box = h(
+      "div",
+      { class: "fw-detail" },
+      h(
+        "p",
+        null,
+        h("b", null, r.action === "ACCEPT" ? "Lets through" : "Drops"),
+        `: ${r.note || "no reason given"}.`,
+        r.disabled
+          ? " Switched off: Proxmox skips it."
+          : r.enabled
+            ? ""
+            : " Not in force: declared in the file, not applied yet.",
+      ),
+      h(
+        "p",
+        null,
+        pairs.length
+          ? `Decides ${pairs.length.toLocaleString("en-GB")} ${pairs.length === 1 ? "pair" : "pairs"}: ${pairs.map(cellWords).join(" ")}`
+          : `Names ${r.peer}, which is not a stack, so it decides no pair of the matrix.`,
+      ),
+      h("p", { class: "fw-hint" }, ruleOrderText(r, m.rules)),
+      h(
+        "div",
+        { class: "kp-row-actions" },
+        drivable(
+          h(
+            "a",
+            {
+              class: "kp-button kp-button--sm",
+              href: fwHref(r.stack),
+              title:
+                "Edit, move or switch off this rule on the stack's Settings",
+            },
+            "Edit this rule",
+          ),
+          EDIT_RULE,
+          key,
+        ),
+        r.n > 1
+          ? drivable(
+              h(
+                "a",
+                {
+                  class: "kp-button kp-button--sm kp-button--ghost",
+                  href: `${fwHref(r.stack)}&rule=${r.n}&do=up`,
+                  title:
+                    "Move this rule one place up: the stack's firewall opens with the move staged; you review and write it there",
+                },
+                "Move up",
+              ),
+              RULE_UP,
+              key,
+            )
+          : null,
+        drivable(
+          h(
+            "a",
+            {
+              class: "kp-button kp-button--sm kp-button--ghost",
+              href: `${fwHref(r.stack)}&rule=${r.n}&do=${r.disabled ? "enable" : "disable"}`,
+              title: r.disabled
+                ? "Switch this rule back on: the stack's firewall opens with it staged; you review and write it there"
+                : "Switch this rule off (it stays in the file, Proxmox skips it): the stack's firewall opens with it staged; you review and write it there",
+            },
+            r.disabled ? "Enable" : "Disable",
+          ),
+          RULE_OFF,
+          key,
+        ),
+      ),
+    );
+    return box;
+  };
+  /** The rules table is drawn once per read. @type {RuleRow[] | null} */
+  let ruDrawn = null;
   const paintRules = () => {
     const m = data?.matrix;
     if (!m) return;
-    const withRules = names().filter((n) => m.rules.some((r) => r.stack === n));
-    if (!withRules.length) {
-      stackSeg.el.hidden = true;
-      tb.el.hidden = true;
-      rulesBody.replaceChildren(
-        emptyState({
-          title: "No stack declares a rule yet",
-          text: "Declare a firewall on a stack's Settings; its rules appear here, in the order Proxmox reads them.",
-        }),
-      );
-      ruleCount.textContent = "";
-      return;
-    }
-    stackSeg.el.hidden = false;
-    tb.el.hidden = false;
-    if (!withRules.includes(S.stack))
-      S.stack =
-        [...S.focus].find((n) => withRules.includes(n)) ??
-        busiestStack(withRules, m.rules);
-    const nextSeg = ruleStackSeg(
-      withRules.map((n) => ({
-        value: n,
-        label: `${n} · ${m.rules.filter((r) => r.stack === n).length}`,
-        hint: `Show ${n}'s rules`,
-      })),
-    );
-    stackSeg.el.replaceWith(nextSeg.el);
-    stackSeg = nextSeg;
-    const href = fwHref(S.stack);
-    editThese.href = href;
-    editRules.href = href;
-    editRules.title = `Edit ${S.stack}'s rules on its Settings`;
-    let shown = 0;
-    let total = 0;
-    /** @param {"in" | "out"} dir */
-    const side = (dir) => {
-      const all = m.rules.filter((r) => r.stack === S.stack && r.dir === dir);
-      const rs = all.filter((r) => ruleMatches(r, S.act, S.q));
-      shown += rs.length;
-      total += all.length;
-      // redesign-final (exact counts): the side's count is linked to the
-      // rule rows it counts.
-      const body = h(
-        "tbody",
-        null,
-        rs.length
-          ? rs.flatMap((r) => ruleRow(r, m.rules))
-          : [
-              h(
-                "tr",
-                null,
-                h(
-                  "td",
-                  { colspan: "5" },
-                  h(
-                    "div",
-                    { class: "cf-empty" },
-                    h(
-                      "strong",
-                      null,
-                      all.length ? "No rule matches" : "No rules this way",
-                    ),
-                    all.length
-                      ? drivable(
-                          h(
-                            "button",
-                            {
-                              type: "button",
-                              class: "cf-linkbtn",
-                              onclick: clearRuleFilter,
-                            },
-                            "Clear the filters",
-                          ),
-                          CLEAR_RULES,
-                        )
-                      : h(
-                          "span",
-                          null,
-                          "The default policy decides everything in this direction.",
-                        ),
-                  ),
-                ),
-              ),
-            ],
-      );
-      const counted = chip(
-        rs.length === all.length
-          ? String(all.length)
-          : `${rs.length} of ${all.length}`,
-      );
-      countOf(counted, body, ":scope > tr.fw-rule");
-      return h(
+    if (ruDrawn !== m.rules) {
+      ruDrawn = m.rules;
+      const head = (/** @type {"in" | "out"} */ dir) =>
+        `<tr data-kp-row-group="${dir}" data-kp-group-always><th scope="rowgroup" colspan="9"><b>${dir === "in" ? "Inbound" : "Outbound"}</b> <span class="kp-badge" data-kp-group-count></span> <span class="fw-hint">${dir === "in" ? "what may reach the stack" : "what the stack may open"}</span></th></tr>`;
+      ruTable.innerHTML = "";
+      const shell = h(
         "div",
-        { class: "fw-side", "data-dir": dir },
-        h("h3", null, dir === "in" ? "Inbound" : "Outbound", counted),
-        // redesign-integrate-1: on a phone each rule is a card with its
-        // cells labelled (kp-themes' card layout, decided by this wrap's
-        // own width), never a table scrolling sideways inside its card.
+        {
+          class: "kp-datatable",
+          id: "fw-rule-table",
+          "data-kp-datatable": "",
+          "data-kp-cards": "",
+          "data-kp-expandable": "",
+          "data-kp-expand-single": "",
+          "data-kp-column-menu": "",
+          "data-kp-sort-multi": "click",
+          "data-kp-page-size": "100",
+          "data-kp-page-sizes": "none",
+          "data-kp-max-height": "38rem",
+          "data-kp-remember": "firewall-rules",
+          "data-kp-busy-overlay": "",
+        },
+        h(
+          "div",
+          { class: "kp-datatable__bar" },
+          drivable(
+            h("input", {
+              class: "kp-datatable__search",
+              type: "search",
+              "data-kp-datatable-search": "",
+              placeholder: "Search by address, port, stack or why",
+              "aria-label": "Search the rules",
+            }),
+            RULE_SEARCH,
+          ),
+        ),
         h(
           "div",
           {
-            class: "kp-table-wrap cf-table-wrap",
-            // kp's tables.js makes this scroll box a keyboard region; its
-            // name says which rules it holds, not kp's generic "Table".
-            "data-kp-region-label":
-              dir === "in" ? "Inbound rules" : "Outbound rules",
+            class: "kp-alert kp-alert--destructive",
+            "data-kp-datatable-failed": "",
+            role: "alert",
+            hidden: "",
           },
           h(
+            "p",
+            { class: "kp-alert__label kp-stateplate__title" },
+            "The rules could not be read",
+          ),
+          h("p", { "data-kp-datatable-failed-reason": "" }),
+          h(
+            "button",
+            {
+              type: "button",
+              class: "kp-button",
+              "data-kp-datatable-retry": "",
+            },
+            "Try again",
+          ),
+        ),
+        h(
+          "div",
+          { class: "kp-table-wrap" },
+          h(
             "table",
-            { class: "kp-table fw-rules", "data-kp-cards": "" },
+            { class: "kp-table" },
+            h(
+              "caption",
+              { class: "kp-sr-only" },
+              "Firewall rules, grouped inbound and outbound",
+            ),
             h(
               "thead",
               null,
               h(
                 "tr",
                 null,
-                h("th", { class: "num", scope: "col" }, "#"),
-                h("th", { scope: "col" }, "Action"),
-                h("th", { scope: "col" }, dir === "in" ? "From" : "To"),
-                h("th", { scope: "col" }, "Ports"),
-                h("th", { scope: "col", class: "fw-hide-sm" }, "Why"),
+                h("th", { scope: "col", "data-kp-sort": "number" }, "#"),
+                h(
+                  "th",
+                  {
+                    scope: "col",
+                    "data-kp-sort": "text",
+                    "data-kp-filter": "choice",
+                  },
+                  "Stack",
+                ),
+                h(
+                  "th",
+                  {
+                    scope: "col",
+                    "data-kp-sort": "text",
+                    "data-kp-filter": "choice",
+                  },
+                  "Action",
+                ),
+                h("th", { scope: "col", "data-kp-sort": "text" }, "Peer"),
+                h("th", { scope: "col", "data-kp-sort": "text" }, "Ports"),
+                h("th", { scope: "col", "data-kp-sort": "text" }, "Why"),
+                h("th", { scope: "col", "data-kp-sort": "text" }, "In force"),
               ),
             ),
-            body,
+            h("tbody"),
           ),
         ),
-      );
-    };
-    rulesBody.replaceChildren(side("in"), side("out"));
-    ruleCount.textContent =
-      shown === total ? `${total} rules` : `${shown} of ${total} rules`;
-    countOf(ruleCount, rulesBody, "tr.fw-rule");
-  };
-
-  const clearRuleFilter = () => {
-    S.q = "";
-    if (tb.search) tb.search.value = "";
-    S.act = new Set();
-    acts.set([]);
-    keepUrl();
-    paintRules();
-  };
-
-  /** @param {RuleRow} r @param {RuleRow[]} every */
-  const ruleRow = (r, every) => {
-    const key = `${r.stack}/${r.dir}/${r.n}`;
-    const open = S.open === key;
-    const tr = h(
-      "tr",
-      {
-        class: `fw-rule${r.disabled ? " fw-rule--off" : ""}`,
-        tabindex: "0",
-        "data-rule": key,
-        "aria-expanded": String(open),
-        title: "Hover to see it in the matrix · click for details",
-        onclick: () => {
-          S.open = open ? null : key;
-          paintRules();
-        },
-        onpointerenter: () => {
-          S.hot = r;
-          paintMx();
-        },
-        onpointerleave: () => {
-          S.hot = null;
-          paintMx();
-        },
-        onfocus: () => {
-          S.hot = r;
-          paintMx();
-        },
-      },
-      h("td", { class: "num cf-muted", "data-label": "#" }, String(r.n)),
-      h(
-        "td",
-        { "data-label": "Action" },
-        h("span", { class: `fw-act fw-act--${r.action}` }, r.action),
-        r.disabled ? chip("off") : null,
-      ),
-      h(
-        "td",
-        { class: "fw-peer", "data-label": r.dir === "in" ? "From" : "To" },
-        // redesign-final-c4: the cell stays a table cell (a grid cell does
-        // not grow its row, so a rule's stack chips printed over the next
-        // rule); the grid lives on a block inside it.
         h(
           "div",
-          { class: "fw-peer__in" },
-          h("span", { class: "cf-mono" }, highlight(r.peer, S.q)),
-          r.peer_stacks.length
-            ? h(
-                "span",
-                { class: "cf-row" },
-                r.peer_stacks.map((p) => chip(highlight(p, S.q))),
-              )
-            : null,
-        ),
-      ),
-      h(
-        "td",
-        { class: "cf-mono nowrap", "data-label": "Ports" },
-        highlight(portsText(r), S.q),
-      ),
-      h(
-        "td",
-        { class: "fw-note fw-hide-sm", "data-label": "Why" },
-        highlight(r.note, S.q) || "—",
-      ),
-    );
-    drivable(tr, RULE, key);
-    if (!open) return [tr];
-    return [
-      tr,
-      h(
-        "tr",
-        { class: "fw-rule-more" },
-        h("td"),
-        h(
-          "td",
-          { colspan: "4" },
+          { class: "kp-empty", "data-kp-datatable-empty": "", hidden: "" },
           h(
-            "dl",
-            { class: "cf-kv" },
-            h("dt", null, "In force"),
+            "div",
+            { "data-kp-datatable-empty-none": "" },
+            h("p", { class: "kp-empty__title" }, "No rules yet"),
             h(
-              "dd",
+              "p",
               null,
-              r.disabled
-                ? "no: switched off, Proxmox skips it"
-                : r.enabled
-                  ? `yes, live on CT ${r.vmid}`
-                  : "declared, not applied yet",
-            ),
-            h("dt", null, "Order"),
-            h("dd", null, ruleOrderText(r, every)),
-            h("dt", null, "Why"),
-            h("dd", null, r.note || "—"),
-            h("dt", null, "Matrix"),
-            h(
-              "dd",
-              null,
-              r.peer_stacks.length
-                ? `affects ${r.peer_stacks.length} square(s), outlined above while you hover`
-                : "matches no managed stack",
+              "Declare a firewall in a stack file to see its rules here.",
             ),
           ),
           h(
             "div",
-            { class: "cf-row fw-rule-more__acts" },
+            { "data-kp-datatable-empty-nomatch": "", hidden: "" },
+            h("p", { class: "kp-empty__title" }, "No rule matches"),
             drivable(
               h(
-                "a",
+                "button",
                 {
-                  class: "kp-button kp-button--sm",
-                  href: fwHref(r.stack),
-                  title:
-                    "Edit, move or switch off this rule on the stack's Settings",
+                  type: "button",
+                  class: "kp-button kp-button--secondary",
+                  "data-kp-datatable-clear": "",
                 },
-                "Edit this rule",
+                "Clear the search and filters",
               ),
-              EDIT_RULE,
-              key,
-            ),
-            r.n > 1
-              ? drivable(
-                  h(
-                    "a",
-                    {
-                      class: "kp-button kp-button--sm kp-button--ghost",
-                      href: `${fwHref(r.stack)}&rule=${r.n}&do=up`,
-                      title:
-                        "Move this rule one place up: the stack's firewall opens with the move staged; you review and write it there",
-                    },
-                    "Move up",
-                  ),
-                  RULE_UP,
-                  key,
-                )
-              : null,
-            drivable(
-              h(
-                "a",
-                {
-                  class: "kp-button kp-button--sm kp-button--ghost",
-                  href: `${fwHref(r.stack)}&rule=${r.n}&do=${r.disabled ? "enable" : "disable"}`,
-                  title: r.disabled
-                    ? "Switch this rule back on: the stack's firewall opens with it staged; you review and write it there"
-                    : "Switch this rule off (it stays in the file, Proxmox skips it): the stack's firewall opens with it staged; you review and write it there",
-                },
-                r.disabled ? "Enable" : "Disable",
-              ),
-              RULE_OFF,
-              key,
+              CLEAR_RULES,
             ),
           ),
         ),
-      ),
-    ];
+        h(
+          "div",
+          { class: "kp-datatable__bar" },
+          h("p", {
+            class: "kp-datatable__status",
+            "data-kp-datatable-status": "",
+            role: "status",
+            "aria-live": "polite",
+          }),
+          h("div", {
+            class: "kp-datatable__pager",
+            "data-kp-datatable-pager": "",
+          }),
+        ),
+      );
+      ruTable.append(shell);
+      const tbody = /** @type {HTMLElement} */ (shell.querySelector("tbody"));
+      for (const dir of /** @type {const} */ (["in", "out"])) {
+        const g = h("tbody");
+        g.innerHTML = head(dir);
+        tbody.append(...g.children);
+        for (const r of m.rules.filter((x) => x.dir === dir)) {
+          const key = ruleKey(r);
+          tbody.append(
+            h(
+              "tr",
+              { "data-kp-row-key": key, "data-kp-group-of": dir },
+              h("td", { "data-label": "#", class: "kp-numeric" }, `#${r.n}`),
+              h(
+                "td",
+                { "data-label": "Stack", "data-kp-filter-value": r.stack },
+                drivable(
+                  h(
+                    "button",
+                    {
+                      type: "button",
+                      class: "fw-stackbtn",
+                      title: `Show only ${r.stack}'s rules`,
+                      onclick: (/** @type {Event} */ e) => {
+                        e.stopPropagation();
+                        onlyStack(r.stack);
+                      },
+                    },
+                    h("b", null, r.stack),
+                  ),
+                  RULE_STACK,
+                  r.stack,
+                ),
+              ),
+              h(
+                "td",
+                { "data-label": "Action", "data-kp-filter-value": r.action },
+                h(
+                  "span",
+                  {
+                    class: `kp-badge kp-badge--${r.action === "ACCEPT" ? "success" : "destructive"}`,
+                  },
+                  r.action,
+                ),
+                r.disabled ? h("span", { class: "kp-badge" }, "off") : null,
+              ),
+              h(
+                "td",
+                { "data-label": "Peer" },
+                h("code", { class: "kp-mono" }, r.peer),
+                r.peer_stacks.length ? ` (${r.peer_stacks.join(", ")})` : "",
+              ),
+              h(
+                "td",
+                { "data-label": "Ports", class: "kp-numeric" },
+                portsText(r),
+              ),
+              h("td", { "data-label": "Why" }, r.note || "—"),
+              h(
+                "td",
+                { "data-label": "In force" },
+                r.disabled ? "no (off)" : r.enabled ? "yes" : "no",
+              ),
+            ),
+          );
+        }
+      }
+      attachDataTables(ruTable, {
+        detail: (row) => ruleDetail(row.dataset.kpRowKey ?? ""),
+        decorate: (part, info) => {
+          if (info.kind === "row-toggle" && info.value)
+            drivable(part, RULE, info.value);
+        },
+      });
+      const dt = ruDt();
+      if (dt) {
+        dt.element.addEventListener(VIEW_EVENT, paintRuleCounts);
+        cleanups.push(bindTableUrl(dt, "firewall-rules"));
+        if (S.stack) dt.filter(2, [S.stack]);
+      }
+    }
+    paintRuleCounts();
   };
+  /** @param {string} stack */
+  const onlyStack = (stack) => {
+    const dt = ruDt();
+    if (!dt) return;
+    const f = dt.view().filters[2];
+    const same = Array.isArray(f) && f.length === 1 && f[0] === stack;
+    dt.filter(2, same ? null : [stack]);
+    S.stack = same ? "" : stack;
+    keepUrl();
+  };
+  const paintRuleCounts = () => {
+    const m = data?.matrix;
+    if (!m) return;
+    const acc = m.rules.filter((r) => r.action === "ACCEPT").length;
+    const set = (/** @type {HTMLElement} */ b, /** @type {number} */ n) => {
+      b.setAttribute("data-kp-count", String(n));
+      toggleOf(b)?.setCount(n);
+    };
+    for (const b of /** @type {HTMLElement[]} */ ([
+      ...toggles.querySelectorAll("button"),
+    ])) {
+      const v = b.getAttribute("data-kp-toggle-value");
+      set(
+        b,
+        v === "ACCEPT"
+          ? acc
+          : v === "DROP"
+            ? m.rules.length - acc
+            : m.rules.length,
+      );
+    }
+    const shown = ruDt()?.view().shown ?? m.rules.length;
+    rup.read.textContent = `${m.rules.length.toLocaleString("en-GB")} rules: ${acc.toLocaleString("en-GB")} ACCEPT, ${(m.rules.length - acc).toLocaleString("en-GB")} DROP${shown !== m.rules.length ? `; ${shown.toLocaleString("en-GB")} shown` : ""}.`;
+    const st = S.stack || ([...S.lit][0] ?? "");
+    editThese.hidden = !st;
+    editThese.title = st
+      ? `Edit ${st}'s rules on its Settings`
+      : "Edit the shown stack's rules on its Settings";
+  };
+  toggles.addEventListener(TOGGLE_CHANGED_EVENT, (e) => {
+    const keys = /** @type {CustomEvent} */ (e).detail.pressedKeys ?? [];
+    ruDt()?.filter(3, keys.length ? keys : null);
+  });
 
-  rowKeys(stBox, "tr.fw-row", (tr) => tr.click());
-  rowKeys(rulesCard.el, "tr.fw-rule", (tr) => tr.click());
+  // the guard ---------------------------------------------------------------
+  const paintGuard = () => {
+    const ns = names();
+    if (!data || !ns.length) {
+      setCardState(
+        guardCard.el,
+        state === "loading" ? "loading" : state === "error" ? "error" : "empty",
+        {
+          words: "Reading the stacks…",
+          title: "No stack to edit",
+          text: "No stack has a firewall to edit yet.",
+        },
+      );
+      return;
+    }
+    setCardState(guardCard.el, "ready");
+    if (!S.guard || !ns.includes(S.guard))
+      S.guard = S.stack && ns.includes(S.stack) ? S.stack : (ns[0] ?? "");
+    chips.replaceChildren(
+      ...ns.map((n) => {
+        const s = data?.stacks.find((x) => x.stack === n);
+        const st = s ? fwState(s) : null;
+        const b = h(
+          "button",
+          {
+            class: "kp-button",
+            type: "button",
+            "data-kp-toggle": "",
+            "data-kp-look": "chip",
+            "data-kp-toggle-value": n,
+            "aria-pressed": String(n === S.guard),
+            "data-kp-hovercard": s
+              ? `${n} · CT ${s.vmid} · ${(s.ip ?? "").split("/")[0]}. ${st?.word}. Inbound ${s.policy_in ?? "—"}, outbound ${s.policy_out ?? "—"}, ${s.rules} rules. ${s.live_matches_repo === false || s.live_enforced === false ? "Live does not match the files." : "Live matches the files."}${s.management_open ? ` Management open: ${s.management_open}.` : ""}`
+              : n,
+          },
+          n,
+        );
+        return drivable(b, GUARD_STACK, n);
+      }),
+    );
+    attachToggles(chips);
+    attachHoverCards(chips);
+    guardCurrent();
+  };
+  const guardCurrent = () => {
+    const s = data?.stacks.find((x) => x.stack === S.guard);
+    if (!s) return;
+    const gate = ackGate(ack);
+    if (s.management_open) {
+      ack.setAttribute("data-kp-ack-key", `mgmt-${s.stack}`);
+      warn.replaceChildren(
+        h(
+          "strong",
+          null,
+          `${s.stack} has its management open: ${s.management_open}.`,
+        ),
+        " A rule change you make here reaches every container on the LAN.",
+      );
+      gate?.setState("ready");
+    } else gate?.setState("empty");
+    editGo.disabled = false;
+    editGo.title = `Open ${s.stack}'s rules on its Settings`;
+    attachDisabledReasons(root);
+    editGo.dataset.stack = s.stack;
+  };
+  chips.addEventListener(TOGGLE_CHANGED_EVENT, (e) => {
+    const keys = /** @type {CustomEvent} */ (e).detail.pressedKeys ?? [];
+    if (keys[0]) S.guard = keys[0];
+    ackGate(ack)?.set(false);
+    guardCurrent();
+  });
+  editGo.addEventListener("click", () => {
+    if (editGo.disabled) return;
+    go(fwHref(editGo.dataset.stack ?? S.guard));
+  });
+
+  // events ------------------------------------------------------------------
+  const paintAll = () => {
+    keepUrl();
+    paintHeader();
+    paintNeeds();
+    paintTotals();
+    paintStacks();
+    setSegmentedValues(modeSeg, [S.mode]);
+    setSegmentedValues(viewSeg, [S.view]);
+    paintMx();
+    paintLines();
+    paintTrace();
+    paintRules();
+    paintGuard();
+    const keys = totalKeys();
+    totals.read.textContent = !data
+      ? ""
+      : keys.length
+        ? `Showing ${keys.length.toLocaleString("en-GB")} of ${names().length.toLocaleString("en-GB")} stacks: ${keys.join(", ")}.`
+        : `Showing all ${names().length.toLocaleString("en-GB")} stacks.`;
+    setAgo(mxAgo, readAt);
+    setAgo(ago, readAt);
+  };
+  /** @type {number | null} */
+  let readAt = null;
+
+  modeSeg.addEventListener(SEGMENTED_EVENT, (e) => {
+    const v = /** @type {CustomEvent} */ (e).detail.value;
+    S.mode = v === "files" || v === "differences" ? v : "live";
+    keepUrl();
+    paintMx();
+  });
+  viewSeg.addEventListener(SEGMENTED_EVENT, (e) => {
+    S.view =
+      /** @type {CustomEvent} */ (e).detail.value === "lines"
+        ? "lines"
+        : "grid";
+    keepUrl();
+    paintMx();
+    paintLines();
+  });
+  followSel.addEventListener("change", () => {
+    S.follow = followSel.value;
+    keepUrl();
+    paintLines();
+  });
+  mxEl.addEventListener(MATRIX_PICK_EVENT, (e) => {
+    const d = /** @type {CustomEvent} */ (e).detail;
+    S.cell = `${d.rowKey}>${d.colKey}`;
+    S.from = d.rowKey;
+    S.to = d.colKey;
+    S.port = "any";
+    keepUrl();
+    putTrace();
+    paintTrace();
+    const p = pinnedPair();
+    if (p) mxp.read.textContent = cellReading(p);
+  });
+  mxEl.addEventListener(MATRIX_LIGHT_EVENT, (e) => {
+    const keys = /** @type {CustomEvent} */ (e).detail.keys ?? [];
+    S.lit = new Set(
+      keys.filter((/** @type {string} */ k) => !totalKeys().includes(k)),
+    );
+    keepUrl();
+    lit.textContent = S.lit.size
+      ? `Lit up: ${[...S.lit].join(", ")}.`
+      : "Press stack names to light them up; each press turns one on or off.";
+    showAll.hidden = S.lit.size === 0;
+    paintStacks();
+  });
+  for (const map of [reachMap, reachedMap])
+    map.addEventListener(USES_PIN_EVENT, (e) => {
+      const d = /** @type {CustomEvent} */ (e).detail;
+      if (d.pinned && d.key !== S.follow && names().includes(d.key)) {
+        S.follow = d.key;
+        keepUrl();
+        paintLines();
+      }
+    });
+  fromBox.addEventListener(CHANGE_EVENT, (e) => {
+    const v = /** @type {CustomEvent} */ (e).detail.value;
+    if (putting || !v || v === S.from) return;
+    S.from = v;
+    S.port = "any";
+    putTrace();
+    paintTrace();
+  });
+  toBox.addEventListener(CHANGE_EVENT, (e) => {
+    const v = /** @type {CustomEvent} */ (e).detail.value;
+    if (putting || !v || v === S.to) return;
+    S.to = v;
+    S.port = "any";
+    putTrace();
+    paintTrace();
+  });
+  portSel.addEventListener("change", () => {
+    S.port = portSel.value;
+    paintTrace();
+  });
+  traceEl.addEventListener(TRACE_SWAP_EVENT, () => {
+    [S.from, S.to] = [S.to, S.from];
+    S.port = "any";
+    putTrace();
+    paintTrace();
+    if (S.from && S.to) setMatrixPick(mxEl, { row: S.from, column: S.to });
+  });
+  traceEl.addEventListener(TRACE_RULE_EVENT, (e) => {
+    const r = ruleOfChip(
+      String(/** @type {CustomEvent} */ (e).detail.rule ?? ""),
+    );
+    if (!r) return;
+    const dt = ruDt();
+    dt?.filter(2, null);
+    dt?.expand([ruleKey(r)]);
+    rup.el.scrollIntoView({ block: "start", behavior: "smooth" });
+    rup.read.textContent = `${r.stack} ${r.dir === "in" ? "inbound" : "outbound"} rule ${r.n} is open below.`;
+  });
+  traceEl.addEventListener(TRACE_RETRY_EVENT, () => retry());
+  for (const el of [mxCard.el, traceCard.el, guardCard.el])
+    el.addEventListener(CARD_RETRY_EVENT, () => retry());
+  stTable.addEventListener("kp-datatable-retry", () => retry());
 
   /** @param {KeyboardEvent} e */
   const onKey = (e) => {
@@ -1285,70 +2327,115 @@ export function mount(root) {
     const a = document.activeElement;
     if (a && /^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName)) return;
     if (document.querySelector("dialog[open]")) return;
-    pageTip().hide();
-    if (S.focus.size) {
-      S.focus.clear();
+    if (S.lit.size || S.totals.size) {
+      S.lit.clear();
+      S.totals.clear();
+      applyTotals();
       paintAll();
     }
   };
   document.addEventListener("keydown", onKey);
+  cleanups.push(() => document.removeEventListener("keydown", onKey));
 
-  // ── loading ───────────────────────────────────────────────────────────
-  const mxSkeleton = () => {
-    mx.style.setProperty("--n", "5");
-    mx.replaceChildren(
-      h("span", { class: "cf-hint fw-mx__corner" }, "from ↓ to →"),
-      ...Array.from({ length: 5 }, () =>
-        h("span", { class: "fw-mx__col" }, skeleton("80%")),
-      ),
-      ...Array.from({ length: 5 }, () => [
-        h("span", { class: "fw-mx__row" }, skeleton("80%")),
-        ...Array.from({ length: 5 }, () =>
-          h("span", { class: "fw-mx__cell fw-mx__cell--sk" }),
-        ),
-      ]).flat(),
-    );
-    pathBox.replaceChildren(skeleton("40%"), skeleton("70%"));
+  // loading -----------------------------------------------------------------
+  const setLoading = () => {
+    state = "loading";
+    paintTotals();
+    const dt = stDt();
+    dt?.busy({ text: "Reading the firewalls…", overlay: true });
+    dt?.state("loading");
+    setMatrix(mxEl, {
+      rows: [],
+      columns: [],
+      state: "loading",
+      skeleton: 11,
+      label: "Reading the matrix",
+    });
+    trace(traceEl)?.setState("running");
+    setCardState(guardCard.el, "loading", { words: "Reading the stacks…" });
+    setCardState(mxCard.el, "ready");
+    setCardState(traceCard.el, "ready");
   };
-  mxSkeleton();
-  rulesBody.replaceChildren(skeletonTable(6, 5), skeletonTable(6, 5));
-
+  const setFailed = (/** @type {string} */ why) => {
+    state = "error";
+    failure = why;
+    const dt = stDt();
+    dt?.busy(null);
+    dt?.fail(why);
+    setMatrix(mxEl, {
+      rows: [],
+      columns: [],
+      state: "error",
+      message: "The firewall rules could not be read.",
+    });
+    trace(traceEl)?.setState("error", {
+      message: "The firewall did not answer. Nothing was changed.",
+    });
+    setCardState(guardCard.el, "error", {
+      title: "The stacks could not be read",
+      text: "The firewall did not answer. Nothing was changed.",
+    });
+    for (const t of kpis.tiles.values())
+      t.set({ value: "—", ctx: "not read", loading: false });
+    const ruleHost = ruTable.querySelector(".kp-datatable");
+    if (ruleHost) {
+      const dtr = dataTable(ruleHost);
+      dtr?.fail(why);
+    }
+    needs.el.hidden = true;
+  };
   const load = async () => {
+    setLoading();
     const r = await fetchJson(
       "/data/firewall",
       "the fleet's firewall",
       abort.signal,
     );
+    if (abort.signal.aborted) return;
     if (!r.ok) {
-      // One read, one message (redesign-config-11): the alert under the
-      // header says why with one Try again; each card says it is empty.
       fail.set(
         failSummary([{ what: "the fleet's firewall", error: r.error }]),
         retry,
       );
-      const note = failNote("Not read: see the message at the top.");
-      stBox.replaceChildren(note);
-      mx.replaceChildren(note.cloneNode(true));
-      pathBox.hidden = true;
-      rulesBody.replaceChildren(note.cloneNode(true));
+      setFailed(r.error.why);
       return;
     }
     fail.set(null, retry);
     data = /** @type {FirewallRead} */ (r.body);
     data.stacks = data.stacks ?? [];
-    foot.replaceChildren(h("span", null, data.head?.subject ?? ""), ago);
-    setAgo(ago, Date.now() / 1000);
+    readAt = Date.now() / 1000;
+    state = data.stacks.length ? "ready" : "empty";
+    stDt()?.busy(null);
+    stDt()?.state("ready");
+    fillTraceControls();
+    if (!S.from || !names().includes(S.from)) {
+      const seed = data.matrix ? defaultPair() : null;
+      if (seed) [S.from, S.to] = seed;
+    }
+    if (!S.cell && S.from && S.to) S.cell = `${S.from}>${S.to}`;
+    putTrace();
     paintAll();
+  };
+  /** A pair worth tracing before anyone asks: the pinned one, else the one with the most ports. */
+  const defaultPair = () => {
+    const m = data?.matrix;
+    if (!m) return null;
+    let best = null;
+    for (const c of m.cells)
+      if (
+        c.state === "some" &&
+        (!best || c.allowed.length > best.allowed.length)
+      )
+        best = c;
+    best = best ?? m.cells[0] ?? null;
+    return best ? /** @type {[string, string]} */ ([best.from, best.to]) : null;
   };
   const retry = () => void load().catch(() => {});
   const off = listen("repo", retry);
+  cleanups.push(off);
   retry();
   return () => {
     abort.abort();
-    off();
-    pageTip().hide();
-    document.removeEventListener("keydown", onKey);
-    detachSt();
-    root.classList.remove("cf-page", "fw-page");
+    for (const c of cleanups) c();
   };
 }

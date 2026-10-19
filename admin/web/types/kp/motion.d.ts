@@ -1,5 +1,3 @@
-// The kp-themes module chassis-rs serves at /static/kp/js/motion.js (kp-themes 10.1.1),
-// copied from kp-themes js/motion.d.ts: chassis serves the module, not its types.
 /** Any box a consumer wants eased, beside the components below. */
 export declare const SIZE_ATTRIBUTE = "data-kp-size-motion";
 /** The boxes that ease to a new size. */

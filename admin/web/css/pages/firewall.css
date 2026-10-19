@@ -1,362 +1,159 @@
-/* redesign-firewall (3.71.0): the Firewall page as the approved demo draws
-   it (~/.local/share/homelab/redesign-3.71/firewall.html). kp-themes
-   tokens only; shared pieces live in config.css. */
+/* feat-kpadopt-2 (kp-themes 11.0.0, the approved app-homelab-backups demo,
+   Firewall sections): the page's frame. Everything with a kp- class is the
+   package's; these fw- rules only lay the panels out on shared grid tracks
+   (Kenny, 2026-10-19: labels, fields, readings and buttons align to column
+   tracks, never left/right flex rows) and keep each area one height in
+   every state. The topology figure stays on the Map. */
 
-/* ---------- stacks table ---------- */
-.fw-row {
-  cursor: pointer;
-}
-.fw-row[aria-selected="true"] td {
-  background: color-mix(in oklab, var(--accent) 45%, transparent);
-}
-.fw-idcell {
-  display: inline-grid;
-  grid-template-columns: auto minmax(0, 1fr);
-  gap: 8px;
+.fw-grid {
+  display: grid;
+  grid-template-columns: repeat(12, minmax(0, 1fr));
+  gap: var(--kp-space-lg, 1.5rem);
   align-items: start;
-}
-.fw-idcell .nx-mark {
-  margin-block-start: 3px;
-}
-.fw-idcell__text {
-  display: grid;
-  gap: 1px;
-}
-.fw-idcell__text small {
-  color: var(--muted-foreground);
-  font-weight: 400;
-  font-size: var(--kp-text-xs);
-  white-space: nowrap;
-}
-.fw-policy {
-  display: inline-grid;
-  grid-template-columns: auto auto;
-  gap: 2px 6px;
-  font-size: var(--kp-text-xs);
-  align-items: center;
-}
-.fw-policy b {
-  font-weight: 500;
-  color: var(--muted-foreground);
-}
-.fw-act {
-  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
-  font-weight: 600;
-  font-size: var(--kp-text-xs);
-  line-height: 1.6;
-  padding: 0 6px;
-  border-radius: 4px;
-  white-space: nowrap;
-}
-.fw-act--ACCEPT {
-  background: var(--success);
-  color: var(--success-foreground);
-}
-.fw-act--DROP,
-.fw-act--REJECT {
-  background: transparent;
-  color: var(--destructive);
-  box-shadow: inset 0 0 0 1px var(--destructive);
-}
-
-/* ---------- the reachability matrix ---------- */
-.fw-mx-body {
-  display: grid;
-  gap: var(--kp-space-sm, 8px);
-  align-content: start;
-}
-.fw-mx {
-  display: grid;
-  grid-template-columns: 6.5rem repeat(var(--n, 5), minmax(0, 1fr));
-  gap: 4px;
-  font-size: var(--kp-text-xs);
-  align-content: start;
-}
-.fw-mx__corner {
-  align-self: end;
-  padding: 4px 2px;
-}
-.fw-mx__col,
-.fw-mx__row {
-  all: unset;
-  box-sizing: border-box;
-  cursor: pointer;
-  border-radius: 6px;
-  font-weight: 500;
   min-inline-size: 0;
 }
-.fw-mx__col {
-  text-align: center;
-  color: var(--muted-foreground);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  padding: 4px 2px;
-}
-.fw-mx__row {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 0 6px;
-}
-.fw-mx__row span:last-child {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.fw-mx__col:hover,
-.fw-mx__row:hover {
-  background: color-mix(in oklab, var(--muted) 70%, transparent);
-}
-.fw-mx__col[aria-pressed="true"],
-.fw-mx__row[aria-pressed="true"] {
-  background: var(--accent);
-  color: var(--accent-foreground);
-}
-.fw-mx__col:focus-visible,
-.fw-mx__row:focus-visible,
-.fw-mx__cell:focus-visible {
-  outline: 2px solid var(--ring);
-  outline-offset: 1px;
-}
-.fw-mx__cell {
-  min-block-size: 44px;
-  border-radius: 6px;
-  border: 1px solid transparent;
-  font: inherit;
-  font-size: var(--kp-text-xs);
-  cursor: pointer;
-  display: grid;
-  place-items: center;
-  text-align: center;
-  padding: 2px;
-  line-height: 1.2;
+.fw-grid > * {
+  grid-column: 1 / -1;
   min-inline-size: 0;
-  overflow-wrap: anywhere;
-  background: var(--muted);
-  color: var(--muted-foreground);
-  transition:
-    transform 110ms var(--cf-ease),
-    opacity 110ms var(--cf-ease);
 }
-.fw-mx__cell:hover {
-  transform: scale(1.05);
+.fw-grid > .fw-c12 {
+  grid-column: 1 / -1;
 }
-.fw-mx__cell[aria-pressed="true"] {
-  outline: 2px solid var(--ring);
-  outline-offset: 1px;
-}
-.fw-mx__cell--some {
-  background: var(--success);
-  color: var(--success-foreground);
-  font-weight: 600;
-}
-.fw-mx__cell--open {
-  background: var(--warning);
-  color: var(--warning-foreground);
-  font-weight: 600;
-}
-.fw-mx__cell--self {
-  background: transparent;
-  border: 1px dashed var(--border);
-  cursor: default;
-}
-.fw-mx__cell--self:hover {
-  transform: none;
-}
-.fw-mx__cell--stopped {
-  box-shadow: inset 0 0 0 2px var(--destructive);
-}
-.fw-mx__cell--sk {
-  cursor: default;
-  animation: cf-sk 1.4s linear infinite;
-  background: linear-gradient(
-    90deg,
-    var(--muted) 0%,
-    color-mix(in oklab, var(--muted) 55%, var(--card)) 50%,
-    var(--muted) 100%
-  );
-  background-size: 200% 100%;
-}
-.fw-mx.has-focus .fw-mx__cell:not(.is-hot) {
-  opacity: 0.28;
-}
-.fw-mx__cell.is-rule {
-  outline: 2px dashed var(--primary);
-  outline-offset: 1px;
-  opacity: 1 !important;
-}
-.fw-legend {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px 14px;
-  font-size: var(--kp-text-xs);
-  color: var(--muted-foreground);
-}
-.fw-legend i {
-  display: inline-block;
-  inline-size: 12px;
-  block-size: 12px;
-  border-radius: 3px;
-  margin-inline-end: 6px;
-  vertical-align: -2px;
-}
-.fw-legend--some {
-  background: var(--success);
-}
-.fw-legend--open {
-  background: var(--warning);
-}
-.fw-legend--none {
-  background: var(--muted);
-}
-.fw-legend--stopped {
-  box-shadow: inset 0 0 0 2px var(--destructive);
-}
-.fw-path {
-  display: grid;
-  gap: 6px;
-  padding: 12px;
-  border-radius: 8px;
-  background: color-mix(in oklab, var(--muted) 55%, transparent);
-  font-size: var(--kp-text-sm);
-  align-self: end;
-}
-.fw-path[hidden] {
+.fw-grid > [hidden] {
   display: none;
 }
-.fw-path__top {
-  display: flex;
-  justify-content: space-between;
-  gap: 8px;
-  align-items: center;
-  flex-wrap: wrap;
+
+/* A panel is a form grid: its first row carries the title (label track), the
+   one sentence that says what the part does (control track) and the live
+   reading of the part (value track); the part itself spans every track under
+   that row. */
+.fw-panel {
+  align-content: start;
+  --kp-formgrid-label-min: 12rem;
+  padding: var(--kp-space-lg, 1.5rem);
+  border: 1px solid var(--border);
+  border-radius: var(--radius, 0.5rem);
+  background: var(--card);
+  color: var(--card-foreground);
 }
-.fw-path strong {
-  font-size: var(--kp-text-md, 1rem);
+.fw-panel
+  > :not(
+    .kp-formgrid__row,
+    .kp-formgrid__group,
+    .kp-formrows,
+    .kp-kv,
+    fieldset,
+    form
+  ) {
+  grid-column: 1 / -1;
+  min-inline-size: 0;
+}
+.fw-panel__head h2 {
+  margin: 0;
+  font-size: var(--kp-text-base, 1rem);
+}
+.fw-panel__head > p {
+  margin: 0;
+  color: var(--muted-foreground);
+  font-size: var(--kp-text-sm, 0.8125rem);
+}
+.fw-panel__head > .fw-panel__read {
+  color: var(--foreground);
+}
+.fw-hint {
+  color: var(--muted-foreground);
+  font-size: var(--kp-text-sm, 0.8125rem);
+}
+.fw-foot {
+  margin: 0;
+  justify-self: end;
 }
 
-/* ---------- rules ---------- */
-.fw-rules-body {
-  display: grid;
-  gap: var(--kp-space-md, 12px);
+.fw-table {
+  min-inline-size: 0;
+  min-block-size: 16rem;
 }
-.fw-rules2 {
+.fw-table .kp-datatable {
+  min-block-size: 16rem;
+}
+.fw-ct {
+  color: var(--muted-foreground);
+  font-size: var(--kp-text-sm, 0.8125rem);
+}
+.fw-stackbtn {
+  all: unset;
+  cursor: pointer;
+  color: inherit;
+}
+.fw-stackbtn:hover {
+  text-decoration: underline;
+}
+.fw-stackbtn:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+.fw-detail {
+  display: grid;
+  gap: var(--kp-space-xs, 0.25rem);
+  padding: var(--kp-space-sm, 0.5rem);
+}
+.fw-detail p {
+  margin: 0;
+}
+.fw-fixes {
+  display: inline-grid;
+  grid-auto-flow: column;
+  gap: var(--kp-space-sm, 0.5rem);
+}
+
+/* The matrix keeps its height in every state and scrolls inside its box. */
+.fw-matrix {
+  min-block-size: 24rem;
+  min-inline-size: 0;
+  overflow-x: auto;
+}
+.fw-matrix .kp-matrix {
+  --kp-matrix-cell-min: 2.75rem;
+  --kp-matrix-head: 5.5rem;
+}
+.fw-card {
+  min-inline-size: 0;
+}
+.fw-lines-box {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: var(--cf-gap);
+  gap: var(--kp-space-lg, 1.5rem);
+  min-block-size: 18rem;
   align-items: start;
 }
-.fw-side h3 {
-  margin: 0 0 6px;
-  font-size: 1rem;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-.fw-rules td {
-  padding-block: 8px;
-}
-.fw-rule {
-  cursor: pointer;
-}
-.fw-rule[aria-expanded="true"] td,
-.fw-rule-more td {
-  background: color-mix(in oklab, var(--accent) 35%, transparent);
-}
-.fw-rule-more td {
-  font-size: var(--kp-text-sm);
-  padding-block-start: 0;
-}
-.fw-rule-more__acts {
-  margin-block-start: 8px;
-}
-/* redesign-integrate-1: on a phone a rule is a card (kp-themes' card
-   layout, by the table wrap's own width); its detail row drops the empty
-   cell that keeps the "#" column on a desktop. */
-@container kp-table (max-width: 40rem) {
-  .fw-rules[data-kp-cards] .fw-rule-more > td:empty {
-    display: none;
-  }
-  .fw-rules[data-kp-cards] .fw-rule-more > td::before {
-    content: none;
-  }
-  /* A card breaks a long value (a port list, an address) instead of
-     widening; the Ports cell's desktop nowrap gives way here. */
-  .cf-page .fw-rules[data-kp-cards] td,
-  .cf-page .fw-rules[data-kp-cards] td.nowrap {
-    white-space: normal;
-    overflow-wrap: anywhere;
-    min-inline-size: 0;
-  }
-  .cf-page .fw-rules[data-kp-cards] td > * {
-    min-inline-size: 0;
-  }
-}
-.fw-peer__in {
+.fw-lines-col {
   display: grid;
-  gap: 2px;
-  justify-items: start;
+  gap: var(--kp-space-sm, 0.5rem);
+  min-inline-size: 0;
 }
-.fw-peer .cf-row {
-  gap: 4px;
-}
-.fw-note {
+.fw-lines-title {
+  margin: 0;
+  font-size: var(--kp-text-sm, 0.8125rem);
   color: var(--muted-foreground);
-  font-size: var(--kp-text-sm);
+  font-weight: 600;
 }
-@media (max-width: 64rem) {
-  .fw-rules2 {
+.fw-lines-box[hidden],
+.fw-lines {
+  min-inline-size: 0;
+}
+.fw-tracebox {
+  min-block-size: 12rem;
+}
+.fw-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--kp-space-xs, 0.25rem);
+}
+@media (max-width: 62rem) {
+  .fw-lines-box {
     grid-template-columns: minmax(0, 1fr);
   }
 }
-@media (max-width: 40rem) {
-  .fw-mx {
-    grid-template-columns: 4.6rem repeat(var(--n, 5), minmax(0, 1fr));
-    gap: 3px;
-  }
-  .fw-mx__cell {
-    min-block-size: 36px;
-    font-size: 10px;
-  }
-  .fw-mx__col {
-    font-size: 10px;
-  }
-  .fw-mx__row .nx-mark {
-    display: none;
-  }
-  .fw-hide-sm {
-    display: none;
-  }
-  /* redesign-config-1: on a phone the Stacks table is kp's card layout
-     (data-kp-cards); the CT/IP line wraps under the name in its own row. */
-  .fw-idcell__text small {
-    white-space: normal;
-    overflow-wrap: anywhere;
-  }
-  .fw-stacks td.cf-row-actions {
-    justify-content: flex-end;
-  }
-}
-
-/* the Actions column's header is for a screen reader only */
-.fw-stacks th.fw-col-acts {
-  font-size: 0;
-}
-
-/* redesign-config-9: the rules toolbar in the demo's order — the ACCEPT /
-   DROP toggles, the search with its "/", the count against the right
-   edge. Above a phone only; there the foundation stacks it. */
-@media (min-width: 48.01rem) {
-  .nx-tb.fw-tb {
-    grid-template-columns: auto minmax(14rem, 22rem) minmax(0, 1fr);
-  }
-}
-
-/* redesign-config-8: a rule switched off reads muted */
-.fw-rule--off td {
-  color: var(--muted-foreground);
-}
-.fw-rule--off .fw-act {
-  opacity: 0.6;
+.fw-panel .kp-formgrid__row[hidden] {
+  display: none;
 }

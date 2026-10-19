@@ -1,5 +1,3 @@
-// The kp-themes module chassis-rs serves at /static/kp/js/tables.js (kp-themes 10.1.1),
-// copied from kp-themes js/tables.d.ts: chassis serves the module, not its types.
 /** The wrapper this module upgrades. A contract value [TH26]. */
 export declare const WRAP_SELECTOR = ".kp-table-wrap";
 /** A wrapper the consumer keeps out of it: `data-kp-region="off"`. */

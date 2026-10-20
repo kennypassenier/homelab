@@ -62,6 +62,7 @@ import {
   toggleGroup,
 } from "../ui.js";
 import { attachTrendCharts, setTrendData } from "/static/kp/js/chart.js";
+import { runFlashButton } from "/static/kp/js/flash.js";
 import { attachPatterns } from "/static/kp/js/patterns.js";
 import {
   REFRESH_EVENT,
@@ -1111,6 +1112,29 @@ export function mount(root, ctx) {
    * @param {string} pin
    */
   const pinCell = (pin) => {
+    const pinCopy = drivable(
+      h(
+        "button",
+        {
+          type: "button",
+          class: "kp-button kp-button--ghost kp-button--sm kp-copyable__button",
+          "data-kp-flash-words": "Copied,Press Ctrl C",
+          "aria-label": "Copy the whole fingerprint",
+        },
+        "Copy",
+      ),
+      COPY_PIN,
+    );
+    pinCopy.addEventListener("click", () => {
+      void runFlashButton(pinCopy, async () => {
+        try {
+          await navigator.clipboard.writeText(pin);
+          return "Copied";
+        } catch {
+          return { error: "Press Ctrl C", word: "Press Ctrl C" };
+        }
+      });
+    });
     const cell = h(
       "span",
       { class: "kp-copyable" },
@@ -1119,21 +1143,7 @@ export function mount(root, ctx) {
         { class: "kp-copyable__value mono", title: pin },
         `${pin.slice(0, 20)}…`,
       ),
-      drivable(
-        h(
-          "button",
-          {
-            type: "button",
-            class:
-              "kp-button kp-button--ghost kp-button--sm kp-copyable__button",
-            "data-kp-copy": "",
-            "data-kp-copy-value": pin,
-            "aria-label": "Copy the whole fingerprint",
-          },
-          "Copy",
-        ),
-        COPY_PIN,
-      ),
+      pinCopy,
     );
     attachPatterns(cell);
     return cell;

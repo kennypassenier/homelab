@@ -15,6 +15,7 @@ import { section, segSwitch } from "./ui.js";
 import { setBullets } from "/static/kp/js/bullets.js";
 import {
   setHeat,
+  setHeatLegend,
   HEAT_PICK_EVENT,
   HEAT_ROW_EVENT,
 } from "/static/kp/js/heat.js";
@@ -315,22 +316,6 @@ export function fleetGlance(ctx) {
     "data-kp-heat-latest": "end",
     id: "fg-nights",
   });
-  const legend = h(
-    "ul",
-    { class: "kp-heat__legend fg-legend", "aria-label": "Legend" },
-    ...[
-      ["ok", "backed up"],
-      ["bad", "missed"],
-      ["paused", "paused (parked)"],
-    ].map(([tone, words]) =>
-      h(
-        "li",
-        null,
-        h("span", { class: "kp-heat__swatch", "data-kp-tone": tone }),
-        words,
-      ),
-    ),
-  );
   const readout = h("div", { class: "fg-readout", "aria-live": "polite" });
   const nightsCtl = h(
     "div",
@@ -342,12 +327,19 @@ export function fleetGlance(ctx) {
     title: "Every stack, every night",
     desc: "Draws the stacks against the last nights as a grid of coloured cells, with one summary row of how many stacks missed each night, so a stack that fails often shows as a stripe.",
     id: "stack-nights",
-    body: h("div", { class: "fg-nights" }, nightsCtl, heat, legend, readout),
+    body: h("div", { class: "fg-nights" }, nightsCtl, heat, readout),
     foot: [
       "The backup calendar the Backups page reads",
       "a parked stack is paused, never failed",
     ],
   });
+
+  // kp's heat legend under the grid.
+  setHeatLegend(heat, [
+    { tone: "ok", label: "backed up" },
+    { tone: "bad", label: "missed" },
+    { tone: "paused", label: "paused (parked)" },
+  ]);
 
   const narrow = () => matchMedia("(max-width: 40rem)").matches;
   const count = () => (narrow() ? Math.min(7, win) : win);

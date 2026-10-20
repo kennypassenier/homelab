@@ -178,9 +178,6 @@
 .ac-heat {
   min-block-size: calc(var(--ac-heat-rows, 21) * 1.95rem + 1.5rem);
 }
-.ac-legend {
-  margin: var(--kp-space-sm, 8px) 0 0;
-}
 /* Six stack lanes, two of them with a second row for a running or waiting
    job, all in view without a scroll. */
 .ac-jobs-gantt {

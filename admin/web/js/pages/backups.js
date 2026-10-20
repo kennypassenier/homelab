@@ -106,7 +106,6 @@ import {
   setHeatRows,
 } from "/static/kp/js/heat.js";
 import { attachFootprints } from "/static/kp/js/footprint.js";
-import { setKeys } from "/static/kp/js/keys.js";
 import {
   SEGMENTED_EVENT,
   attachSegmented,
@@ -689,30 +688,23 @@ export function mount(root) {
       ),
     ),
   );
-  const keysEl = h("span", { class: "kp-keys" });
-  const legendItem = (/** @type {string} */ tone, /** @type {string} */ w) =>
-    h(
-      "li",
-      null,
-      h("span", { class: "kp-heat__swatch", "data-kp-tone": tone }),
-      ` ${w}`,
-    );
-  const legend = h(
-    "ul",
-    { class: "kp-heat__legend", "aria-label": "Legend" },
-    legendItem("ok", "backed up"),
-    legendItem("warn", "some stacks missed"),
-    legendItem("bad", "missed"),
-    legendItem("before", "before any history"),
-    legendItem("none", "keeps no data"),
-    h("li", { "data-kp-end": "" }, keysEl),
-  );
-  setKeys(keysEl, [
-    [["←", "→", "↑", "↓"], "move"],
-    ["Enter", "pin the night"],
-    [["Page Up", "Page Down"], "earlier or later"],
-    ["Esc", "unpin"],
-  ]);
+  // kp's heat legend (setHeat `legend`), under each grid it explains.
+  /** @type {Pick<import("/static/kp/js/heat.js").HeatSpec, "legend" | "legendKeys">} */
+  const heatLegend = {
+    legend: [
+      { tone: "ok", label: "backed up" },
+      { tone: "warn", label: "some stacks missed" },
+      { tone: "bad", label: "missed" },
+      { tone: "before", label: "before any history" },
+      { tone: "none", label: "keeps no data" },
+    ],
+    legendKeys: [
+      [["←", "→", "↑", "↓"], "move"],
+      ["Enter", "pin the night"],
+      [["Page Up", "Page Down"], "earlier or later"],
+      ["Esc", "unpin"],
+    ],
+  };
   const pinRead = h(
     "p",
     { class: "kp-formgrid__control", role: "status", "data-bk-pin": "" },
@@ -766,7 +758,7 @@ export function mount(root) {
     title: "Backups per night",
     desc: "Shows, for each stack, whether a backup landed on each night, so a missed night stands out at a glance and one press pins it; the Month option shows one month as a calendar with the same grid beside it.",
   });
-  cov.body.append(toolbar, covCard, legend, reads3);
+  cov.body.append(toolbar, covCard, reads3);
 
   // ── one night ─────────────────────────────────────────────────────────
   const nightSel = h("select", {
@@ -1196,6 +1188,7 @@ export function mount(root) {
         /** @type {string[]} */ nights,
         /** @type {number} */ every,
       ) => ({
+        ...heatLegend,
         ...nightsSpec({
           names: [],
           reads: {},
@@ -1241,15 +1234,15 @@ export function mount(root) {
       shown: S.stacks,
     };
     if (!isMonth) {
-      setHeat(
-        nightsHeat,
-        nightsSpec({
+      setHeat(nightsHeat, {
+        ...heatLegend,
+        ...nightsSpec({
           ...common,
           nights,
           every: range.every,
           label: `Backups per stack, last ${range.n} nights`,
         }),
-      );
+      });
       decorateHeat(nightsHeat);
       if (S.night && nights.includes(S.night)) setHeatPick(nightsHeat, S.night);
       else setHeatPick(nightsHeat, null);
@@ -1259,6 +1252,7 @@ export function mount(root) {
     } else {
       const days = monthNights(S.cursor.year, S.cursor.month);
       setHeat(monthHeat, {
+        ...heatLegend,
         ...nightsSpec({
           ...common,
           nights: days,
@@ -1285,7 +1279,6 @@ export function mount(root) {
       );
       if (S.night) calendarSelect(calendar, S.night);
     }
-    legend.hidden = false;
     shownRead.textContent = S.stacks.size
       ? `Showing only: ${[...S.stacks].sort().join(", ")} (the page filters; the grid reports).`
       : "All stacks shown. Press a stack name to show only that one.";

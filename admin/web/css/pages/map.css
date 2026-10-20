@@ -387,23 +387,6 @@
   --kp-matrix-head: 8rem;
   --kp-matrix-cell-min: 4.4rem;
 }
-.mv-legend {
-  display: grid;
-  grid-template-columns: auto auto minmax(0, 1fr);
-  column-gap: var(--kp-space-sm, 0.5rem);
-  row-gap: var(--kp-space-xs, 0.25rem);
-  align-items: baseline;
-  justify-items: start;
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-.mv-legend > li {
-  grid-column: 1 / -1;
-  display: grid;
-  grid-template-columns: subgrid;
-  align-items: baseline;
-}
 .mv-card .nx-card__body {
   display: grid;
   grid-template-columns: minmax(0, 1fr);

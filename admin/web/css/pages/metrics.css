@@ -211,10 +211,6 @@ main.mk-page > .mk-failed:empty {
 .mk-card .kp-datatable[hidden] {
   display: none;
 }
-.mk-legend {
-  margin: 0;
-  padding: 0;
-}
 /* Hostnames are long: the grid's name column is wide enough for the longest. */
 #traffic-heat {
   --kp-heat-label: 14rem;

@@ -60,6 +60,7 @@ import {
   MATRIX_LIGHT_EVENT,
   MATRIX_PICK_EVENT,
   attachMatrices,
+  setHeatLegend,
   setMatrix,
   setMatrixLit,
   setMatrixPick,
@@ -67,7 +68,7 @@ import {
 import { attachFootprints } from "/static/kp/js/footprint.js";
 import { attachIdmarks } from "/static/kp/js/idmark.js";
 import { attachHoverCards } from "/static/kp/js/hovercard.js";
-import { attachKeys, setKeys } from "/static/kp/js/keys.js";
+import { attachKeys } from "/static/kp/js/keys.js";
 import {
   SEGMENTED_EVENT,
   attachSegmented,
@@ -741,29 +742,25 @@ export function mount(root) {
     class: "kp-matrix",
     "data-kp-matrix": "",
   });
-  const legend = h(
-    "ul",
-    { class: "kp-heat__legend", "aria-label": "Legend" },
-    ...[
-      ["ok", "some ports"],
-      ["bad", "every port (target unprotected)"],
-      ["muted", "nothing"],
-      ["warn", "differs from the files"],
-    ].map(([t, w]) =>
-      h(
-        "li",
-        null,
-        h("span", { class: "kp-heat__swatch", "data-kp-tone": t }),
-        ` ${w}`,
-      ),
-    ),
-    h(
-      "li",
-      { "data-kp-end": "" },
-      h("span", { class: "kp-keys", "data-fw-keys": "" }),
-    ),
-  );
   const mxCard = card("Who can reach whom", [mxEl]);
+  // kp's heat legend, under the matrix it explains.
+  setHeatLegend(
+    mxEl,
+    [
+      { tone: "ok", label: "some ports" },
+      { tone: "bad", label: "every port (target unprotected)" },
+      { tone: "muted", label: "nothing" },
+      { tone: "warn", label: "differs from the files" },
+    ],
+    {
+      keys: [
+        [["←", "→", "↑", "↓"], "move"],
+        ["Enter", "pin the cell"],
+        ["S", "swap the traced pair"],
+        ["Esc", "show every stack"],
+      ],
+    },
+  );
   mxp.el.append(
     gridRow({
       label: "Compare",
@@ -773,7 +770,6 @@ export function mount(root) {
     }),
     gridRow({ label: "Lit", control: lit, actions: showAll }),
     h("div", { class: "fw-matrix", "data-fw-span": "all" }, mxCard.el),
-    legend,
   );
 
   // ── the trace ─────────────────────────────────────────────────────────
@@ -993,12 +989,6 @@ export function mount(root) {
   cleanups.push(tables);
   const comboHandles = attachComboboxes(root);
   cleanups.push(comboHandles);
-  setKeys(/** @type {HTMLElement} */ (root.querySelector("[data-fw-keys]")), [
-    [["←", "→", "↑", "↓"], "move"],
-    ["Enter", "pin the cell"],
-    ["S", "swap the traced pair"],
-    ["Esc", "show every stack"],
-  ]);
   // What Live view reaches that the package draws itself.
   const toggleAll = toggles.querySelector("[data-kp-toggle-all]");
   if (toggleAll instanceof HTMLElement)

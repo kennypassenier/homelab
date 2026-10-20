@@ -71,7 +71,7 @@ import {
 import { attachCardStates, setCardState } from "/static/kp/js/card-state.js";
 import { setDeplist } from "/static/kp/js/deplist.js";
 import { setCode } from "/static/kp/js/code.js";
-import { HEAT_PICK_EVENT, setHeat } from "/static/kp/js/heat.js";
+import { HEAT_PICK_EVENT, setHeat, setHeatLegend } from "/static/kp/js/heat.js";
 import { UPTIME_PICK_EVENT, setUptime } from "/static/kp/js/uptime.js";
 import {
   DANGER,
@@ -2620,22 +2620,6 @@ function backupsTab(panel, c) {
       },
       mark: (b, v) => void drivable(b, BACKUP_VIEW, `${name}/${v}`),
     });
-    const legend = h(
-      "ul",
-      { class: "kp-heat__legend hb-legend", "aria-label": "Legend" },
-      ...[
-        ["ok", "backed up"],
-        ["bad", "missed"],
-        ["before", "before the oldest kept backup"],
-      ].map(([tone, words]) =>
-        h(
-          "li",
-          null,
-          h("span", { class: "kp-heat__swatch", "data-kp-tone": tone }),
-          words,
-        ),
-      ),
-    );
     const readout = h("p", { class: "hb-readout", role: "status" });
     body.replaceChildren(
       h(
@@ -2646,9 +2630,14 @@ function backupsTab(panel, c) {
       ),
       strips,
       heat,
-      legend,
       readout,
     );
+    // kp's heat legend: the tones of both views (strips and grid).
+    setHeatLegend(heat, [
+      { tone: "ok", label: "backed up" },
+      { tone: "bad", label: "missed" },
+      { tone: "before", label: "before the oldest kept backup" },
+    ]);
     const draw = () => {
       views.set(backupView);
       strips.hidden = backupView !== "strips";

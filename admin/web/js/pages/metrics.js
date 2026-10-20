@@ -104,6 +104,7 @@ import {
   HEAT_ROW_EVENT,
   attachHeats,
   setHeat,
+  setHeatLegend,
   setHeatPick,
   setHeatRows,
 } from "/static/kp/js/heat.js";
@@ -1918,21 +1919,15 @@ export function mount(root, ctx) {
       id: "traffic-heat",
       "aria-label": "Requests per hostname per hour",
     });
-    const heatBox = h(
-      "div",
-      { class: "mk-hosts" },
-      heatEl,
-      h(
-        "ul",
-        { class: "kp-heat__legend mk-legend" },
-        h(
-          "li",
-          null,
-          h("span", { class: "kp-heat__ramp" }),
-          " fewer to more requests for that hostname",
-        ),
-      ),
-    );
+    const heatBox = h("div", { class: "mk-hosts" }, heatEl);
+    // kp's heat legend: the value ramp under the grid.
+    setHeatLegend(heatEl, [
+      {
+        ramp: true,
+        less: "Fewer",
+        more: "more requests for that hostname",
+      },
+    ]);
     const hostsBody = h("tbody");
     const hostsTable = h(
       "div",

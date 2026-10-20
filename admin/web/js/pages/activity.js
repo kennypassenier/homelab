@@ -106,6 +106,7 @@ import {
 import {
   attachHeats,
   setHeat,
+  setHeatLegend,
   setHeatPick,
   setHeatRows,
 } from "/static/kp/js/heat.js";
@@ -733,25 +734,13 @@ function mountNow(body, x) {
     desc: "Shows every stack against every day, coloured by whether it ran cleanly, so a stack that keeps failing stands out at a glance; press a day or a stack name to narrow the History below.",
     id: "heat",
   });
-  heatCard.body.append(
-    heatCover,
-    h(
-      "ul",
-      { class: "kp-heat__legend ac-legend" },
-      ...[
-        ["ok", "everything ran fine"],
-        ["bad", "something failed"],
-        ["none", "not touched that day"],
-      ].map(([tone, words]) =>
-        h(
-          "li",
-          null,
-          h("span", { class: "kp-heat__swatch", "data-kp-tone": tone }),
-          ` ${words}`,
-        ),
-      ),
-    ),
-  );
+  heatCard.body.append(heatCover);
+  // kp's heat legend under the grid.
+  setHeatLegend(heatEl, [
+    { tone: "ok", label: "everything ran fine" },
+    { tone: "bad", label: "something failed" },
+    { tone: "none", label: "not touched that day" },
+  ]);
 
   // ── History (kp data table) ───────────────────────────────────────────
   const stale$ = h("p", { class: "ac-stale", role: "status", hidden: "" });

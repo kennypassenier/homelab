@@ -26,7 +26,11 @@ import { setBullets } from "/static/kp/js/bullets.js";
 import { attachCardStates, setCardState } from "/static/kp/js/card-state.js";
 import { attachDataTables } from "/static/kp/js/datatable.js";
 import { setDeplist } from "/static/kp/js/deplist.js";
-import { MATRIX_PICK_EVENT, setMatrix } from "/static/kp/js/heat.js";
+import {
+  MATRIX_PICK_EVENT,
+  setHeatLegend,
+  setMatrix,
+} from "/static/kp/js/heat.js";
 import { attachIdmarks } from "/static/kp/js/idmark.js";
 import { bindSelection } from "./selectbind.js";
 import {
@@ -455,19 +459,6 @@ export function matrixView() {
     "data-kp-matrix-owned": "",
     "data-kp-matrix-select": "follow",
   });
-  const legend = h(
-    "ul",
-    { class: "kp-heat__legend mv-legend", "aria-label": "Kinds of connection" },
-    ...Object.entries(KIND_WORDS).map(([k, words]) =>
-      h(
-        "li",
-        null,
-        h("span", { class: "kp-heat__swatch", "data-kp-tone": KIND_TONE[k] }),
-        h("b", null, k),
-        h("span", null, words),
-      ),
-    ),
-  );
   const shows = segSwitch({
     label: "Show",
     value: show,
@@ -501,8 +492,16 @@ export function matrixView() {
       shows.el,
     ),
     el,
-    legend,
     line,
+  );
+  // kp's heat legend under the matrix: one swatch per kind of connection.
+  setHeatLegend(
+    el,
+    Object.entries(KIND_WORDS).map(([k, words]) => ({
+      tone: /** @type {any} */ (KIND_TONE[k]),
+      label: `${k}: ${words}`,
+    })),
+    { label: "Kinds of connection" },
   );
   const draw = () => {
     shows.set(show);

@@ -1141,7 +1141,7 @@ test("invariants: every top-level section on Overview and the stack page has a h
         const heads = document.querySelectorAll("#page h1, #page h2, #page h3");
         for (const head of heads) {
           // The description is the shared `.section-head__desc` sibling
-          // when the heading uses `sectionHeader()`, or the next element
+          // when the heading carries one, or the next element
           // sibling of the heading's own row otherwise (a plain paragraph
           // right after it, or right after its enclosing `.kp-page-header__heading`).
           let desc =

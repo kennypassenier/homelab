@@ -79,16 +79,8 @@ a.kp-button:visited {
   text-decoration-line: none;
 }
 /* fix-210 (Kenny, 2026-10-02: "ik moet niet raden naar wat een functie
-   doet, alles moet duidelijk zijn"): the one shared shape for a section's
-   heading plus its one-sentence description (`dom.js` `sectionHeader()`),
-   so every page's section intro reads the same instead of each page
-   inventing its own heading/caption pair. */
-.section-head {
-  margin: 0;
-}
-.section-head > :first-child {
-  margin: 0;
-}
+   doet, alles moet duidelijk zijn"): the one shared class for a section's
+   one-sentence description, so every page's section intro reads the same. */
 .section-head__desc {
   margin-block-start: 2px !important;
 }
@@ -1660,62 +1652,6 @@ td.stack-flags {
 /* An empty chart/figure message */
 .chart__empty {
   color: var(--muted-foreground);
-}
-
-/* fix-224 (Kenny, Dutch: "welke doet die dan niet? waarom kan ik dat niet
- * zien?"): a per-stack read's progress as a named chip grid — one chip per
- * stack, every state its own colour, instead of a bare "N of M" a reader
- * cannot act on. Shared by the backup calendar and the Backups page, the
- * two pages that read one route per stack (`perstack.js`). */
-.perstack-chips {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(11rem, 1fr));
-  gap: 6px;
-  width: 100%;
-  margin: 0 0 8px;
-  padding: 0;
-  list-style: none;
-}
-/* redesign-final (layout audit): the stack's name is never cut; its state
-   word wraps in its own column instead. */
-.perstack-chip {
-  display: grid;
-  grid-template-columns: max-content minmax(0, 1fr) auto;
-  align-items: center;
-  gap: 6px;
-  padding: 4px 8px;
-  border-radius: 6px;
-  font-size: 0.85em;
-  border: 1px solid var(--border);
-  background: var(--muted);
-  color: var(--muted-foreground);
-}
-.perstack-chip--read {
-  background: color-mix(in srgb, var(--success-foreground) 18%, transparent);
-  border-color: var(--success-foreground);
-  color: var(--foreground);
-}
-.perstack-chip--no_backup {
-  color: var(--muted-foreground);
-}
-.perstack-chip--reading {
-  color: var(--foreground);
-}
-.perstack-chip--failed {
-  background: color-mix(in srgb, var(--destructive) 14%, transparent);
-  border-color: var(--destructive);
-  color: var(--foreground);
-}
-.perstack-chip__name {
-  font-weight: 600;
-  white-space: nowrap;
-}
-.perstack-chip__state {
-  justify-self: end;
-  text-align: end;
-}
-.perstack-chip__retry {
-  flex: none;
 }
 
 /* fix-241: the "Show a file…" dialog — fields, the button, the status and

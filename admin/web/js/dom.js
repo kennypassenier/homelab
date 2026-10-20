@@ -96,28 +96,6 @@ export function td(text, cls) {
 }
 
 /**
- * The one shared shape for a top-level section's heading (rule 8, Kenny
- * 2026-10-02: "ik moet niet raden naar wat een functie doet, alles moet
- * duidelijk zijn" — every section says, in one plain sentence, what it
- * does and when it is used, so nobody has to guess from the heading
- * alone). `level` picks `h1` (a page's own title) or `h2` (a section
- * inside a page, e.g. a `<details>` block's `<summary>`); the description
- * always renders as the next sibling paragraph, in one shared class so
- * every page's section intro reads the same.
- * @param {string} title
- * @param {string} description one plain sentence
- * @param {{level?: "h1" | "h2" | "h3"}} [opts]
- */
-export function sectionHeader(title, description, opts = {}) {
-  return h(
-    "hgroup",
-    { class: "section-head" },
-    h(opts.level ?? "h2", null, title),
-    h("p", { class: "section-head__desc measured" }, description),
-  );
-}
-
-/**
  * kp-themes' badge variant for a state tone (`ok`, `warn`, `bad`; any
  * other tone is the plain badge).
  * @type {Record<string, string>}
@@ -616,17 +594,6 @@ export function bindTableUrl(handle, name) {
 }
 
 /**
- * Label and value pairs as a definition list.
- * @param {HTMLElement} dl
- * @param {{label: string, value: string}[]} facts
- */
-export function fillFacts(dl, facts) {
-  dl.replaceChildren(
-    ...facts.flatMap((x) => [h("dt", null, x.label), h("dd", null, x.value)]),
-  );
-}
-
-/**
  * A row of stat tiles from a plain list, redrawn whole (Kenny, 2026-10-01):
  * for a count that does not need its own live-updating node. kp-themes'
  * key figures without a trend: `.kp-kpis` of `.kp-kpi`.
@@ -702,34 +669,6 @@ export function patchKeyed(
 export const LIVE = "data-live";
 
 /**
- * The text of every live value under `root`, by its name.
- * @param {ParentNode} root
- * @returns {Map<string, string>}
- */
-export function liveTexts(root) {
-  /** @type {Map<string, string>} */
-  const m = new Map();
-  for (const e of root.querySelectorAll(`[${LIVE}]`))
-    m.set(e.getAttribute(LIVE) ?? "", e.textContent ?? "");
-  return m;
-}
-
-/**
- * After a repaint of `root`, play the theme's update on every live value
- * whose text differs from what `before` (liveTexts, taken just before the
- * repaint) held; a value that is new, or the same, plays nothing.
- * @param {ParentNode} root
- * @param {Map<string, string>} before
- */
-export function playChanged(root, before) {
-  for (const e of root.querySelectorAll(`[${LIVE}]`)) {
-    const was = before.get(e.getAttribute(LIVE) ?? "");
-    const now = e.textContent ?? "";
-    if (was != null && was !== now) void update(e, now);
-  }
-}
-
-/**
  * Write a live value in place: a change plays the theme's update; the
  * first fill, or the same text again, is written plainly.
  * @param {Element} el
@@ -740,15 +679,6 @@ export function setLive(el, text) {
   if (el.textContent === s) return;
   if (!el.isConnected || el.textContent === "") el.textContent = s;
   else void update(el, s);
-}
-
-/**
- * Refills a stat grid in place, the stat-tile counterpart of `fillFacts`.
- * @param {HTMLElement} grid
- * @param {{label: string, value: string}[]} stats
- */
-export function fillStatGrid(grid, stats) {
-  grid.replaceChildren(...stats.map((s) => statTile(s.label, s.value).el));
 }
 
 /**
@@ -803,27 +733,6 @@ export function progressBar(label, pct = 0, cls = "") {
 }
 
 /**
- * kp-themes progress bars in one group, so the tracks line up.
- * @param {{label: string, pct: number, value: string}[]} bars
- */
-export function progressGroup(bars) {
-  return h(
-    "div",
-    { class: "kp-progress-group" },
-    ...bars.map((b) => {
-      const p = progressBar(b.label, b.pct);
-      return h(
-        "div",
-        { class: "kp-progress__wrap" },
-        h("span", { class: "kp-progress__label" }, b.label),
-        p,
-        h("span", { class: "kp-progress__value" }, b.value),
-      );
-    }),
-  );
-}
-
-/**
  * The same kp tab row for every tabbed page: links, so each tab has its own
  * address (feat-overview-8), marked the ARIA way.
  * @param {string} label
@@ -846,55 +755,6 @@ export function tabRow(label, tabs) {
         t.label,
       ),
     ),
-  );
-}
-
-/**
- * fix-224: a per-stack read's progress as a named chip grid — `perstack.js`'s
- * `stackChips` painted, one chip per stack: `read` (settled), `reading`
- * (still pending, with how long), `no_backup` (fix-202's terminal "keeps
- * nothing by design") and `failed` (the host's own reason — also where a
- * stack that outlived its own per-stack timeout lands, each with its own
- * Retry button so one hung stack never needs the whole page reloaded).
- * @param {ReturnType<typeof import("./perstack.js").stackChips>} chips
- * @param {{onRetry?: (stack: string) => void}} [opts]
- */
-export function perstackChips(chips, opts = {}) {
-  return h(
-    "ul",
-    { class: "perstack-chips", "aria-live": "polite" },
-    ...chips.map((c) => {
-      const word =
-        c.state === "read"
-          ? "read"
-          : c.state === "no_backup"
-            ? "no backups by design"
-            : c.state === "reading"
-              ? `reading (${c.seconds}s)`
-              : `${c.reason}`;
-      return h(
-        "li",
-        { class: `perstack-chip perstack-chip--${c.state}` },
-        h("span", { class: "perstack-chip__name" }, c.stack),
-        h("span", { class: "perstack-chip__state" }, word),
-        ...(c.state === "failed" && opts.onRetry
-          ? [
-              (() => {
-                const btn = h(
-                  "button",
-                  {
-                    type: "button",
-                    class: "kp-button kp-button--sm perstack-chip__retry",
-                  },
-                  "Retry",
-                );
-                btn.addEventListener("click", () => opts.onRetry?.(c.stack));
-                return btn;
-              })(),
-            ]
-          : []),
-      );
-    }),
   );
 }
 

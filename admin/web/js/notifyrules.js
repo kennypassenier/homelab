@@ -9,11 +9,78 @@
 // with a notice.
 
 /**
+ * @typedef {{from: string, to: string, days: number[],
+ *   critical_breaks: boolean}} QuietHours days: 1 = Monday .. 7 = Sunday
+ * @typedef {{critical: boolean, warning: boolean, info: boolean,
+ *   ok: boolean}} Routing
  * @typedef {{push: boolean, digest_at?: string | null,
- *   snooze_until?: number | null, muted_stacks?: string[]}} Rules
+ *   snooze_until?: number | null, muted_stacks?: string[],
+ *   quiet_hours?: QuietHours | null, routing?: Routing | null}} Rules
  */
 
-import { formatDateTime } from "./format.js";
+import { ZONE, formatDateTime } from "./format.js";
+import { WEEKDAYS, zoneParts } from "./schedules.js";
+
+/** The severities in the order the page lists them, with their words. */
+export const SEVERITIES = /** @type {const} */ ([
+  [
+    "critical",
+    "Critical",
+    "a service or the host down for five minutes, a missed backup",
+  ],
+  ["warning", "Warning", "something failed or needs a look"],
+  ["info", "Info", "news that needs no action"],
+  ["ok", "Ok", "done, nothing to do"],
+]);
+
+/**
+ * Minutes into the day and the ISO weekday (1 = Monday) of a moment in the
+ * dashboard's zone.
+ * @param {number} unix @param {string} [timeZone]
+ */
+function localParts(unix, timeZone = ZONE) {
+  const p = zoneParts(unix, timeZone);
+  return { minutes: p.hh * 60 + p.mm, wd: p.wd + 1 };
+}
+
+/** @param {string} hhmm */
+const minutesOf = (hhmm) => {
+  const [h, m] = hhmm.split(":").map(Number);
+  return h * 60 + m;
+};
+
+/**
+ * Whether quiet hours cover a moment (the server's `QuietHours::covers`): a
+ * window across midnight belongs to the weekday it starts on.
+ * @param {QuietHours | null | undefined} q @param {number} unix
+ * @param {string} [timeZone]
+ */
+export function quietCovers(q, unix, timeZone) {
+  if (!q) return false;
+  const { minutes, wd } = localParts(unix, timeZone);
+  const [from, to] = [minutesOf(q.from), minutesOf(q.to)];
+  const yesterday = wd === 1 ? 7 : wd - 1;
+  if (from < to) return minutes >= from && minutes < to && q.days.includes(wd);
+  if (minutes >= from) return q.days.includes(wd);
+  return minutes < to && q.days.includes(yesterday);
+}
+
+/**
+ * Quiet hours in words: "22:00 to 07:00 on Mon, Tue and Wed".
+ * @param {QuietHours} q
+ */
+export function quietWords(q) {
+  const days = [...q.days].sort((a, b) => a - b).map((d) => WEEKDAYS[d - 1]);
+  const list =
+    days.length === 0
+      ? "no day"
+      : days.length === 7
+        ? "every day"
+        : days.length === 1
+          ? days[0]
+          : `${days.slice(0, -1).join(", ")} and ${days.at(-1)}`;
+  return `${q.from} to ${q.to} on ${list}`;
+}
 
 /** The longest snooze the server takes, in minutes (a week). */
 export const SNOOZE_MAX_MINUTES = 10080;
@@ -74,7 +141,8 @@ export function digestLast(last, timeZone) {
 /**
  * What the rules would do with one notice, in the server's own order
  * (core/notify.rs `decide`): a snooze silences everything, then only an
- * urgent notice pushes, then the global switch, then the stack's.
+ * urgent notice pushes, then the global switch, the stack's, the severity's
+ * and quiet hours.
  * @param {{level?: string, stack?: string}} n
  * @param {Rules} s
  * @param {number} now unix seconds
@@ -98,6 +166,22 @@ export function pushVerdict(n, s, now, timeZone) {
     return { pushed: false, why: "Not pushed: push to the phone is off." };
   if (n.stack && (s.muted_stacks ?? []).includes(n.stack))
     return { pushed: false, why: `Not pushed: ${n.stack} is muted.` };
+  const level = /** @type {keyof Routing} */ (n.level ?? "info");
+  if (s.routing && s.routing[level] === false)
+    return {
+      pushed: false,
+      why: `Not pushed: ${level} notices are set to digest only.`,
+    };
+  const q = s.quiet_hours;
+  if (
+    q &&
+    quietCovers(q, now, timeZone) &&
+    !(q.critical_breaks && level === "critical")
+  )
+    return {
+      pushed: false,
+      why: `Not pushed: quiet hours (${quietWords(q)}).`,
+    };
   return {
     pushed: true,
     why: "Pushed: an urgent notice goes to the phone at once.",

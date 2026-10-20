@@ -232,6 +232,115 @@ pub struct Settings {
     /// from before still loads; never written.
     #[serde(default, rename = "long_action_s", skip_serializing)]
     pub retired_long_action_s: Option<u64>,
+    /// ask-kp11be-3: hours in which nothing pushes (the notice still lands
+    /// in the list). None: no quiet hours.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub quiet_hours: Option<QuietHours>,
+    /// ask-kp11be-3: per severity, may a notice push at all? A severity set
+    /// to "digest only" never pushes (it lands in the list and the digest).
+    /// Absent severities push, as before.
+    #[serde(default, skip_serializing_if = "Routing::is_default")]
+    pub routing: Routing,
+}
+
+/// ask-kp11be-3: a daily window, local time (Europe/Brussels), on chosen
+/// weekdays. A window that crosses midnight (22:00 to 07:00) belongs to the
+/// weekday it starts on.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct QuietHours {
+    /// `HH:MM`.
+    pub from: String,
+    /// `HH:MM`; equal to `from` is refused (an empty or a whole-day window
+    /// is better said by not setting quiet hours, or by a snooze).
+    pub to: String,
+    /// 1 = Monday .. 7 = Sunday, the day the window starts on. Empty: none.
+    pub days: Vec<u8>,
+    /// A critical notice (a service down five minutes) still pushes.
+    #[serde(default = "yes")]
+    pub critical_breaks: bool,
+}
+
+/// ask-kp11be-3: one switch per severity.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Routing {
+    #[serde(default = "yes")]
+    pub critical: bool,
+    #[serde(default = "yes")]
+    pub warning: bool,
+    #[serde(default = "yes")]
+    pub info: bool,
+    #[serde(default = "yes")]
+    pub ok: bool,
+}
+
+impl Default for Routing {
+    fn default() -> Self {
+        Routing {
+            critical: true,
+            warning: true,
+            info: true,
+            ok: true,
+        }
+    }
+}
+
+impl Routing {
+    pub fn is_default(&self) -> bool {
+        *self == Routing::default()
+    }
+    pub fn pushes(&self, l: Level) -> bool {
+        match l {
+            Level::Critical => self.critical,
+            Level::Warning => self.warning,
+            Level::Info => self.info,
+            Level::Ok => self.ok,
+        }
+    }
+}
+
+impl QuietHours {
+    pub fn validate(&self) -> Result<(), String> {
+        let (Some(f), Some(t)) = (
+            super::schedule::parse_hhmm(&self.from),
+            super::schedule::parse_hhmm(&self.to),
+        ) else {
+            return Err("quiet hours are times HH:MM, 00:00 to 23:59".into());
+        };
+        if f == t {
+            return Err("quiet hours need different start and end times".into());
+        }
+        if self.days.iter().any(|d| !(1..=7).contains(d)) {
+            return Err("quiet hours days are 1 (Monday) to 7 (Sunday)".into());
+        }
+        Ok(())
+    }
+
+    /// Whether `now` (unix seconds) falls inside the window.
+    pub fn covers(&self, now: i64) -> bool {
+        let (Some((fh, fm)), Some((th, tm))) = (
+            super::schedule::parse_hhmm(&self.from),
+            super::schedule::parse_hhmm(&self.to),
+        ) else {
+            return false;
+        };
+        let (from, to) = (fh * 60 + fm, th * 60 + tm);
+        let (y, m, d, h, min) = super::schedule::to_local(now);
+        let at = h * 60 + min;
+        // Monday = 1 .. Sunday = 7 of a calendar day (weekday() is 0 = Monday).
+        let dow = |days: i64| (super::schedule::weekday(days) + 1) as u8;
+        let today = super::schedule::days_from_civil(y, m, d);
+        let on = |days: i64| self.days.contains(&dow(days));
+        if from < to {
+            at >= from && at < to && on(today)
+        } else if at >= from {
+            on(today)
+        } else {
+            // The small hours belong to the day before.
+            at < to && on(today - 1)
+        }
+    }
 }
 
 fn yes() -> bool {
@@ -252,6 +361,8 @@ impl Default for Settings {
             snooze_until: None,
             digest_at: d_digest(),
             retired_long_action_s: None,
+            quiet_hours: None,
+            routing: Routing::default(),
         }
     }
 }
@@ -269,6 +380,9 @@ impl Settings {
             .any(|s| !super::actions::valid_stack_name(s))
         {
             return Err("muted_stacks holds stack names only".into());
+        }
+        if let Some(q) = &self.quiet_hours {
+            q.validate()?;
         }
         Ok(())
     }
@@ -429,7 +543,8 @@ pub fn draft_urgency(d: &Draft) -> homelab_core::notify::Urgency {
 }
 
 /// The one decision about a notice. Order: snooze (silences everything),
-/// what the notice is (only urgent pushes), the global switch, the stack's.
+/// what the notice is (only urgent pushes), the global switch, the stack's,
+/// the severity's, then quiet hours.
 /// Pages pop up what needs a look and the dashboard's own action results.
 pub fn route(s: &Settings, d: &Draft, now: i64) -> Route {
     if s.snoozed(now) {
@@ -439,19 +554,26 @@ pub fn route(s: &Settings, d: &Draft, now: i64) -> Route {
         };
     }
     let u = draft_urgency(d);
-    let push = if !u.urgent {
-        Err(u.why.to_string())
-    } else if !s.push {
-        Err("pushes are off".into())
-    } else if d
-        .stack
-        .as_ref()
-        .is_some_and(|st| s.muted_stacks.contains(st))
-    {
-        Err("this stack's pushes are off".into())
-    } else {
-        Ok(())
-    };
+    let push =
+        if !u.urgent {
+            Err(u.why.to_string())
+        } else if !s.push {
+            Err("pushes are off".into())
+        } else if d
+            .stack
+            .as_ref()
+            .is_some_and(|st| s.muted_stacks.contains(st))
+        {
+            Err("this stack's pushes are off".into())
+        } else if !s.routing.pushes(d.detail.level) {
+            Err("this severity is set to digest only".into())
+        } else if s.quiet_hours.as_ref().is_some_and(|q| {
+            q.covers(now) && !(q.critical_breaks && d.detail.level == Level::Critical)
+        }) {
+            Err("quiet hours".into())
+        } else {
+            Ok(())
+        };
     let pop_up = matches!(d.detail.level, Level::Critical | Level::Warning)
         || matches!(
             d.kind,

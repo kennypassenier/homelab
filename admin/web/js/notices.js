@@ -23,7 +23,9 @@ import { formatDateTime, humanDuration } from "./format.js";
  *   remedy?: string, link?: string, source?: string, key?: string,
  *   fixes?: Fix[]}} Notice
  * @typedef {{push: boolean, muted_stacks: string[],
- *   snooze_until?: number | null, digest_at?: string | null}} NotifySettings
+ *   snooze_until?: number | null, digest_at?: string | null,
+ *   quiet_hours?: import("./notifyrules.js").QuietHours | null,
+ *   routing?: import("./notifyrules.js").Routing | null}} NotifySettings
  * @typedef {{day: string, at: number, count: number, push: Push}} DigestRecord
  * @typedef {{notices: Notice[], unread: number,
  *   unread_by_stack: Record<string, number>, settings: NotifySettings,
@@ -223,5 +225,7 @@ export function settingsBody(s, change) {
     digest_at: out.digest_at ?? null,
   };
   if (out.snooze_until != null) body.snooze_until = out.snooze_until;
+  if (out.quiet_hours) body.quiet_hours = out.quiet_hours;
+  if (out.routing) body.routing = out.routing;
   return body;
 }

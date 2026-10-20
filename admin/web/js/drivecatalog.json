@@ -3206,6 +3206,52 @@
       "twins": false
     },
     {
+      "id": "quiet-critical-breaks",
+      "page": "notifications",
+      "what": "let a critical notice still push during quiet hours",
+      "opens": "run",
+      "row": null,
+      "href": "/system/notifications",
+      "was": [],
+      "shows": "while quiet hours are on",
+      "reach": [
+        {
+          "do": "click",
+          "control": "quiet-hours-on"
+        }
+      ],
+      "twins": false
+    },
+    {
+      "id": "quiet-day",
+      "page": "notifications",
+      "what": "turn one weekday of the quiet hours on or off (a window across midnight belongs to the day it starts)",
+      "opens": "run",
+      "row": "<mon|tue|wed|thu|fri|sat|sun>",
+      "href": "/system/notifications",
+      "was": [],
+      "shows": "while quiet hours are on",
+      "reach": [
+        {
+          "do": "click",
+          "control": "quiet-hours-on"
+        }
+      ],
+      "twins": false
+    },
+    {
+      "id": "quiet-hours-on",
+      "page": "notifications",
+      "what": "turn quiet hours on or off: while they last nothing pushes, the Inbox keeps filling",
+      "opens": "run",
+      "row": null,
+      "href": "/system/notifications",
+      "was": [],
+      "shows": null,
+      "reach": [],
+      "twins": false
+    },
+    {
       "id": "refusal-fix",
       "page": "update",
       "what": "the button under a refusal whose fix is an action (Deploy a stack that already names the newer version)",
@@ -3487,6 +3533,54 @@
       "opens": "dialog",
       "row": "<token name>",
       "href": "/settings",
+      "was": [],
+      "shows": null,
+      "reach": [],
+      "twins": false
+    },
+    {
+      "id": "route-critical",
+      "page": "notifications",
+      "what": "send critical notices to the phone (push), or keep them for the daily digest and the Inbox (digest)",
+      "opens": "run",
+      "row": "push|digest",
+      "href": "/system/notifications",
+      "was": [],
+      "shows": null,
+      "reach": [],
+      "twins": false
+    },
+    {
+      "id": "route-info",
+      "page": "notifications",
+      "what": "send info notices to the phone (push), or keep them for the daily digest and the Inbox (digest)",
+      "opens": "run",
+      "row": "push|digest",
+      "href": "/system/notifications",
+      "was": [],
+      "shows": null,
+      "reach": [],
+      "twins": false
+    },
+    {
+      "id": "route-ok",
+      "page": "notifications",
+      "what": "send ok notices to the phone (push), or keep them for the daily digest and the Inbox (digest)",
+      "opens": "run",
+      "row": "push|digest",
+      "href": "/system/notifications",
+      "was": [],
+      "shows": null,
+      "reach": [],
+      "twins": false
+    },
+    {
+      "id": "route-warning",
+      "page": "notifications",
+      "what": "send warning notices to the phone (push), or keep them for the daily digest and the Inbox (digest)",
+      "opens": "run",
+      "row": "push|digest",
+      "href": "/system/notifications",
       "was": [],
       "shows": null,
       "reach": [],
@@ -5003,6 +5097,20 @@
       "id": "notify-digest",
       "page": "notifications",
       "what": "the time of the daily digest (saves as you change it)",
+      "was": [],
+      "row": null
+    },
+    {
+      "id": "notify-quiet-from",
+      "page": "notifications",
+      "what": "the time quiet hours start, 24 hours (saves as you change it)",
+      "was": [],
+      "row": null
+    },
+    {
+      "id": "notify-quiet-to",
+      "page": "notifications",
+      "what": "the time quiet hours end, 24 hours (saves as you change it)",
       "was": [],
       "row": null
     },

@@ -7,8 +7,8 @@
 use homelab_admin::core::actions::ActionKind;
 use homelab_admin::core::notify::{
     DIGEST_LATE_S, DigestRecord, Draft, FixSource, KEEP, Kind, Level, NotifyFile, PushOutcome,
-    Settings, alert_drafts, digest, digest_due, fix_for, host_draft, push_payload, route,
-    today_lines,
+    QuietHours, Routing, Settings, alert_drafts, digest, digest_due, fix_for, host_draft,
+    push_payload, route, today_lines,
 };
 use homelab_core::notify::HostNotice;
 use homelab_core::ops::fleetcheck::{Finding, Severity};
@@ -537,4 +537,55 @@ fn fix_inbox_resolve_a_success_settles_the_same_operations_failure_on_the_same_s
     );
     assert!(!by(other_stack.id).read, "another stack's failure stays");
     assert!(!by(deploy.id).read, "another operation's failure stays");
+}
+
+/// ask-kp11be-3: quiet hours (a window across midnight belongs to the day it
+/// starts on) and per-severity routing only ever withhold a push.
+#[test]
+fn quiet_hours_and_severity_routing_withhold_pushes() {
+    use homelab_admin::core::schedule::days_from_civil;
+    let at = |d: u32, h: i64, m: i64| days_from_civil(2026, 10, d) * 86_400 + h * 3_600 + m * 60;
+    // Tuesday 20 October 2026, Brussels summer time (UTC+2).
+    let tue_2330 = at(20, 21, 30);
+    let wed_0300 = at(21, 1, 0);
+    let wed_2330 = at(21, 21, 30);
+    let tue_1000 = at(20, 8, 0);
+    let q = QuietHours {
+        from: "22:00".into(),
+        to: "07:00".into(),
+        days: vec![2],
+        critical_breaks: true,
+    };
+    assert!(q.covers(tue_2330) && q.covers(wed_0300));
+    assert!(!q.covers(wed_2330) && !q.covers(tue_1000));
+    assert!(
+        QuietHours {
+            from: "07:00".into(),
+            ..q.clone()
+        }
+        .validate()
+        .is_err()
+    );
+    let s = Settings {
+        quiet_hours: Some(q),
+        ..Default::default()
+    };
+    let missed = draft(Kind::ScheduleMissed, Some("backup"));
+    assert_eq!(
+        route(&s, &missed, tue_2330).push.unwrap_err(),
+        "quiet hours"
+    );
+    assert!(route(&s, &missed, tue_1000).push.is_ok());
+    let mut critical = draft(Kind::ScheduleMissed, Some("backup"));
+    critical.detail.level = Level::Critical;
+    assert!(route(&s, &critical, tue_2330).push.is_ok());
+    let digest_only = Settings {
+        routing: Routing {
+            info: false,
+            ..Routing::default()
+        },
+        ..Default::default()
+    };
+    assert!(route(&digest_only, &missed, tue_1000).push.is_err());
+    assert!(route(&digest_only, &critical, tue_1000).push.is_ok());
 }

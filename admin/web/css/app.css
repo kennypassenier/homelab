@@ -2597,16 +2597,11 @@ details.nx-card--fold[open] > summary::before {
 .nx-toast__act:focus-visible {
   outline: 2px solid var(--background);
 }
-/* fix-ux-1: a held toast's close button, in the toast's own ink. */
-.nx-toast__close {
-  margin-inline-start: auto;
-  min-inline-size: 2rem;
-  padding: 0 var(--kp-space-xs);
+/* A held toast's close button is kp's (kp-toast__close), in the toast's own ink. */
+.nx-toast .kp-toast__close {
   color: inherit;
-  background: transparent;
-  border-color: transparent;
 }
-.nx-toast__close:focus-visible {
+.nx-toast .kp-toast__close:focus-visible {
   outline: 2px solid var(--background);
 }
 

@@ -27,7 +27,7 @@ import {
   themeCommands,
 } from "./commands.js";
 import { h } from "./dom.js";
-import { drivable } from "./drivable.js";
+import { dialogControl, drivable } from "./drivable.js";
 import {
   changed as notifyInbox,
   inboxNow,
@@ -40,7 +40,7 @@ import { noMatch, rankPalette } from "./intent.js";
 import { finished, queueOrder, stepText } from "./jobs.js";
 import { mountJobPanel } from "./jobpanel.js";
 import { toastOf } from "./notices.js";
-import { holdToast } from "./ui.js";
+import { ACTION_TOAST_MS } from "./ui.js";
 import { openImport } from "./importstack.js";
 import { openNewStack } from "./newstack.js";
 import { openRollback } from "./rollbackdialog.js";
@@ -260,7 +260,8 @@ function notify(text, tone, action) {
   t = kpToast(text, {
     className: `kp-toast kp-toast--${tone}`,
     live: tone === "error" ? "assertive" : "polite",
-    ms: action ? 0 : tone === "error" ? 10000 : 6000,
+    ms: action ? ACTION_TOAST_MS : tone === "error" ? 10000 : 6000,
+    close: Boolean(action),
     action: action && {
       label: action.label,
       onClick: () => {
@@ -270,7 +271,8 @@ function notify(text, tone, action) {
     },
     max: 4,
   });
-  if (action) holdToast(t);
+  const x = t.querySelector(".kp-toast__close");
+  if (x instanceof HTMLElement) dialogControl(x, "toast-close");
   return t;
 }
 

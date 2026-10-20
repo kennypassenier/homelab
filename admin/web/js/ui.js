@@ -1227,8 +1227,6 @@ export const TOAST_MS = 6000;
 /** fix-ux-1: a toast offering an action (Open, Undo) stays at least this
  * long, and while the pointer or focus is on it. */
 export const ACTION_TOAST_MS = 15000;
-/** How long such a toast lingers after the pointer left it. */
-export const TOAST_LINGER_MS = 2000;
 
 /**
  * How long a toast stays before it leaves by itself.
@@ -1265,43 +1263,6 @@ export function toastRegion(host) {
 }
 
 /**
- * fix-ux-1: make a toast that offers an action stay long enough to use it.
- * The "done" toast left before a click could reach it: it now stays at
- * least 15 s, for as long as the pointer or focus is on it, and goes a
- * moment after the pointer leaves; a close button ends it at once. The
- * toast must have been made with `ms: 0` (no timer of its own).
- * @param {HTMLElement & {dismiss: () => void}} el
- * @param {number} [ms] what the caller asked for
- */
-export function holdToast(el, ms) {
-  const close = dialogControl(
-    h(
-      "button",
-      {
-        type: "button",
-        class: "kp-button kp-button--ghost nx-toast__close",
-        "aria-label": "Close this message",
-        title: "Close",
-      },
-      "×",
-    ),
-    "toast-close",
-  );
-  close.addEventListener("click", () => el.dismiss());
-  el.append(close);
-  let timer = window.setTimeout(el.dismiss, toastMs(true, ms));
-  const hold = () => window.clearTimeout(timer);
-  const release = () => {
-    window.clearTimeout(timer);
-    timer = window.setTimeout(el.dismiss, TOAST_LINGER_MS);
-  };
-  el.addEventListener("pointerenter", hold);
-  el.addEventListener("pointerleave", release);
-  el.addEventListener("focusin", hold);
-  el.addEventListener("focusout", release);
-}
-
-/**
  * A short message at the foot of the screen (DESIGN_LANGUAGE §8): kp-themes'
  * own `toast()` in the page's region (`toastRegion`), gone after `ms`; with
  * an `action`, its button (Undo) runs it and closes the toast, and is the
@@ -1330,9 +1291,14 @@ export function toast(text, opts = {}) {
   const held = a != null && opts.ms === undefined && a.label !== "Undo";
   /** @type {(HTMLElement & {dismiss: () => void}) | null} */
   let t = null;
+  // kp 11.1.1: a toast stops its clock while the pointer or focus is on it.
+  // A held action (Open, Answer) keeps 15 s and has kp's close button; an
+  // Undo is bound to a window that really ends, so its clock never pauses.
   t = kpToast(text, {
     region,
-    ms: held ? 0 : toastMs(false, opts.ms),
+    ms: toastMs(held, opts.ms),
+    pause: !a || held,
+    close: held,
     className: "kp-toast nx-toast",
     ...(a
       ? {
@@ -1353,7 +1319,8 @@ export function toast(text, opts = {}) {
       b.classList.add("nx-toast__act");
       drive(b, a.drive);
     }
-    if (held) holdToast(t, opts.ms);
+    const x = t.querySelector(".kp-toast__close");
+    if (x instanceof HTMLElement) dialogControl(x, "toast-close");
   }
   const made = t;
   return () => made.dismiss();

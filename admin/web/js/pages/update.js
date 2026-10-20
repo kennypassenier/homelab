@@ -25,6 +25,7 @@ import { act, onAct, send } from "../act.js";
 import { refusalCallout } from "../actui.js";
 import { stage } from "../stage.js";
 import { attachCardStates, setCardState } from "/static/kp/js/card-state.js";
+import { attachDeplists, deplist } from "/static/kp/js/deplist.js";
 import {
   ensureStyle,
   errorBox,
@@ -73,7 +74,7 @@ import {
 } from "/static/kp/js/steplist.js";
 import {
   attachVersionDeltas,
-  releaseUrl as kpReleaseUrl,
+  VERSION_SORT,
   summarizeDeltas,
   versionLevel,
 } from "/static/kp/js/version-delta.js";
@@ -105,7 +106,7 @@ const MAJOR_GATE = declare({
   page: "update",
   opens: "view",
   row: "<pin:stack:app/service>",
-  what: "tick “I read the release notes of …” for a major version (it can be ticked once the notes were opened, or after 4 seconds)",
+  what: "tick “I read the release notes of …” for a major version (it can be ticked once the notes link was opened; a version with no link, after 4 seconds)",
   shows: "under the list, once a major version is ticked",
   reach: [{ do: "click", control: "update-pick", row: "*" }],
 });
@@ -155,6 +156,15 @@ const NOTES = declare({
   opens: "view",
   row: "<pin:stack:app/service>",
   what: "a row's release notes, in a new tab",
+});
+const GATE_NOTES = declare({
+  id: "update-major-gate-notes",
+  page: "update",
+  opens: "view",
+  row: "<pin:stack:app/service>",
+  what: "open a major version's release notes from its acknowledge gate, in a new tab (the tick waits for it)",
+  shows: "under the list, once a major version is ticked",
+  reach: [{ do: "click", control: "update-pick", row: "*" }],
 });
 const MAJOR_NOTES = declare({
   id: "update-major-notes",
@@ -425,11 +435,16 @@ export function mount(root, scope) {
     desc: "Read before you start. Everything below is worked out from the stack files and the fleet map — nothing to know by heart.",
   });
   const tiles = h("div", { class: "uf-impact" });
-  const deps = h("div", { class: "uf-deps" });
-  const depsStage = stage(deps);
-  setCardState(depsStage, "loading", {
-    words: "Reading who reaches these apps",
+  const deps = h("div", {
+    class: "kp-deplist",
+    "data-kp-deplist": "",
+    "data-kp-dep-order": "none",
+    "data-kp-dep-direction": "from-reaches-to",
+    "data-kp-dep-heading": "{n} reaches these apps",
+    "data-kp-dep-empty": "No other stack reaches these apps.",
   });
+  const detachDeps = attachDeplists(deps);
+  deplist(deps)?.setState("loading");
   const depsCard = h(
     "section",
     { class: "uf-sub", "aria-labelledby": "uf-deps-h" },
@@ -443,7 +458,7 @@ export function mount(root, scope) {
         "Stacks that reach these apps (from the fleet map). They keep running; their requests fail for the downtime above.",
       ),
     ),
-    depsStage,
+    deps,
   );
   const majorBox = h("div", { class: "uf-major" });
   const diff = h("div", { class: "uf-diff" });
@@ -680,8 +695,7 @@ export function mount(root, scope) {
         }
         const level =
           i.kind === "pin" ? versionLevel(i.from, i.to, {}) : "other";
-        const url =
-          i.notes ?? (i.kind === "pin" ? kpReleaseUrl("", i.to) : null);
+        const url = i.notes;
         const jump =
           i.kind === "pin"
             ? h("span", {
@@ -722,11 +736,7 @@ export function mount(root, scope) {
           h(
             "td",
             {
-              "data-kp-sort-value": String(
-                { major: 3, minor: 2, patch: 1 }[
-                  /** @type {"major"} */ (level)
-                ] ?? 0,
-              ),
+              "data-kp-sort-value": String(VERSION_SORT[level]),
             },
             jump,
           ),
@@ -800,7 +810,11 @@ export function mount(root, scope) {
             "data-kp-ack-mode": "all",
             "data-kp-ack-label": `I read the release notes of ${m.to}`,
             "data-kp-ack-link": m.notes ?? "",
-            "data-kp-ack-min-ms": "4000",
+            // The tick waits for the notes link to be opened; a version with
+            // no link can only wait a few seconds.
+            ...(m.notes
+              ? { "data-kp-ack-require-link": "" }
+              : { "data-kp-ack-min-ms": "4000" }),
           },
           h(
             "div",
@@ -822,6 +836,13 @@ export function mount(root, scope) {
       const key =
         box.closest("[data-kp-ack]")?.getAttribute("data-kp-ack-key") ?? "";
       if (!box.dataset.drive) drivable(box, MAJOR_GATE, key);
+    }
+    for (const a of /** @type {NodeListOf<HTMLElement>} */ (
+      gates.querySelectorAll("[data-kp-ack] .kp-ack__link")
+    )) {
+      const key =
+        a.closest("[data-kp-ack]")?.getAttribute("data-kp-ack-key") ?? "";
+      if (!a.dataset.drive) drivable(a, GATE_NOTES, key);
     }
   };
   gates.addEventListener("kp-ack-change", (e) => {
@@ -969,6 +990,7 @@ export function mount(root, scope) {
     );
     paintGo();
     // Who notices, from the fleet map's dependencies.
+    deplist(deps)?.setState("loading");
     void (async () => {
       const r = await fetchJson(
         "/data/dependencies",
@@ -977,38 +999,15 @@ export function mount(root, scope) {
       );
       if (abort.signal.aborted) return;
       if (!r.ok) {
-        setCardState(depsStage, "error", {
-          title: "Who reaches these apps did not read",
-          text: r.error.why,
-          retry: false,
+        deplist(deps)?.setState("error", {
+          message: `Who reaches these apps did not read: ${r.error.why}`,
         });
         return;
       }
       const rows = whoNotices(c, r.body.dependencies ?? []);
-      deps.replaceChildren(
-        ...(rows.length
-          ? rows.map((d) =>
-              h(
-                "div",
-                { class: "uf-dep" },
-                h("span", { class: "kp-badge" }, `${d.who} (reaches it)`),
-                h(
-                  "span",
-                  { class: "uf-dep__arrow", "aria-hidden": "true" },
-                  "→",
-                ),
-                h("strong", null, d.what),
-              ),
-            )
-          : [
-              h(
-                "span",
-                { class: "uf-hint" },
-                "No other stack reaches these apps.",
-              ),
-            ]),
+      deplist(deps)?.set(
+        rows.map((d) => ({ from: d.who, to: d.what, label: "reaches it" })),
       );
-      setCardState(depsStage, "ready");
     })().catch(() => {});
     // The change to the files: each pin's newer reference (its registry's
     // digest), then each stack's plan with all its moves.
@@ -1552,6 +1551,7 @@ export function mount(root, scope) {
     detachMarks();
     detachGates();
     detachDeltas();
+    detachDeps();
     jobLog.stop();
     detachStages();
     for (const f of detachRun) f();

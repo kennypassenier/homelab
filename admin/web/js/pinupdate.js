@@ -12,9 +12,10 @@
 //    `/data/stacks/{stack}/pin-target`), pushed;
 // 3. that commit's deploy, queued by the commit itself (`follow: deploy`).
 //
-// A MAJOR version jump (the first number differs) is marked and needs an
-// explicit "I read the release notes for this major version" before
-// Confirm. Afterwards Roll back puts the old reference back the same way.
+// The version jump is kp's version chip. A MAJOR version asks for its release
+// notes to be read in the Update flow (pages/update.js, kp's acknowledge
+// gate); this dialog is only its Roll back. Afterwards Roll back puts the
+// old reference back the same way.
 //
 // redesign-flows-1 (3.71.0): the row's Update opens the one Update flow
 // (pages/update.js) with that app picked; this dialog stays as its Roll
@@ -28,6 +29,9 @@ import { mountJobPanel } from "./jobpanel.js";
 import { planView } from "./plan.js";
 import { updateHref } from "./updateflow.js";
 import { dialogControl } from "./drivable.js";
+import { stage } from "./stage.js";
+import { attachCardStates, setCardState } from "/static/kp/js/card-state.js";
+import { attachVersionDeltas } from "/static/kp/js/version-delta.js";
 
 /**
  * One stale-image row, as the Fleet view has it.
@@ -37,8 +41,6 @@ import { dialogControl } from "./drivable.js";
  * @typedef {{stack: string, key: string, file: string,
  *   from: string, to: string, from_version: string, to_version: string}} Move
  */
-
-const TICK_LABEL = "I read the release notes for this major version";
 
 /**
  * A job's end, once it has one: "done", "failed", "deferred", "refused"
@@ -107,7 +109,7 @@ export function openPinRollback(move) {
       from_version: move.to_version,
       to_version: move.from_version,
     },
-    { major: false, notes: null, rollback: true },
+    { rollback: true },
   );
 }
 
@@ -127,20 +129,22 @@ function closeRow(close) {
  * @param {{dialog: HTMLDialogElement, close: () => void}} d
  * @param {HTMLElement} body
  * @param {Move} move
- * @param {{major: boolean, notes: string | null, rollback: boolean}} o
+ * @param {{rollback: boolean}} o
  */
 async function drawMove(d, body, move, o) {
   const service = move.key.split("/")[1] ?? move.key;
   const edit = { kind: "settings", images: { [move.key]: move.to } };
-  body.replaceChildren(
-    h("p", { class: "measured", role: "status" }, "Reading the plan…"),
-  );
+  const waiting = stage(h("div"));
+  setCardState(waiting, "loading", { words: "Reading the plan" });
+  const detachWaiting = attachCardStates(waiting);
+  body.replaceChildren(waiting);
   const plan = await send(
     "POST",
     `/data/stacks/${encodeURIComponent(move.stack)}/plan`,
     { edit },
     "the plan of this update",
   );
+  detachWaiting();
   if (!d.dialog.open) return;
   if (!plan.ok) {
     body.replaceChildren(refusalCallout(plan.error), closeRow(d.close));
@@ -153,6 +157,17 @@ async function drawMove(d, body, move, o) {
     { class: "facts pin-update__facts" },
     h("dt", null, "Stack"),
     h("dd", null, move.stack),
+    h("dt", null, "Jump"),
+    h(
+      "dd",
+      null,
+      h("span", {
+        class: "kp-badge kp-badge--version",
+        "data-kp-version-from": move.from_version,
+        "data-kp-version-to": move.to_version,
+        "data-kp-version-app": service,
+      }),
+    ),
     h("dt", null, "App / service"),
     h("dd", null, move.key),
     h("dt", null, "From"),
@@ -171,69 +186,7 @@ async function drawMove(d, body, move, o) {
     ),
     h("dt", null, "File"),
     h("dd", { class: "mono" }, move.file),
-    ...(o.notes
-      ? [
-          h("dt", null, "Release notes"),
-          h(
-            "dd",
-            null,
-            h(
-              "a",
-              { href: o.notes, target: "_blank", rel: "noopener noreferrer" },
-              `${move.to_version} on GitHub`,
-            ),
-          ),
-        ]
-      : []),
   );
-
-  // The same kp check field every action dialog draws (actui.js
-  // `fieldEl`'s check shape), written out: it is no action argument.
-  /** @type {{wrap: HTMLElement, input: HTMLInputElement} | null} */
-  let tick = null;
-  if (o.major) {
-    const input = h("input", {
-      class: "kp-field__check",
-      type: "checkbox",
-      id: "pin-major-read",
-      name: "major_read",
-      "aria-describedby": "pin-major-read-hint",
-    });
-    tick = {
-      input,
-      wrap: h(
-        "div",
-        { class: "kp-field kp-field--check", "data-field": "major_read" },
-        input,
-        h(
-          "label",
-          { class: "kp-field__label", for: "pin-major-read" },
-          TICK_LABEL,
-        ),
-        h(
-          "span",
-          { class: "kp-field__help", id: "pin-major-read-hint" },
-          "A major release can change its configuration or migrate its data in a way the old version cannot read back.",
-        ),
-      ),
-    };
-  }
-  const majorBox = o.major
-    ? h(
-        "div",
-        {
-          class: "kp-alert kp-alert--warning pin-update__major",
-          role: "note",
-          "data-pin-major": "",
-        },
-        h(
-          "span",
-          { class: "kp-alert__body" },
-          h("span", { class: "kp-alert__label" }, "Major version: "),
-          `${move.from_version} → ${move.to_version}. Read the release notes for breaking changes before this runs.`,
-        ),
-      )
-    : null;
 
   const steps = h(
     "ol",
@@ -297,14 +250,11 @@ async function drawMove(d, body, move, o) {
     "Cancel",
   );
   cancel.addEventListener("click", () => d.close());
-  // fix-239: `homelab ui press confirm` (or `click confirm`) in Live view;
-  // the major-version tick is `homelab ui check pin-major-read on`.
+  // fix-239: `homelab ui press confirm` (or `click confirm`) in Live view.
   dialogControl(confirm, "confirm");
   const ready = () => {
-    const ok = !v.blocked && (!tick || tick.input.checked);
-    /** @type {HTMLButtonElement} */ (confirm).disabled = !ok;
+    /** @type {HTMLButtonElement} */ (confirm).disabled = v.blocked;
   };
-  tick?.input.addEventListener("change", ready);
   ready();
 
   body.replaceChildren(
@@ -316,15 +266,14 @@ async function drawMove(d, body, move, o) {
         : `Moves ${move.key}'s pinned image to the upstream's newer release.`,
     ),
     facts,
-    ...(majorBox ? [majorBox] : []),
     h("h3", { class: "pin-update__h" }, "What happens, in order"),
     steps,
     after,
     ...(diff ? [diff] : []),
     ...(blocked ? [blocked] : []),
-    ...(tick ? [tick.wrap] : []),
     h("div", { class: "kp-dialog__actions" }, cancel, confirm),
   );
+  attachVersionDeltas(body);
 
   confirm.addEventListener("click", () => {
     if (/** @type {HTMLButtonElement} */ (confirm).disabled) return;
@@ -549,7 +498,7 @@ async function run(d, body, move, edit) {
         from_version: move.to_version,
         to_version: move.from_version,
       },
-      { major: false, notes: null, rollback: true },
+      { rollback: true },
     );
   });
   const close = h(

@@ -3599,6 +3599,14 @@ test("invariants: the Update flow runs See, Impact, Back up, Update, Verify and 
     // A major version holds the next step off until its notes are read.
     const gates = await page.locator("[data-drive=update-major-read]").all();
     if (gates.length) await page.waitForTimeout(4500);
+    // A gate with a notes link waits for the link to be opened once.
+    for (const link of await page
+      .locator("[data-drive=update-major-gate-notes]")
+      .all()) {
+      const popup = page.waitForEvent("popup");
+      await link.click();
+      await (await popup).close();
+    }
     for (const t of gates) await t.check();
     await page.locator("[data-drive=update-see-impact]").click();
     assert.equal(await now(), "Impact");
@@ -3608,7 +3616,7 @@ test("invariants: the Update flow runs See, Impact, Back up, Update, Verify and 
       ["downtime", "restarts", "safety net", "undo later"],
     );
     await page
-      .locator("#page .uf-deps .uf-dep, #page .uf-deps .uf-hint")
+      .locator('#page [data-kp-deplist]:not([data-kp-state="loading"])')
       .first()
       .waitFor({ timeout: 5000 });
     // Only plans were asked so far: nothing ran.

@@ -128,6 +128,7 @@ import { FOLLOW_EVENT } from "/static/kp/js/newpill.js";
 import { facetGroup } from "../logfacets.js";
 import { formGrid, gridRow } from "../gridrow.js";
 import { watchTabOverflow } from "/static/kp/js/overlays.js";
+import { attachToolbars } from "/static/kp/js/toolbar.js";
 import { mount as mountSecrets } from "./secrets.js";
 import {
   countOf,
@@ -142,7 +143,6 @@ import {
   segSwitch,
   skeletonLines,
   stackMark,
-  toolbar,
 } from "../ui.js";
 
 /** How far back the History tab reads. */
@@ -2812,32 +2812,53 @@ function historyTab(panel, c) {
     });
     return b;
   });
-  const tb = toolbar({
-    search: {
+  const searchBox = /** @type {HTMLInputElement} */ (
+    h("input", {
+      type: "search",
+      class: "kp-field__input kp-toolbar__input",
       placeholder: "Find: action, app, error",
-      label: "Find in history",
-      value: q,
-      onInput: (v) => {
-        q = v;
-        writeUrl();
-        paint();
-      },
+      "aria-label": "Find in history",
+      "aria-keyshortcuts": "/",
+    })
+  );
+  searchBox.value = q;
+  searchBox.addEventListener("input", () => {
+    q = searchBox.value;
+    writeUrl();
+    paint();
+  });
+  const tb = h(
+    "div",
+    {
+      class: "kp-toolbar",
+      "data-kp-toolbar": "",
+      "data-kp-toolbar-key": "/",
+      role: "group",
+      "aria-label": "History",
     },
-    groups: [
+    h(
+      "div",
+      { class: "kp-toolbar__search" },
+      searchBox,
+      h("kbd", { class: "kp-kbd kp-toolbar__key", "aria-hidden": "true" }, "/"),
+    ),
+    h(
+      "div",
+      { class: "kp-toolbar__filters" },
       h(
         "div",
         {
-          class: "nx-tb__group",
+          class: "kp-toolbar__group",
           role: "group",
-          "aria-label": "Started by, click to show or hide",
+          "aria-labelledby": "hist-by-l",
         },
-        h("b", null, "Started by"),
+        h("b", { class: "kp-toolbar__label", id: "hist-by-l" }, "Started by"),
         h("span", { class: "nx-chips" }, chips),
       ),
-    ],
-    state: [count],
-  });
-  if (tb.search) drivable(tb.search, HISTORY_SEARCH, name);
+    ),
+    h("div", { class: "kp-toolbar__state" }, count),
+  );
+  drivable(searchBox, HISTORY_SEARCH, name);
   const list = h("ul", { class: "sh-feed sh-feed--full" });
   list.append(skeletonLines(6, "Reading the history"));
   const card = h(
@@ -2853,9 +2874,10 @@ function historyTab(panel, c) {
         "Every operation on this stack, who started it, and how it ended.",
       ),
     ),
-    tb.el,
+    tb,
     list,
   );
+  const detachTb = attachToolbars(tb);
   const incList = h("ul", { class: "sh-feed" });
   incList.append(skeletonLines(2, "Reading the incidents"));
   const incidents = section({
@@ -2985,6 +3007,7 @@ function historyTab(panel, c) {
   return () => {
     stopAnswers();
     updatesAbort.abort();
+    detachTb();
     document.removeEventListener("keydown", esc);
   };
 }

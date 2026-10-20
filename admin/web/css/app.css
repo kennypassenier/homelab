@@ -1955,56 +1955,7 @@ td.stack-flags {
 /* -- attention band (DESIGN_LANGUAGE §1.3): kp-themes' `.kp-attention`
    (js/attention.js) draws it per theme and takes no room when it is empty. */
 
-/* -- toolbar / filter bar (DESIGN_LANGUAGE §12): search · filters ·
-      view & state, inside the card it filters -- */
-.nx-tb {
-  display: grid;
-  grid-template-columns: minmax(14rem, 22rem) minmax(0, 1fr) auto;
-  gap: 10px 20px;
-  align-items: center;
-}
-.nx-tb--nosearch {
-  grid-template-columns: minmax(0, 1fr) auto;
-}
-.nx-tb__search {
-  position: relative;
-}
-.nx-tb__search .nx-search {
-  inline-size: 100%;
-  box-sizing: border-box;
-  padding-inline-end: 34px;
-}
-.nx-tb__search .kp-kbd {
-  position: absolute;
-  inset-inline-end: 8px;
-  inset-block-start: 50%;
-  transform: translateY(-50%);
-}
-.nx-tb__filters {
-  display: flex;
-  gap: 8px 18px;
-  flex-wrap: wrap;
-  align-items: center;
-  min-inline-size: 0;
-}
-.nx-tb__group {
-  display: inline-flex;
-  gap: 6px;
-  align-items: center;
-  flex-wrap: wrap;
-}
-.nx-tb__group > b {
-  font-size: var(--kp-text-xs);
-  font-weight: 500;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  color: var(--muted-foreground);
-  margin-inline-end: 2px;
-}
-.nx-tb__group + .nx-tb__group {
-  padding-inline-start: 18px;
-  border-inline-start: 1px solid var(--border);
-}
+/* -- the History tab's "Started by" chips sit in kp's toolbar filters -- */
 .nx-chips {
   display: inline-flex;
   gap: 6px;
@@ -2037,45 +1988,6 @@ td.stack-flags {
   font-variant-numeric: tabular-nums;
   opacity: 0.75;
 }
-.nx-tb__state {
-  display: flex;
-  gap: 10px;
-  align-items: center;
-  justify-self: end;
-  white-space: nowrap;
-  font-size: var(--kp-text-sm);
-  color: var(--muted-foreground);
-}
-.nx-tb__active {
-  grid-column: 1 / -1;
-  display: flex;
-  gap: 6px;
-  flex-wrap: wrap;
-  align-items: center;
-  font-size: var(--kp-text-sm);
-}
-.nx-tb__active[hidden] {
-  display: none;
-}
-@media (max-width: 48rem) {
-  .nx-tb,
-  .nx-tb--nosearch {
-    grid-template-columns: minmax(0, 1fr);
-  }
-  .nx-tb__filters {
-    flex-wrap: nowrap;
-    overflow-x: auto;
-    scrollbar-width: none;
-  }
-  .nx-tb__group {
-    flex-wrap: nowrap;
-  }
-  .nx-tb__state {
-    justify-self: stretch;
-    justify-content: space-between;
-  }
-}
-
 /* -- a section as a card (DESIGN_LANGUAGE §5), folded or open -- */
 .nx-card {
   --nx-card-pad: 1rem; /* kp-card's own padding */
@@ -2526,34 +2438,6 @@ details.nx-card--fold[open] > summary::before {
 .nx-chev,
 .nx-card__tools:has(> .nx-chev:only-child) {
   display: none;
-}
-
-/* an active filter as a chip with its × */
-.nx-filterchip {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--kp-space-xs);
-  padding: 2px var(--kp-space-xs) 2px var(--kp-space-sm);
-  border-radius: 999px;
-  background: var(--accent);
-  color: var(--accent-foreground);
-  font-size: var(--kp-text-xs);
-  font-weight: 500;
-}
-.nx-filterchip button {
-  all: unset;
-  cursor: pointer;
-  inline-size: 18px;
-  block-size: 18px;
-  display: grid;
-  place-items: center;
-  border-radius: 50%;
-}
-.nx-filterchip button:hover {
-  background: color-mix(in oklab, currentColor 15%, transparent);
-}
-.nx-filterchip button:focus-visible {
-  outline: 2px solid var(--ring);
 }
 
 /* toasts, inside #page so Live view reaches their Undo */

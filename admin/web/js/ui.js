@@ -16,11 +16,9 @@
 //                toggle of a filter on the page
 //   attention    one kp-alert per problem, worst first, each with its fix;
 //                zero height when all is well
-//   toolbar      §12: search · labelled filter groups · view & state, plus
-//                the active-filter row of filterChips
 //   toggleGroup  the plain-click toggle group (several on, every one on is
-//                All, Esc / All / Show all resets), segmented or as chips
-//                (`toggleChips`); segSwitch the one-of switch
+//                All, Esc / All / Show all resets), segmented;
+//                segSwitch the one-of switch
 //   section      a card: heading + one sentence + tools, optionally
 //                collapsible and mounted only when first opened, with a
 //                foot line (source left, "read 4 s ago" right)
@@ -585,102 +583,6 @@ export function attentionBand(items = []) {
 }
 
 /**
- * The toolbar of a list, a table, a log or a chart (DESIGN_LANGUAGE §12):
- * three zones on one grid row inside the card it filters — the search at
- * its own width with its `/` hint inside the box, the labelled filter
- * groups in the middle, view & state (the count, follow, range, Table /
- * Cards) against the right edge — and under it the active-filter row
- * (one removable chip per filter not visible in the bar, plus Clear all),
- * absent when nothing is active. Esc in the search clears it.
- * @param {{search?: {placeholder: string, label?: string, value?: string,
- *   onInput: (q: string) => void}, groups?: HTMLElement[],
- *   state?: Node[]}} spec
- * @returns {{el: HTMLElement, search: HTMLInputElement | null,
- *   state: HTMLElement, setActive: (chips: {label: string,
- *   clear: () => void, drive: Drive}[],
- *   clearAll?: {run: () => void, drive: Drive}) => void}}
- *   `setActive`: one `filterChip` per active filter, each the Live view
- *   control its `drive` names, and Clear all (its own control)
- */
-export function toolbar(spec) {
-  /** @type {HTMLInputElement | null} */
-  let search = null;
-  const zones = [];
-  if (spec.search) {
-    const s = spec.search;
-    search = /** @type {HTMLInputElement} */ (
-      h("input", {
-        type: "search",
-        class: "kp-field__input nx-search",
-        placeholder: s.placeholder,
-        "aria-label": s.label ?? s.placeholder,
-        "aria-keyshortcuts": "/",
-      })
-    );
-    search.value = s.value ?? "";
-    const input = search;
-    input.addEventListener("input", () => s.onInput(input.value));
-    input.addEventListener("keydown", (e) => {
-      if (e.key === "Escape" && input.value) {
-        e.stopPropagation();
-        input.value = "";
-        s.onInput("");
-      }
-    });
-    zones.push(
-      h(
-        "div",
-        { class: "nx-tb__search" },
-        search,
-        h("kbd", { class: "kp-kbd", "aria-hidden": "true" }, "/"),
-      ),
-    );
-  }
-  zones.push(h("div", { class: "nx-tb__filters" }, ...(spec.groups ?? [])));
-  const state = h("div", { class: "nx-tb__state" }, ...(spec.state ?? []));
-  zones.push(state);
-  const active = h("div", { class: "nx-tb__active", hidden: "" });
-  const el = h(
-    "div",
-    {
-      class: `nx-tb${spec.search ? "" : " nx-tb--nosearch"}`,
-      role: "toolbar",
-    },
-    ...zones,
-    active,
-  );
-  return {
-    el,
-    search,
-    state,
-    setActive: (chips, clearAll) => {
-      active.replaceChildren(
-        h("span", { class: "nx-tb__active-label" }, "Showing only"),
-        ...chips.map((c) => filterChip(c.label, c.clear, c.drive)),
-        ...(clearAll
-          ? [
-              drive(
-                h(
-                  "button",
-                  {
-                    type: "button",
-                    class: "kp-button kp-button--ghost kp-button--sm",
-                    title: "Turn every filter off",
-                    onclick: clearAll.run,
-                  },
-                  "Clear all",
-                ),
-                clearAll.drive,
-              ),
-            ]
-          : []),
-      );
-      active.hidden = chips.length === 0;
-    },
-  };
-}
-
-/**
  * @typedef {{title?: string, desc?: string, label?: string, id?: string,
  *   tools?: Node[], badge?: Node | null, foot?: import("./dom.js").Child[],
  *   body?: import("./dom.js").Child, collapsible?: boolean, open?: boolean,
@@ -1023,13 +925,11 @@ export function toggleValue(on, value, total) {
 /**
  * @typedef {{label: string, chips: Chip[], onChange: (on: Set<string>) => void,
  *   drive: {id: string}, selected?: Iterable<string>,
- *   all?: {label: string, hint?: string} | null,
- *   look?: "seg" | "chips"}} ToggleSpec
+ *   all?: {label: string, hint?: string} | null}} ToggleSpec
  *   `drive`: the Live view control every button is, on its own value's
  *   row ("all" for All) — required, a toggle nobody can press from Live
  *   view is a defect (invariant 39). `all`: an "All" button first, pressed
- *   while nothing is on. `look`: "seg" (the segmented control, the
- *   default) or "chips" (labelled chips in a toolbar group).
+ *   while nothing is on.
  */
 
 /**
@@ -1050,17 +950,12 @@ export function toggleGroup(spec) {
     throw new Error(
       `the toggle group ${spec.label} needs its Live view control`,
     );
-  const chipsLook = spec.look === "chips";
   const driveId = spec.drive.id;
   /** @type {Chip[]} */
   let chips = spec.chips;
   /** @type {Record<string, number | null | undefined>} */
   let n = Object.fromEntries(chips.map((c) => [c.value, c.count]));
-  const group = segmentedGroup(
-    spec.label,
-    "multi",
-    chipsLook ? "kp-segmented kp-segmented--chips" : "kp-segmented",
-  );
+  const group = segmentedGroup(spec.label, "multi", "kp-segmented");
   /** The items as kp draws them: All first, each with its hint and count. */
   const items = () => [
     ...(spec.all
@@ -1094,16 +989,8 @@ export function toggleGroup(spec) {
   group.addEventListener(SEGMENTED_EVENT, () =>
     spec.onChange(new Set(getSegmentedValues(group))),
   );
-  const e = chipsLook
-    ? h(
-        "div",
-        { class: "nx-tb__group" },
-        h("b", { "aria-hidden": "true" }, spec.label),
-        group,
-      )
-    : group;
   return {
-    el: e,
+    el: group,
     selected: () => new Set(getSegmentedValues(group)),
     set: (values) => setSegmentedValues(group, values),
     reset: () => resetSegmented(group),
@@ -1118,12 +1005,6 @@ export function toggleGroup(spec) {
     },
   };
 }
-
-/**
- * The same toggle group in the chips look, for a toolbar's filter groups.
- * @param {Omit<ToggleSpec, "look">} spec
- */
-export const toggleChips = (spec) => toggleGroup({ ...spec, look: "chips" });
 
 /**
  * A one-of segmented switch ("Changed" / "All"). Each button is the Live
@@ -1187,28 +1068,6 @@ function segmentedGroup(label, mode, cls) {
   });
   attachSegmented(group);
   return group;
-}
-
-/**
- * An active-filter chip: what is on, × turns it off (the Live view
- * control `drive`).
- * @param {string} label
- * @param {() => void} onClear
- * @param {Drive} d
- */
-export function filterChip(label, onClear, d) {
-  const x = h(
-    "button",
-    {
-      type: "button",
-      "aria-label": `Clear ${label}`,
-      title: "Turn this filter off",
-    },
-    "×",
-  );
-  x.addEventListener("click", onClear);
-  drive(x, d);
-  return h("span", { class: "nx-filterchip" }, label, x);
 }
 
 /**

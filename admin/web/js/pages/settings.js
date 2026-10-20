@@ -43,7 +43,7 @@ import {
 } from "../settingsview.js";
 import { listen } from "../store.js";
 import { mountThisBrowser } from "../thisbrowser.js";
-import { highlight, pageHeader, segSwitch, toolbar } from "../ui.js";
+import { highlight, pageHeader, segSwitch } from "../ui.js";
 import { setParams } from "../urlstate.js";
 import { editable } from "../editforms.js";
 import { mountSignin } from "../signin.js";
@@ -51,6 +51,7 @@ import { chip, dot, ensureStyle } from "../ui.js";
 import { attachAll } from "/static/kp/js/auto.js";
 import { setCardState } from "/static/kp/js/card-state.js";
 import { setProblems } from "/static/kp/js/problems.js";
+import { attachToolbars } from "/static/kp/js/toolbar.js";
 import { REFRESH_EVENT, refreshDone } from "/static/kp/js/auto-refresh.js";
 import { unsaved, unsavedSaved } from "/static/kp/js/unsaved.js";
 
@@ -302,22 +303,47 @@ export function mount(root, opts = {}) {
 
   // ── the search ────────────────────────────────────────────────────────
   const found = h("span", { class: "cf-count" });
-  const tb = toolbar({
-    search: {
+  const searchBox = /** @type {HTMLInputElement} */ (
+    h("input", {
+      type: "search",
+      class: "kp-field__input kp-toolbar__input",
       placeholder: "Find a setting by name, key or what it does",
-      label: "Find a setting",
-      value: S.q,
-      onInput: (v) => {
-        S.q = v.trim().toLowerCase();
-        keepUrl();
-        filter();
-      },
-    },
-    groups: [],
-    state: [found],
+      "aria-label": "Find a setting",
+      "aria-keyshortcuts": "/",
+    })
+  );
+  searchBox.value = S.q;
+  searchBox.addEventListener("input", () => {
+    S.q = searchBox.value.trim().toLowerCase();
+    keepUrl();
+    filter();
   });
-  tb.el.classList.add("st-tb");
-  if (tb.search) drivable(tb.search, SEARCH);
+  const tb = {
+    search: searchBox,
+    el: h(
+      "div",
+      {
+        class: "kp-toolbar st-tb",
+        "data-kp-toolbar": "",
+        "data-kp-toolbar-key": "/",
+        role: "group",
+        "aria-label": "Find a setting",
+      },
+      h(
+        "div",
+        { class: "kp-toolbar__search" },
+        searchBox,
+        h(
+          "kbd",
+          { class: "kp-kbd kp-toolbar__key", "aria-hidden": "true" },
+          "/",
+        ),
+      ),
+      h("div", { class: "kp-toolbar__state" }, found),
+    ),
+  };
+  stops.push(attachToolbars(tb.el));
+  drivable(searchBox, SEARCH);
 
   // ── working copy ──────────────────────────────────────────────────────
   const fetchNow = drivable(

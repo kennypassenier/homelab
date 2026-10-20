@@ -3,11 +3,8 @@
    settings.html). kp-themes tokens only; shared pieces live in
    config.css. */
 
-.st-tb.nx-tb {
+.st-tb.kp-toolbar {
   grid-template-columns: minmax(0, 1fr) auto;
-}
-.st-tb .nx-tb__filters:empty {
-  display: none;
 }
 
 /* ---------- side list + main column ---------- */

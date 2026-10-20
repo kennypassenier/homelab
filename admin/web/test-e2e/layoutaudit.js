@@ -256,7 +256,7 @@ export function layoutAudit(rootSel) {
     if (!COUNT.test(t.data)) continue;
     if (
       !el.closest(
-        ".nx-card__head, .nx-card__foot, summary, .nx-tb__state, .section-head, h2, h3",
+        ".nx-card__head, .nx-card__foot, summary, .kp-toolbar__state, .section-head, h2, h3",
       )
     )
       continue;

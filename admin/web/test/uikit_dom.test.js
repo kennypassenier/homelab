@@ -320,20 +320,19 @@ test("redesign-kit-9: one element factory: h skips empty attributes, wires on…
   assert.equal(/** @type {any} */ (dom).on, undefined);
 });
 
-test("redesign-kit-10: one toggle group, one rule: drive is required, every value on is All, in both looks", () => {
+test("redesign-kit-10: one toggle group, one rule: drive is required, every value on is All", () => {
   assert.throws(
     () =>
-      ui.toggleChips(
+      ui.toggleGroup(
         /** @type {any} */ ({ label: "Status", chips: [], onChange() {} }),
       ),
     /Live view/,
   );
-  for (const look of /** @type {const} */ (["seg", "chips"])) {
+  {
     /** @type {Set<string>[]} */
     const seen = [];
     const g = ui.toggleGroup({
       label: "Status",
-      look,
       all: { label: "All" },
       chips: [
         { value: "a", label: "A", count: 3 },
@@ -347,16 +346,16 @@ test("redesign-kit-10: one toggle group, one rule: drive is required, every valu
     assert.equal(btn("a").dataset.drive, "kit-test-toggle");
     assert.equal(btn("a").dataset.driveRow, "a");
     btn("a").click();
-    assert.deepEqual(pressed(g.el), ["all:false", "a:true", "b:false"], look);
+    assert.deepEqual(pressed(g.el), ["all:false", "a:true", "b:false"]);
     btn("b").click();
     assert.deepEqual(
       pressed(g.el),
       ["all:true", "a:false", "b:false"],
-      `${look}: every value on is All`,
+      "every value on is All",
     );
     assert.equal(seen.at(-1)?.size, 0);
     g.counts({ a: 7, b: 0, all: 7 });
-    assert.equal(btn("a").textContent, "A7", `${look}: the exact count`);
+    assert.equal(btn("a").textContent, "A7", "the exact count");
     assert.equal(btn("b").textContent, "B0");
   }
   assert.match(
@@ -364,33 +363,6 @@ test("redesign-kit-10: one toggle group, one rule: drive is required, every valu
     /key === "Escape"[\s\S]{0,120}gFilter\.reset\(\)/,
     "Esc on Host resets the container filter",
   );
-});
-
-test("redesign-kit-11: the toolbar's active filters are filterChips, each a Live view control, and Clear all one too", () => {
-  const tb = ui.toolbar({ search: { placeholder: "Search", onInput() {} } });
-  let cleared = 0;
-  let all = 0;
-  tb.setActive(
-    [
-      {
-        label: "“q”",
-        clear: () => cleared++,
-        drive: { id: "kit-test-chip", row: "q" },
-      },
-    ],
-    { run: () => all++, drive: { id: "kit-test-clear" } },
-  );
-  const chip = /** @type {any} */ (tb.el.querySelector(".nx-filterchip"));
-  assert.ok(chip, "the active filter is not a filterChip");
-  const x = chip.querySelector("button");
-  assert.equal(x.dataset.drive, "kit-test-chip");
-  x.click();
-  const clear = /** @type {any} */ (
-    tb.el.querySelector('[data-drive="kit-test-clear"]')
-  );
-  clear.click();
-  assert.deepEqual([cleared, all], [1, 1]);
-  assert.doesNotMatch(read("css/app.css"), /\.nx-tb__chip\b/);
 });
 
 test("redesign-kit-12: the duplicates are gone: Schedules' icon button, Host's own swatch, Secrets' hover-card restyle", () => {

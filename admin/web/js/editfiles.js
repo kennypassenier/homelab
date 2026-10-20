@@ -10,6 +10,7 @@
 
 import { notify } from "./actui.js";
 import { h } from "./dom.js";
+import { setParams } from "./urlstate.js";
 import { buttonGroup, formGrid, gridRow } from "./gridrow.js";
 import {
   editCard,
@@ -45,9 +46,14 @@ export function filesCard(stack, e, reload, pending) {
   const templates = e.file_templates ?? {};
   /** @type {"edit" | "create"} */
   let mode = "edit";
-  let current = files.includes("lxc-compose.yml")
-    ? "lxc-compose.yml"
-    : (files[0] ?? "");
+  // `?file=<path>` opens that file (a link from Secrets or Apply names one);
+  // a name this stack does not have falls back to the usual first file.
+  const linked = new URLSearchParams(location.search).get("file") ?? "";
+  let current = files.includes(linked)
+    ? linked
+    : files.includes("lxc-compose.yml")
+      ? "lxc-compose.yml"
+      : (files[0] ?? "");
 
   for (const [path, text] of [...pending])
     if (!(path in e.texts) || text === e.texts[path]) pending.delete(path);
@@ -323,6 +329,12 @@ export function filesCard(stack, e, reload, pending) {
     if (mode !== "edit" || !(path in e.texts) || path === current) return;
     current = path;
     if (sel.value !== path) sel.value = path;
+    // The address names the open file, so the page can be linked and reloaded.
+    history.replaceState(
+      history.state,
+      "",
+      `${location.pathname}${setParams(location.search, { file: path })}`,
+    );
     if (!fromList) selectPane(masterDetail, path);
     showFile();
   };

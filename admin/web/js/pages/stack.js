@@ -3100,7 +3100,9 @@ function settingsHub(panel, c) {
   const { name, S } = c;
   /** @type {(() => void)[]} */
   const stops = [];
-  const want = new URLSearchParams(location.search).get("section");
+  const query = new URLSearchParams(location.search);
+  // `?file=` names a file of the Files card, so it opens that card.
+  const want = query.get("section") ?? (query.get("file") ? "files" : null);
   const drive = driven();
 
   const secrets = section({

@@ -559,9 +559,15 @@ dialog.kp-drawer.sk-drawer--plan {
 .ap-hover {
   display: grid;
   gap: var(--kp-space-xs, 0.25rem);
-  min-inline-size: 14rem;
+  /* The card is at most 24rem wide (kp's hover card); the content fills it
+     whole, so the 90-day strip and its axis are never cut at the edge. */
+  inline-size: min(22rem, calc(100vw - 3rem));
 }
-/* The 90-day strip in the hover card: one cell a day, scrolling when narrow. */
+/* The 90-day strip in the hover card: one cell a day, all 90 in the card. */
 .ap-hover__uptime {
-  min-inline-size: min(26rem, 80vw);
+  min-inline-size: 0;
+  --kp-uptime-cell-min: 2px;
+}
+.ap-hover__uptime .kp-uptime__track {
+  column-gap: 1px;
 }

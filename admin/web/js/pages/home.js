@@ -352,7 +352,6 @@ export function mount(root) {
       class: "kp-uptime ap-hover__uptime",
       "data-kp-uptime": "",
       "data-kp-uptime-count": "90",
-      "data-kp-uptime-fit": "scroll",
     });
     const entry =
       uptimeHist instanceof Map
@@ -563,6 +562,8 @@ export function mount(root) {
         if (!t) continue;
         c.dataset.host = t.host;
         c.setAttribute("data-kp-hovercard", "");
+        // On a phone the first tap on a tile opens its card, the second follows the link.
+        c.setAttribute("data-kp-touch", "tap");
         const link = c.querySelector("a.kp-entity__name");
         if (link instanceof HTMLElement) drivable(link, OPEN, t.host);
       }

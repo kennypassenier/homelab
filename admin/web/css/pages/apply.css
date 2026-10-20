@@ -155,3 +155,10 @@
     grid-template-columns: minmax(0, 1fr);
   }
 }
+
+/* "Plan again" stands at the right edge of the plan view, so its reason, which
+   kp opens to the right of the button, was squeezed to a 115 px column of three
+   lines. It opens to the left instead (kp-gaps homelab 135). */
+.kp-reason:has(> #apply-read) > .kp-tooltip {
+  position-area: block-end span-inline-start;
+}

@@ -324,6 +324,15 @@
   grid-auto-columns: minmax(0, 1fr);
   inline-size: 100%;
 }
+/* A label that does not fit its item wraps onto a second line; it is never cut. */
+.mv-ctl > .kp-segmented > .kp-segmented__item {
+  white-space: normal;
+  overflow: visible;
+  text-overflow: clip;
+  text-align: center;
+  line-height: 1.2;
+  block-size: auto;
+}
 .mv-block {
   display: grid;
   grid-template-columns: minmax(0, 1fr);

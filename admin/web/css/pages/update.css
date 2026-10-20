@@ -191,6 +191,7 @@
   }
   .uf-foot > :last-child {
     justify-self: stretch;
+    inline-size: 100%;
   }
 }
 /* Review item 7: the Update flow at the demo's width. */
@@ -210,21 +211,53 @@
   margin-block-end: 16px;
 }
 .undo-updates__list {
+  /* One set of column tracks for every row (subgrid), so the app names, the
+     version chips, the dates and the buttons line up from row to row. */
   display: grid;
-  gap: 8px;
+  grid-template-columns: max-content max-content minmax(0, 1fr) max-content;
+  column-gap: var(--kp-space-md, 1rem);
+  row-gap: 0;
 }
 .undo-updates__row {
   display: grid;
-  grid-template-columns:
-    minmax(8rem, max-content) minmax(8rem, max-content)
-    minmax(0, 1fr) auto;
-  gap: 8px 16px;
+  grid-column: 1 / -1;
+  grid-template-columns: subgrid;
   align-items: center;
+  padding-block: var(--kp-space-sm, 0.5rem);
+  border-block-start: 1px solid var(--border);
   font-size: var(--kp-text-sm);
 }
+.undo-updates__row:first-child {
+  border-block-start: 0;
+}
+.undo-updates__row .measured {
+  min-inline-size: 0;
+}
+.undo-updates__row .kp-button {
+  white-space: nowrap;
+  justify-self: stretch;
+}
 @media (max-width: 40rem) {
+  .undo-updates__list {
+    grid-template-columns: minmax(0, 1fr) max-content;
+  }
   .undo-updates__row {
-    grid-template-columns: minmax(0, 1fr) auto;
+    row-gap: var(--kp-space-xs, 0.25rem);
+  }
+  .undo-updates__row > .kp-button {
+    grid-column: 2;
+    grid-row: 1 / span 2;
+  }
+  .undo-updates__row > strong {
+    grid-column: 1;
+    overflow-wrap: anywhere;
+  }
+  .undo-updates__row > .kp-badge {
+    grid-column: 1;
+    justify-self: start;
+  }
+  .undo-updates__row > .measured {
+    grid-column: 1 / -1;
   }
 }
 

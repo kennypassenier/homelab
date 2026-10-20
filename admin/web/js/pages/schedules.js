@@ -19,6 +19,7 @@ import {
 } from "../act.js";
 import { schedulableActions } from "../actionforms.js";
 import { agoEl, setAgo } from "../ago.js";
+import { refusalCallout } from "../actui.js";
 import { fetchJson, h, patchKeyed, tableBlock } from "../dom.js";
 import { declare, declareField, drivable } from "../drivable.js";
 import { openJobDialog } from "../jobpanel.js";
@@ -38,6 +39,7 @@ import {
   HISTORY_LANES,
   movedTime,
   nextUp,
+  pausedUntil,
   runsWithClash,
   scheduleTitle,
   shortWhen,
@@ -96,6 +98,14 @@ import {
   setSelectionBusy,
   setSelectionResult,
 } from "/static/kp/js/selection-bar.js";
+import {
+  SNOOZE_END_EVENT,
+  SNOOZE_EVENT,
+  attachSnoozes,
+  setSnoozeBusy,
+  setSnoozedUntil,
+} from "/static/kp/js/snooze.js";
+import { getStrings, setStrings } from "/static/kp/js/strings.js";
 import { undoToast } from "/static/kp/js/undo-toast.js";
 import { attachUptimes, setUptime } from "/static/kp/js/uptime.js";
 import {
@@ -173,6 +183,34 @@ const SKIP_NEXT = declare({
   opens: "run",
   what: "skip only the next run; the schedule stays on",
 });
+// feat-kp11demo-9.5: pause one schedule until a date, on kp's snooze picker.
+const PAUSE_FOR = declare({
+  id: "pause-schedule-until",
+  page: "schedules",
+  opens: "run",
+  row: "<schedule id>/tomorrow|monday|next-week|pick",
+  what: "pause the schedule whose form is open until tomorrow 09:00, Monday 09:00, next week or a date and time (at most 30 days); its runs before then are skipped; pick is the button of the date panel",
+  shows: "while a saved schedule's form is open",
+  reach: [{ do: "click", control: "edit-schedule", row: "*" }],
+});
+const END_PAUSE = declare({
+  id: "resume-schedule",
+  page: "schedules",
+  opens: "run",
+  row: "<schedule id>",
+  what: "end the pause of the schedule whose form is open: its next run is back on time",
+  shows: "while the schedule is paused",
+  reach: [{ do: "click", control: "edit-schedule", row: "*" }],
+});
+/** The picker's words on this page: a pause, not a reminder. */
+const PAUSE_WORDS = {
+  snoozeTrigger: "Pause until…",
+  snoozeChange: "Paused: change",
+  snoozeSaving: "Pausing…",
+  snoozeNone: "Running",
+  snoozeEnd: "Resume now",
+  snoozeUntil: (/** @type {string} */ moment) => `Paused until ${moment}`,
+};
 const UNDO_CHANGE = declare({
   id: "undo-schedule-change",
   page: "schedules",
@@ -259,6 +297,16 @@ export function mount(root, opts = {}) {
   /** @type {number | null | undefined} undefined: not read (yet) */
   let nightly;
   let alive = true;
+  // kp's strings are one set for the document: the pause words last for this
+  // page and the reminder words come back when it closes.
+  const kpWords = getStrings();
+  const wordsBefore = Object.fromEntries(
+    Object.keys(PAUSE_WORDS).map((k) => [
+      k,
+      /** @type {Record<string, unknown>} */ (kpWords)[k],
+    ]),
+  );
+  setStrings(PAUSE_WORDS);
   /** Deletes waiting out their Undo: the rows are hidden meanwhile. */
   /** @type {Set<string>} */
   const removed = new Set();
@@ -882,7 +930,9 @@ export function mount(root, opts = {}) {
             h(
               "small",
               null,
-              `${cadenceWords(v.schedule.when)}${v.schedule.enabled ? "" : " · off"}`,
+              `${cadenceWords(v.schedule.when)}${v.schedule.enabled ? "" : " · off"}${
+                pausedUntil(v.schedule, now()) != null ? " · paused" : ""
+              }`,
             ),
           ),
         ),
@@ -904,6 +954,7 @@ export function mount(root, opts = {}) {
     const t = titleOf(s);
     const act_ = actionLabel(s.action);
     const next = s.enabled && v.next_run != null ? v.next_run : null;
+    const paused = pausedUntil(s, now());
     const nextText = !s.enabled
       ? "off"
       : next == null
@@ -1023,6 +1074,13 @@ export function mount(root, opts = {}) {
           "data-kp-sort-value": next ?? 9e15,
         },
         nextText,
+        paused
+          ? h(
+              "small",
+              { class: "sch-note" },
+              `Paused until ${dateTimeText(paused, zone())}`,
+            )
+          : null,
       ),
       cell("Last 14", strip),
       h(
@@ -1465,10 +1523,124 @@ export function mount(root, opts = {}) {
   /** @type {ReturnType<typeof buildScheduleForm> | null} */
   let form = null;
 
+  // ── pause until (feat-kp11demo-9.5) ──
+  /** The saved schedule whose form is open, or null. @type {string | null} */
+  let pauseId = null;
+  const pauseEl = h("div", {
+    class: "kp-snooze sch-pause__picker",
+    "data-kp-snooze": "",
+    "data-kp-snooze-choices": "tomorrow monday next-week pick",
+    "data-kp-snooze-morning": "09:00",
+    "data-kp-snooze-max": "30d",
+    "data-kp-look": "menu",
+    "aria-labelledby": "sch-pause-h",
+    id: "sch-pause",
+  });
+  const pauseNote = h("p", {
+    class: "measured sch-pause__note",
+    role: "status",
+  });
+  const pauseErr = h("div", { class: "sch-pause__err" });
+  const pauseBox = h(
+    "section",
+    { class: "sch-pause", "aria-labelledby": "sch-pause-h" },
+    h("h3", { id: "sch-pause-h" }, "Pause until a date"),
+    h(
+      "p",
+      { class: "measured" },
+      "Stops this schedule for a while without losing it (a holiday, a migration): its runs before the date are skipped, and the first run after it happens on time.",
+    ),
+    pauseEl,
+    pauseNote,
+    pauseErr,
+  );
+  let pauseAttached = false;
+  const paintPause = () => {
+    const v = pauseId ? viewOf(pauseId) : null;
+    if (!v) {
+      pauseBox.remove();
+      return;
+    }
+    if (!pauseBox.isConnected) paneBody.append(pauseBox);
+    if (!pauseAttached) {
+      pauseAttached = true;
+      attachSnoozes(pauseBox);
+    }
+    const to = pausedUntil(v.schedule, now());
+    setSnoozedUntil(pauseEl, to != null ? to * 1000 : null);
+    pauseNote.textContent =
+      to != null
+        ? `Paused: its runs before ${dateTimeText(to, zone())} are skipped${
+            v.next_run != null
+              ? `; the next run is ${dateTimeText(v.next_run, zone())}`
+              : ""
+          }.`
+        : v.schedule.enabled
+          ? "Running: every run happens on time."
+          : "Turned off: it runs nothing until it is turned on.";
+  };
+  /** @param {number | null} until unix seconds, or null to resume */
+  const sendPause = async (until) => {
+    const id = pauseId;
+    if (!id) return;
+    setSnoozeBusy(pauseEl, true);
+    const r = await send(
+      "POST",
+      `/data/schedules/${encodeURIComponent(id)}/pause`,
+      { until },
+      "the pause",
+    );
+    setSnoozeBusy(pauseEl, false);
+    if (!r.ok) {
+      pauseErr.replaceChildren(
+        refusalCallout(
+          r.error,
+          "destructive",
+          until == null ? "Not resumed" : "Not paused",
+        ),
+      );
+      paintPause();
+      return;
+    }
+    pauseErr.replaceChildren();
+    await loadSchedules();
+    say(
+      until == null
+        ? "Resumed: the schedule is back on time."
+        : `Paused until ${dateTimeText(until, zone())}.`,
+    );
+  };
+  pauseEl.addEventListener(SNOOZE_EVENT, (event) => {
+    const at = Date.parse(/** @type {CustomEvent} */ (event).detail.until);
+    void sendPause(Math.round(at / 1000));
+  });
+  pauseEl.addEventListener(SNOOZE_END_EVENT, () => void sendPause(null));
+  const markPause = () => {
+    if (!pauseId) return;
+    for (const b of /** @type {NodeListOf<HTMLElement>} */ (
+      pauseEl.querySelectorAll(".kp-snooze__chip[data-value], [data-kp-value]")
+    )) {
+      const value = b.dataset.value ?? b.dataset.kpValue;
+      if (value) drivable(b, PAUSE_FOR, `${pauseId}/${value}`);
+    }
+    const apply = pauseEl.querySelector(
+      ".kp-snooze__actions .kp-button--primary",
+    );
+    if (apply instanceof HTMLElement)
+      drivable(apply, PAUSE_FOR, `${pauseId}/pick`);
+    const end = pauseEl.querySelector(".kp-snooze__end");
+    if (end instanceof HTMLElement) drivable(end, END_PAUSE, pauseId);
+  };
+  const pauseWatch = new MutationObserver(markPause);
+  pauseWatch.observe(pauseEl, { childList: true, subtree: true });
+  detach.push(() => pauseWatch.disconnect());
+
   const closeForm = () => {
     form?.destroy();
     form = null;
     formKey = null;
+    pauseId = null;
+    pauseBox.remove();
     paneBody.replaceChildren();
     paneHeading.textContent = "";
     handle?.select(null);
@@ -1551,6 +1723,9 @@ export function mount(root, opts = {}) {
         onClose: closeForm,
         onSaved: () => {},
       });
+      pauseId = existing?.id ?? null;
+      paintPause();
+      markPause();
       handle?.select(key);
       handle?.open(key);
       form.focus();
@@ -1736,6 +1911,7 @@ export function mount(root, opts = {}) {
     drawWeek();
     drawHero();
     drawPaneList();
+    paintPause();
     if (!formKey && (paneError || paneLoading)) {
       paneError = false;
       paneLoading = false;
@@ -1781,6 +1957,7 @@ export function mount(root, opts = {}) {
   first();
   render();
   return () => {
+    setStrings(wordsBefore);
     alive = false;
     offAct();
     offJobs();

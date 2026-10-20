@@ -19,6 +19,7 @@ import {
   movedTime,
   nextRuns,
   nextUp,
+  pausedUntil,
   runsWithClash,
   scheduleTitle,
   seriesOf,
@@ -366,4 +367,12 @@ test("redesign-schedules: the history draws the schedules' jobs as bars, the bus
   assert.equal(m.hidden, 0);
   void dateTimeText;
   void zoneParts;
+});
+
+test("feat-kp11demo-9.5: a pause reads as paused only while it lies ahead, and only for a schedule that is on", () => {
+  const s = /** @type {any} */ ({ enabled: true, paused_until: 2000 });
+  assert.equal(pausedUntil(s, 1000), 2000);
+  assert.equal(pausedUntil(s, 2000), null, "it ended at that moment");
+  assert.equal(pausedUntil({ ...s, enabled: false }, 1000), null);
+  assert.equal(pausedUntil(/** @type {any} */ ({ enabled: true }), 1000), null);
 });

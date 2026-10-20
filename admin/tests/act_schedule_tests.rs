@@ -172,6 +172,7 @@ fn daily(at: &str, handled_until: i64) -> Schedule {
         handled_until,
         last_run: None,
         last_missed: None,
+        paused_until: None,
     }
 }
 

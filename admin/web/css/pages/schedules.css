@@ -274,3 +274,15 @@ tr.sch-flash td {
     grid-template-columns: minmax(0, 1fr);
   }
 }
+
+/* Pause until: the picker, then the sentence about what the pause does, on
+   the form's own width. */
+.sch-pause {
+  display: grid;
+  gap: var(--kp-space-sm, 0.5rem);
+  margin-block-start: var(--kp-space-lg, 1.5rem);
+}
+.sch-pause > h3,
+.sch-pause > p {
+  margin: 0;
+}

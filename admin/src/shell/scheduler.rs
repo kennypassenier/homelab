@@ -273,6 +273,7 @@ impl Scheduler {
             handled_until: now,
             last_run: None,
             last_missed: None,
+            paused_until: None,
         };
         let view = {
             let mut f = self.state.lock().await;
@@ -331,6 +332,31 @@ impl Scheduler {
                     "reload the schedules page and skip the run it shows next",
                 )
             })?;
+            let s = s.clone();
+            self.save(&f).map_err(saved)?;
+            self.view(&s, now)
+        };
+        self.publish_list().await;
+        Ok(view)
+    }
+
+    /// feat-kp11demo-9.5: pause the schedule until `until` (unix seconds),
+    /// or resume it with `None`. Its slots before then pass quietly.
+    pub async fn pause(&self, id: &str, until: Option<i64>) -> Result<serde_json::Value, Refusal> {
+        let now = (self.clock)();
+        let until = schedule::pause(until, now).map_err(|why| {
+            Refusal::new(
+                format!("pausing schedule {id}"),
+                why,
+                "pick a moment between now and a year from now",
+            )
+        })?;
+        let view = {
+            let mut f = self.state.lock().await;
+            let Some(s) = f.schedules.iter_mut().find(|s| s.id == id) else {
+                return Err(unknown(id));
+            };
+            s.paused_until = until;
             let s = s.clone();
             self.save(&f).map_err(saved)?;
             self.view(&s, now)
@@ -450,6 +476,38 @@ async fn skip_run(
     }
 }
 
+/// The body of `POST /data/schedules/{id}/pause`: `until` in unix seconds,
+/// or null to resume.
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct PauseBody {
+    until: Option<i64>,
+}
+
+async fn pause_schedule(
+    State(s): State<Arc<Scheduler>>,
+    UrlPath(id): UrlPath<String>,
+    b: Result<Json<PauseBody>, JsonRejection>,
+) -> Response {
+    let until = match b {
+        Ok(Json(b)) => b.until,
+        Err(e) => {
+            return bad(
+                StatusCode::BAD_REQUEST,
+                Refusal::new(
+                    "pause",
+                    format!("the request body does not read: {}", e.body_text()),
+                    "send {until: <unix seconds>} to pause, or {until: null} to resume",
+                ),
+            );
+        }
+    };
+    match s.pause(&id, until).await {
+        Ok(v) => Json(v).into_response(),
+        Err(r) => bad(StatusCode::BAD_REQUEST, r),
+    }
+}
+
 async fn remove(State(s): State<Arc<Scheduler>>, UrlPath(id): UrlPath<String>) -> Response {
     match s.delete(&id).await {
         Ok(()) => StatusCode::NO_CONTENT.into_response(),
@@ -463,5 +521,6 @@ pub fn router(s: Arc<Scheduler>) -> Router {
         .route("/data/schedules", get(list).post(create))
         .route("/data/schedules/{id}", put(update).delete(remove))
         .route("/data/schedules/{id}/skip", post(skip_run))
+        .route("/data/schedules/{id}/pause", post(pause_schedule))
         .with_state(s)
 }

@@ -13,7 +13,8 @@ import { formatClock, formatDateTime, formatDay } from "./format.js";
  *   args: Record<string, unknown>, when: When, enabled: boolean, note: string,
  *   created_at: number, handled_until: number,
  *   last_run?: {slot: number, job: number},
- *   last_missed?: {slot: number, why: "down" | "busy" | "refused"}}} Schedule
+ *   last_missed?: {slot: number, why: "down" | "busy" | "refused"},
+ *   paused_until?: number | null}} Schedule
  * @typedef {{schedule: Schedule, next_run: number | null,
  *   next_run_local: string | null,
  *   last_job: import("./jobs.js").Job | null}} ScheduleView
@@ -817,7 +818,13 @@ export function weekEvents(list, o) {
         series: seriesOf(s.action),
         ...(state ? { state } : {}),
         detail: `${o.label(s.action)} · ${SHORT_DAYS[zoneParts(t, zone).wd]} ${dateTimeText(t, zone)} · ${cadenceWords(s.when)}${
-          !s.enabled ? " · turned off" : skipped ? " · skipped" : ""
+          !s.enabled
+            ? " · turned off"
+            : skipped
+              ? s.paused_until && t < s.paused_until
+                ? " · paused"
+                : " · skipped"
+              : ""
         }${clash ? ` · same minute as ${clash}` : ""}`,
       });
     }
@@ -1130,3 +1137,14 @@ export function historyModel(list, jobs, o) {
     hidden: busy.size - shown.length,
   };
 }
+
+/**
+ * The moment a schedule's pause ends (unix seconds), or null when it is not
+ * paused now (feat-kp11demo-9.5).
+ * @param {Schedule} s
+ * @param {number} now
+ */
+export const pausedUntil = (s, now) =>
+  s.enabled && s.paused_until != null && s.paused_until > now
+    ? s.paused_until
+    : null;

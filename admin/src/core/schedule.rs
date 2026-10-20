@@ -251,6 +251,29 @@ pub struct Schedule {
     /// than `last_run`. A slot skipped on purpose is never recorded here.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub last_missed: Option<Missed>,
+    /// feat-kp11demo-9.5: paused until this moment (unix seconds). A slot
+    /// before it is neither run nor missed, nor notified: it passes quietly,
+    /// and the first slot at or after it runs as usual. Absent in a file an
+    /// older dashboard wrote, and an older dashboard reading this one
+    /// ignores it (it then runs the slots; a version check informs, never
+    /// blocks).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub paused_until: Option<i64>,
+}
+
+/// The longest a schedule may be paused for: a year.
+pub const MAX_PAUSE_S: i64 = 366 * 86_400;
+
+/// Pause `s` until `until` (or resume it with `None`) at `now`. Returns the
+/// new `paused_until`. A moment in the past, or more than a year away, is
+/// refused with a sentence.
+pub fn pause(until: Option<i64>, now: i64) -> Result<Option<i64>, String> {
+    match until {
+        None => Ok(None),
+        Some(u) if u <= now => Err("the pause must end in the future".into()),
+        Some(u) if u > now + MAX_PAUSE_S => Err("the longest pause is one year".into()),
+        Some(u) => Ok(Some(u)),
+    }
 }
 
 /// Why a slot passed without a run.
@@ -388,7 +411,14 @@ pub fn tick(s: &Schedule, now: i64, grace: i64, busy: bool) -> TickPlan {
             handled_until: now.max(s.handled_until),
         };
     }
-    let slots = s.when.slots_between(s.handled_until, now, 1_000);
+    // A paused schedule lets its slots before `paused_until` pass quietly.
+    let resume = s.paused_until.unwrap_or(i64::MIN);
+    let slots: Vec<i64> = s
+        .when
+        .slots_between(s.handled_until, now, 1_000)
+        .into_iter()
+        .filter(|t| *t >= resume)
+        .collect();
     let mut missed = Vec::new();
     let mut run = None;
     for (i, slot) in slots.iter().enumerate() {
@@ -411,7 +441,13 @@ pub fn next_run(s: &Schedule, now: i64) -> Option<i64> {
     if !s.enabled {
         return None;
     }
-    s.when.next_after(now.max(s.handled_until))
+    let from = now.max(s.handled_until);
+    // `next_after` is strictly after: one second early keeps a slot AT the
+    // moment the pause ends.
+    match s.paused_until {
+        Some(p) if p > from => s.when.next_after(p - 1),
+        _ => s.when.next_after(from),
+    }
 }
 
 /// redesign-schedules-2: skip one run. Only the slot the page shows as next
@@ -436,4 +472,51 @@ pub fn skip(s: &Schedule, slot: i64, now: i64) -> Result<i64, String> {
 pub fn local_label(unix: i64) -> String {
     let (y, m, d, hh, mm) = to_local(unix);
     format!("{y:04}-{m:02}-{d:02} {hh:02}:{mm:02}")
+}
+
+#[cfg(test)]
+mod pause_tests {
+    use super::*;
+
+    fn daily(paused_until: Option<i64>) -> Schedule {
+        Schedule {
+            id: "s1".into(),
+            stack: "jellyfin".into(),
+            action: "backup".into(),
+            args: ActionArgs::default(),
+            when: When::Day { at: "03:30".into() },
+            enabled: true,
+            note: String::new(),
+            created_at: 0,
+            handled_until: days_from_civil(2026, 10, 20) * 86_400,
+            last_run: None,
+            last_missed: None,
+            paused_until,
+        }
+    }
+
+    #[test]
+    fn a_paused_schedule_skips_quietly_and_resumes_at_the_end() {
+        let day = |d: u32| days_from_civil(2026, 10, d) * 86_400;
+        // Paused until 23/10 00:00 UTC: the slots of 20-22 pass quietly.
+        let s = daily(Some(day(23)));
+        let during = tick(&s, day(22) + 40_000, 600, false);
+        assert_eq!(during.run, None);
+        assert!(during.missed.is_empty());
+        // The next run the page shows is the first slot after the pause.
+        let next = next_run(&s, day(21)).unwrap();
+        assert!(next >= day(23), "{}", local_label(next));
+        assert_eq!(local_label(next), "2026-10-23 03:30");
+        // Not paused: the same ticks would have run / missed them.
+        let free = daily(None);
+        assert!(!tick(&free, day(22) + 40_000, 600, false).missed.is_empty());
+    }
+
+    #[test]
+    fn a_pause_must_end_in_the_next_year() {
+        assert_eq!(pause(None, 100), Ok(None));
+        assert!(pause(Some(50), 100).is_err());
+        assert!(pause(Some(100 + MAX_PAUSE_S + 1), 100).is_err());
+        assert_eq!(pause(Some(500), 100), Ok(Some(500)));
+    }
 }

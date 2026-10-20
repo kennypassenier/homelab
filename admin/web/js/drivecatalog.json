@@ -2882,6 +2882,24 @@
       "twins": false
     },
     {
+      "id": "pause-schedule-until",
+      "page": "schedules",
+      "what": "pause the schedule whose form is open until tomorrow 09:00, Monday 09:00, next week or a date and time (at most 30 days); its runs before then are skipped; pick is the button of the date panel",
+      "opens": "run",
+      "row": "<schedule id>/tomorrow|monday|next-week|pick",
+      "href": "/activity?view=planned",
+      "was": [],
+      "shows": "while a saved schedule's form is open",
+      "reach": [
+        {
+          "do": "click",
+          "control": "edit-schedule",
+          "row": "*"
+        }
+      ],
+      "twins": false
+    },
+    {
       "id": "pin-update",
       "page": "fleetview",
       "what": "a stale image's Update: open the Update flow with that app picked (back up, move the pinned image, commit, deploy, verify)",
@@ -3357,6 +3375,24 @@
       ],
       "shows": null,
       "reach": [],
+      "twins": false
+    },
+    {
+      "id": "resume-schedule",
+      "page": "schedules",
+      "what": "end the pause of the schedule whose form is open: its next run is back on time",
+      "opens": "run",
+      "row": "<schedule id>",
+      "href": "/activity?view=planned",
+      "was": [],
+      "shows": "while the schedule is paused",
+      "reach": [
+        {
+          "do": "click",
+          "control": "edit-schedule",
+          "row": "*"
+        }
+      ],
       "twins": false
     },
     {

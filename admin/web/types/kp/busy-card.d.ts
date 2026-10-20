@@ -1,4 +1,4 @@
-// The kp-themes module chassis-rs serves at /static/kp/js/busy-card.js (kp-themes 11.0.0),
+// The kp-themes module chassis-rs serves at /static/kp/js/busy-card.js (kp-themes 11.1.1),
 // copied from kp-themes js/busy-card.d.ts: chassis serves the module, not its types.
 /** Every busy card, whatever component laid it. */
 export declare const BUSY_CARD = ".kp-datatable__busy-card";
@@ -42,6 +42,20 @@ export type BusyCard = {
    * take it out at once (a new loading state while it was leaving)
    */
   remove: () => void;
+};
+/** The ancestors of `host` that clip it sideways (overflow-x other than visible), nearest first. @param {HTMLElement} host */
+export declare function scrollersAround(host: HTMLElement): HTMLElement[];
+/**
+ * The span of `host`'s width (left to right, in viewport pixels) that no ancestor's sideways scrolling hides.
+ * @param {HTMLElement} host @param {number} left @param {number} right
+ */
+export declare function seenAcross(
+  host: HTMLElement,
+  left: number,
+  right: number,
+): {
+  left: number;
+  right: number;
 };
 /**
  * Lay the busy card over a data area of `host`.

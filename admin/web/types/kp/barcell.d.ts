@@ -1,4 +1,4 @@
-// The kp-themes module chassis-rs serves at /static/kp/js/barcell.js (kp-themes 11.0.0),
+// The kp-themes module chassis-rs serves at /static/kp/js/barcell.js (kp-themes 11.1.1),
 // copied from kp-themes js/barcell.d.ts: chassis serves the module, not its types.
 /** A bar cell written in markup. */
 export declare const BAR_CELL = "[data-kp-bar]";

@@ -1,4 +1,4 @@
-// The kp-themes module chassis-rs serves at /static/kp/js/row-select.js (kp-themes 11.0.0),
+// The kp-themes module chassis-rs serves at /static/kp/js/row-select.js (kp-themes 11.1.1),
 // copied from kp-themes js/row-select.d.ts: chassis serves the module, not its types.
 /** An element that gets the keys whether or not it is a data table. */
 export declare const ROW_SELECT = "[data-kp-select-keys]";

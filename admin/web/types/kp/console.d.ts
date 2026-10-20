@@ -94,6 +94,8 @@ export type ConsoleState = {
   off: (() => void)[];
   showAll: boolean;
   said: string;
+  barState: string;
+  hintHeight: number;
 };
 /**
  * Give a console its `run`.

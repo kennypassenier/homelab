@@ -8,6 +8,18 @@ export type WheelItem = {
    * 1 by default; larger is likelier and a larger segment
    */
   weight?: number;
+  /**
+   * a short line about the choice, shown in the answer card and the segment's tooltip
+   */
+  tag?: string;
+  /**
+   * stays on the wheel, marked, and is never drawn while another choice is not resting
+   */
+  resting?: boolean;
+  /**
+   * a shorter name for the wheel's face, used when the whole label does not fit a thin segment
+   */
+  short?: string;
 };
 export type WheelState = {
   items: WheelItem[];

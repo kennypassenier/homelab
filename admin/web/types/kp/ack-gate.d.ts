@@ -1,4 +1,4 @@
-// The kp-themes module chassis-rs serves at /static/kp/js/ack-gate.js (kp-themes 11.0.0),
+// The kp-themes module chassis-rs serves at /static/kp/js/ack-gate.js (kp-themes 11.1.1),
 // copied from kp-themes js/ack-gate.d.ts: chassis serves the module, not its types.
 /** The gates this module drives. */
 export declare const ACK_GATE = "[data-kp-ack]";

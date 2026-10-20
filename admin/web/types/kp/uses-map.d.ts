@@ -42,6 +42,16 @@ export type UsesNode = {
    */
   mark?: string;
 };
+export type UsesLine = {
+  /**
+   * the line's colour (and its pattern)
+   */
+  tone?: "ok" | "warn" | "bad" | "muted";
+  /**
+   * the words on the line
+   */
+  label?: string;
+};
 /** The view a matrix remembers on this device, or null. @param {Element} el @returns {'grid' | 'lines' | null} */
 export declare function rememberedView(el: Element): "grid" | "lines" | null;
 /** Remember the view a matrix shows. @param {Element} el @param {'grid' | 'lines'} view */
@@ -49,7 +59,7 @@ export declare function rememberView(el: Element, view: "grid" | "lines"): void;
 /**
  * The relation of a spec, as lists. Pure.
  * @param {{ rows?: readonly UsesNode[], columns?: readonly UsesNode[], cell?: (row: string, column: string) => unknown }} spec
- * @returns {{ uses: Map<string, string[]>, usedBy: Map<string, string[]> }}
+ * @returns {{ uses: Map<string, string[]>, usedBy: Map<string, string[]>, lines: Map<string, UsesLine> }} `lines` by `"<row>><column>"`
  */
 export declare function usesRelation(spec: {
   rows?: readonly UsesNode[];
@@ -58,6 +68,7 @@ export declare function usesRelation(spec: {
 }): {
   uses: Map<string, string[]>;
   usedBy: Map<string, string[]>;
+  lines: Map<string, UsesLine>;
 };
 /**
  * The path of one line between two points. Pure.
@@ -89,13 +100,6 @@ export type Context = {
   ) => void;
   markDrawn: (el: HTMLElement) => void;
 };
-/**
- * The helpers heat.js hands over: the busy card's bookkeeping lives there.
- * @typedef {object} Context
- * @property {(el: HTMLElement, nodes: Node[]) => void} replaceKeepingCard
- * @property {(el: HTMLElement, loading: boolean, words: string, area: () => readonly (Element | { top: number, right: number, bottom: number, left: number })[], className: string) => void} syncCard
- * @property {(el: HTMLElement) => void} markDrawn
- */
 /**
  * Draw the lines view of a matrix.
  *

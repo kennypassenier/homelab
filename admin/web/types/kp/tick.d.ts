@@ -1,4 +1,4 @@
-// The kp-themes module chassis-rs serves at /static/kp/js/tick.js (kp-themes 11.0.0),
+// The kp-themes module chassis-rs serves at /static/kp/js/tick.js (kp-themes 11.1.1),
 // copied from kp-themes js/tick.d.ts: chassis serves the module, not its types.
 /** An element whose number ticks when its text changes. */
 export declare const TICK = "[data-kp-tick]";

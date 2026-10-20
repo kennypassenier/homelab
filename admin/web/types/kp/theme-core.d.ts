@@ -42,6 +42,15 @@ export declare const UNKNOWN_THEME_EVENT = "kp-theme-unknown";
  * so a later choice supersedes a held one. `pendingTheme()` reads it.
  */
 export declare const PENDING_THEME_ATTRIBUTE = "data-theme-pending";
+/**
+ * The theme a root is really wearing while it shows a PREVIEW of another, on the root [anchors-picker-1019].
+ *
+ * `previewTheme()` puts a theme on the root to look at it, without a change: nothing is announced, nothing is stored, no
+ * listener is asked. While it is set, `data-theme` is the previewed theme and this attribute names the real one;
+ * `currentTheme()` still answers the real one, so a picker's mark, a stored choice and every `kp-theme-change` listener keep
+ * seeing the theme the person chose. `endPreview()` removes it, and so does `applyTheme()` whenever it puts a theme on the root.
+ */
+export declare const PREVIEW_THEME_ATTRIBUTE = "data-theme-preview-from";
 export type ThemeConfig = {
   root?: Element;
   darkClass?: string | null;
@@ -104,6 +113,54 @@ export declare function applyTheme(
     announce?: boolean;
   },
 ): ThemeName;
+/**
+ * Show a theme on the root for a look, without choosing it [anchors-picker-1019].
+ *
+ * Nothing is announced (no `kp-theme-before-change`, no `kp-theme-change`), nothing is stored, and `currentTheme()` goes on
+ * answering the theme the root really wears; only `data-theme` and the dark class change, so the page, its charts that read the
+ * theme from the root and the tokens all show the previewed theme. A theme that does not exist is ignored (no fallback to the
+ * default: a preview of nothing is no preview). Previewing the theme already worn ends a preview. `endPreview()` goes back;
+ * `applyTheme()` makes a choice and ends it. A theme whose register is loaded on demand needs it loaded first:
+ * js/theme-picker.js does that before it calls this.
+ *
+ * @param {unknown} theme
+ * @param {{ root?: Element, darkClass?: string | null }} [options]
+ * @returns {ThemeName | null} the theme now shown, or null when the name is not a theme
+ */
+export declare function previewTheme(
+  theme: unknown,
+  {
+    root,
+    darkClass,
+  }?: {
+    root?: Element;
+    darkClass?: string | null;
+  },
+): ThemeName | null;
+/**
+ * Go back from a preview to the theme the root really wears.
+ *
+ * @param {{ root?: Element, darkClass?: string | null }} [options]
+ * @returns {boolean} whether there was a preview to end
+ */
+export declare function endPreview({
+  root,
+  darkClass,
+}?: {
+  root?: Element;
+  darkClass?: string | null;
+}): boolean;
+/**
+ * The theme being previewed on the root, or null when none is.
+ *
+ * @param {{ root?: Element }} [options]
+ * @returns {ThemeName | null}
+ */
+export declare function previewedTheme({
+  root,
+}?: {
+  root?: Element;
+}): ThemeName | null;
 /**
  * Remember the choice. Returns false when storage refused — private mode,
  * blocked storage, a full quota. The caller shows that; it is not swallowed

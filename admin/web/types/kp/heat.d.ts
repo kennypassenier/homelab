@@ -1,4 +1,4 @@
-// The kp-themes module chassis-rs serves at /static/kp/js/heat.js (kp-themes 11.0.0),
+// The kp-themes module chassis-rs serves at /static/kp/js/heat.js (kp-themes 11.1.1),
 // copied from kp-themes js/heat.d.ts: chassis serves the module, not its types.
 /** A heat grid. */
 export declare const HEAT = "[data-kp-heat]";
@@ -12,6 +12,10 @@ export declare const HEAT_ROW_EVENT = "kp-heat-row";
 export declare const HEAT_PAGE_EVENT = "kp-heat-page";
 /** Fired on a matrix when a cell is pinned. */
 export declare const MATRIX_PICK_EVENT = "kp-matrix-pick";
+/** Fired on a heat grid, bubbling, when the Retry of its failed state is pressed [state-plates-1019]. */
+export declare const HEAT_RETRY_EVENT = "kp-heat-retry";
+/** Fired on a matrix (either view), bubbling, when the Retry of its failed state is pressed [state-plates-1019]. */
+export declare const MATRIX_RETRY_EVENT = "kp-matrix-retry";
 /** Fired on a matrix when the lit headers change. */
 export declare const MATRIX_LIGHT_EVENT = "kp-matrix-light";
 export type GridTone =
@@ -79,6 +83,9 @@ export type HeatRow = {
   cells: readonly HeatCell[];
 };
 export type HeatSpec = {
+  /**
+   * `minor: true` draws no name, `minor: false` always does
+   */
   columns?: readonly {
     key: string;
     label: string;
@@ -91,9 +98,17 @@ export type HeatSpec = {
    */
   state?: "ready" | "loading" | "empty" | "error";
   /**
-   * the words of the empty and error states
+   * the words of the empty and error states (the plate's heading)
    */
   message?: string;
+  /**
+   * the plate's sentence under the heading (an error says the package's own when none is given)
+   */
+  text?: string;
+  /**
+   * a picture over the heading of the empty and error plates
+   */
+  art?: Node | string | null;
   /**
    * the shape of the loading state when there is no data yet
    */
@@ -102,7 +117,7 @@ export type HeatSpec = {
     columns: number;
   };
   /**
-   * every how many columns the axis names one (default 3; the last always)
+   * every how many columns the axis names one (default 3; the last always); columns with `minor` set do not count
    */
   every?: number;
   /**
@@ -119,6 +134,50 @@ export type HeatSpec = {
   picked?: string | null;
   /**
    * the grid's accessible name, when the element has none
+   */
+  label?: string;
+  /**
+   * the legend under the grid (setHeatLegend); `false` takes it away
+   */
+  legend?: readonly HeatLegendEntry[] | false;
+  /**
+   * the key line at the end of the legend
+   */
+  legendKeys?: HeatLegendOptions["keys"];
+};
+export type HeatLegendEntry = {
+  /**
+   * a swatch of this tone (with `label`)
+   */
+  tone?: GridTone;
+  /**
+   * its words
+   */
+  label?: string;
+  /**
+   * instead of a tone: the value scale, `less` then `steps` swatches of rising level then `more`
+   */
+  ramp?: boolean;
+  /**
+   * how many swatches the ramp has (default 5, 2 to 9)
+   */
+  steps?: number;
+  /**
+   * the ramp's low end (default "Less")
+   */
+  less?: string;
+  /**
+   * the ramp's high end (default "More")
+   */
+  more?: string;
+};
+export type HeatLegendOptions = {
+  /**
+   * `true`: the keys of a heat grid (move, pick a column, drop the pick, earlier or later); or the pairs to show; at the end of the legend
+   */
+  keys?: boolean | readonly import("./keys.js").KeyPair[];
+  /**
+   * the legend's name for a screen reader (default "Legend")
    */
   label?: string;
 };
@@ -165,7 +224,18 @@ export type MatrixSpec = {
    */
   cell?: (row: string, column: string) => MatrixCell | null | undefined;
   state?: "ready" | "loading" | "empty" | "error";
+  /**
+   * the plate's heading in the empty and error states
+   */
   message?: string;
+  /**
+   * the plate's sentence under the heading
+   */
+  text?: string;
+  /**
+   * a picture over the heading of the empty and error plates
+   */
+  art?: Node | string | null;
   /**
    * the size of the loading state when there are no names yet
    */
@@ -222,6 +292,24 @@ export declare function setHeatRows(
   el: HTMLElement,
   keys: readonly string[],
 ): void;
+/**
+ * The legend under a heat grid: a swatch and its words per entry, in the order given, a value ramp where an entry asks for one,
+ * and at the end the line of keys. The list is the one right after the grid (made when there is none), named in the grid's
+ * `aria-describedby`; no entries and no keys hides it. Called again, it rewrites in place, so the legend keeps its place while the
+ * grid loads.
+ *
+ * @param {HTMLElement} el the heat grid
+ * @param {readonly HeatLegendEntry[]} entries
+ * @param {HeatLegendOptions & { source?: 'auto' }} [options]
+ * @returns {HTMLElement | null} the legend, null for a grid that is not in a page
+ */
+export declare function setHeatLegend(
+  el: HTMLElement,
+  entries: readonly HeatLegendEntry[],
+  options?: HeatLegendOptions & {
+    source?: "auto";
+  },
+): HTMLElement | null;
 /**
  * Wire every heat grid under `root`: pick, row labels, keys.
  * @param {ParentNode} [root]

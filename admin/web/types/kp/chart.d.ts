@@ -1,4 +1,4 @@
-// The kp-themes module chassis-rs serves at /static/kp/js/chart.js (kp-themes 11.0.0),
+// The kp-themes module chassis-rs serves at /static/kp/js/chart.js (kp-themes 11.1.1),
 // copied from kp-themes js/chart.d.ts: chassis serves the module, not its types.
 /** A chart: `data-kp-chart` (a plot) or `data-kp-chart="spark"`. */
 export declare const CHART = "[data-kp-chart]";
@@ -130,6 +130,14 @@ export type ChartData = {
    * why there are no readings: shown in the plot, at its height, instead of the lines
    */
   error?: string;
+  /**
+   * a sentence under `error` on a key figure's trend (its failed plate; else the package's own)
+   */
+  errorText?: string;
+  /**
+   * a picture over the heading of a key figure's empty and failed trend plate
+   */
+  art?: Node | string | null;
   /**
    * while every source has a single reading, say so under the plot (`chartOnePoint`)
    */
@@ -296,6 +304,8 @@ export type Strings = import("./strings.js").Strings;
  *   the axis too; `unit` and `digits` then do nothing
  * @property {number} [digits] fraction digits of a value; else by its size
  * @property {string} [error] why there are no readings: shown in the plot, at its height, instead of the lines
+ * @property {string} [errorText] a sentence under `error` on a key figure's trend (its failed plate; else the package's own)
+ * @property {Node | string | null} [art] a picture over the heading of a key figure's empty and failed trend plate
  * @property {boolean} [onePointNote] while every source has a single reading, say so under the plot (`chartOnePoint`)
  * @property {ChartSeries[]} series
  * @property {ChartEvent[]} [events]
@@ -367,6 +377,7 @@ export declare function chartWords(overrides?: Partial<Strings>): {
   now: string;
   empty: string;
   retry: string;
+  trendFailed: string;
   onePoint: string;
   loading: string;
   pinnedOutside: string;
@@ -676,7 +687,20 @@ export type TrendData = {
   /**
    * `[[ms, value]…]`, oldest first
    */
-  points: ChartPoint[];
+  points?: ChartPoint[];
+  /**
+   * why the trend could not be read: the tile's trend is the failed plate (its heading) with a Retry
+   * that fires `kp-chart-retry` on the figure, bubbling [kyu-plates-1019]
+   */
+  error?: string;
+  /**
+   * one sentence under `error` (else the package's own), or under the empty plate
+   */
+  text?: string;
+  /**
+   * a picture over the heading of the empty and failed plates
+   */
+  art?: Node | string | null;
   /**
    * the points' spacing, ms (the axis says `now` while the last is at most two steps old)
    */
@@ -687,7 +711,11 @@ export type TrendData = {
 };
 /**
  * @typedef {object} TrendData a key figure's trend, the short way
- * @property {ChartPoint[]} points `[[ms, value]…]`, oldest first
+ * @property {ChartPoint[]} [points] `[[ms, value]…]`, oldest first
+ * @property {string} [error] why the trend could not be read: the tile's trend is the failed plate (its heading) with a Retry
+ *   that fires `kp-chart-retry` on the figure, bubbling [kyu-plates-1019]
+ * @property {string} [text] one sentence under `error` (else the package's own), or under the empty plate
+ * @property {Node | string | null} [art] a picture over the heading of the empty and failed plates
  * @property {number} [step] the points' spacing, ms (the axis says `now` while the last is at most two steps old)
  * @property {string} [unit]
  * @property {ChartUnitKind} [unitKind]
@@ -697,7 +725,8 @@ export type TrendData = {
  * Give a key figure's trend its points: setChartData() with one source, the
  * short way. `null` is loading: the trend stays empty at its final height
  * and the tile around it is `aria-busy` until data comes. An empty
- * `points` is a tile with no trend.
+ * `points` is the empty plate over the trend's place; `{ error }` is the failed plate with a Retry (`kp-chart-retry`); loading is the
+ * theme's busy card over the trend [kyu-plates-1019].
  * @param {Element} figure the `[data-kp-chart="spark"]` element
  * @param {TrendData | null} data
  */

@@ -1,4 +1,4 @@
-// The kp-themes module chassis-rs serves at /static/kp/js/gantt.js (kp-themes 11.0.0),
+// The kp-themes module chassis-rs serves at /static/kp/js/gantt.js (kp-themes 11.1.1),
 // copied from kp-themes js/gantt.d.ts: chassis serves the module, not its types.
 /** A run timeline: `section.kp-gantt[data-kp-gantt]`. */
 export declare const GANTT = "[data-kp-gantt]";
@@ -10,9 +10,11 @@ export declare const GANTT_SELECT_EVENT = "kp-gantt-select";
 export declare const GANTT_WINDOW_EVENT = "kp-gantt-window";
 /** How often a live window moves, in ms. */
 export declare const GANTT_TICK_MS = 1000;
+/** Fired on the timeline, bubbling, when the Retry of its failed state is pressed [state-plates-1019]. */
+export declare const GANTT_RETRY_EVENT = "kp-gantt-retry";
 /** The steps an axis chooses from, in seconds. */
 export declare const GANTT_STEPS: readonly number[];
-export type GanttRunState = "queued" | "running" | "ok" | "failed";
+export type GanttRunState = "queued" | "running" | "ok" | "failed" | "planned";
 export type GanttRun = {
   /**
    * what the page calls the run; reported by `kp-gantt-open`
@@ -27,11 +29,11 @@ export type GanttRun = {
    */
   label: string;
   /**
-   * epoch ms or an ISO string; for a queued run, the moment it was queued
+   * epoch ms or an ISO string; for a queued run, the moment it was queued; for a planned run, when it is to begin
    */
   start: number | string;
   /**
-   * when it ended; ignored for a queued or running run
+   * when it ended, or for a planned run when it is to end; ignored for a queued or running run
    */
   end?: number | string | null;
   state: GanttRunState;
@@ -168,6 +170,10 @@ export type GanttModel = {
   brushBox: HTMLElement;
   selectBox: HTMLElement;
   stateLine: HTMLElement;
+  plate: HTMLElement;
+  plateKey: string;
+  plateText: string;
+  plateArt: Node | string | null;
   announcer: HTMLElement;
   ranges: HTMLElement;
   liveButton: HTMLButtonElement;
@@ -202,6 +208,14 @@ export type GanttModel = {
   } | null;
   dragMoved: boolean;
   tickKey: string;
+  labels: Map<
+    HTMLElement,
+    {
+      key: string;
+      width: number;
+    }
+  >;
+  outside: Map<HTMLElement, HTMLElement>;
 };
 /**
  * The seconds a range word names: `90m`, `6h`, `24h`, `7d`. NaN when it names nothing.
@@ -230,6 +244,8 @@ export declare function axisStep(
  * @param {{ id: string, s: number, e: number | null }[]} runs in any order, seconds
  * @param {Map<string, number>} [before] the rows the runs had
  * @param {number} [pad] the seconds two runs keep between them
+ * @param {{ s: number, e: number }[]} [fixed] stretches of the first row that are taken (the marks of a lane's points, as
+ *   wide as they are drawn): a run keeps the same gap from them as from another run [hlthree-1019 gantt-points]
  * @returns {{ rows: Map<string, number>, count: number }}
  */
 export declare function packRows(
@@ -240,6 +256,10 @@ export declare function packRows(
   }[],
   before?: Map<string, number>,
   pad?: number,
+  fixed?: {
+    s: number;
+    e: number;
+  }[],
 ): {
   rows: Map<string, number>;
   count: number;
@@ -270,15 +290,25 @@ export declare function setGanttRuns(
 ): void;
 /**
  * The timeline as a whole: `loading` (ghost lanes at their final size),
- * `ready`, `empty` or `error` (`words` over the plot).
+ * `ready`, `empty` or `error`. An empty or failed timeline is the package's state plate over the whole plot (`words` its
+ * heading, `text` its sentence, `art` a picture over the heading), an error with a Retry that fires `kp-gantt-retry`
+ * [state-plates-1019].
  * @param {Element} el
  * @param {GanttState} state
  * @param {string} [words]
+ * @param {{ text?: string, art?: Node | string | null }} [plate]
  */
 export declare function setGanttState(
   el: Element,
   state: GanttState,
   words?: string,
+  {
+    text,
+    art,
+  }?: {
+    text?: string;
+    art?: Node | string | null;
+  },
 ): void;
 /**
  * Set the window; no event, the page asked. `span` in seconds; `live: false`

@@ -1,9 +1,20 @@
-// The kp-themes module chassis-rs serves at /static/kp/js/sentence.js (kp-themes 11.0.0),
+// The kp-themes module chassis-rs serves at /static/kp/js/sentence.js (kp-themes 11.1.1),
 // copied from kp-themes js/sentence.d.ts: chassis serves the module, not its types.
 /** A sentence form. */
 export declare const SENTENCE = "[data-kp-sentence]";
 /** Fired on the sentence, bubbling, after a change, once things have settled: `{ summary }`. */
 export declare const SENTENCE_EVENT = "kp-sentence-change";
+/**
+ * Write the text of a computed field (`[data-kp-sentence-computed="<name>"]`); null, undefined or '' draws a dash.
+ * @param {Element} element a `.kp-sentence`
+ * @param {string} name the field's `data-kp-sentence-computed`
+ * @param {string | number | null | undefined} text
+ */
+export declare function setSentenceComputed(
+  element: Element,
+  name: string,
+  text: string | number | null | undefined,
+): void;
 /**
  * The sentence in words as it stands now: the text, with each field replaced by what it shows and each hidden phrase left out.
  * @param {Element} element a `.kp-sentence`
@@ -49,15 +60,31 @@ export type SentenceHandle = {
    */
   summary: () => string;
   /**
-   * show and hide the phrases and place the fields again
+   * show and hide the phrases, work the computed fields out again and place the fields
    */
   refresh: () => void;
+  /**
+   * set (or with null, drop) the function behind a computed field
+   */
+  compute: (name: string, fn: ComputedFn | null) => void;
 };
+export type ComputedFn = (
+  values: Record<string, string | null>,
+  element: Element,
+) => string | number | null | undefined;
 /** The handle of an attached sentence. @param {Element} element */
 export declare function sentence(element: Element): SentenceHandle | null;
 /**
  * Wire every sentence form under `root`.
  * @param {ParentNode} [root]
+ * @param {{ computed?: Record<string, ComputedFn> }} [options] the functions behind the computed fields, by `data-kp-sentence-computed`
  * @returns {() => void} detach
  */
-export declare function attachSentences(root?: ParentNode): () => void;
+export declare function attachSentences(
+  root?: ParentNode,
+  {
+    computed,
+  }?: {
+    computed?: Record<string, ComputedFn>;
+  },
+): () => void;

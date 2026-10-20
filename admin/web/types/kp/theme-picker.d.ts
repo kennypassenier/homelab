@@ -1,6 +1,10 @@
 import { THEMES } from "./theme-core.js";
 /** Dispatched on the picker, bubbling, when a person chose a theme here: `{ theme, stored }`. */
 export declare const PICK_EVENT = "kp-theme-pick";
+/** Dispatched on the picker, bubbling, when a theme is previewed or the preview ends: `{ theme }`, `{ theme: null }` at the end. */
+export declare const PREVIEW_EVENT = "kp-theme-preview";
+/** How long a preview waits before it goes back, in ms: crossing the gap between two buttons is not a leave. */
+export declare const PREVIEW_LEAVE_MS = 90;
 /**
  * Attach the behaviour to every picker under `root`, and keep them all in
  * step with each other and with any React picker on the same page — they
@@ -11,10 +15,12 @@ export declare const PICK_EVENT = "kp-theme-pick";
  * after attach, which the idempotency guard would otherwise skip.
  *
  * @param {ParentNode} [root]
- * @param {{ persist?: boolean, closePopover?: boolean, status?: ParentNode | null }} [options]
+ * @param {{ persist?: boolean, closePopover?: boolean, status?: ParentNode | null, preview?: boolean }} [options]
  *   persist: store the choice (default true); closePopover: close an
  *   enclosing popover after a choice (default true); status: where the
- *   save-failed message lives (default: the picker's parent).
+ *   save-failed message lives (default: the picker's parent); preview:
+ *   show a theme on hover and keyboard focus (default: the picker's
+ *   `data-kp-theme-preview="hover"`, else off).
  * @returns {(() => void) & { refresh: () => void }} detach
  */
 export declare function attachThemePickers(
@@ -23,10 +29,12 @@ export declare function attachThemePickers(
     persist,
     closePopover,
     status,
+    preview,
   }?: {
     persist?: boolean;
     closePopover?: boolean;
     status?: ParentNode | null;
+    preview?: boolean;
   },
 ): (() => void) & {
   refresh: () => void;

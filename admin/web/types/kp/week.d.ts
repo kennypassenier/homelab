@@ -1,4 +1,4 @@
-// The kp-themes module chassis-rs serves at /static/kp/js/week.js (kp-themes 11.0.0),
+// The kp-themes module chassis-rs serves at /static/kp/js/week.js (kp-themes 11.1.1),
 // copied from kp-themes js/week.d.ts: chassis serves the module, not its types.
 /** A week agenda: `section.kp-week[data-kp-week]`. */
 export declare const WEEK = "[data-kp-week]";
@@ -8,6 +8,8 @@ export declare const WEEK_OPEN_EVENT = "kp-week-open";
 export declare const WEEK_RANGE_EVENT = "kp-week-range";
 /** How often the now-line and the past marks move, in ms. */
 export declare const WEEK_TICK_MS = 30000;
+/** Fired on the agenda, bubbling, when the Retry of its failed state is pressed [state-plates-1019]. */
+export declare const WEEK_RETRY_EVENT = "kp-week-retry";
 export type WeekEventState = "next" | "off" | "skipped" | "reference";
 export type WeekEvent = {
   /**
@@ -101,6 +103,10 @@ export type WeekModel = {
   leaving: Promise<unknown> | null;
   held: number[] | null;
   stateLine: HTMLElement;
+  plate: HTMLElement;
+  plateKey: string;
+  plateText: string;
+  plateArt: Node | string | null;
   title: HTMLElement | null;
   today: HTMLButtonElement | null;
   legend: HTMLElement;
@@ -170,16 +176,24 @@ export declare function attachWeeks(
 export declare function setWeekEvents(el: Element, events: WeekEvent[]): void;
 /**
  * The agenda as a whole: `loading` (the data table's busy panel over the empty days), `ready`,
- * `empty` or `error` (`words` over the grid; an error says it in the page's
- * words).
+ * `empty` or `error`: the package's state plate over the whole agenda (`words` its heading, in the page's words; `text` its
+ * sentence; `art` a picture over the heading), an error with a Retry that fires `kp-week-retry` [state-plates-1019].
  * @param {Element} el
  * @param {WeekState} state
  * @param {string} [words]
+ * @param {{ text?: string, art?: Node | string | null }} [plate]
  */
 export declare function setWeekState(
   el: Element,
   state: WeekState,
   words?: string,
+  {
+    text,
+    art,
+  }?: {
+    text?: string;
+    art?: Node | string | null;
+  },
 ): void;
 /**
  * Move the range to start on `iso` (`YYYY-MM-DD`); no event, the page asked.

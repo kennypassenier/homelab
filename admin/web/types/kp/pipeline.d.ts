@@ -11,6 +11,7 @@ export type PipelineLane = {
   label: string;
   tone?: 1 | 2 | 3 | 4 | 5;
   closed?: boolean;
+  danger?: boolean;
 };
 export type PipelineCard = {
   id: string;
@@ -57,9 +58,8 @@ export type PipelineModel = {
   active: string | null;
   board: HTMLElement;
   closed: HTMLElement;
-  stateBox: HTMLElement;
-  stateWords: HTMLElement;
-  retry: HTMLButtonElement;
+  plate: HTMLElement;
+  plateKey: string;
   live: HTMLElement;
   nodes: Map<string, HTMLElement>;
   busy: import("./busy-card.js").BusyCard | null;
@@ -93,8 +93,8 @@ export declare function setPipeline(
   },
 ): void;
 /**
- * The board as a whole: `loading` (the lanes kept, the table's loading card over them), `ready`, `empty` (every lane says
- * none, `words` over the board) or `error` (`words` with Try again).
+ * The board as a whole: `loading` (the lanes kept, the table's loading card over them), `ready`, `empty` (the state plate
+ * over the whole board, `words` its heading) or `error` (the plate with Try again, `words` the reason under its heading).
  * @param {Element} el
  * @param {PipelineState} state
  * @param {string} [words]

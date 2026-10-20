@@ -15,8 +15,10 @@ export declare const ANCHOR_REVEAL_EVENT = "kp-anchor-reveal";
 export declare const ANCHOR_MISSING_EVENT = "kp-anchor-missing";
 /** How long a place a link landed on stays marked, in ms. */
 export declare const ANCHOR_HIT_MS = 2000;
-/** How long a hash that has no row yet is waited for, in ms. */
+/** The longest a hash that has no row yet is waited for, in ms. */
 export declare const ANCHOR_WAIT_MS = 10000;
+/** How long a container must have been still, with nothing in it drawing, before a hash without a place is given up, in ms. */
+export declare const ANCHOR_QUIET_MS = 1000;
 /** How long "Copied" stays on the mark, in ms. */
 export declare const ANCHOR_COPIED_MS = 1500;
 /**
@@ -41,6 +43,10 @@ export type AnchorOptions = {
   target?: "highlight" | "none";
   open?: boolean;
   copiedMs?: number;
+  /**
+   * the longest wait for a place not drawn yet, in ms
+   */
+  wait?: number;
 };
 /**
  * Wire every container under `root`.

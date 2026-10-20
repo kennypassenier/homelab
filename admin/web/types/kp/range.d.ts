@@ -1,4 +1,4 @@
-// The kp-themes module chassis-rs serves at /static/kp/js/range.js (kp-themes 11.0.0),
+// The kp-themes module chassis-rs serves at /static/kp/js/range.js (kp-themes 11.1.1),
 // copied from kp-themes js/range.d.ts: chassis serves the module, not its types.
 /** A range picker. */
 export declare const RANGE = "[data-kp-range]";

@@ -1,4 +1,4 @@
-// The kp-themes module chassis-rs serves at /static/kp/js/runs.js (kp-themes 11.0.0),
+// The kp-themes module chassis-rs serves at /static/kp/js/runs.js (kp-themes 11.1.1),
 // copied from kp-themes js/runs.d.ts: chassis serves the module, not its types.
 /** A next-times list. */
 export declare const RUNS = "[data-kp-runs]";

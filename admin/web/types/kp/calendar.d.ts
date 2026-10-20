@@ -4,7 +4,7 @@ export declare const CALENDAR = "[data-kp-calendar]";
 export declare const CALENDAR_PICK_EVENT = "kp-calendar-pick";
 /** Fired on the calendar, bubbling, when a person moves it to another month: `detail` `{ year, month }` (month 1-12). */
 export declare const CALENDAR_MONTH_EVENT = "kp-calendar-month";
-/** Fired on a calm calendar, bubbling, when Retry is pressed on its failed plate. */
+/** Fired on a calendar, bubbling, when Retry is pressed on its failed plate (every tone) [r1r2-1019]. */
 export declare const CALENDAR_RETRY_EVENT = "kp-calendar-retry";
 export type CalendarTone =
   | "ok"

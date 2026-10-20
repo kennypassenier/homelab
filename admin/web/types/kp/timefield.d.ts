@@ -1,4 +1,4 @@
-// The kp-themes module chassis-rs serves at /static/kp/js/timefield.js (kp-themes 11.0.0),
+// The kp-themes module chassis-rs serves at /static/kp/js/timefield.js (kp-themes 11.1.1),
 // copied from kp-themes js/timefield.d.ts: chassis serves the module, not its types.
 /** The fields this module looks after. */
 export declare const TIME = "[data-kp-time]";

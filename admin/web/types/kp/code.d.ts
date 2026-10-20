@@ -1,4 +1,4 @@
-// The kp-themes module chassis-rs serves at /static/kp/js/code.js (kp-themes 11.0.0),
+// The kp-themes module chassis-rs serves at /static/kp/js/code.js (kp-themes 11.1.1),
 // copied from kp-themes js/code.d.ts: chassis serves the module, not its types.
 /** A code block js/auto.js fills from its markup. */
 export declare const CODE = "[data-kp-code]";

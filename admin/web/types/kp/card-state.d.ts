@@ -1,4 +1,4 @@
-// The kp-themes module chassis-rs serves at /static/kp/js/card-state.js (kp-themes 11.0.0),
+// The kp-themes module chassis-rs serves at /static/kp/js/card-state.js (kp-themes 11.1.1),
 // copied from kp-themes js/card-state.d.ts: chassis serves the module, not its types.
 /** The cards this module looks after. */
 export declare const CARD_STATE = ".kp-card[data-kp-state]";
@@ -28,13 +28,17 @@ export type CardStateOptions = {
    */
   text?: string;
   /**
-   * a button or link under an empty note ("Add an appointment"); an error note always has Try again
+   * a button or link under an empty note ("Add an appointment"), or several (an array, or a fragment): they lie on the plate's own action row; an error note always has Try again
    */
-  action?: Node | null;
+  action?: Node | readonly Node[] | null;
   /**
    * false leaves Try again out of an error note (a read the page cannot repeat)
    */
   retry?: boolean;
+  /**
+   * a picture over the note's title, empty or error: a node (an inline SVG, an icon) or a glyph; aria-hidden either way
+   */
+  art?: Node | string | null;
 };
 /**
  * Put a card in a state. The options are kept for the card, so a later

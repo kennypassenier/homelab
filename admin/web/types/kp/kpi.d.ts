@@ -1,4 +1,4 @@
-// The kp-themes module chassis-rs serves at /static/kp/js/kpi.js (kp-themes 11.0.0),
+// The kp-themes module chassis-rs serves at /static/kp/js/kpi.js (kp-themes 11.1.1),
 // copied from kp-themes js/kpi.d.ts: chassis serves the module, not its types.
 /** An inline SVG drawn from the numbers in its attribute. */
 export declare const SPARK = "svg[data-kp-spark]";
@@ -114,9 +114,9 @@ export type Meter = {
    */
   mark?: number | null;
   /**
-   * the fill's colour; a tone on the tile around it does the same
+   * the fill's colour (`success` good, `neutral` quiet); a tone on the tile around it does the same
    */
-  tone?: "warning" | "destructive" | null;
+  tone?: "success" | "neutral" | "warning" | "destructive" | null;
   /**
    * what the share is, in the words a screen reader hears ("full"); `meterUsed` unless given
    */
@@ -134,7 +134,7 @@ export type Meter = {
  * @typedef {object} Meter
  * @property {number | null} [value] the share, 0 up (1 is full; above 1 the bar is full and says so); null is not measured
  * @property {number | null} [mark] a tick at this share (a target, a limit, what is booked), 0 up; null is none
- * @property {'warning' | 'destructive' | null} [tone] the fill's colour; a tone on the tile around it does the same
+ * @property {'success' | 'neutral' | 'warning' | 'destructive' | null} [tone] the fill's colour (`success` good, `neutral` quiet); a tone on the tile around it does the same
  * @property {string} [label] what the share is, in the words a screen reader hears ("full"); `meterUsed` unless given
  * @property {string} [markLabel] what the mark is ("the target level")
  * @property {boolean} [loading] the track pulses at its height, with no fill and no mark

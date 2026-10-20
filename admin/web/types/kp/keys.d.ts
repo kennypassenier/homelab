@@ -1,4 +1,4 @@
-// The kp-themes module chassis-rs serves at /static/kp/js/keys.js (kp-themes 11.0.0),
+// The kp-themes module chassis-rs serves at /static/kp/js/keys.js (kp-themes 11.1.1),
 // copied from kp-themes js/keys.d.ts: chassis serves the module, not its types.
 /** A cap whose text is the platform's modifier key. */
 export declare const MOD_CAP = '.kp-kbd[data-kp-key="mod"]';

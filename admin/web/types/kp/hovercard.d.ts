@@ -1,4 +1,4 @@
-// The kp-themes module chassis-rs serves at /static/kp/js/hovercard.js (kp-themes 11.0.0),
+// The kp-themes module chassis-rs serves at /static/kp/js/hovercard.js (kp-themes 11.1.1),
 // copied from kp-themes js/hovercard.d.ts: chassis serves the module, not its types.
 /** The attribute that makes an element an anchor; its value is the card's text when not empty. */
 export declare const HOVERCARD_ATTRIBUTE = "data-kp-hovercard";
@@ -29,6 +29,10 @@ export type HoverCardOptions = {
    * Default true. Per anchor `data-kp-close-on-escape="false"`.
    */
   closeOnEscape?: boolean;
+  /**
+   * A tap opens and closes the card. Default true; per anchor `data-kp-touch="off" | "tap"`.
+   */
+  touch?: boolean;
   /**
    * A class added to the card, for a page's own measure (it lives in <body>).
    */

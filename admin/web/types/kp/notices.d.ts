@@ -1,4 +1,4 @@
-// The kp-themes module chassis-rs serves at /static/kp/js/notices.js (kp-themes 11.0.0),
+// The kp-themes module chassis-rs serves at /static/kp/js/notices.js (kp-themes 11.1.1),
 // copied from kp-themes js/notices.d.ts: chassis serves the module, not its types.
 /** A notification centre. */
 export declare const NOTICES = "[data-kp-notices]";

@@ -2,6 +2,8 @@
 export declare const GRAPH = "[data-kp-graph]";
 /** Fired on the graph, bubbling, when its selection, hover or hidden kinds change: `detail` `{ selected, hover, hiddenKinds }`. */
 export declare const GRAPH_CHANGE_EVENT = "kp-graph-change";
+/** Fired on the graph, bubbling, when the Retry of its failed state is pressed [state-plates-1019]. */
+export declare const GRAPH_RETRY_EVENT = "kp-graph-retry";
 export type GraphNode = {
   id: string;
   label: string;
@@ -132,6 +134,8 @@ export type GraphModel = {
   data: GraphData | null;
   state: "loading" | "ready" | "empty" | "error";
   words: string;
+  text: string;
+  art: Node | string | null;
   selected: Set<string>;
   hidden: Set<string>;
   hover: string | null;
@@ -143,6 +147,8 @@ export type GraphModel = {
   box: HTMLElement;
   svg: SVGSVGElement;
   note: HTMLElement;
+  plate: HTMLElement;
+  drawn: boolean;
   hint: HTMLElement;
   decorate?: (part: Element, info: GraphDecorateInfo) => void;
   strings: import("./strings.js").Strings;
@@ -159,15 +165,25 @@ export type GraphModel = {
 export declare function setGraphData(el: Element, data: GraphData): void;
 /**
  * `loading`, `empty` or `error`, with the sentence to show in the picture at
- * its final height (loading says `graphLoading` when given none).
+ * its final height (loading says `graphLoading` when given none). Loading is the ghost of the coming network, the register's own loading picture; empty
+ * and error are the package's state plate over it (`words` is its heading, `text` its sentence, `art` a picture over the
+ * heading), an error with a Retry that fires `kp-graph-retry` [state-plates-1019].
  * @param {Element} el
  * @param {'loading' | 'empty' | 'error'} state
  * @param {string} [words]
+ * @param {{ text?: string, art?: Node | string | null }} [plate]
  */
 export declare function setGraphState(
   el: Element,
   state: "loading" | "empty" | "error",
   words?: string,
+  {
+    text,
+    art,
+  }?: {
+    text?: string;
+    art?: Node | string | null;
+  },
 ): void;
 /** Pick these nodes (and only these). @param {Element} el @param {string[]} ids */
 export declare function graphSelect(el: Element, ids: string[]): void;

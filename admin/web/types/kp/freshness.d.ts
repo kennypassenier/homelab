@@ -7,14 +7,17 @@ export type Strings = import("./strings.js").Strings;
 /**
  * A span of seconds in the units a person reads best: seconds under a
  * minute, minutes and seconds under an hour, hours and minutes under a day,
- * days and hours beyond; a zero second part is left out ("2 min").
+ * days and hours beyond; a zero second part is left out ("2 min"). With
+ * `units: 'days'` a span of a day or more is whole days only ("97 days").
  * @param {number} seconds
  * @param {Strings} [strings]
+ * @param {'days' | undefined} [units]
  * @returns {string}
  */
 export declare function humanDuration(
   seconds: number,
   strings?: Strings,
+  units?: "days" | undefined,
 ): string;
 /**
  * The line's words: "updated 12 s ago", or "not updated yet" with no moment.
@@ -23,6 +26,7 @@ export declare function humanDuration(
  * @param {number | null | undefined} atMs
  * @param {number} nowMs
  * @param {Strings} [strings]
+ * @param {'days' | undefined} [units] `days`: a day or more reads as whole days
  * @returns {string}
  */
 export declare function agoText(
@@ -30,6 +34,7 @@ export declare function agoText(
   atMs: number | null | undefined,
   nowMs: number,
   strings?: Strings,
+  units?: "days" | undefined,
 ): string;
 /**
  * A moment as a person reads it (rule 52): `dd/mm/yyyy HH:mm`, 24-hour, in

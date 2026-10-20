@@ -1,4 +1,4 @@
-// The kp-themes module chassis-rs serves at /static/kp/js/segmented.js (kp-themes 11.0.0),
+// The kp-themes module chassis-rs serves at /static/kp/js/segmented.js (kp-themes 11.1.1),
 // copied from kp-themes js/segmented.d.ts: chassis serves the module, not its types.
 /** A segmented control or a chip group. */
 export declare const SEGMENTED = "[data-kp-segmented]";

@@ -1,9 +1,23 @@
-// The kp-themes module chassis-rs serves at /static/kp/js/action-tiles.js (kp-themes 11.0.0),
+// The kp-themes module chassis-rs serves at /static/kp/js/action-tiles.js (kp-themes 11.1.1),
 // copied from kp-themes js/action-tiles.d.ts: chassis serves the module, not its types.
 /** The tiles this module looks after. */
 export declare const ACTION_TILE = ".kp-action";
 /** Fired on the tile, bubbling, when it becomes busy or stops being busy: `{ tile, busy }`. */
 export declare const ACTION_BUSY_EVENT = "kp-action-busy";
+/** The tile sizes the stylesheet knows; no size is the theme's own. */
+export declare const ACTION_SIZES: readonly ["compact", "large"];
+/**
+ * Set the size of the tiles under `element` (or of one tile): `compact`, `large`, or `null` for the theme's own.
+ * The stylesheet follows the attribute, so this is only a typed way to write it.
+ *
+ * @param {Element} element a `.kp-actions` grid, a tile, or any element above them
+ * @param {(typeof ACTION_SIZES)[number] | null} size
+ * @returns {Element}
+ */
+export declare function setActionSize(
+  element: Element,
+  size: (typeof ACTION_SIZES)[number] | null,
+): Element;
 /**
  * Make a tile busy or not busy. `aria-busy` is the single source of truth;
  * the spinner and the spoken word follow it.

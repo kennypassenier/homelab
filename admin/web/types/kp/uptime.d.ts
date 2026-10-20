@@ -1,4 +1,4 @@
-// The kp-themes module chassis-rs serves at /static/kp/js/uptime.js (kp-themes 11.0.0),
+// The kp-themes module chassis-rs serves at /static/kp/js/uptime.js (kp-themes 11.1.1),
 // copied from kp-themes js/uptime.d.ts: chassis serves the module, not its types.
 /** A strip. */
 export declare const UPTIME = "[data-kp-uptime]";
@@ -6,6 +6,8 @@ export declare const UPTIME = "[data-kp-uptime]";
 export declare const UPTIME_PICK_EVENT = "kp-uptime-pick";
 /** Fired on the strip, cancelable, before a period's quick info opens: `{ key, index, period, panel }`. */
 export declare const UPTIME_OPEN_EVENT = "kp-uptime-open";
+/** Fired on the strip, bubbling, when the Retry of its failed state is pressed [kyu-plates-1019]. */
+export declare const UPTIME_RETRY_EVENT = "kp-uptime-retry";
 /** The states of a period, in the order of how bad they are. */
 export declare const UPTIME_STATES: readonly ["up", "degraded", "down", "none"];
 /** How many cells a strip waits with when the page has not said (`data-kp-uptime-count`). */
@@ -67,9 +69,21 @@ export type UptimeSpec = {
    */
   count?: number;
   /**
-   * the error state's sentence; else the dictionary's
+   * the error state's sentence (the failed plate's heading); else the dictionary's
    */
   error?: string;
+  /**
+   * the empty state's heading, and the failed state's when `error` is not given; else the dictionary's
+   */
+  message?: string;
+  /**
+   * the plate's sentence under the heading, empty or failed (a failure says the package's own when none is given)
+   */
+  text?: string;
+  /**
+   * a picture over the heading of the empty and failed plates
+   */
+  art?: Node | string | null;
   /**
    * a press opens the period's quick info; else `data-kp-uptime-open`
    */
@@ -106,7 +120,10 @@ export type UptimeFigures = {
  * @property {string} [from]    the axis's start word when every period is shown ("90 days ago"); else the first period's label
  * @property {string} [to]      the axis's end word ("Today"); else the latest period's label
  * @property {number} [count]   how many cells a loading or empty strip waits with; else `data-kp-uptime-count`, else 90
- * @property {string} [error]   the error state's sentence; else the dictionary's
+ * @property {string} [error]   the error state's sentence (the failed plate's heading); else the dictionary's
+ * @property {string} [message] the empty state's heading, and the failed state's when `error` is not given; else the dictionary's
+ * @property {string} [text]    the plate's sentence under the heading, empty or failed (a failure says the package's own when none is given)
+ * @property {Node | string | null} [art] a picture over the heading of the empty and failed plates
  * @property {'info'} [open]    a press opens the period's quick info; else `data-kp-uptime-open`
  */
 /**

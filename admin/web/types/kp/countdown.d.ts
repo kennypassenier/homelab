@@ -1,7 +1,9 @@
-// The kp-themes module chassis-rs serves at /static/kp/js/countdown.js (kp-themes 11.0.0),
+// The kp-themes module chassis-rs serves at /static/kp/js/countdown.js (kp-themes 11.1.1),
 // copied from kp-themes js/countdown.d.ts: chassis serves the module, not its types.
 /** A countdown. */
-export declare const COUNTDOWN = "[data-kp-countdown]";
+/** A countdown: the length, or only the moment it counts down to (the documented `-until` markup). */
+export declare const COUNTDOWN =
+  "[data-kp-countdown], [data-kp-countdown-until]";
 /** Fired on the timer when it starts, pauses, resets or gains time: `{ state, remaining, total }` (ms). */
 export declare const COUNTDOWN_EVENT = "kp-countdown-change";
 /** Fired on the timer when its time is up: `{ total }` (ms). */
@@ -16,6 +18,51 @@ export declare const COUNTDOWN_STEP = 60;
 export declare function parseDuration(
   value: string | number | null | undefined,
 ): number;
+export type UntilZone = string | number | null;
+/**
+ * The IANA zone a timer is given in: `attribute` (`data-kp-countdown-timezone`, `data-kp-timer-disc-timezone`) on it or an
+ * ancestor; null (the device) when none or unknown.
+ * @param {Element} el @param {string} attribute
+ */
+export declare function timerZone(
+  el: Element,
+  attribute: string,
+): string | null;
+/** The fixed offset, in minutes, a date and time string carries ("Z", "+02:00"); null when it carries none. @param {string} text */
+export declare function untilOffset(text: string): number | null;
+/**
+ * The zone an `until` value is given in: the offset it carries, else the timer's zone, else the device.
+ * @param {string | number | null | undefined} value @param {string | null} [timeZone]
+ * @returns {UntilZone}
+ */
+export declare function untilZone(
+  value: string | number | null | undefined,
+  timeZone?: string | null,
+): UntilZone;
+/**
+ * The moment an `until` option names, in epoch ms: "14:30" or "14:30:15" is the next such time on the clock of `timeZone`
+ * (the device's when none; today when it is still ahead, else tomorrow), a date and time is that moment (read in `timeZone`
+ * when it carries no offset of its own), a number of 10 digits or more is epoch ms.
+ * @param {string | number | null | undefined} value
+ * @param {number} nowMs
+ * @param {string | null} [timeZone] an IANA zone name
+ * @returns {number | null} null when the value names no moment
+ */
+export declare function parseUntil(
+  value: string | number | null | undefined,
+  nowMs: number,
+  timeZone?: string | null,
+): number | null;
+/**
+ * A moment as the words after "until": "14:30" when it is today, else "20/10/2026 09:00", read on the clock of `zone`
+ * (the zone the moment was given in; the device's when null).
+ * @param {number} ms @param {number} nowMs @param {UntilZone} [zone]
+ */
+export declare function untilLabel(
+  ms: number,
+  nowMs: number,
+  zone?: UntilZone,
+): string;
 /**
  * The digits of a time left, rounded up to the second: "25:00", "0:08", "1:02:03".
  * @param {number} ms the time left
@@ -97,14 +144,17 @@ export declare function timerButton(
 /**
  * Wire every countdown under `root`.
  * @param {ParentNode} [root]
- * @param {{ now?: () => number }} [options]
+ * @param {{ now?: () => number, wall?: () => number }} [options] `now` is the clock's (performance.now), `wall` the device's
+ *   date and time (Date.now), which an `until` option is counted against
  * @returns {() => void} detach
  */
 export declare function attachCountdowns(
   root?: ParentNode,
   {
     now,
+    wall,
   }?: {
     now?: () => number;
+    wall?: () => number;
   },
 ): () => void;

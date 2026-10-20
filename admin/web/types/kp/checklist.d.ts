@@ -6,6 +6,8 @@ export declare const CHECKLIST_EVENT = "kp-checklist-change";
 export declare const CHECKLIST_CLEAR_EVENT = "kp-checklist-clear";
 /** Fired on Undo: `{ restored, items }`. */
 export declare const CHECKLIST_UNDO_EVENT = "kp-checklist-undo";
+/** Fired on the list, bubbling, when the Retry of its failed state is pressed [r6r8-1019]. */
+export declare const CHECKLIST_RETRY_EVENT = "kp-checklist-retry";
 /** Fired on the list (not bubbling) after every draw, so a part that adds to the rows can draw its cells [kpadopt6]. */
 export declare const CHECKLIST_RENDER_EVENT = "kp-checklist-render";
 /** How long Undo is offered after a clear, unless the list says otherwise [ms]. */

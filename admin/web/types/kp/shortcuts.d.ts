@@ -1,4 +1,4 @@
-// The kp-themes module chassis-rs serves at /static/kp/js/shortcuts.js (kp-themes 11.0.0),
+// The kp-themes module chassis-rs serves at /static/kp/js/shortcuts.js (kp-themes 11.1.1),
 // copied from kp-themes js/shortcuts.d.ts: chassis serves the module, not its types.
 /** The chord's wait for its second key, in ms (homelab's tested value). */
 export declare const CHORD_MS = 1500;

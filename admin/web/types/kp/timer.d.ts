@@ -7,6 +7,8 @@ export declare const TIMER_START_EVENT = "kp-timer-start";
 export declare const TIMER_CHANGE_EVENT = "kp-timer-change";
 export declare const TIMER_DONE_EVENT = "kp-timer-done";
 export declare const TIMER_STOP_EVENT = "kp-timer-stop";
+/** Fired on the list, bubbling, when the Retry of its failed state is pressed [r6r8-1019]. */
+export declare const TIMERS_RETRY_EVENT = "kp-timers-retry";
 /** How often the shown time is brought up to date [ms]; the time itself comes from the end, not from this. */
 export declare const TIMER_TICK_MS = 250;
 export type TimerState = {
@@ -60,6 +62,17 @@ export type Timer = {
 export { parseDuration };
 /** @param {Element} list @returns {TimerState[]} */
 export declare function getTimers(list: Element): TimerState[];
+/**
+ * The list's state: `loading` lays the busy card over the box the timers fill (and keeps it at its height), `error` says
+ * `message` on the failed plate with a Retry where the timers were (they keep running underneath), `ready` is neither
+ * [r6r8-1019; audhd-recepten gap 30].
+ * @param {Element} list @param {'loading' | 'error' | 'ready'} state @param {string} [message]
+ */
+export declare function setTimersState(
+  list: Element,
+  state: "loading" | "error" | "ready",
+  message?: string,
+): void;
 /** The sounds a list may choose. @type {readonly ['chime', 'bell', 'buzzer']} */
 export declare const TIMER_SOUNDS: readonly ["chime", "bell", "buzzer"];
 /**

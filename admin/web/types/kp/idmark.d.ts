@@ -1,4 +1,4 @@
-// The kp-themes module chassis-rs serves at /static/kp/js/idmark.js (kp-themes 11.0.0),
+// The kp-themes module chassis-rs serves at /static/kp/js/idmark.js (kp-themes 11.1.1),
 // copied from kp-themes js/idmark.d.ts: chassis serves the module, not its types.
 /** A mark the module fills from its name. */
 export declare const IDMARK = "[data-kp-idmark]";

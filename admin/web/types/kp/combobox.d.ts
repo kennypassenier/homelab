@@ -1,4 +1,4 @@
-// The kp-themes module chassis-rs serves at /static/kp/js/combobox.js (kp-themes 11.0.0),
+// The kp-themes module chassis-rs serves at /static/kp/js/combobox.js (kp-themes 11.1.1),
 // copied from kp-themes js/combobox.d.ts: chassis serves the module, not its types.
 /**
  * The event a consumer listens for. A contract value [TH26]: the detail

@@ -41,6 +41,7 @@ import { current, listen, subscribe } from "../store.js";
 import { esc } from "../settingsform.js";
 import { liveStatus, pageHeader, toast } from "../ui.js";
 import { attachAll } from "/static/kp/js/auto.js";
+import { attachDisabledReasons } from "/static/kp/js/reason.js";
 import { setCardState } from "/static/kp/js/card-state.js";
 import { deplist } from "/static/kp/js/deplist.js";
 import { setMatrix } from "/static/kp/js/heat.js";
@@ -826,7 +827,7 @@ export function mount(root, opts = {}) {
     drawerCard.titleEl.textContent = `Change ${row.name}`;
     drawerCard.lede.textContent =
       "The new value never enters a URL or the job's arguments; latch stores it.";
-    drawer.innerHTML = `${steps(S.stage ? ["done", "running", "pending"] : ["running", "pending", "pending"], app)}<div class="kp-formgrid sx-change" data-kp-formgrid-label="wide" data-kp-formgrid-lines="none"><div class="kp-formgrid__row"><label class="kp-formgrid__label" for="${SECRET_VALUE}">New value<small>KEY=value, one per line</small></label><div class="kp-formgrid__control"><textarea class="kp-field__input" id="${SECRET_VALUE}" name="secret-value" rows="5" placeholder="KEY=value" autocomplete="off" spellcheck="false"${S.stage ? " disabled" : ""}></textarea></div></div><div class="kp-formgrid__row"><div class="kp-formgrid__label">After writing</div><div class="kp-formgrid__control"><label class="kp-switch" title="After the write, deploy ${esc(stack)} so ${esc(app)} reads the new value"><input class="kp-switch__input" type="checkbox" role="switch" id="${SECRET_RESTART}" name="secret-restart"${S.restart ? " checked" : ""} /><span>Restart ${esc(app)}</span></label></div></div>${S.stageError ? `<div class="kp-formgrid__row"><p class="kp-formgrid__control" data-kp-formgrid-span="all" role="alert">Could not stage it: ${esc(S.stageError)}</p></div>` : ""}<div class="kp-formgrid__row kp-formgrid__row--buttons"><div class="kp-formgrid__control" data-kp-formgrid-span="control-value"><div class="kp-formgrid__buttons"><button type="button" class="kp-button" data-sx-back>${S.stage ? "Edit value" : "Cancel"}</button><button type="button" class="kp-button kp-button--primary" data-sx-next>${S.stage ? "Write and restart" : S.staging ? "Staging…" : "Stage"}</button></div></div></div></div>`;
+    drawer.innerHTML = `${steps(S.stage ? ["done", "running", "pending"] : ["running", "pending", "pending"], app)}<div class="kp-formgrid sx-change" data-kp-formgrid-label="wide" data-kp-formgrid-lines="none"><div class="kp-formgrid__row"><label class="kp-formgrid__label" for="${SECRET_VALUE}">New value<small>KEY=value, one per line</small></label><div class="kp-formgrid__control"><textarea class="kp-field__input" id="${SECRET_VALUE}" name="secret-value" rows="5" placeholder="KEY=value" autocomplete="off" spellcheck="false"${S.stage ? ' disabled data-kp-disabled-reason="Staged for writing: press Edit value to change it"' : ""}></textarea></div></div><div class="kp-formgrid__row"><div class="kp-formgrid__label">After writing</div><div class="kp-formgrid__control"><label class="kp-switch" title="After the write, deploy ${esc(stack)} so ${esc(app)} reads the new value"><input class="kp-switch__input" type="checkbox" role="switch" id="${SECRET_RESTART}" name="secret-restart"${S.restart ? " checked" : ""} /><span>Restart ${esc(app)}</span></label></div></div>${S.stageError ? `<div class="kp-formgrid__row"><p class="kp-formgrid__control" data-kp-formgrid-span="all" role="alert">Could not stage it: ${esc(S.stageError)}</p></div>` : ""}<div class="kp-formgrid__row kp-formgrid__row--buttons"><div class="kp-formgrid__control" data-kp-formgrid-span="control-value"><div class="kp-formgrid__buttons"><button type="button" class="kp-button" data-sx-back>${S.stage ? "Edit value" : "Cancel"}</button><button type="button" class="kp-button kp-button--primary" data-sx-next>${S.stage ? "Write and restart" : S.staging ? "Staging…" : "Stage"}</button></div></div></div></div>`;
     const ta = /** @type {HTMLTextAreaElement} */ (
       drawer.querySelector("textarea")
     );
@@ -852,6 +853,8 @@ export function mount(root, opts = {}) {
           "Paste or type the new value first",
         );
       else next.removeAttribute("data-kp-disabled-reason");
+      // A reason that arrives after the drawer was wired is wired now.
+      void attachDisabledReasons(drawer);
     };
     sync();
     ta.addEventListener("input", () => {

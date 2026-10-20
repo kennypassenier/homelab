@@ -31,6 +31,7 @@ import {
   setPasskeys,
 } from "/static/kp/js/passkeys.js";
 import { setQr } from "/static/kp/js/qr.js";
+import { attachDisabledReasons } from "/static/kp/js/reason.js";
 
 /**
  * @typedef {{id: string, label: string, created_at: string,
@@ -424,6 +425,8 @@ export function mountSignin(box, report) {
         "Passkeys need https: this dashboard is not reached over https, or its public address is not set.",
       );
     else registerBtn.removeAttribute("data-kp-disabled-reason");
+    // The reason arrives with the read, after the page was wired once.
+    stops.push(attachDisabledReasons(registerBtn.parentElement ?? box));
     draw({
       rows: passkeyRows(d.passkeys),
       state: d.passkeys.length ? "ready" : "empty",

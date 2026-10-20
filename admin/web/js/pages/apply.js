@@ -46,6 +46,7 @@ import { bindSelection } from "../selectbind.js";
 import { openConfirmation } from "/static/kp/js/components.js";
 import { attachDataTables } from "/static/kp/js/datatable.js";
 import { attachIdmarks } from "/static/kp/js/idmark.js";
+import { attachDisabledReasons } from "/static/kp/js/reason.js";
 import { attachSentences } from "/static/kp/js/sentence.js";
 
 const SKIP_FIELD = declareField({
@@ -160,6 +161,7 @@ export function mount(root, opts = {}) {
         class: "kp-button",
         id: "apply-read",
         title: "Read the plan again from the host and the working copy",
+        "data-kp-disabled-reason": "The plan is being read just now",
       },
       "Plan again",
     ),
@@ -279,6 +281,7 @@ export function mount(root, opts = {}) {
     },
   });
   const detachMarks = attachIdmarks(root);
+  const detachReasons = attachDisabledReasons(root);
 
   /** @type {Plan | null} */
   let plan = null;
@@ -417,10 +420,12 @@ export function mount(root, opts = {}) {
         drivable(box, PICK, r.stack);
         if (off) {
           box.disabled = true;
-          box.title =
+          box.setAttribute(
+            "data-kp-disabled-reason",
             r.action === "broken"
               ? "Cannot be planned: its file did not read"
-              : "Nothing changed: there is nothing to apply";
+              : "Nothing changed: there is nothing to apply",
+          );
         }
         const files = diffs.get(r.stack);
         const pm = files ? plusMinus(files) : null;
@@ -542,6 +547,7 @@ export function mount(root, opts = {}) {
       "Lines",
     ]);
     block.ready();
+    attachDisabledReasons(block.tbody);
     // The deploys start ticked; a destroy only when someone arms it.
     for (const b of /** @type {NodeListOf<HTMLInputElement>} */ (
       block.tbody.querySelectorAll("input[data-kp-select-row]")
@@ -691,5 +697,6 @@ export function mount(root, opts = {}) {
     detachTables();
     sel.stop();
     detachMarks();
+    detachReasons();
   };
 }

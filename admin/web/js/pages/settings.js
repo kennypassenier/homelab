@@ -49,6 +49,7 @@ import { editable } from "../editforms.js";
 import { mountSignin } from "../signin.js";
 import { chip, dot, ensureStyle } from "../ui.js";
 import { attachAll } from "/static/kp/js/auto.js";
+import { attachDisabledReasons } from "/static/kp/js/reason.js";
 import { setCardState } from "/static/kp/js/card-state.js";
 import { setProblems } from "/static/kp/js/problems.js";
 import { attachToolbars } from "/static/kp/js/toolbar.js";
@@ -354,6 +355,7 @@ export function mount(root, opts = {}) {
         class: "kp-button",
         id: "repo-sync",
         title: "Fetch the remote now and compare",
+        "data-kp-disabled-reason": "The remote is being fetched just now",
       },
       "Fetch now",
     ),
@@ -1243,6 +1245,8 @@ export function mount(root, opts = {}) {
       ),
       ...alerts,
     );
+    // The fetch button is drawn here, after the page was wired once.
+    void attachDisabledReasons(wcBody);
   };
 
   // redesign-config-10: the fetch says it runs (it can take seconds on a

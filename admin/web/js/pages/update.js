@@ -67,6 +67,8 @@ import { attachDataTables } from "/static/kp/js/datatable.js";
 import { attachIdmarks } from "/static/kp/js/idmark.js";
 import { setPipeline, attachPipelines } from "/static/kp/js/pipeline.js";
 import { bindSelection } from "../selectbind.js";
+import { attachCountdowns } from "/static/kp/js/countdown.js";
+import { attachDisabledReasons } from "/static/kp/js/reason.js";
 import {
   attachSteplists,
   buildSteplist,
@@ -246,6 +248,8 @@ const now = () => Date.now() / 1000;
 
 /** How long a finished update stays on its flow's page after a reload. */
 const SHOW_DONE_S = 30 * 60;
+/** How long a finished update can be rolled back (the backup of step 3 stays for 7 days). */
+const UNDO_WINDOW_S = 7 * 24 * 3600;
 
 /** @param {Job} j */
 const finishedJob = (j) => j.state !== "queued" && j.state !== "running";
@@ -499,6 +503,7 @@ export function mount(root, scope) {
         type: "button",
         class: "kp-button kp-button--primary",
         disabled: "",
+        "data-kp-disabled-reason": "Choose what to update first",
         title:
           "Back up each stack, then change the files, deploy and verify; you can leave the page once it runs",
       },
@@ -514,6 +519,7 @@ export function mount(root, scope) {
     blocked,
     h("div", { class: "uf-foot" }, backBtn, go),
   );
+  const detachGoReason = attachDisabledReasons(impact.body);
 
   // ---- 3-5 · Running ---------------------------------------------------
   const runCard = section({
@@ -690,8 +696,10 @@ export function mount(root, scope) {
         drivable(box, PICK, i.id);
         if (rel) {
           box.disabled = true;
-          box.title =
-            "Part of the homelab itself: it moves when the host is updated";
+          box.setAttribute(
+            "data-kp-disabled-reason",
+            "Part of the homelab itself: it moves when the host is updated",
+          );
         }
         const level =
           i.kind === "pin" ? versionLevel(i.from, i.to, {}) : "other";
@@ -765,6 +773,7 @@ export function mount(root, scope) {
     labelCells(table.tbody, () => ["", "App", "Jump", "Waiting", "Note"]);
     attachVersionDeltas(table.tbody);
     table.ready();
+    attachDisabledReasons(table.tbody);
     for (const b of /** @type {NodeListOf<HTMLInputElement>} */ (
       table.tbody.querySelectorAll("input[data-kp-select-row]")
     )) {
@@ -887,6 +896,8 @@ export function mount(root, scope) {
   };
 
   // ---- step 2 ----------------------------------------------------------
+  /** Stops the undo window's clock when the done card is drawn again or left. */
+  let stopUndoClock = () => {};
   const paintGo = () => {
     const c = chosenItems();
     const majors = c.filter((i) => i.major);
@@ -896,8 +907,18 @@ export function mount(root, scope) {
       c.length > 1
         ? `Back up and update ${c.length} apps`
         : "Back up and update";
-    /** @type {HTMLButtonElement} */ (go).disabled =
-      !ackOk || (pins && (!plansReady || plansBlocked)) || running();
+    const why = running()
+      ? "An update is already running"
+      : !ackOk
+        ? "Confirm the release notes of each major update first"
+        : pins && plansBlocked
+          ? "A plan is blocked: the notice above says what stops it"
+          : pins && !plansReady
+            ? "The plan of each pinned update is still being worked out"
+            : "";
+    /** @type {HTMLButtonElement} */ (go).disabled = why !== "";
+    if (why) go.setAttribute("data-kp-disabled-reason", why);
+    else go.removeAttribute("data-kp-disabled-reason");
   };
 
   const toImpact = async () => {
@@ -1377,6 +1398,23 @@ export function mount(root, scope) {
                 ]),
                 ".",
               ),
+              ...(j.finished_at != null
+                ? [
+                    h("dt", null, "Undo window"),
+                    h(
+                      "dd",
+                      null,
+                      h("div", {
+                        class: "kp-countdown",
+                        "data-kp-countdown-until": String(
+                          (j.finished_at + UNDO_WINDOW_S) * 1000,
+                        ),
+                        "data-kp-countdown-name": "The undo window closes in",
+                        "data-kp-countdown-controls": "none",
+                      }),
+                    ),
+                  ]
+                : []),
             ]
           : []),
       ),
@@ -1442,6 +1480,8 @@ export function mount(root, scope) {
         ),
       ),
     );
+    stopUndoClock();
+    stopUndoClock = attachCountdowns(doneCard);
     doneCard
       .querySelector("[data-drive-row=again]")
       ?.addEventListener("click", () => {
@@ -1549,6 +1589,8 @@ export function mount(root, scope) {
     detachTables();
     sel.stop();
     detachMarks();
+    detachGoReason();
+    stopUndoClock();
     detachGates();
     detachDeltas();
     detachDeps();

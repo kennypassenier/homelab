@@ -1534,6 +1534,7 @@ export function mount(root, ctx) {
         {
           class: "kp-datatable mk-table",
           "data-kp-datatable": "",
+          "data-kp-busy-overlay": "",
           "data-kp-expandable": "",
           "data-kp-page-size": "500",
           "data-kp-page-sizes": "none",
@@ -1937,6 +1938,7 @@ export function mount(root, ctx) {
       {
         class: "kp-datatable mk-table",
         "data-kp-datatable": "",
+        "data-kp-busy-overlay": "",
         "data-kp-page-size": "500",
         "data-kp-page-sizes": "none",
         "data-kp-sort-multi": "",
@@ -2002,6 +2004,7 @@ export function mount(root, ctx) {
       {
         class: "kp-datatable mk-table",
         "data-kp-datatable": "",
+        "data-kp-busy-overlay": "",
         "data-kp-page-size": "500",
         "data-kp-page-sizes": "none",
         "data-kp-sort-multi": "",

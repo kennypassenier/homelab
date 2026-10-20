@@ -6,7 +6,8 @@
  * @typedef {{fleet: import("./fleet.js").Fleet | null, up: boolean | null,
  *   link: string, hostVersion: string | null, hostBuild: string | null,
  *   asks: import("./asks.js").Ask[],
- *   asksRead: "loading" | "ready" | "error"}} StoreState
+ *   asksRead: "loading" | "ready" | "error",
+ *   fleetRead: "loading" | "ready" | "error"}} StoreState
  */
 
 /** @type {StoreState} */
@@ -18,6 +19,7 @@ const state = {
   hostBuild: null,
   asks: [],
   asksRead: "loading",
+  fleetRead: "loading",
 };
 /** @type {Set<() => void>} */
 const subs = new Set();
@@ -98,11 +100,13 @@ async function load() {
     const body = await getJson("/data/fleet");
     if (!body) return;
     state.fleet = body.fleet;
+    state.fleetRead = "ready";
     state.hostVersion = body.host_version ?? null;
     state.hostBuild = body.host_build ?? null;
     if (body.link_error) setLink(false, `host link down: ${body.link_error}`);
     else if (body.host_version) setLink(true, `host ${body.host_version}`);
   } catch (e) {
+    if (!state.fleet) state.fleetRead = "error";
     setLink(false, `could not read the fleet (${String(e)})`);
   }
   try {
@@ -251,6 +255,7 @@ export function start() {
       });
     events.addEventListener("fleet", (e) => {
       state.fleet = JSON.parse(/** @type {MessageEvent} */ (e).data).fleet;
+      state.fleetRead = "ready";
       emit();
     });
     events.addEventListener("link", (e) => {
@@ -290,6 +295,7 @@ export function start() {
 /** Read the fleet and the questions again (a card's Try again). */
 export function rereadStore() {
   if (state.asksRead === "error") state.asksRead = "loading";
+  if (state.fleetRead === "error") state.fleetRead = "loading";
   emit();
   return load();
 }

@@ -1116,7 +1116,21 @@ export function mount(root, ctx) {
       message: "No ping measured yet: the watch pings the host once a minute.",
     });
   };
+  /** The strips' own busy card while the history is read. */
+  const loadingReach = () => {
+    setUptime(reach24, {
+      label: "Reachable, last 24 hours",
+      count: 24,
+      state: "loading",
+    });
+    setUptime(reach90, {
+      label: "Reachable, last 90 days",
+      count: 90,
+      state: "loading",
+    });
+  };
   const loadReach = async () => {
+    loadingReach();
     const now = Math.floor(Date.now() / 1000);
     const [d, hr] = await Promise.all([
       fetchJson(
@@ -1169,11 +1183,16 @@ export function mount(root, ctx) {
     desc: "The pinned TLS line this dashboard holds to the host daemon.",
     foot: [pingBtn, pingCount],
   });
+  // Each strip stands in a wrapper of its own: strips that share a parent
+  // share one busy card on the parent (kp-gaps/homelab.md line 128), and
+  // the held-back measure looks for the card inside the strip.
+  const alone = (/** @type {HTMLElement} */ strip) =>
+    h("div", { class: "hk-strip" }, strip);
   lineCard.body.append(
     facts,
-    lat,
-    reach24,
-    reach90,
+    alone(lat),
+    alone(reach24),
+    alone(reach90),
     reachFigs,
     h("p", { class: "hk-ping-out", role: "status" }, pingDot, pingOut),
   );
@@ -1881,6 +1900,9 @@ export function mount(root, ctx) {
     attachFootprints(root),
     attachRefresh(root),
   );
+  // The line strip shows its busy card from the first paint, not from the
+  // first answer (it is in the page now, which the card needs).
+  paintLine();
 
   const paintKpis = () => {
     if (trend == null && trendWhy == null) return;

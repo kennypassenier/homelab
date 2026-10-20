@@ -1068,8 +1068,8 @@ function overviewTab(panel, c) {
   deps.el.classList.add("sh-span-6");
 
   const feedEl = historyFeedEl("none");
-  setFeed(feedEl, { state: "loading" });
   stops.push(attachFeeds(feedEl));
+  setFeed(feedEl, { state: "loading" });
   const recent = section({
     title: "Recent history",
     desc: "What happened to this stack and who did it, newest first.",
@@ -2924,8 +2924,8 @@ function historyTab(panel, c) {
   );
   drivable(searchBox, HISTORY_SEARCH, name);
   const list = historyFeedEl("day");
-  setFeed(list, { state: "loading" });
   const detachFeed = attachFeeds(list);
+  setFeed(list, { state: "loading" });
   const card = h(
     "section",
     { class: "kp-card nx-card", "aria-labelledby": "hist-h" },

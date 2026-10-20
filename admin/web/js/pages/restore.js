@@ -22,7 +22,7 @@ import { jobSteps } from "../jobs.js";
 import { mountJobPanel } from "../jobpanel.js";
 import { previewGate } from "../previewgate.js";
 import { restoreHref, restoreNights, whatWillHappen } from "../restoreflow.js";
-import { current, subscribe } from "../store.js";
+import { current, rereadStore, subscribe } from "../store.js";
 import { openAction } from "../actiondialog.js";
 import { pageHeader } from "../ui.js";
 import { gridRow, formGrid, buttonGroup } from "../gridrow.js";
@@ -224,12 +224,10 @@ export function mount(root, ctx) {
             label: "App to bring back",
             labelId: "rs-tiles-label",
             control: tiles,
-            wide: true,
           }),
           gridRow({
             label: "What it restores",
             control: facts,
-            wide: true,
           }),
         ]),
       ),
@@ -422,11 +420,39 @@ export function mount(root, ctx) {
   root.replaceChildren(head.el, wiz);
 
   if (!stack) {
-    setCardState(step1Card, "empty", {
-      title: "No stack to restore",
-      text: "The host manages no stack yet; once one has backups, its apps show up here.",
+    // The fleet is the list of stacks: until it has answered, the card is
+    // busy; only an answered, empty fleet is "no stack".
+    const paintNoStack = () => {
+      if (!current().fleet) {
+        if (current().fleetRead === "error")
+          setCardState(step1Card, "error", {
+            title: "The stacks could not be read",
+            text: "The dashboard did not get the list of stacks. Nothing was changed.",
+          });
+        else
+          setCardState(step1Card, "loading", { words: "Reading the stacks…" });
+        return;
+      }
+      const first = names()[0];
+      if (first) ctx.navigate(restoreHref(first));
+      else
+        setCardState(step1Card, "empty", {
+          title: "No stack to restore",
+          text: "The host manages no stack yet; once one has backups, its apps show up here.",
+        });
+    };
+    const detach = attachCardStates(root);
+    step1Card.addEventListener(CARD_RETRY_EVENT, () => {
+      setCardState(step1Card, "loading", { words: "Reading the stacks…" });
+      void rereadStore();
     });
-    return () => abort.abort();
+    paintNoStack();
+    const off = subscribe(paintNoStack);
+    return () => {
+      off();
+      detach();
+      abort.abort();
+    };
   }
 
   cleanups.push(

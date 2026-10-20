@@ -55,7 +55,7 @@ import {
   snoozeRow,
   snoozeStatus,
 } from "../rowsnooze.js";
-import { current, subscribe } from "../store.js";
+import { current, rereadStore, subscribe } from "../store.js";
 import { stage } from "../stage.js";
 import { countOf, pageHeader } from "../ui.js";
 import { ALERT_DISMISS_EVENT } from "/static/kp/js/overlays.js";
@@ -860,7 +860,9 @@ export function mount(root) {
     if (busyRows > 0) return;
     const { items, ready } = inboxNow();
     const rows = /** @type {import("../inboxrows.js").Row[]} */ (items);
-    if (!ready) {
+    // The counter treats a failed notices read as an empty list (chrome.js),
+    // but the page must not look like "nothing needs you" then: it says so.
+    if (!ready || (act.failed.notices && !act.notices)) {
       putState(
         listCard,
         act.failed.notices && !retrying ? "error" : "loading",
@@ -1134,11 +1136,24 @@ export function mount(root) {
     if (!current().fleet)
       await new Promise((resolve) => {
         const off = subscribe(() => {
-          if (!current().fleet) return;
+          if (!current().fleet && current().fleetRead !== "error") return;
           off();
           resolve(undefined);
         });
+        if (current().fleetRead === "error") {
+          off();
+          resolve(undefined);
+        }
       });
+    if (abort.signal.aborted) return;
+    if (!current().fleet) {
+      worthN.textContent = "";
+      setCardState(worthStage, "error", {
+        title: "What is worth a look could not be read",
+        text: "The dashboard did not get the list of stacks. Try again.",
+      });
+      return;
+    }
     const stacks = (current().fleet?.stacks ?? []).map((s) => s.name);
     const [versions, ...backups] = await Promise.all([
       fetchJson("/data/versions", "the versions", abort.signal),
@@ -1151,6 +1166,16 @@ export function mount(root) {
       ),
     ]);
     if (abort.signal.aborted) return;
+    // Nothing answered: the fold says so with the package's failed plate
+    // and a Retry instead of a list that looks like "nothing to look at".
+    if (!versions.ok && backups.every((b) => !b.ok)) {
+      worthN.textContent = "";
+      setCardState(worthStage, "error", {
+        title: "What is worth a look could not be read",
+        text: `${versions.error.what}: ${versions.error.why}`,
+      });
+      return;
+    }
     const rows = worthRows(
       backups.flatMap((b) => (b.ok ? [b.body] : [])),
       versions.ok ? versions.body : null,
@@ -1182,6 +1207,11 @@ export function mount(root) {
     );
     setCardState(worthStage, "ready");
   };
+
+  worthStage.addEventListener("kp-card-retry", () => {
+    if (!current().fleet) void rereadStore();
+    void readWorth();
+  });
 
   // ---- Check again --------------------------------------------------------
   const checkAgain = async () => {

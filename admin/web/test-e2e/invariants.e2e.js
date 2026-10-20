@@ -6134,7 +6134,9 @@ test("invariants: the Metrics page is laid out as the approved demo, every chart
       refresh: document.querySelectorAll(".kp-refresh").length,
       // The three rows stand on shared columns: their fields start at one
       // x and their sentences at another.
-      rows: [...document.querySelectorAll(".mk-controls .mk-row")].map((r) => [
+      rows: [
+        ...document.querySelectorAll(".mk-controls .kp-formgrid__row"),
+      ].map((r) => [
         r.children[0].textContent,
         Math.round(r.children[0].getBoundingClientRect().left),
         Math.round(r.children[1].getBoundingClientRect().left),

@@ -112,6 +112,7 @@ import {
   attachDataTables,
   dataTable as tableOf,
 } from "/static/kp/js/datatable.js";
+import { gridRow, formGrid } from "../gridrow.js";
 import { attachBarCells, setBarCell } from "/static/kp/js/barcell.js";
 import { attachUptimes, setUptime } from "/static/kp/js/uptime.js";
 
@@ -278,9 +279,10 @@ export function mount(root, ctx) {
 
   // ── the three rows on shared columns: what is shown, the window, the refresh ──
   const refreshEl = h("div", {
-    class: "kp-refresh mk-field",
+    class: "kp-refresh",
     "data-kp-refresh": EVERY_S,
     "data-kp-refresh-choices": "0,15,30,60,300",
+    "data-kp-refresh-label": "Refresh",
     id: "mk-refresh",
     "aria-label": "Refresh the charts",
   });
@@ -292,57 +294,49 @@ export function mount(root, ctx) {
     "aria-label": "Time range",
   });
   const picker = tab === "system" ? scopePicker() : null;
+  const aside = (/** @type {string} */ text) =>
+    h("span", { class: "mk-aside" }, text);
   const rows = h(
     "section",
     { class: "mk-controls", "aria-label": "What this page shows" },
-    h(
-      "div",
-      { class: "mk-row" },
-      h(
-        "label",
-        {
-          class: "mk-label",
-          for: picker ? SCOPE_FIELD : "mk-scope-fixed",
-        },
-        "Showing",
-      ),
-      picker
-        ? picker.el
-        : h(
-            "span",
-            { class: "mk-field mk-fixed", id: "mk-scope-fixed" },
-            "Every hostname behind the gateway",
-          ),
-      h(
-        "p",
-        { class: "mk-aside" },
-        picker
-          ? "Picks whose charts the page shows: the host or a stack, or up to three machines side by side."
-          : "The access log covers every hostname the gateway serves.",
-      ),
-    ),
-    h(
-      "div",
-      { class: "mk-row" },
-      h("span", { class: "mk-label", id: "mk-range-label" }, "Window"),
-      rangeEl,
-      h(
-        "p",
-        { class: "mk-aside" },
-        "Sets how far back every section reaches; a section's own keys change only that section.",
-      ),
-    ),
-    h(
-      "div",
-      { class: "mk-row mk-row--refresh" },
-      h("span", { class: "mk-label", id: "mk-refresh-label" }, "Refresh"),
+    formGrid([
+      gridRow({
+        label: "Showing",
+        labelFor: picker ? SCOPE_FIELD : "mk-scope-fixed",
+        cls: "mk-row",
+        control: picker
+          ? picker.el
+          : h(
+              "span",
+              { class: "mk-field mk-fixed", id: "mk-scope-fixed" },
+              "Every hostname behind the gateway",
+            ),
+        value: aside(
+          picker
+            ? "Picks whose charts the page shows: the host or a stack, or up to three machines side by side."
+            : "The access log covers every hostname the gateway serves.",
+        ),
+      }),
+      gridRow({
+        label: "Window",
+        labelId: "mk-range-label",
+        cls: "mk-row",
+        control: rangeEl,
+        value: aside(
+          "Sets how far back every section reaches; a section's own keys change only that section.",
+        ),
+      }),
+      // The kit's own refresh row (kp-themes 11.1.1): the bar is a direct
+      // child of the grid and draws its label in the label track.
       refreshEl,
-      h(
-        "p",
-        { class: "mk-aside" },
-        "Reads the charts again and adds the new readings in place: a pinned reading, a zoom and the sources you switched off stay.",
-      ),
-    ),
+      gridRow({
+        cls: "mk-row",
+        control: aside(
+          "Reads the charts again and adds the new readings in place: a pinned reading, a zoom and the sources you switched off stay.",
+        ),
+        span: "control-value",
+      }),
+    ]),
   );
   rangeEl.setAttribute("aria-labelledby", "mk-range-label");
 

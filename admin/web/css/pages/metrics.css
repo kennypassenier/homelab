@@ -49,34 +49,11 @@ main.mk-page > .mk-failed:empty {
 }
 
 /* ---------- the three rows: what is shown, the window, the refresh ----
-   One grid, three columns shared by every row (label, field, words about
-   it): the labels, the fields and the sentences line up down the page, and
-   a row keeps its height whatever its field holds. kp-themes 11.0.0 has no
-   form grid of its own; this is the page's. */
+   One `.kp-formgrid` (served by kp-themes 11.1.1, gap 59 closed): label,
+   field and the words about it on the package's shared tracks. Only the
+   fixed "every hostname" line and the sentences are the page's. */
 .mk-controls {
-  display: grid;
-  grid-template-columns:
-    [label] max-content
-    [field] minmax(0, 36rem)
-    [aside] minmax(0, 1fr);
-  column-gap: var(--kp-space-lg, 1.5rem);
-  row-gap: var(--kp-space-md, 1rem);
-  align-items: start;
-  --mk-control: 2.25rem; /* one control high: the field, the chooser, the label's line */
-  --mk-chip: 1.625rem; /* a picked machine's chip, the first line of the picker */
-}
-.mk-row {
-  display: grid;
-  grid-template-columns: subgrid;
-  grid-column: 1 / -1;
-  align-items: start;
-}
-.mk-label {
-  display: flex;
-  align-items: center;
-  min-block-size: var(--mk-control);
-  margin: 0;
-  font-weight: 600;
+  --mk-control: 2.25rem; /* one control high: the fixed line */
 }
 .mk-field {
   min-inline-size: 0;
@@ -86,25 +63,7 @@ main.mk-page > .mk-failed:empty {
   align-items: center;
   min-block-size: var(--mk-control);
 }
-.mk-row:first-child .mk-label {
-  min-block-size: var(--mk-chip);
-}
-/* The refresh bar needs the room of its six choices, its read line and its
-   button: it runs over the field and the aside tracks; every row's sentence
-   stands under its field, on one edge. */
-.mk-row--refresh > .kp-refresh {
-  grid-column: 2 / -1;
-}
-.mk-row > .mk-aside {
-  grid-column: 2 / -1;
-  grid-row: 2;
-  padding-block-start: 0;
-}
 .mk-aside {
-  display: block;
-  /* the sentence's first line stands on the field's centre line */
-  padding-block-start: calc((var(--mk-control) - 1lh) / 2);
-  margin: 0;
   font-size: var(--kp-text-sm);
   color: var(--muted-foreground);
 }
@@ -114,31 +73,6 @@ main.mk-page > .mk-failed:empty {
 #mk-range .kp-range__custom,
 #mk-range .kp-range__panel {
   display: none;
-}
-@media (max-width: 64rem) {
-  .mk-controls {
-    grid-template-columns: [label] max-content [field] minmax(0, 1fr);
-  }
-  .mk-aside {
-    grid-column: 1 / -1;
-    padding-block-start: 0;
-  }
-}
-@media (max-width: 40rem) {
-  .mk-controls {
-    grid-template-columns: minmax(0, 1fr);
-  }
-  .mk-row {
-    grid-template-columns: minmax(0, 1fr);
-  }
-  .mk-label {
-    min-block-size: 0;
-  }
-  .mk-row > .mk-aside,
-  .mk-row--refresh > .kp-refresh {
-    grid-column: 1;
-    grid-row: auto;
-  }
 }
 /* An option of the machine picker: its name first (what a tag reads), its
    colour mark before it, its detail after. */

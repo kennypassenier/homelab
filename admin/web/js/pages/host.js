@@ -135,12 +135,9 @@ const RUN_CHECKS = declare({
   page: "host",
   opens: "run",
   what: "read the doctor's host-level checks now (about 30 s)",
-});
-const READ_CHECKS = declare({
-  id: "read-host-checks",
-  page: "host",
-  opens: "run",
-  what: "the Host checks card's own Run checks",
+  // kit round (chassis-rs 3.9.0): the Host checks card's own Run checks was a
+  // second button for the same read; the header's one button took its place.
+  was: ["read-host-checks"],
 });
 const PING = declare({
   id: "ping-host",
@@ -1406,19 +1403,6 @@ export function mount(root, ctx) {
   // already computed. The read takes about 30 s: the card lays the theme's
   // busy card over the list with the seconds it has run; no progress is
   // invented, because the host reports none.
-  const checksBtn = drivable(
-    h(
-      "button",
-      {
-        type: "button",
-        class: "kp-button kp-button--sm kp-button--primary",
-        title: "Read the doctor's host-level checks (about 30 s)",
-        onclick: () => void loadChecks().catch(() => {}),
-      },
-      "Run checks",
-    ),
-    READ_CHECKS,
-  );
   const checksNote = h("span", { role: "status", id: "host-checks-note" });
   let checksList = h("ul", { class: "kp-statuslist", id: "host-checks" });
   const checksKp = h(
@@ -1438,7 +1422,6 @@ export function mount(root, ctx) {
     id: "host-checks-card",
     title: "Host checks",
     desc: "The doctor's checks about the host itself: disk, state file, clock, certificates.",
-    tools: [checksBtn],
     foot: [checksNote],
   });
   // The count line lives in the card's foot and shows only when it has words.
@@ -1494,7 +1477,6 @@ export function mount(root, ctx) {
     if (checking) return;
     checking = true;
     runChecks.setAttribute("disabled", "");
-    checksBtn.setAttribute("disabled", "");
     const began = Date.now();
     let haveRows = false;
     // The theme's own busy card carries the wait; the host reports no
@@ -1528,7 +1510,6 @@ export function mount(root, ctx) {
     } finally {
       checking = false;
       runChecks.removeAttribute("disabled");
-      checksBtn.removeAttribute("disabled");
     }
   };
   checksKp.addEventListener(
@@ -1689,6 +1670,7 @@ export function mount(root, ctx) {
     "data-kp-look": "segmented",
     "data-kp-refresh-choices": "0,15,30,60,300",
     "data-kp-remember": "host-refresh",
+    "data-kp-refresh-label": "Refresh",
     "data-kp-stale-after": String(EVERY_S * 3),
   });
   const refreshRead = h(
@@ -1696,15 +1678,10 @@ export function mount(root, ctx) {
     { class: "hk-muted", role: "status" },
     "The figures, the containers and the line to the host are read together.",
   );
+  // The kit's own refresh row: the bar is a direct child of the grid and
+  // draws its label in the label track; the sentence sits under it.
   const refreshRow = formGrid(
-    [
-      gridRow({
-        label: "Refresh",
-        control: refreshEl,
-        value: refreshRead,
-        wide: true,
-      }),
-    ],
+    [refreshEl, gridRow({ control: refreshRead, span: "control-value" })],
     "hk-refresh",
   );
   refreshEl.addEventListener(REFRESH_EVENT, (e) => {

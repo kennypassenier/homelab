@@ -8999,6 +8999,11 @@ fn lag_catch_up(
 /// only hands a value to an operation that is parked waiting for it; queued
 /// behind that same operation it can never arrive.
 fn runs_beside_the_queue(command: &Rpc) -> bool {
+    // A cancel is for the exec that holds the queue: behind it, it would
+    // arrive when there is nothing left to stop.
+    if matches!(command, Rpc::CancelExec { .. }) {
+        return true;
+    }
     // fix-68: `today` reads for about a minute (doctor plus the fleet check);
     // in the queue it would hold up every deploy and refresh the TUI sends
     // after opening. It changes nothing, and the TUI recognises its reply by
@@ -9498,6 +9503,31 @@ fn tighten_private_paths(state_dir: &str) {
 /// masker knows shapes (`NAME=value` for secret-looking names, URL
 /// passwords, `Bearer <token>`), not every secret: a bare password argument
 /// still lands, which the user guide says.
+/// An `ExecIn` in flight: where it runs, the tag its `timeout` carries, and
+/// whether a `CancelExec` stopped it. Keyed by the token that asked and the
+/// request id, so two sessions' ids never meet.
+struct RunningExec {
+    vmid: u16,
+    tag: String,
+    cancelled: Arc<std::sync::atomic::AtomicBool>,
+}
+
+static RUNNING_EXECS: std::sync::LazyLock<
+    std::sync::Mutex<std::collections::HashMap<(String, u64), RunningExec>>,
+> = std::sync::LazyLock::new(Default::default);
+
+/// Takes its exec out of [`RUNNING_EXECS`] when the run ends, however it ends.
+struct RunningExecGuard((String, u64));
+
+impl Drop for RunningExecGuard {
+    fn drop(&mut self) {
+        RUNNING_EXECS
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .remove(&self.0);
+    }
+}
+
 fn exec_audit_line(ts: u64, vmid: u16, command: &str) -> String {
     format!(
         "{} exec vmid={} cmd={:?}\n",
@@ -12292,12 +12322,31 @@ async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse {
                 tracing::warn!("audit.log: could not record the exec :: {}", e);
             }
             info!("audit: {}", audit.trim_end());
-            match homelab_core::executor::pct_sh(&exec, vmid, &command, 120).await {
+            let key = (requested_by().unwrap_or_default(), req.id);
+            let tag = format!("homelab-exec-{}-{}", req.id, ts);
+            let cancelled = Arc::new(std::sync::atomic::AtomicBool::new(false));
+            RUNNING_EXECS
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .insert(
+                    key.clone(),
+                    RunningExec {
+                        vmid,
+                        tag: tag.clone(),
+                        cancelled: cancelled.clone(),
+                    },
+                );
+            let _running = RunningExecGuard(key);
+            let ran =
+                homelab_core::executor::pct_sh_tagged(&exec, vmid, &command, 120, Some(&tag)).await;
+            let stopped = cancelled.load(std::sync::atomic::Ordering::SeqCst);
+            match ran {
                 Ok(out) => RpcResponse {
                     id: req.id,
-                    ok: out.success(),
+                    ok: out.success() && !stopped,
                     message: format!(
-                        "exit {}\n{}{}",
+                        "{}exit {}\n{}{}",
+                        if stopped { "cancelled\n" } else { "" },
                         out.code,
                         out.stdout,
                         if out.stderr.is_empty() {
@@ -12311,9 +12360,68 @@ async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse {
                 Err(e) => RpcResponse {
                     id: req.id,
                     ok: false,
-                    message: format!("{}", e),
+                    message: format!("{}{}", if stopped { "cancelled\n" } else { "" }, e),
                     deferred: None,
                 },
+            }
+        }
+        // Stop the exec a request id names, cleanly: TERM inside the
+        // container, KILL after the grace `timeout -k` holds. The exec's own
+        // reply then starts `cancelled`.
+        Rpc::CancelExec { request } => {
+            let by = requested_by().unwrap_or_default();
+            let found = RUNNING_EXECS
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .get(&(by, request))
+                .map(|r| (r.vmid, r.tag.clone(), r.cancelled.clone()));
+            let Some((vmid, tag, cancelled)) = found else {
+                return RpcResponse {
+                    id: req.id,
+                    ok: false,
+                    message: format!(
+                        "no command is running for request {request}; it may have ended already"
+                    ),
+                    deferred: None,
+                };
+            };
+            let ts = unix_now();
+            let audit = format!("{ts} exec-cancel vmid={vmid} request={request}\n");
+            let audit_path = format!("{}/audit.log", state.config.state_dir);
+            if let Err(e) = append_audit(&audit_path, &audit) {
+                tracing::warn!("audit.log: could not record the cancel :: {}", e);
+            }
+            info!("audit: {}", audit.trim_end());
+            cancelled.store(true, std::sync::atomic::Ordering::SeqCst);
+            let stop = homelab_core::executor::stop_tagged_script(&tag);
+            match homelab_core::executor::pct_sh(&exec, vmid, &stop, 15).await {
+                Ok(out) if out.success() => RpcResponse {
+                    id: req.id,
+                    ok: true,
+                    message: format!("stop signal sent to the command in CT {vmid}"),
+                    deferred: None,
+                },
+                Ok(out) => {
+                    cancelled.store(false, std::sync::atomic::Ordering::SeqCst);
+                    RpcResponse {
+                        id: req.id,
+                        ok: false,
+                        message: format!(
+                            "the command in CT {vmid} could not be signalled (exit {}); it may have ended already",
+                            out.code
+                        ),
+                        deferred: None,
+                    }
+                }
+                Err(e) => {
+                    cancelled.store(false, std::sync::atomic::Ordering::SeqCst);
+                    RpcResponse {
+                        id: req.id,
+                        ok: false,
+                        message: format!("{e}"),
+                        deferred: None,
+                    }
+                }
             }
         }
         Rpc::GetApplied { stack } => {

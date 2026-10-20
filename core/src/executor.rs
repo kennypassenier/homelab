@@ -540,14 +540,61 @@ pub async fn pct_sh(
     script: &str,
     timeout_s: u64,
 ) -> Result<CmdOutput, CoreError> {
+    pct_sh_tagged(exec, vmid, script, timeout_s, None).await
+}
+
+/// [`pct_sh`] with a tag riding along as the shell's `$0`: the one word by
+/// which [`stop_tagged_script`] finds this run's `timeout` inside the
+/// container to stop it cleanly (a cancelled exec).
+pub async fn pct_sh_tagged(
+    exec: &dyn Executor,
+    vmid: u16,
+    script: &str,
+    timeout_s: u64,
+    tag: Option<&str>,
+) -> Result<CmdOutput, CoreError> {
     let vm = vmid.to_string();
     let limit = timeout_s.to_string();
-    exec.run(&Cmd::new(
-        "pct",
-        &[
-            "exec", &vm, "--", "timeout", "-k", "10", &limit, "sh", "-c", script,
-        ],
-        timeout_s,
-    ))
-    .await
+    let mut args = vec![
+        "exec", &vm, "--", "timeout", "-k", "10", &limit, "sh", "-c", script,
+    ];
+    if let Some(tag) = tag {
+        args.push(tag);
+    }
+    exec.run(&Cmd::new("pct", &args, timeout_s)).await
+}
+
+/// The script that stops the run [`pct_sh_tagged`] started with `tag`: TERM
+/// to that run's `timeout`, which passes it to the script's whole process
+/// group and follows with KILL after its own `-k` grace. The bracket keeps
+/// the pattern from matching the very process that carries it.
+pub fn stop_tagged_script(tag: &str) -> String {
+    let mut chars = tag.chars();
+    let first = chars.next().unwrap_or('x');
+    format!("pkill -TERM -f '^timeout .*[{first}]{}'", chars.as_str())
+}
+
+#[cfg(test)]
+mod stop_tests {
+    use super::*;
+
+    #[test]
+    fn the_stop_script_names_the_tag_without_matching_itself() {
+        let s = stop_tagged_script("homelab-exec-7-1000");
+        assert_eq!(s, "pkill -TERM -f '^timeout .*[h]omelab-exec-7-1000'");
+        // The pattern's own text must not match the tag it looks for in a
+        // process line that carries the script (the bracket class).
+        assert!(
+            !"pkill -TERM -f '^timeout .*[h]omelab-exec-7-1000'".contains("homelab-exec-7-1000")
+        );
+    }
+
+    #[tokio::test]
+    async fn a_tagged_run_carries_its_tag_after_the_script() {
+        let m = crate::mock::MockExecutor::new();
+        let _ = pct_sh_tagged(&m, 106, "ls", 5, Some("homelab-exec-1-2")).await;
+        let calls = m.calls();
+        let last = calls.last().expect("one call");
+        assert!(last.contains("sh -c ls homelab-exec-1-2"), "{last}");
+    }
 }

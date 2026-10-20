@@ -674,7 +674,16 @@ struct Inner {
     /// fix-stale-refresh-1: told the stack of every deploy, update or
     /// restart that finished well (the fleet check forgets its stale rows).
     settled: std::sync::OnceLock<SettledFn>,
+    /// The running commands a viewer asked to stop, job -> who: `run` turns
+    /// the host's `cancelled` reply into "cancelled by <who>".
+    cancelling: std::sync::Mutex<std::collections::HashMap<u64, String>>,
 }
+
+/// The first host release that knows `Command::CancelExec`. An older host
+/// drops the command unanswered, so the dashboard says so instead of
+/// waiting for a reply that cannot come (a version check informs; the
+/// command itself still runs to its end there).
+pub const CANCEL_EXEC_SINCE: &str = "3.76.0";
 
 /// feat-secrets-2: how long a staged secret value waits for the job that
 /// asked for it before it is dropped unused.
@@ -753,6 +762,7 @@ impl Actions {
             flow_store: std::sync::OnceLock::new(),
             flow_timing: std::sync::OnceLock::new(),
             settled: std::sync::OnceLock::new(),
+            cancelling: std::sync::Mutex::new(std::collections::HashMap::new()),
         });
         let worker = Actions {
             inner: inner.clone(),
@@ -1222,6 +1232,60 @@ impl Actions {
             self.publish_batch(batch);
         }
         Ok(v)
+    }
+
+    /// Stop a RUNNING command (Run a command) cleanly: the host signals it
+    /// inside the container and the job ends as `refused` with "cancelled by
+    /// <who>", the same shape a queued cancel has. Other running jobs run to
+    /// their end. `Err` says why not, in a sentence for the viewer.
+    pub async fn cancel_running(&self, id: u64, who: &str) -> Result<JobView, String> {
+        let Some(v) = self.job(id) else {
+            return Err(format!("this dashboard knows no job {id}"));
+        };
+        if v.state != JobState::Running {
+            return Err(format!("job {id} is not running, so it cannot be stopped"));
+        }
+        if v.action != ActionKind::Exec {
+            return Err(format!(
+                "only a running command can be stopped; {} runs to its end",
+                v.action.label()
+            ));
+        }
+        let Some(&request) = v.reqs.last() else {
+            return Err("the command has not reached the host yet; try again in a moment".into());
+        };
+        let host_version = self.inner.shared.read().await.host_version.clone();
+        if let Some(ver) = host_version
+            && homelab_client::version::older(&ver, CANCEL_EXEC_SINCE)
+        {
+            return Err(format!(
+                "the host runs v{ver}, which cannot stop a running command yet (v{CANCEL_EXEC_SINCE} can); it ends by itself within 120 s"
+            ));
+        }
+        if let Ok(mut c) = self.inner.cancelling.lock() {
+            c.insert(id, who.to_string());
+        }
+        let reply = self
+            .inner
+            .host
+            .ask_traced(
+                Command::CancelExec { request },
+                Duration::from_secs(20),
+                None,
+            )
+            .await;
+        match reply {
+            Ok(r) if r.ok => Ok(self.job(id).unwrap_or(v)),
+            other => {
+                if let Ok(mut c) = self.inner.cancelling.lock() {
+                    c.remove(&id);
+                }
+                Err(match other {
+                    Ok(r) => r.message,
+                    Err(e) => e,
+                })
+            }
+        }
     }
 
     /// feat-batch-1: every still-queued job of a batch is cancelled, the
@@ -1757,7 +1821,23 @@ impl Actions {
             args: view.args.clone(),
         };
         let outcome = self.execute(&req, &mut view).await;
+        let stopped_by = self
+            .inner
+            .cancelling
+            .lock()
+            .ok()
+            .and_then(|mut c| c.remove(&view.job));
         let (state, message) = match outcome {
+            // A viewer stopped the running command: the host's reply starts
+            // `cancelled`; the job ends the way a queued cancel does.
+            Ok(r) if !r.ok && stopped_by.is_some() && r.message.starts_with("cancelled") => (
+                JobState::Refused,
+                format!(
+                    "cancelled by {}; the command was stopped\n{}",
+                    stopped_by.as_deref().unwrap_or("a viewer"),
+                    r.message.trim_start_matches("cancelled").trim_start()
+                ),
+            ),
             Ok(r) if r.ok => (JobState::Done, r.message),
             Ok(r) if r.deferred.is_some() => (JobState::Deferred, r.message),
             Ok(r) => (JobState::Failed, r.message),
@@ -1774,6 +1854,14 @@ impl Actions {
         // all) is masked by shape before it goes over the live channel.
         let message = homelab_core::executor::mask_secrets(&message);
         self.finish(&mut view, state, message.clone());
+        // Stopped on purpose by the person who sees the job: nothing failed,
+        // so no notice goes out.
+        if stopped_by.is_some() && state == JobState::Refused {
+            if let Origin::Batch { batch } = view.origin {
+                self.publish_batch(batch);
+            }
+            return;
+        }
         // fix-stale-refresh-1: the stack now runs what its files name.
         if state == JobState::Done
             && matches!(
@@ -2353,7 +2441,13 @@ async fn job_log(State(a): State<Actions>, UrlPath(job): UrlPath<u64>) -> Respon
 
 /// feat-batch-1: cancel one queued job.
 async fn cancel_job(State(a): State<Actions>, UrlPath(job): UrlPath<u64>) -> Response {
-    match a.cancel_job(job, "a viewer") {
+    // A running command is stopped on the host; a queued job just leaves.
+    let result = if a.job(job).is_some_and(|v| v.state == JobState::Running) {
+        a.cancel_running(job, "a viewer").await
+    } else {
+        a.cancel_job(job, "a viewer")
+    };
+    match result {
         Ok(v) => Json(serde_json::json!({ "job": v.job, "state": v.state, "message": v.message }))
             .into_response(),
         Err(why) if a.job(job).is_none() => refusal(
@@ -2362,7 +2456,11 @@ async fn cancel_job(State(a): State<Actions>, UrlPath(job): UrlPath<u64>) -> Res
         ),
         Err(why) => refusal(
             StatusCode::CONFLICT,
-            Refusal::new("cancel the job", why, "only a queued job can be cancelled"),
+            Refusal::new(
+                "cancel the job",
+                why,
+                "a queued job and a running command can be cancelled; other running jobs run to their end",
+            ),
         ),
     }
 }

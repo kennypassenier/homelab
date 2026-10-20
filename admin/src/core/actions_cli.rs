@@ -293,6 +293,9 @@ fn cli_line_bare(command: &Command, force: bool) -> Option<String> {
         | GetFirewallLive { .. }
         | SetConfig(_)
         | Answer { .. }
+        // Stopping a running exec is the job panel's Cancel; the CLI's
+        // `exec` has no second command to stop it with.
+        | CancelExec { .. }
         | SessionOptions { .. }
         | CurrentOp
         | History { .. }

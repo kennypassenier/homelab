@@ -136,6 +136,17 @@ pub enum Command {
         vmid: u16,
         command: String,
     },
+    /// Stop a running `ExecIn` cleanly (feat-kpadopt-2, ask WP-9): `request`
+    /// is the id of the `ExecIn` request that is running, on this token's
+    /// sessions. The host signals the command inside the container with
+    /// TERM (then KILL after the grace `timeout -k` already holds) and the
+    /// `ExecIn` ends with a reply that starts `cancelled`. It runs beside the
+    /// queue, so it is never stuck behind the command it stops. A host
+    /// before 3.76.0 drops it unanswered (unknown command), which the
+    /// dashboard knows from the host's version and says in a sentence.
+    CancelExec {
+        request: u64,
+    },
     /// B8: build the golden template container (docker + guards baked in)
     /// on a dedicated temp vmid, then convert it to a Proxmox template.
     BuildTemplate {
@@ -960,6 +971,7 @@ impl Command {
             | SelfUpdateHost { .. }
             | RestartHost
             | ExecIn { .. }
+            | CancelExec { .. }
             | SetConfig(_)
             | ForgetStack { .. }
             | DestroyRecorded { .. }
@@ -994,6 +1006,7 @@ impl Command {
             RestartHost => "restart_host",
             PatchFleet => "patch_fleet",
             ExecIn { .. } => "exec_in",
+            CancelExec { .. } => "cancel_exec",
             BuildTemplate { .. } => "build_template",
             ApplyResources(_) => "apply_resources",
             ListTemplates => "list_templates",

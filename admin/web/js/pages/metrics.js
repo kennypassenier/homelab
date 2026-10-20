@@ -310,7 +310,7 @@ export function mount(root, ctx) {
     h("span", { class: "mk-aside" }, text);
   const rows = h(
     "section",
-    { class: "mk-controls", "aria-label": "What this page shows" },
+    { class: "kp-card mk-controls", "aria-label": "What this page shows" },
     formGrid([
       gridRow({
         label: "Showing",

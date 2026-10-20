@@ -421,13 +421,21 @@ export function mount(root, scope) {
   const detachMarks = attachIdmarks(list);
   const detachGates = attachAckGates(list);
   const detachDeltas = attachVersionDeltas(list);
+  /** @type {Set<string>} */
+  const acked = new Set();
   const rules = () => ({
     see: (/** @type {{key: string, label: string}[]} */ sel) => {
       const majors = sel.filter(
         (x) => items.find((i) => i.id === x.key)?.major,
       );
-      return !majorsTogether && majors.length && sel.length > 1
-        ? `A major update needs its own read: update ${majors[0].label} on its own`
+      if (!majorsTogether && majors.length && sel.length > 1)
+        return `A major update needs its own read: update ${majors[0].label} on its own`;
+      // The acknowledge gate and this bar both write the button's
+      // aria-disabled; the bar is the one that redraws on every tick, so the
+      // unread notes are a reason here too.
+      const unread = majors.filter((x) => !acked.has(x.key));
+      return unread.length
+        ? `Confirm the release notes of ${unread.map((x) => x.label).join(", ")} first`
         : "";
     },
   });
@@ -637,8 +645,6 @@ export function mount(root, scope) {
   let chosen = new Set();
   let picked = false;
   let step = 1;
-  /** @type {Set<string>} */
-  const acked = new Set();
   /** @type {Map<string, Move>} */
   let moves = new Map();
   let plansReady = false;
@@ -923,6 +929,7 @@ export function mount(root, scope) {
     if (d.key) {
       if (d.checked) acked.add(d.key);
       else acked.delete(d.key);
+      paintChosen();
     }
   });
   const paintChosen = () => {

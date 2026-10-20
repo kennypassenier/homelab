@@ -57,6 +57,10 @@
 .nr-card .kp-formgrid__control > .kp-switch {
   display: flex;
 }
+.nr-card .kp-formgrid__control:has(> .kp-switch) {
+  justify-self: stretch;
+  margin-inline: 0;
+}
 /* The label of the test row stands on the first line of its note, not on the middle of it. */
 .nr-card #nr-test-l {
   align-self: start;

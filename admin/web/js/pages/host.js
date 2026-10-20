@@ -1119,12 +1119,12 @@ export function mount(root, ctx) {
   /** The strips' own busy card while the history is read. */
   const loadingReach = () => {
     setUptime(reach24, {
-      label: "Reachable, last 24 hours",
+      label: "Last 24 hours",
       count: 24,
       state: "loading",
     });
     setUptime(reach90, {
-      label: "Reachable, last 90 days",
+      label: "Last 90 days",
       count: 90,
       state: "loading",
     });
@@ -1152,8 +1152,8 @@ export function mount(root, ctx) {
         : null;
     const day = d.ok ? d.body.keys?.["ping:host"] : undefined;
     const hour = hr.ok ? hr.body.keys?.["ping:host"] : undefined;
-    paintReach(reach24, "Reachable, last 24 hours", "hour", hour, why);
-    paintReach(reach90, "Reachable, last 90 days", "day", day, why);
+    paintReach(reach24, "Last 24 hours", "hour", hour, why);
+    paintReach(reach90, "Last 90 days", "day", day, why);
     reachFigs.textContent = why
       ? "Reachability history not read."
       : `Reachable: ${shareText(hour?.uptime, "24 hours")} · ${shareText(day?.uptime, "90 days")}. Pinged once a minute; kept 90 days.`;

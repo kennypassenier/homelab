@@ -520,12 +520,10 @@ dialog.kp-drawer.sk-drawer--plan {
   align-content: start;
   gap: var(--kp-space-md, 1rem);
 }
-@media (max-width: 40rem) {
-}
 .ap-stacks {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(min(100%, 27rem), 1fr));
-  gap: var(--kp-space-lg, 1.5rem) var(--kp-space-xl, 2rem);
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--kp-space-lg, 1.5rem);
   align-items: start;
 }
 .ap-group {
@@ -545,34 +543,18 @@ dialog.kp-drawer.sk-drawer--plan {
   margin: 0;
   font-size: var(--kp-text-md, 1rem);
 }
-.ap-group > .kp-actions {
-  grid-column: 1 / -1;
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(11.5rem, 1fr));
-  gap: var(--kp-space-sm, 0.5rem);
-}
-.ap-tile {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  align-content: start;
-  gap: var(--kp-space-xs, 0.25rem) var(--kp-space-sm, 0.5rem);
-  min-block-size: 4.5rem;
-}
-.ap-tile .kp-action__text {
+.ap-group > .ap-tiles {
   grid-column: 1 / -1;
 }
-.ap-tile .kp-action__title {
-  display: grid;
-  grid-auto-flow: column;
-  grid-auto-columns: max-content;
-  justify-content: start;
-  align-items: center;
-  gap: var(--kp-space-xs, 0.4rem);
-  min-inline-size: 0;
-}
-.ap-tile.is-first {
+.ap-tiles [data-ap-first] {
   outline: 2px solid var(--ring);
   outline-offset: 2px;
+}
+.ap-bar {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  justify-items: start;
+  gap: var(--kp-space-sm, 0.5rem);
 }
 .ap-hover {
   display: grid;

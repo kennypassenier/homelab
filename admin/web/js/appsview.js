@@ -1,6 +1,6 @@
 // redesign-stacks (3.71.0, Kenny approved the Apps demo 2026-10-03:
 // redesign-3.71/apps.html): the pure half of the Apps page — each tile's
-// watch state in words, the launch search (filter, highlight, the first
+// watch state in words, the launch search (filter, the first
 // match that Enter opens), the board's groups with Starred on top, and the
 // one-line verdict. No DOM, so `node --test` drives it.
 
@@ -71,23 +71,6 @@ const hay = (t) =>
 export function filterTiles(tiles, q) {
   const s = q.trim().toLowerCase();
   return s ? tiles.filter((t) => hay(t).includes(s)) : tiles;
-}
-
-/**
- * The text cut around the search's first match, for a `<mark>`.
- * @param {string} text
- * @param {string} q
- * @returns {{text: string, hit: boolean}[]}
- */
-export function markParts(text, q) {
-  const s = q.trim().toLowerCase();
-  const i = s ? text.toLowerCase().indexOf(s) : -1;
-  if (i < 0) return [{ text, hit: false }];
-  return [
-    { text: text.slice(0, i), hit: false },
-    { text: text.slice(i, i + s.length), hit: true },
-    { text: text.slice(i + s.length), hit: false },
-  ].filter((p) => p.text !== "");
 }
 
 /**

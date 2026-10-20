@@ -3,10 +3,13 @@
 // sends there; main.js `landing`). Every app the fleet runs, one click away:
 // a header with the watch's own freshness, a one-line verdict, the launch
 // search (type, Enter opens the first match in a new tab), then the apps as
-// kp action tiles grouped by their stack, each with one state word (answers,
+// kp entity tiles (kind "tile": the whole card is the app's link, with a
+// favourite star) grouped by their stack, each with one state word (answers,
 // failing, down, deploying, not watched, the word is the legend), a hover
 // card that says why an app is amber or red, facets that keep only the apps
-// in a state, and a menu per stack that opens every app of it that answers.
+// in a state, a menu per stack that opens every app of it that answers, the
+// kp refresh control for the minute watch, and the arrow keys / first letters
+// over the tiles.
 //
 // Everything on a tile is declared in the stack that owns the route
 // (`tiles:` in lxc-compose.yml); nothing here knows an app. The state is the
@@ -17,9 +20,27 @@ import { fetchJson, h } from "../dom.js";
 import { formatDateTime } from "../format.js";
 import { declare, drivable } from "../drivable.js";
 import { agoEl, setAgo } from "../ago.js";
-import { appsVerdict, filterTiles, markParts, tileState } from "../appsview.js";
+import { appsVerdict, filterTiles, tileState } from "../appsview.js";
 import { ensureStyle, keyRow, pageHeader } from "../ui.js";
+import {
+  REFRESH_EVENT,
+  attachRefresh,
+  refreshOf,
+} from "/static/kp/js/auto-refresh.js";
 import { attachCardStates, setCardState } from "/static/kp/js/card-state.js";
+import {
+  CONNECTION_RETRY_EVENT,
+  attachConnection,
+  setConnection,
+} from "/static/kp/js/connection.js";
+import {
+  ENTITY_GRID_RETRY_EVENT,
+  ENTITY_RETRY_EVENT,
+  ENTITY_STAR_EVENT,
+  attachEntityCards,
+  setEntityGrid,
+} from "/static/kp/js/entity-card.js";
+import { nextTile, tileStop } from "/static/kp/js/tiles.js";
 import {
   FACET_EVENT,
   attachFacets,
@@ -28,7 +49,6 @@ import {
   setFacetValues,
 } from "/static/kp/js/facets.js";
 import { attachHoverCards } from "/static/kp/js/hovercard.js";
-import { attachIdmarks } from "/static/kp/js/idmark.js";
 import { attachMenuButtons } from "/static/kp/js/menu-button.js";
 
 /**
@@ -97,11 +117,38 @@ const OPEN_ALL = declare({
   reach: [{ do: "click", control: "apps-stack-menu", row: "*" }],
 });
 
-/** How often the dots are read again (the watch runs every minute). */
-const EVERY_MS = 60_000;
+/** How often the dots are read again by default (the watch runs every minute). */
+const EVERY_S = 60;
 
-/** The words a tile's state can say; the longest sets the width. */
-const WORDS = "answers\nfailing\ndown\ndeploying\nnot watched";
+/** Where the favourite apps are kept (this browser only). */
+const STARS_KEY = "homelab.apps.starred";
+
+/** The kp tone of each state word. */
+const TONE = /** @type {const} */ ({
+  answers: "success",
+  failing: "warning",
+  down: "destructive",
+  deploying: "info",
+  "not watched": undefined,
+});
+
+/** @returns {Set<string>} the hosts the person starred */
+function readStars() {
+  try {
+    const v = JSON.parse(localStorage.getItem(STARS_KEY) ?? "[]");
+    return new Set(Array.isArray(v) ? v.map(String) : []);
+  } catch {
+    return new Set();
+  }
+}
+/** @param {Set<string>} set */
+function writeStars(set) {
+  try {
+    localStorage.setItem(STARS_KEY, JSON.stringify([...set]));
+  } catch {
+    /* private mode: the stars last for this visit */
+  }
+}
 const STATE_ORDER = ["answers", "failing", "down", "deploying", "not watched"];
 
 /**
@@ -176,7 +223,7 @@ export function mount(root) {
   head.el.classList.add("sk-head");
   const verdictDot = h("span", { class: "ap-dot" });
   const verdictText = h("strong", null, "Reading the apps…");
-  const verdictAgo = agoEl("checked");
+  const verdictAgo = agoEl("checked", null, { live: true });
   const verdict = h(
     "p",
     { class: "ap-verdict", role: "status" },
@@ -223,8 +270,26 @@ export function mount(root) {
     },
     h("ul", { class: "kp-facets__list" }),
   );
-  const body = h("div", { class: "ap-stacks" });
-  const data = h("div", { class: "ap-launcher" }, facets, body);
+  const body = h("div", {
+    class: "ap-stacks",
+    "data-kp-idmark-set": "apps",
+  });
+  const refreshEl = h("div", {
+    class: "kp-refresh ap-refresh",
+    "data-kp-refresh": String(EVERY_S),
+    "data-kp-look": "segmented",
+    "data-kp-refresh-choices": "0,15,30,60,300",
+    "data-kp-remember": "apps-refresh",
+    "data-kp-stale-after": String(EVERY_S * 3),
+  });
+  const bar = h("div", { class: "ap-bar" }, facets, refreshEl);
+  const data = h("div", { class: "ap-launcher" }, bar, body);
+  const connection = h("div", {
+    class: "kp-connection",
+    "data-kp-connection": "",
+    "data-kp-placement": "top",
+    "data-kp-connection-source": "app",
+  });
   const card = h(
     "section",
     {
@@ -238,10 +303,12 @@ export function mount(root) {
       h("div", { class: "kp-card__data" }, data),
     ),
   );
-  root.replaceChildren(head.el, verdict, launch, card);
+  root.replaceChildren(head.el, connection, verdict, launch, card);
   const detachFacets = attachFacets(root);
   const detachCards = attachCardStates(root);
-  const detachMarks = attachIdmarks(root);
+  const detachEntities = attachEntityCards(root);
+  const detachRefresh = attachRefresh(root);
+  const detachConnection = attachConnection(root);
   setFacetItems(
     facets,
     STATE_ORDER.map((v) => ({ value: v, label: v })),
@@ -251,50 +318,8 @@ export function mount(root) {
       drivable(box, FACET, box.getAttribute("value") ?? "");
   });
 
-  /** @param {string} text */
-  const marked = (text) =>
-    markParts(text, q).map((p) => (p.hit ? h("mark", null, p.text) : p.text));
-  const mark = (/** @type {string} */ name) =>
-    h("span", {
-      class: "kp-idmark kp-idmark--sm",
-      "data-kp-idmark": name,
-      "aria-hidden": "true",
-    });
-
-  /** @param {Tile} t @param {boolean} first */
-  const tileEl = (t, first) => {
-    const st = tileState(watch, t);
-    const a = h(
-      "a",
-      {
-        class: `kp-action ap-tile${first ? " is-first" : ""}`,
-        href: t.url,
-        target: "_blank",
-        rel: "noopener",
-        "data-host": t.host,
-        "data-kp-hovercard": "",
-        "data-ap-state": wordOf(st),
-      },
-      h(
-        "strong",
-        { class: "kp-action__title" },
-        mark(t.name),
-        ...marked(t.name),
-      ),
-      h("span", { class: "kp-action__mark", "aria-hidden": "true" }),
-      h(
-        "span",
-        { class: "kp-action__text" },
-        h(
-          "span",
-          { class: "kp-state-word", "data-kp-words": WORDS },
-          wordOf(st),
-        ),
-      ),
-    );
-    drivable(a, OPEN, t.host);
-    return a;
-  };
+  /** The favourites, kept in this browser. */
+  const stars = readStars();
 
   /** What the hover card says about a tile. @param {HTMLElement} anchor */
   const fill = (anchor) => {
@@ -343,100 +368,174 @@ export function mount(root) {
       : base;
   };
 
+  /** @param {Tile} t @returns {import("/static/kp/js/entity-card.js").EntityData} */
+  const entityOf = (t) => {
+    const word = wordOf(tileState(watch, t));
+    return {
+      key: t.host,
+      name: t.name,
+      href: t.url,
+      external: true,
+      starred: stars.has(t.host),
+      description: t.description ?? "",
+      state: {
+        label: word,
+        tone: TONE[/** @type {keyof typeof TONE} */ (word)],
+      },
+      lines: [t.host, ...(t.lines ?? [])].slice(0, 3),
+      ...(t.error
+        ? { status: /** @type {const} */ ("error"), error: t.error }
+        : {}),
+    };
+  };
+
+  /**
+   * One group per stack, made once and refilled: a card under the pointer or
+   * the focus is never rebuilt by the minute watch.
+   * @type {Map<string, {el: HTMLElement, badge: HTMLElement, label: HTMLElement,
+   *   hint: HTMLElement, item: HTMLElement, grid: HTMLElement, ok: Tile[]}>}
+   */
+  const groupsBy = new Map();
+  /** @param {string} stack */
+  const groupOf = (stack) => {
+    const have = groupsBy.get(stack);
+    if (have) return have;
+    const badge = h("span", { class: "kp-badge" });
+    const label = h("span", { class: "kp-menu__label" });
+    const hint = h("span", { class: "kp-menu__hint" });
+    const item = h(
+      "button",
+      {
+        type: "button",
+        role: "menuitem",
+        class: "kp-menu__item",
+        tabindex: "-1",
+        "data-kp-value": stack,
+      },
+      label,
+      hint,
+    );
+    drivable(item, OPEN_ALL, stack);
+    const menu = h(
+      "div",
+      {
+        class: "kp-menu-button ap-group__menu",
+        "data-kp-menu-button": "",
+        "data-kp-key": `open-${stack}`,
+      },
+      drivable(
+        h(
+          "button",
+          { type: "button", class: "kp-button kp-button--sm" },
+          "Open ▾",
+        ),
+        OPEN_MENU,
+        stack,
+      ),
+      h(
+        "div",
+        {
+          class: "kp-menu kp-menu--rich",
+          role: "menu",
+          "aria-label": `Apps of ${stack}`,
+          hidden: "",
+        },
+        item,
+      ),
+    );
+    const grid = h("div", {
+      class: "kp-entity-grid ap-tiles",
+      "data-kp-entity-grid": "",
+      "data-kp-entity-kind": "tile",
+      "data-kp-entity-min": "14rem",
+      "data-kp-entity-star-key": ".",
+      role: "group",
+      "aria-label": `Apps of ${stack}`,
+    });
+    const el = h(
+      "div",
+      { class: "ap-group", "data-stack": stack },
+      h("h3", { class: "ap-group__name" }, stack, badge),
+      menu,
+      grid,
+    );
+    const g = {
+      el,
+      badge,
+      label,
+      hint,
+      item,
+      grid,
+      ok: /** @type {Tile[]} */ ([]),
+    };
+    menu.addEventListener("kp-menu-select", () => {
+      for (const t of g.ok) window.open(t.url, "_blank", "noopener");
+    });
+    groupsBy.set(stack, g);
+    attachMenuButtons(el);
+    return g;
+  };
+
+  /** Every tile card on the board, in reading order. */
+  const cardsOf = () =>
+    /** @type {HTMLElement[]} */ ([
+      ...body.querySelectorAll("[data-kp-entity]"),
+    ]);
+  /** The tile that holds the board's one tab stop. @type {Element | null} */
+  let stop = null;
+  /** One tab stop for the whole board; the star is reached with its key. */
+  const rove = () => {
+    const all = cardsOf();
+    if (!stop || !all.includes(/** @type {HTMLElement} */ (stop)))
+      stop = all[0] ?? null;
+    for (const c of all) {
+      const el = tileStop(c);
+      if (el) el.tabIndex = c === stop ? 0 : -1;
+      c.querySelector(".kp-entity__star")?.setAttribute("tabindex", "-1");
+    }
+  };
+
   const paintBody = () => {
     if (!tiles) return;
     const shown = visible();
     const groups = byStack(shown);
-    let first = q.trim() !== "";
+    for (const g of groups) {
+      const view = groupOf(g.stack);
+      const ok = g.tiles.filter(
+        (t) => wordOf(tileState(watch, t)) === "answers",
+      );
+      view.ok = ok;
+      view.badge.textContent = String(g.tiles.length);
+      view.label.textContent = `Open the ${ok.length} ${ok.length === 1 ? "app" : "apps"} that answer`;
+      view.hint.textContent = ok.length
+        ? "each in its own tab"
+        : "none of them answers now";
+      if (ok.length) view.item.removeAttribute("aria-disabled");
+      else view.item.setAttribute("aria-disabled", "true");
+      const ordered = [...g.tiles].sort(
+        (a, b) => Number(stars.has(b.host)) - Number(stars.has(a.host)),
+      );
+      setEntityGrid(view.grid, ordered.map(entityOf));
+      for (const c of view.grid.querySelectorAll("[data-kp-entity]")) {
+        if (!(c instanceof HTMLElement)) continue;
+        const t = g.tiles.find((x) => x.host === c.dataset.kpEntityKey);
+        if (!t) continue;
+        c.dataset.host = t.host;
+        c.setAttribute("data-kp-hovercard", "");
+        const link = c.querySelector("a.kp-entity__name");
+        if (link instanceof HTMLElement) drivable(link, OPEN, t.host);
+      }
+    }
     body.replaceChildren(
-      ...groups.map((g) => {
-        const ok = g.tiles.filter(
-          (t) => wordOf(tileState(watch, t)) === "answers",
-        );
-        const menu = h(
-          "div",
-          {
-            class: "kp-menu-button ap-group__menu",
-            "data-kp-menu-button": "",
-            "data-kp-key": `open-${g.stack}`,
-          },
-          drivable(
-            h(
-              "button",
-              { type: "button", class: "kp-button kp-button--sm" },
-              "Open ▾",
-            ),
-            OPEN_MENU,
-            g.stack,
-          ),
-          h(
-            "div",
-            {
-              class: "kp-menu kp-menu--rich",
-              role: "menu",
-              "aria-label": `Apps of ${g.stack}`,
-              hidden: "",
-            },
-            drivable(
-              h(
-                "button",
-                {
-                  type: "button",
-                  role: "menuitem",
-                  class: "kp-menu__item",
-                  tabindex: "-1",
-                  "data-kp-value": g.stack,
-                  ...(ok.length ? {} : { "aria-disabled": "true" }),
-                },
-                h(
-                  "span",
-                  { class: "kp-menu__label" },
-                  `Open the ${ok.length} ${ok.length === 1 ? "app" : "apps"} that answer`,
-                ),
-                h(
-                  "span",
-                  { class: "kp-menu__hint" },
-                  ok.length
-                    ? "each in its own tab"
-                    : "none of them answers now",
-                ),
-              ),
-              OPEN_ALL,
-              g.stack,
-            ),
-          ),
-        );
-        menu.addEventListener("kp-menu-select", () => {
-          for (const t of ok) window.open(t.url, "_blank", "noopener");
-        });
-        return h(
-          "div",
-          { class: "ap-group", "data-stack": g.stack },
-          h(
-            "h3",
-            { class: "ap-group__name" },
-            mark(g.stack),
-            g.stack,
-            h("span", { class: "kp-badge" }, String(g.tiles.length)),
-          ),
-          menu,
-          h(
-            "div",
-            {
-              class: "kp-actions",
-              role: "group",
-              "aria-label": `Apps of ${g.stack}`,
-            },
-            ...g.tiles.map((t) => {
-              const el = tileEl(t, first);
-              first = false;
-              return el;
-            }),
-          ),
-        );
-      }),
+      ...groups.map((g) => /** @type {HTMLElement} */ (groupOf(g.stack).el)),
     );
-    attachMenuButtons(body);
+    const live = new Set(groups.map((g) => g.stack));
+    for (const k of groupsBy.keys()) if (!live.has(k)) groupsBy.delete(k);
+    // The first match is the one Enter opens.
+    cardsOf().forEach((c, i) =>
+      c.toggleAttribute("data-ap-first", q.trim() !== "" && i === 0),
+    );
+    rove();
     if (!groups.length) {
       const all = h(
         "button",
@@ -450,7 +549,7 @@ export function mount(root) {
       drivable(all, SHOW_ALL);
       all.addEventListener("click", () => {
         kept = null;
-        setFacetValuesAll();
+        setFacetValues(facets, null);
         setQuery("");
       });
       setCardState(card, "empty", {
@@ -465,17 +564,21 @@ export function mount(root) {
     } else setCardState(card, "ready");
   };
 
-  const setFacetValuesAll = () => {
-    import("/static/kp/js/facets.js").then((m) =>
-      m.setFacetValues(facets, null),
-    );
-  };
   facets.addEventListener(FACET_EVENT, (e) => {
     const values = /** @type {CustomEvent} */ (e).detail.values;
     kept = values && values.length < STATE_ORDER.length ? values : null;
     paintBody();
   });
   card.addEventListener("kp-card-retry", () => void load());
+  body.addEventListener(ENTITY_RETRY_EVENT, () => void load());
+  body.addEventListener(ENTITY_GRID_RETRY_EVENT, () => void load());
+  body.addEventListener(ENTITY_STAR_EVENT, (e) => {
+    const { key, starred } = /** @type {CustomEvent} */ (e).detail;
+    if (starred) stars.add(key);
+    else stars.delete(key);
+    writeStars(stars);
+    paintBody();
+  });
 
   const paint = () => {
     if (failed != null) {
@@ -533,55 +636,111 @@ export function mount(root) {
     if (tiles) paintBody();
   };
   search.addEventListener("input", () => setQuery(search.value));
+  /** Focus the tile at `i` (and make it the board's tab stop). @param {HTMLElement | undefined} c */
+  const focusTile = (c) => {
+    if (!c) return;
+    stop = c;
+    rove();
+    tileStop(c)?.focus();
+  };
   search.addEventListener("keydown", (e) => {
     if (e.key === "Enter") {
       const f = visible()[0];
       if (f) window.open(f.url, "_blank", "noopener");
     } else if (e.key === "ArrowDown") {
       e.preventDefault();
-      /** @type {HTMLElement | null} */ (
-        body.querySelector(".ap-tile")
-      )?.focus();
+      focusTile(cardsOf()[0]);
     } else if (e.key === "Escape" && search.value) {
       e.stopPropagation();
       setQuery("");
     }
   });
-  // Arrows move between tiles on the grid they sit in.
-  body.addEventListener("keydown", (e) => {
-    const all = /** @type {HTMLElement[]} */ ([
-      ...body.querySelectorAll(".ap-tile"),
-    ]);
-    const i = all.indexOf(/** @type {HTMLElement} */ (document.activeElement));
-    if (i < 0) return;
-    const grid = all[i].parentElement;
-    const cols = grid
-      ? Math.max(1, Math.round(grid.clientWidth / all[i].offsetWidth))
-      : 1;
-    /** @type {Record<string, number>} */
-    const step = {
-      ArrowRight: 1,
-      ArrowLeft: -1,
-      ArrowDown: cols,
-      ArrowUp: -cols,
-    };
-    const d = step[e.key];
-    if (d == null) return;
-    e.preventDefault();
-    if (e.key === "ArrowUp" && i - cols < 0) {
-      search.focus();
-      return;
+  body.addEventListener("focusin", (e) => {
+    const c =
+      e.target instanceof Element ? e.target.closest("[data-kp-entity]") : null;
+    if (c && c !== stop) {
+      stop = c;
+      rove();
     }
-    all[Math.max(0, Math.min(all.length - 1, i + d))].focus();
   });
 
+  // Arrows, Home and End move over the tiles by their place on screen (kp's
+  // `nextTile`); a letter jumps to the next app whose name starts with the
+  // letters typed in the last second. The star's key is "." so that every
+  // letter is free. [gap kp-gaps/homelab.md: tiles-keys does not know entity
+  // tiles]
+  let typed = "";
+  let typedAt = 0;
+  body.addEventListener("keydown", (e) => {
+    if (e.defaultPrevented || e.altKey || e.ctrlKey || e.metaKey) return;
+    const target = e.target;
+    if (
+      !(target instanceof Element) ||
+      target.closest("input, textarea, select, .kp-menu")
+    )
+      return;
+    const all = cardsOf();
+    const i = all.findIndex((c) => c.contains(target));
+    if (i < 0) return;
+    /** @type {Record<string, "left" | "right" | "up" | "down" | "first" | "last">} */
+    const ways = {
+      ArrowLeft: "left",
+      ArrowRight: "right",
+      ArrowUp: "up",
+      ArrowDown: "down",
+      Home: "first",
+      End: "last",
+    };
+    const way = ways[e.key];
+    if (way) {
+      e.preventDefault();
+      const to = nextTile(
+        all.map((c) => c.getBoundingClientRect()),
+        i,
+        way,
+      );
+      if (to !== null) focusTile(all[to]);
+      else if (way === "up") search.focus();
+      return;
+    }
+    if (e.key.length !== 1 || /[\s.]/.test(e.key)) return;
+    const now = Date.now();
+    typed =
+      now - typedAt > 1000 ? e.key.toLowerCase() : typed + e.key.toLowerCase();
+    typedAt = now;
+    const same = [...typed].every((ch) => ch === typed[0]);
+    const order = [
+      ...all.slice(i + (same ? 1 : 0)),
+      ...all.slice(0, i + (same ? 1 : 0)),
+    ];
+    const pick = order.find((c) => {
+      const n =
+        c.querySelector(".kp-entity__name")?.firstChild?.textContent ?? "";
+      return n.toLowerCase().startsWith(same ? typed[0] : typed);
+    });
+    if (pick) {
+      e.preventDefault();
+      focusTile(pick);
+    }
+  });
+
+  /** @returns {Promise<boolean>} whether the watch could be read */
   const readWatch = async () => {
     const w = await fetchJson("/data/watch", "the watch", abort.signal);
-    if (!w.ok) return;
+    if (abort.signal.aborted) return true;
+    if (!w.ok) {
+      if (tiles)
+        setConnection(connection, "refused", {
+          why: `${w.error.what}: ${w.error.why}`,
+        });
+      return false;
+    }
+    setConnection(connection, "online");
     /** @type {import("../appsview.js").Watch[]} */
     const targets = w.body.targets ?? [];
     watch = new Map(targets.map((x) => [x.key, x]));
     paint();
+    return true;
   };
   const load = async () => {
     failed = null;
@@ -599,17 +758,27 @@ export function mount(root) {
     }
     tiles = r.body.report?.tiles ?? [];
     paint();
+    refreshOf(refreshEl)?.now();
   };
+  // The kp refresh control reads the watch at the chosen interval (and when
+  // "Refresh now" is pressed); the control starts with the page's own load.
+  refreshEl.addEventListener(REFRESH_EVENT, (e) => {
+    const d = /** @type {CustomEvent} */ (e).detail;
+    void readWatch()
+      .then((ok) => d.done(ok))
+      .catch(() => d.done(false));
+  });
+  connection.addEventListener(CONNECTION_RETRY_EVENT, () => void readWatch());
   paint();
   void load().catch(() => {});
-  const timer = setInterval(() => void readWatch().catch(() => {}), EVERY_MS);
   if (!matchMedia("(max-width: 48rem)").matches) search.focus();
   return () => {
     abort.abort();
-    clearInterval(timer);
     detachFacets();
     detachCards();
-    detachMarks();
+    detachEntities();
+    detachRefresh();
+    detachConnection();
     detachHover();
     root.classList.remove("ap-page");
   };

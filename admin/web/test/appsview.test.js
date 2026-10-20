@@ -1,14 +1,9 @@
 // redesign-stacks (3.71.0, the approved Apps demo): the Apps page's view
 // model — a tile's dot from the minute watch, the launch search, the board
-// with Starred on top, the highlight and the verdict line.
+// with Starred on top, and the verdict line.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import {
-  appsVerdict,
-  filterTiles,
-  markParts,
-  tileState,
-} from "../js/appsview.js";
+import { appsVerdict, filterTiles, tileState } from "../js/appsview.js";
 
 /** @param {string} name @param {string} group @param {string} stack */
 const tile = (name, group, stack) => ({
@@ -66,16 +61,6 @@ test("redesign-stacks: the search matches name, address, description and stack",
     ["Jellyfin", "Sonarr"],
   );
   assert.equal(filterTiles(TILES, "  ").length, 4);
-});
-
-test("redesign-stacks: the highlight cuts around the first match, any case", () => {
-  assert.deepEqual(markParts("JobTracker", "TR"), [
-    { text: "Job", hit: false },
-    { text: "Tr", hit: true },
-    { text: "acker", hit: false },
-  ]);
-  assert.deepEqual(markParts("Sonarr", "x"), [{ text: "Sonarr", hit: false }]);
-  assert.deepEqual(markParts("Sonarr", ""), [{ text: "Sonarr", hit: false }]);
 });
 
 test("redesign-stacks: the verdict names what is down first, and counts exactly", () => {

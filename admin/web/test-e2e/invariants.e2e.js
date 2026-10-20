@@ -4314,15 +4314,17 @@ test("invariants: Apps groups the stacks' tiles per stack, each opening in a new
       return;
     }
     await page
-      .locator(".ap-tile[data-host]")
+      .locator(".ap-tiles [data-kp-entity][data-host]")
       .first()
       .waitFor({ timeout: 8000 });
-    const shown = await page.$$eval(".ap-tile[data-host]", (els) =>
-      els.map((e) => ({
-        host: /** @type {HTMLElement} */ (e).dataset.host,
-        target: e.getAttribute("target"),
-        word: e.querySelector(".kp-state-word")?.textContent?.trim(),
-      })),
+    const shown = await page.$$eval(
+      ".ap-tiles [data-kp-entity][data-host]",
+      (els) =>
+        els.map((e) => ({
+          host: /** @type {HTMLElement} */ (e).dataset.host,
+          target: e.querySelector("a.kp-entity__name")?.getAttribute("target"),
+          word: e.querySelector(".kp-entity__tile-state")?.textContent?.trim(),
+        })),
     );
     assert.deepEqual(
       shown.map((s) => s.host).sort(),
@@ -4354,7 +4356,7 @@ test("invariants: Apps groups the stacks' tiles per stack, each opening in a new
     const name = String(tiles[tiles.length - 1].name);
     await page.fill(".ap-search", name.slice(0, 4));
     const first = await page
-      .locator(".ap-tile.is-first")
+      .locator(".ap-tiles [data-ap-first]")
       .getAttribute("data-host");
     assert.equal(
       first,
@@ -4372,7 +4374,7 @@ test("invariants: Apps groups the stacks' tiles per stack, each opening in a new
     );
     await page.getByRole("button", { name: "Show every app" }).click();
     await page
-      .locator(".ap-tile[data-host]")
+      .locator(".ap-tiles [data-kp-entity][data-host]")
       .first()
       .waitFor({ timeout: 8000 });
   } finally {

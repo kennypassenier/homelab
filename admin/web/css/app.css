@@ -873,6 +873,99 @@ tr.unread td:first-child {
 .edit-head {
   margin-block: 0.25rem 0.75rem;
 }
+/* The stack's Settings cards (feat-kpadopt-2, WP-8): a head of title and
+   sentence with kp's unsaved bar on its end edge, one form grid of titled
+   groups (labels, fields and words on shared tracks), then the blocks of
+   row tables. Real grids all through: nothing hangs on a flex edge. */
+.edit-card__head {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-areas:
+    "title bar"
+    "desc bar";
+  column-gap: var(--kp-space-md, 1rem);
+  row-gap: var(--kp-space-xs, 0.25rem);
+  align-items: start;
+  margin-block-end: var(--kp-space-md, 1rem);
+}
+.edit-card__title {
+  grid-area: title;
+  margin: 0;
+}
+.edit-card__desc {
+  grid-area: desc;
+  margin: 0;
+  max-inline-size: 70ch;
+}
+.edit-card__bar {
+  grid-area: bar;
+  align-self: start;
+}
+@media (max-width: 40rem) {
+  .edit-card__head {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-areas:
+      "title"
+      "desc"
+      "bar";
+  }
+}
+.edit-card__grid + .edit-block,
+.edit-block + .edit-block {
+  margin-block-start: var(--kp-space-lg, 1.5rem);
+}
+.edit-card .kp-formgrid .kp-field {
+  margin-block: 0;
+}
+.edit-group__desc {
+  margin: 0;
+}
+.edit-block__head {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-areas:
+    "title action"
+    "desc action";
+  column-gap: var(--kp-space-md, 1rem);
+  row-gap: var(--kp-space-xs, 0.25rem);
+  align-items: start;
+  margin-block-end: var(--kp-space-sm, 0.5rem);
+}
+.edit-block__title {
+  grid-area: title;
+  margin: 0;
+  font-size: var(--kp-text-base, 1rem);
+  font-weight: 600;
+}
+.edit-block__head > .edit-group__desc {
+  grid-area: desc;
+  max-inline-size: 70ch;
+}
+.edit-block__action {
+  grid-area: action;
+  align-self: start;
+}
+.edit-native > .edit-card + .edit-card {
+  margin-block-start: var(--kp-space-md, 1rem);
+}
+.edit-stage {
+  min-block-size: 16rem;
+}
+.edit-files {
+  min-block-size: 22rem;
+}
+.edit-files__dir {
+  display: block;
+  color: var(--muted-foreground);
+  font-size: 0.8em;
+}
+.edit-files__tools {
+  display: grid;
+  margin-block-start: var(--kp-space-sm, 0.5rem);
+}
+.edit-files .kp-pane__list > [data-kp-pane-key][data-kp-changed] b::after {
+  content: " •";
+}
 .raw-text {
   width: 100%;
   min-height: 18rem;

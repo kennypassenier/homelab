@@ -14,10 +14,17 @@ import {
 import { commitFields, startValues } from "./editforms.js";
 import { driven, register } from "./drivehooks.js";
 import { h } from "./dom.js";
+import { gridRow } from "./gridrow.js";
 import { mountJobPanel } from "./jobpanel.js";
 import { commitBody, committedText, planView } from "./plan.js";
 import { attachDiffs, setDiff } from "/static/kp/js/diff.js";
 import { clearError, showError } from "/static/kp/js/forms.js";
+import {
+  discardUnsaved,
+  markUnsavedClean,
+  setUnsavedSaving,
+  unsaved,
+} from "/static/kp/js/unsaved.js";
 import {
   BEFORE_STEP_EVENT,
   FINISH_EVENT,
@@ -47,6 +54,8 @@ export function editField(f, value, onChange) {
       name: f.name,
       "aria-describedby": `${f.id}-hint`,
     });
+    // The default is the saved state kp's unsaved bar compares against.
+    input.defaultChecked = value === true;
     input.checked = value === true;
     input.addEventListener("change", () => onChange(input.checked));
     const wrap = h(
@@ -71,6 +80,7 @@ export function editField(f, value, onChange) {
       ...(f.choices ?? []).map((c) => h("option", { value: c.value }, c.label)),
     );
     sel.value = String(value ?? "");
+    for (const o of sel.options) o.defaultSelected = o.value === sel.value;
     input = sel;
   } else if (f.kind === "textarea") {
     const ta = h("textarea", {
@@ -81,6 +91,7 @@ export function editField(f, value, onChange) {
       spellcheck: "false",
       "aria-describedby": `${f.id}-hint`,
     });
+    ta.defaultValue = String(value ?? "");
     ta.value = String(value ?? "");
     input = ta;
   } else {
@@ -95,8 +106,11 @@ export function editField(f, value, onChange) {
     });
     if (f.kind === "number") inp.inputMode = "numeric";
     if (f.placeholder) inp.placeholder = f.placeholder;
-    if (f.pattern) inp.pattern = f.pattern;
+    // The attribute is checked with the browser's `v` flag, where a bare "/"
+    // in a class is not allowed; the same pattern in JS (checkFields) is.
+    if (f.pattern) inp.pattern = f.pattern.replace(/(?<!\\)\//g, "\\/");
     if (f.required) inp.required = true;
+    inp.defaultValue = String(value ?? "");
     inp.value = String(value ?? "");
     input = inp;
   }
@@ -128,6 +142,244 @@ export function editField(f, value, onChange) {
   );
   return { wrap, input };
 }
+
+/**
+ * One field as a row of a `.kp-formgrid` (Kenny, 2026-10-19: labels, fields
+ * and words on shared tracks): the label, the control, and the help in the
+ * value track. The control keeps the field's id (Live view and a replayed
+ * step find it by it); `data-kp-row` and `data-kp-name` let kp's unsaved bar
+ * track the row and name it in its list of changes. A required number with
+ * bounds is kp's quantity (minus, plus, unit), a textarea grows with its
+ * text (`data-kp-autosize`), and an error shows in the control's own slot.
+ * @param {import("./editforms.js").EditField} f
+ * @param {string | boolean} value
+ * @param {(v: string | boolean) => void} onChange
+ * @returns {{row: HTMLElement, input: HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement}}
+ */
+export function editRow(f, value, onChange) {
+  const x = editField(f, value, onChange);
+  if (f.hidden) return { row: x.wrap, input: x.input };
+  const help = /** @type {HTMLElement | null} */ (
+    x.wrap.querySelector(".kp-field__help")
+  );
+  help?.classList.remove("kp-field__help");
+  const input = x.input;
+  /** @type {HTMLElement} */
+  let control = input;
+  if (
+    f.kind === "number" &&
+    f.required &&
+    f.min != null &&
+    f.max != null &&
+    input instanceof HTMLInputElement
+  ) {
+    input.classList.remove("kp-field__input");
+    input.classList.add("kp-quantity__input");
+    const q = h("div", {
+      class: "kp-quantity",
+      "data-kp-quantity": "",
+      "data-kp-quantity-min": String(f.min),
+      "data-kp-quantity-max": String(f.max),
+      "data-kp-quantity-step": String(
+        f.max > 1000 && f.min % 64 === 0 ? 64 : 1,
+      ),
+      "data-kp-quantity-unit": f.unit ?? "",
+      "data-kp-quantity-label": f.label,
+    });
+    q.append(input);
+    // The stepper writes the number and tells only its own event; the model
+    // and the unsaved bar listen for an input.
+    q.addEventListener("kp-quantity-change", () =>
+      input.dispatchEvent(new Event("input", { bubbles: true })),
+    );
+    control = q;
+  } else if (input instanceof HTMLTextAreaElement) {
+    input.classList.add("kp-field__input--multiline");
+    input.setAttribute("data-kp-autosize", "");
+    input.setAttribute("data-kp-autosize-max", "12");
+  } else if (f.unit && input instanceof HTMLInputElement) {
+    input.classList.add("kp-field__input--short");
+  }
+  const slot = h("p", {
+    class: "kp-field__error",
+    "data-kp-field-error": "",
+    hidden: "",
+  });
+  const field = h(
+    "div",
+    { class: f.kind === "check" ? "kp-field kp-field--check" : "kp-field" },
+    control,
+    slot,
+  );
+  const row = gridRow({
+    label: f.label,
+    labelFor: f.id,
+    control: field,
+    value: help ?? undefined,
+  });
+  row.dataset.kpRow = f.name;
+  row.dataset.kpName = f.label;
+  return { row, input };
+}
+
+/**
+ * A titled group of rows for a `.kp-formgrid`: a heading and one sentence
+ * saying what the group is, then its rows on the grid's tracks.
+ * @param {{id?: string, title: string, desc: string, rows: HTMLElement[]}} g
+ * @returns {HTMLElement}
+ */
+export function editGroup({ id, title, desc, rows }) {
+  return h(
+    "div",
+    { class: "kp-formgrid__group edit-group", id: id ?? null },
+    h("h3", { class: "kp-formgrid__heading" }, title),
+    h(
+      "p",
+      { class: "measured edit-group__desc", "data-kp-formgrid-span": "all" },
+      desc,
+    ),
+    ...rows,
+  );
+}
+
+/**
+ * A titled block that is not a form row (a table of rows with its Add
+ * button): the same heading and sentence as `editGroup`, outside the grid;
+ * its action (Add) stands on the block's end edge, in a grid cell of its own.
+ * @param {{id?: string, title: string, desc: string, body: Node[], action?: HTMLElement}} g
+ * @returns {HTMLElement}
+ */
+export function editBlock({ id, title, desc, body, action }) {
+  return h(
+    "section",
+    { class: "edit-block", id: id ?? null, "aria-label": title },
+    h(
+      "div",
+      { class: "edit-block__head" },
+      h("h3", { class: "edit-block__title" }, title),
+      h("p", { class: "measured edit-group__desc" }, desc),
+      action ? h("div", { class: "edit-block__action" }, action) : "",
+    ),
+    ...body,
+  );
+}
+
+/**
+ * The card around an edit form: heading, one sentence, kp's unsaved bar in
+ * its head (the bar's Save is the card's review; the old "Review and
+ * commit" button and "Changed; not committed." words are the bar's now),
+ * the grid of field groups, then the blocks.
+ * @param {{id: string, form: string, title: string, desc: string,
+ *   groups?: HTMLElement[], blocks?: HTMLElement[], bar?: boolean}} c
+ * `bar: false` is a card that acts (adds something) instead of staging edits.
+ * @returns {{node: HTMLElement, bar: HTMLElement}}
+ */
+export function editCard({
+  id,
+  form,
+  title,
+  desc,
+  groups = [],
+  blocks = [],
+  bar: withBar = true,
+}) {
+  const bar = h("div", {
+    class: "kp-unsaved edit-card__bar",
+    "data-kp-unsaved": "",
+    "data-kp-unsaved-for": `#${id}`,
+    "data-kp-name": id,
+    "data-kp-placement": "header",
+    "data-kp-keep": "off",
+    "data-kp-warn-leave": "off",
+    "data-kp-undo-ms": "0",
+    id: `${id}-bar`,
+  });
+  const node = h(
+    "section",
+    {
+      class: "kp-card edit-card",
+      "aria-label": title,
+      id,
+      "data-form": form,
+    },
+    h(
+      "header",
+      { class: "edit-card__head" },
+      h("h2", { class: "edit-card__title" }, title),
+      h("p", { class: "measured edit-card__desc" }, desc),
+      ...(withBar ? [bar] : []),
+    ),
+    ...(groups.length
+      ? [
+          h(
+            "div",
+            {
+              class: "kp-formgrid edit-card__grid",
+              "data-kp-formgrid-columns": "never",
+            },
+            ...groups,
+          ),
+        ]
+      : []),
+    ...blocks,
+  );
+  return { node, bar };
+}
+
+/**
+ * Wire a card's bar to its review. Save runs `review()`, which opens the plan
+ * dialog and returns its handle (or null when it refused, having said why);
+ * the bar rests again when that dialog closes without a commit, and a commit
+ * reloads the tab, which draws the bars afresh.
+ * @param {HTMLElement} bar
+ * @param {() => ReturnType<typeof openPlanDialog> | null} review
+ * @param {{revert?: (key: string) => boolean, discard?: () => void}} [hooks]
+ * @returns {() => void}
+ */
+export function wireBar(bar, review, hooks = {}) {
+  const onSave = () => {
+    const d = review();
+    if (!d) {
+      queueMicrotask(() => setUnsavedSaving(bar, false));
+      return;
+    }
+    d.closed.then(() => setUnsavedSaving(bar, false));
+  };
+  /** @param {Event} ev */
+  const onRevert = (ev) => {
+    const key = /** @type {CustomEvent} */ (ev).detail?.key;
+    if (hooks.revert?.(String(key))) ev.preventDefault();
+  };
+  const onDiscard = () => hooks.discard?.();
+  bar.addEventListener("kp-unsaved-save", onSave);
+  bar.addEventListener("kp-unsaved-revert", onRevert);
+  bar.addEventListener("kp-unsaved-discard", onDiscard);
+  return () => {
+    bar.removeEventListener("kp-unsaved-save", onSave);
+    bar.removeEventListener("kp-unsaved-revert", onRevert);
+    bar.removeEventListener("kp-unsaved-discard", onDiscard);
+  };
+}
+
+/**
+ * Mark a row of the page's own (a table of rows, a file) as changed or not,
+ * for a bar that tracks by the page (the bar still tracks the fields).
+ * @param {HTMLElement} row
+ * @param {{was: string, now: string} | null} change null: not changed
+ */
+export function markRow(row, change) {
+  if (!change) {
+    row.removeAttribute("data-kp-changed");
+    row.removeAttribute("data-kp-was");
+    row.removeAttribute("data-kp-now");
+    return;
+  }
+  row.dataset.kpWas = change.was;
+  row.dataset.kpNow = change.now;
+  row.setAttribute("data-kp-changed", "");
+}
+
+export { discardUnsaved, markUnsavedClean, unsaved };
 
 /**
  * Show each error on its field; focus the first.

@@ -62,7 +62,9 @@ import {
   settingsBody,
   settingsExtBody,
   settingsExtForm,
+  settingsExtGroups,
   settingsForm,
+  settingsGroups,
   startValues,
   storageFields,
   storageFromValues,
@@ -75,16 +77,32 @@ import {
   tilesEditBody,
 } from "./editforms.js";
 import {
+  editBlock,
+  editCard,
   editField,
+  editGroup,
+  editRow,
   markErrors,
+  markRow,
+  markUnsavedClean,
   openPlanDialog,
   stackCommit,
+  wireBar,
 } from "./editui.js";
+import { filesCard } from "./editfiles.js";
+import { stage } from "./stage.js";
 import { badgeCell, errorBox, fetchJson, h, tableBlock, td } from "./dom.js";
 import { driven, handle, register } from "./drivehooks.js";
 import { attachDataTables, dataTable } from "/static/kp/js/datatable.js";
-import { attachSwitches, showError } from "/static/kp/js/forms.js";
+import { attachSwitches } from "/static/kp/js/forms.js";
+import { attachAll } from "/static/kp/js/auto.js";
+import {
+  CARD_RETRY_EVENT,
+  attachCardStates,
+  setCardState,
+} from "/static/kp/js/card-state.js";
 import { viaForm } from "./drivable.js";
+import { buttonGroup, gridRow } from "./gridrow.js";
 
 /**
  * fix-239: every card of a stack's settings tab is one edit form, which
@@ -166,25 +184,42 @@ function headLine(e) {
 export function settingsTab(panel, params) {
   const stack = params.name;
   const abort = new AbortController();
-  panel.replaceChildren(
-    h("p", { class: "measured" }, "Reading the stack's files…"),
-  );
+  // The tab's own footprint while it is read: kp's busy card, and the failed
+  // plate with its Try again in the same box.
+  const reading = stage(h("div", { class: "edit-stage__body" }));
+  reading.classList.add("edit-stage");
+  panel.replaceChildren(reading);
+  setCardState(reading, "loading", { words: "Reading the stack's files" });
+  const stopStates = attachCardStates(reading);
   /** @type {() => void} */
   let unregister = () => {};
   /** @type {() => void} */
   let detachTables = () => {};
   /** @type {() => void} */
   let detachRows = () => {};
+  /** @type {() => void} */
+  let detachKp = () => {};
+  /** The files edited and not committed: they outlive a reload of the tab. @type {Map<string, string>} */
+  const pending = new Map();
   const load = async () => {
     const r = await readEdit(stack, abort.signal);
     if (!r.ok) {
-      panel.replaceChildren(errorBox(r.error));
+      panel.replaceChildren(reading);
+      setCardState(reading, "error", {
+        title: `Could not read ${r.error.what}`,
+        text: [
+          `Why: ${r.error.why}`,
+          ...(r.error.fix ? [`What to do: ${r.error.fix}`] : []),
+        ].join("\n"),
+      });
       return;
     }
     const e = /** @type {EditRead} */ (r.body);
     const parts = /** @type {Node[]} */ ([...headLine(e)]);
-    if (e.manifest) parts.push(card(settingsCard(stack, e, load), "settings"));
-    else
+    if (e.manifest) {
+      const s = settingsCard(stack, e, load);
+      parts.push(card(s.node, "settings"));
+    } else
       parts.push(
         h(
           "div",
@@ -192,7 +227,8 @@ export function settingsTab(panel, params) {
           `The settings form needs a readable lxc-compose.yml: ${e.manifest_error ?? "none"}. The raw editor below still works.`,
         ),
       );
-    parts.push(card(filesCard(stack, e, load), "raw"));
+    const files = filesCard(stack, e, load, pending);
+    parts.push(card(files.node, "raw"));
     if (e.manifest && e.presets.length)
       parts.push(card(addAppCard(stack, e, load), "add-app"));
     let settingsExt = null;
@@ -210,24 +246,39 @@ export function settingsTab(panel, params) {
       parts.push(card(tiles.node, "tiles"));
     }
     if (e.manifest && (e.manifest.native_only || e.natives.length))
-      parts.push(card(nativeCard(stack, e, load), "native"));
+      parts.push(card(nativeCard(stack, e, load).node, "native"));
+    setCardState(reading, "ready");
     panel.replaceChildren(...parts);
     // feat-platform-10: the row tables' kp datatables need their wraps in
     // the live document first (drawFirewall's own order, at the panel
     // level here since several tables share this one tab).
     detachTables();
     detachTables = attachDataTables(panel);
+    // A table's own search box and sort controls are not edits of the form.
+    for (const c of panel.querySelectorAll(
+      ".edit-block :is(input, select, textarea)",
+    ))
+      c.setAttribute("data-kp-untracked", "");
     settingsExt?.bind();
     apps?.bind();
     latch?.bind();
     tiles?.bind();
+    files.bind();
     detachRows();
     detachRows = () => {
       settingsExt?.detach();
       apps?.detach();
       latch?.detach();
       tiles?.detach();
+      files.detach();
     };
+    // The unsaved bars, the quantities and the other kp parts the cards
+    // carry; Live view finds the bars' Save once they stand.
+    detachKp();
+    const kp = attachAll(panel);
+    detachKp = kp;
+    await kp.ready;
+    if (abort.signal.aborted) return;
     // feat-platform-10: the Live view replay presses these very buttons,
     // and opens/acts on the row tables' rows.
     unregister();
@@ -236,19 +287,21 @@ export function settingsTab(panel, params) {
         const d = panel.querySelector("#raw-editor");
         if (d instanceof HTMLDetailsElement) d.open = true;
       },
+      // A card's review is its unsaved bar's Save; the two add forms keep
+      // their own button.
       review: (/** @type {string} */ family) =>
         /** @type {HTMLElement | null} */ (
           panel.querySelector(
             {
-              raw: "#raw-review",
+              raw: "#raw-editor .kp-unsaved__save",
               "add-app": "#add-app-review",
-              "settings-ext": "#settings-ext-review",
-              apps: "#apps-review",
-              latch: "#latch-review",
-              tiles: "#tiles-review",
-              native: "#native-review",
+              "settings-ext": "#settings-ext-form .kp-unsaved__save",
+              apps: "#apps-form .kp-unsaved__save",
+              latch: "#latch-form .kp-unsaved__save",
+              tiles: "#tiles-form .kp-unsaved__save",
+              native: "#native-form .kp-unsaved__save",
               "add-native": "#add-native-review",
-            }[family] ?? "#settings-review",
+            }[family] ?? "#settings-form .kp-unsaved__save",
           )
         ),
       // feat-platform-10: a row op's target is "<list>:<n>" (or just
@@ -273,12 +326,18 @@ export function settingsTab(panel, params) {
         ),
     });
   };
+  reading.addEventListener(CARD_RETRY_EVENT, () => {
+    setCardState(reading, "loading", { words: "Reading the stack's files" });
+    void load().catch(() => {});
+  });
   void load().catch(() => {});
   return () => {
     abort.abort();
     unregister();
     detachTables();
     detachRows();
+    detachKp();
+    stopStates();
   };
 }
 
@@ -293,40 +352,27 @@ function settingsCard(stack, e, reload) {
   const values = startValues(form);
   /** @type {Map<string, HTMLElement>} */
   const inputs = new Map();
-  const fields = form.steps[0].fields.map((f) => {
-    const x = editField(f, values[f.name], (v) => {
-      values[f.name] = v;
-      status.textContent = changesSomething(settingsBody(form, values))
-        ? "Changed; not committed."
-        : "";
-    });
-    inputs.set(f.name, x.input);
-    return x.wrap;
-  });
-  // Sized for its one text, so it never reflows the row when it appears.
-  const status = h("span", {
-    class: "measured kp-state-word",
-    "data-kp-words": "Changed; not committed.",
-    role: "status",
-  });
-  const review = h(
-    "button",
-    {
-      type: "button",
-      class: "kp-button kp-button--primary",
-      id: "settings-review",
-    },
-    "Review and commit…",
+  const groups = fieldGroups(
+    settingsGroups(form.steps[0].fields),
+    values,
+    inputs,
   );
-  review.addEventListener("click", () => {
+  const { node, bar } = editCard({
+    id: "settings-form",
+    form: form.id,
+    title: "Settings",
+    desc: `CT ${m.vmid} · ${m.hostname} · ${m.ip}. Written into stacks/${stack}/lxc-compose.yml and the apps' compose files, with every comment kept.`,
+    groups,
+  });
+  wireBar(bar, () => {
     const errors = { ...checkFields(form, values), ...tileProblems(values) };
-    if (!markErrors(inputs, errors)) return;
+    if (!markErrors(inputs, errors)) return null;
     const edit = settingsBody(form, values);
     if (!changesSomething(edit)) {
       notify("Nothing is changed yet.", "info");
-      return;
+      return null;
     }
-    openPlanDialog({
+    return openPlanDialog({
       id: form.id,
       title: `Settings · ${stack}`,
       planUrl: `/data/stacks/${encodeURIComponent(stack)}/plan`,
@@ -336,281 +382,33 @@ function settingsCard(stack, e, reload) {
       onCommitted: () => void reload(),
     });
   });
-  return h(
-    "section",
-    {
-      class: "kp-card edit-card",
-      "aria-label": "Settings",
-      id: "settings-form",
-      "data-form": form.id,
-    },
-    h("h2", null, "Settings"),
-    h(
-      "p",
-      { class: "measured" },
-      `CT ${m.vmid} · ${m.hostname} · ${m.ip}. Written into stacks/${stack}/lxc-compose.yml and the apps' compose files, with every comment kept.`,
-    ),
-    h("div", { class: "edit-grid" }, ...fields),
-    h("div", { class: "row-buttons" }, review, " ", status),
-  );
+  return { node, bar };
 }
 
 /**
- * feat-stacks-files: every text file of the stack, open, edited, created,
- * deleted or renamed. Editing an existing file still ends as a `raw` edit
- * (unchanged since feat-stacks-2, and still what Live view drives with
- * `homelab ui open raw <stack>`); create/delete/rename end as a `files`
- * edit (stackedit_files.rs) — new ops, not yet driven from the CLI.
- * @param {string} stack
- * @param {EditRead} e
- * @param {() => Promise<void>} reload
+ * A form's field groups as grid groups: each field a row, its input kept in
+ * `inputs` (for the errors) and its typed value in `values`.
+ * @param {import("./editforms.js").FieldGroup[]} groups
+ * @param {import("./editforms.js").Values} values
+ * @param {Map<string, HTMLElement>} inputs
+ * @param {() => void} [changed]
+ * @returns {HTMLElement[]}
  */
-function filesCard(stack, e, reload) {
-  const files = Object.keys(e.texts).sort();
-  const templates = e.file_templates ?? {};
-  /** @type {"edit" | "create"} */
-  let mode = "edit";
-
-  const sel = h(
-    "select",
-    { class: "kp-field__input", id: "raw-file" },
-    ...files.map((f) => h("option", { value: f }, f)),
-  );
-  sel.value = files.includes("lxc-compose.yml")
-    ? "lxc-compose.yml"
-    : (files[0] ?? "");
-
-  const pathInput = h("input", {
-    class: "kp-field__input mono",
-    id: "files-new-path",
-    type: "text",
-    placeholder: "app/checks.yml",
-    hidden: "",
-  });
-  const templateNames = Object.keys(templates).sort();
-  const templateSel = h(
-    "select",
-    { class: "kp-field__input", id: "files-new-template", hidden: "" },
-    h("option", { value: "" }, "Blank"),
-    ...templateNames.map((k) => h("option", { value: k }, k)),
-  );
-  const pathField = h(
-    "div",
-    { class: "kp-field", id: "files-new-path-field", hidden: "" },
-    h("label", { class: "kp-field__label", for: "files-new-path" }, "Path"),
-    pathInput,
-  );
-  const templateField = h(
-    "div",
-    { class: "kp-field", id: "files-new-template-field", hidden: "" },
-    h(
-      "label",
-      { class: "kp-field__label", for: "files-new-template" },
-      "Start from",
-    ),
-    templateSel,
-  );
-  const fileField = h(
-    "div",
-    { class: "kp-field", id: "files-file-field" },
-    h("label", { class: "kp-field__label", for: "raw-file" }, "File"),
-    sel,
-  );
-
-  const renameInput = h("input", {
-    class: "kp-field__input mono",
-    id: "files-rename-to",
-    type: "text",
-  });
-  const renameField = h(
-    "div",
-    { class: "kp-field", id: "files-rename-field", hidden: "" },
-    h(
-      "label",
-      { class: "kp-field__label", for: "files-rename-to" },
-      "New path",
-    ),
-    renameInput,
-    h(
-      "button",
-      { type: "button", class: "kp-button", id: "files-rename-go" },
-      "Rename…",
-    ),
-  );
-
-  const area = h("textarea", {
-    class: "kp-field__input mono raw-text",
-    id: "raw-text",
-    rows: "18",
-    spellcheck: "false",
-    "aria-label": "The file's text",
-  });
-
-  const newBtn = h(
-    "button",
-    { type: "button", class: "kp-button", id: "files-new" },
-    "New file…",
-  );
-  const renameBtn = h(
-    "button",
-    { type: "button", class: "kp-button", id: "files-rename" },
-    "Rename this file…",
-  );
-  const deleteBtn = h(
-    "button",
-    {
-      type: "button",
-      class: "kp-button kp-button--destructive",
-      id: "files-delete",
-    },
-    "Delete this file…",
-  );
-  const cancelBtn = h(
-    "button",
-    { type: "button", class: "kp-button", id: "files-cancel", hidden: "" },
-    "Cancel",
-  );
-  const review = h(
-    "button",
-    { type: "button", class: "kp-button kp-button--primary", id: "raw-review" },
-    "Review and commit…",
-  );
-
-  const showFile = () => (area.value = e.texts[sel.value] ?? "");
-  showFile();
-  sel.addEventListener("change", showFile);
-
-  const setMode = (/** @type {"edit" | "create"} */ m) => {
-    mode = m;
-    const creating = m === "create";
-    fileField.hidden = creating;
-    pathField.hidden = !creating;
-    templateField.hidden = !creating;
-    newBtn.hidden = creating;
-    renameBtn.hidden = creating;
-    deleteBtn.hidden = creating;
-    cancelBtn.hidden = !creating;
-    renameField.hidden = true;
-    if (creating) {
-      pathInput.value = "";
-      templateSel.value = "";
-      area.value = "";
-      pathInput.focus();
-    } else {
-      showFile();
-    }
-  };
-
-  newBtn.addEventListener("click", () => setMode("create"));
-  cancelBtn.addEventListener("click", () => setMode("edit"));
-  templateSel.addEventListener(
-    "change",
-    () => (area.value = templates[templateSel.value] ?? ""),
-  );
-
-  renameBtn.addEventListener("click", () => {
-    renameField.hidden = !renameField.hidden;
-    if (!renameField.hidden) {
-      renameInput.value = sel.value;
-      renameInput.focus();
-      renameInput.select();
-    }
-  });
-  renameField
-    .querySelector("#files-rename-go")
-    ?.addEventListener("click", () => {
-      const to = renameInput.value.trim();
-      if (!to || to === sel.value) {
-        notify("Give the file another path first.", "info");
-        return;
-      }
-      const edit = { kind: "files", op: "rename", from: sel.value, to };
-      openPlanDialog({
-        id: `edit:files:rename:${stack}`,
-        title: `Rename ${sel.value} · ${stack}`,
-        planUrl: `/data/stacks/${encodeURIComponent(stack)}/plan`,
-        planBody: { edit },
-        commitUrl: `/data/stacks/${encodeURIComponent(stack)}/commit`,
-        commitBody: stackCommit(edit),
-        onCommitted: () => void reload(),
-      });
-    });
-
-  deleteBtn.addEventListener("click", () => {
-    const edit = { kind: "files", op: "delete", path: sel.value };
-    openPlanDialog({
-      id: `edit:files:delete:${stack}`,
-      title: `Delete ${sel.value} · ${stack}`,
-      planUrl: `/data/stacks/${encodeURIComponent(stack)}/plan`,
-      planBody: { edit },
-      commitUrl: `/data/stacks/${encodeURIComponent(stack)}/commit`,
-      commitBody: stackCommit(edit),
-      onCommitted: () => void reload(),
-    });
-  });
-
-  review.addEventListener("click", () => {
-    if (mode === "create") {
-      const path = pathInput.value.trim();
-      if (!path) {
-        notify("Give the new file a path first.", "info");
-        return;
-      }
-      const edit = { kind: "files", op: "create", path, content: area.value };
-      openPlanDialog({
-        id: `edit:files:create:${stack}`,
-        title: `${path} · ${stack}`,
-        planUrl: `/data/stacks/${encodeURIComponent(stack)}/plan`,
-        planBody: { edit },
-        commitUrl: `/data/stacks/${encodeURIComponent(stack)}/commit`,
-        commitBody: stackCommit(edit),
-        onCommitted: () => void reload(),
-      });
-      return;
-    }
-    const edit = { kind: "raw", path: sel.value, content: area.value };
-    if (area.value === e.texts[sel.value]) {
-      notify("The file is as it was.", "info");
-      return;
-    }
-    openPlanDialog({
-      id: `edit:raw:${stack}`,
-      title: `${sel.value} · ${stack}`,
-      planUrl: `/data/stacks/${encodeURIComponent(stack)}/plan`,
-      planBody: { edit },
-      commitUrl: `/data/stacks/${encodeURIComponent(stack)}/commit`,
-      commitBody: stackCommit(edit),
-      onCommitted: () => void reload(),
-    });
-  });
-
-  return h(
-    "details",
-    {
-      class: "kp-card edit-card kp-accordion__item kp-accordion__item--bare",
-      id: "raw-editor",
-      open: "",
-    },
-    h("summary", null, h("strong", null, "Files")),
-    h(
-      "p",
-      { class: "measured" },
-      "Every text file of the stack: open, edit, create, delete or rename. Secrets (.env) are not here: they live in latch.",
-    ),
-    fileField,
-    pathField,
-    templateField,
-    area,
-    h(
-      "div",
-      { class: "row-buttons" },
-      review,
-      newBtn,
-      renameBtn,
-      deleteBtn,
-      cancelBtn,
-    ),
-    renameField,
+function fieldGroups(groups, values, inputs, changed) {
+  return groups.map((g) =>
+    editGroup({
+      id: `group-${g.id}`,
+      title: g.title,
+      desc: g.desc,
+      rows: g.fields.map((f) => {
+        const x = editRow(f, values[f.name], (v) => {
+          values[f.name] = v;
+          changed?.();
+        });
+        inputs.set(f.name, x.input);
+        return x.row;
+      }),
+    }),
   );
 }
 
@@ -636,18 +434,31 @@ function addAppCard(stack, e, reload) {
   // brings in — blank means no tile for that app. Kept to a hostname
   // only (name = the app, group = "Own"); the Tiles form on this same tab
   // is where it is refined afterward.
-  const tileArea = h("div");
+  const tileGroup = h("div", {
+    class: "kp-formgrid__group edit-group",
+    id: "add-app-tiles",
+  });
   /** @type {Map<string, HTMLInputElement>} */
   const tileInputs = new Map();
   const renderTiles = () => {
     const preset = e.presets.find((p) => p.name === sel.value);
     tileInputs.clear();
     if (!preset || !preset.apps.length) {
-      tileArea.replaceChildren();
+      tileGroup.hidden = true;
+      tileGroup.replaceChildren();
       return;
     }
-    tileArea.replaceChildren(
-      h("p", { class: "kp-field__label" }, "Tiles (optional, blank = none)"),
+    tileGroup.hidden = false;
+    tileGroup.replaceChildren(
+      h("h3", { class: "kp-formgrid__heading" }, "Tiles (optional)"),
+      h(
+        "p",
+        {
+          class: "measured edit-group__desc",
+          "data-kp-formgrid-span": "all",
+        },
+        "A hostname gives the app a tile on the start page; blank means no tile for that app.",
+      ),
       ...preset.apps.map((app) => {
         const id = `add-app-tile-${app}`;
         const input = /** @type {HTMLInputElement} */ (
@@ -659,12 +470,12 @@ function addAppCard(stack, e, reload) {
           })
         );
         tileInputs.set(app, input);
-        return h(
-          "div",
-          { class: "kp-field" },
-          h("label", { class: "kp-field__label", for: id }, `${app} hostname`),
-          input,
-        );
+        return gridRow({
+          label: `${app} hostname`,
+          labelFor: id,
+          control: input,
+          value: `Where ${app} opens.`,
+        });
       }),
     );
   };
@@ -672,7 +483,11 @@ function addAppCard(stack, e, reload) {
   renderTiles();
   const review = h(
     "button",
-    { type: "button", class: "kp-button", id: "add-app-review" },
+    {
+      type: "button",
+      class: "kp-button kp-button--primary",
+      id: "add-app-review",
+    },
     "Review and commit…",
   );
   review.addEventListener("click", () => {
@@ -693,24 +508,34 @@ function addAppCard(stack, e, reload) {
       onCommitted: () => void reload(),
     });
   });
-  return h(
-    "section",
-    { class: "kp-card edit-card", "aria-label": "Add an app", id: "add-app" },
-    h("h2", null, "Add an app"),
-    h(
-      "p",
-      { class: "measured" },
-      "A preset's app joins this stack: its files, its entry in apps and its /appdata folder.",
-    ),
-    h(
-      "div",
-      { class: "kp-field" },
-      h("label", { class: "kp-field__label", for: "add-app-preset" }, "Preset"),
-      sel,
-    ),
-    tileArea,
-    h("div", { class: "row-buttons" }, review),
-  );
+  const { node } = editCard({
+    id: "add-app",
+    form: "add-app",
+    bar: false,
+    title: "Add an app",
+    desc: "A preset's app joins this stack: its files, its entry in apps and its /appdata folder.",
+    groups: [
+      editGroup({
+        id: "group-add-app",
+        title: "Preset",
+        desc: "The preset whose app is added; nothing is written until the plan is reviewed and committed.",
+        rows: [
+          gridRow({
+            label: "Preset",
+            labelFor: "add-app-preset",
+            control: sel,
+            value: "The preset's apps and their folders.",
+          }),
+        ],
+      }),
+      tileGroup,
+      gridRow({
+        control: buttonGroup([review]),
+        buttons: true,
+      }),
+    ],
+  });
+  return node;
 }
 
 // ── feat-publish-1 (B): publish an app through the gateway ──────────────
@@ -908,14 +733,11 @@ function settingsExtCard(stack, e, reload) {
   const values = startValues(form);
   /** @type {Map<string, HTMLElement>} */
   const inputs = new Map();
-  const fields = form.steps[0].fields.map((f) => {
-    const x = editField(f, values[f.name], (v) => {
-      values[f.name] = v;
-      repaintStatus();
-    });
-    inputs.set(f.name, x.input);
-    return x.wrap;
-  });
+  const groups = fieldGroups(
+    settingsExtGroups(form.steps[0].fields),
+    values,
+    inputs,
+  );
   const startRetention = rowModel(m.retention ?? []);
   const retention = rowTable({
     remember: "stack-retention",
@@ -936,76 +758,102 @@ function settingsExtCard(stack, e, reload) {
     addLabel: "Add a tier…",
     driveKey: `row-table:retention:${stack}`,
     rows: startRetention,
-    onChange: () => repaintStatus(),
+    onChange: () => tg.sync(),
   });
-  const status = h("span", {
-    class: "measured kp-state-word",
-    "data-kp-words": "Changed; not committed.",
-    role: "status",
+  const tg = tableGroup({
+    id: "group-retention",
+    title: "Retention",
+    desc: "How many of this stack's own snapshots are kept, per period; with no tier of its own the fleet default applies.",
+    table: retention,
+    start: startRetention,
   });
-  const repaintStatus = () => {
-    const changed =
-      changesSomething(settingsExtBody(form, values, null)) ||
-      rowsChanged(retention.getRows(), startRetention);
-    status.textContent = changed ? "Changed; not committed." : "";
-  };
-  const review = h(
-    "button",
-    { type: "button", class: "kp-button", id: "settings-ext-review" },
-    "Review and commit…",
-  );
-  review.addEventListener("click", () => {
-    const errors = checkFields(form, values);
-    if (!markErrors(inputs, errors)) return;
-    const edit = settingsExtBody(
-      form,
-      values,
-      rowsChanged(retention.getRows(), startRetention)
-        ? retention.getRows()
-        : null,
-    );
-    if (!changesSomething(edit)) {
-      notify("Nothing is changed yet.", "info");
-      return;
-    }
-    openPlanDialog({
-      id: form.id,
-      title: `Network & hardware · ${stack}`,
-      planUrl: `/data/stacks/${encodeURIComponent(stack)}/plan`,
-      planBody: { edit },
-      commitUrl: `/data/stacks/${encodeURIComponent(stack)}/commit`,
-      commitBody: stackCommit(edit),
-      onCommitted: () => void reload(),
-    });
+  const { node, bar } = editCard({
+    id: "settings-ext-form",
+    form: form.id,
+    title: "Network & hardware",
+    desc: "The address, the lxc flags and the storage a rebuild would use, and this stack's own snapshot retention. Address and vmid clashes with another stack are caught at Review.",
+    groups,
+    blocks: [tg.block],
   });
-  const node = h(
-    "section",
-    {
-      class: "kp-card edit-card",
-      "aria-label": "Network & hardware",
-      id: "settings-ext-form",
-      "data-form": form.id,
+  wireBar(
+    bar,
+    () => {
+      const errors = checkFields(form, values);
+      if (!markErrors(inputs, errors)) return null;
+      const edit = settingsExtBody(
+        form,
+        values,
+        rowsChanged(retention.getRows(), startRetention)
+          ? retention.getRows()
+          : null,
+      );
+      if (!changesSomething(edit)) {
+        notify("Nothing is changed yet.", "info");
+        return null;
+      }
+      return openPlanDialog({
+        id: form.id,
+        title: `Network & hardware · ${stack}`,
+        planUrl: `/data/stacks/${encodeURIComponent(stack)}/plan`,
+        planBody: { edit },
+        commitUrl: `/data/stacks/${encodeURIComponent(stack)}/commit`,
+        commitBody: stackCommit(edit),
+        onCommitted: () => void reload(),
+      });
     },
-    h("h2", null, "Network & hardware"),
-    h(
-      "p",
-      { class: "measured" },
-      "The address, the lxc flags and the storage a rebuild would use, and this stack's own snapshot retention. Address/vmid clashes with another stack are caught at Review. Unprivileged, gpu, vpn and Proxmox storage only ever apply at a rebuild of the container.",
-    ),
-    h("div", { class: "edit-grid" }, ...fields),
-    h("h3", null, "retention:"),
-    h(
-      "p",
-      { class: "measured" },
-      "How many of this stack's own snapshots are kept, per period.",
-    ),
-    ...retention.wrap,
-    h("div", { class: "row-buttons" }, review, " ", status),
+    tableHooks([tg]),
   );
   return {
     node,
+    bar,
     bind: () => retention.bind(),
     detach: () => retention.detach(),
+  };
+}
+
+/**
+ * A row table as a titled block of its card: its Add on the block's end
+ * edge, and the block marked changed for kp's unsaved bar while its rows
+ * differ from the committed ones.
+ * @param {{id: string, title: string, desc: string, table: RowTable,
+ *   start: import("./editforms.js").RowEdit[]}} t
+ */
+function tableGroup({ id, title, desc, table, start }) {
+  const block = editBlock({
+    id,
+    title,
+    desc,
+    body: table.body,
+    action: table.add,
+  });
+  block.dataset.kpName = title;
+  const sync = () => {
+    const rows = table.getRows();
+    markRow(
+      block,
+      rowsChanged(rows, start)
+        ? {
+            was: `${start.length} ${start.length === 1 ? "row" : "rows"}`,
+            now: `${rows.length} ${rows.length === 1 ? "row" : "rows"}, edited`,
+          }
+        : null,
+    );
+  };
+  return { block, title, sync, reset: () => table.setRows(start) };
+}
+
+/**
+ * The bar's revert and discard for the row tables of a card.
+ * @param {ReturnType<typeof tableGroup>[]} groups
+ */
+function tableHooks(groups) {
+  return {
+    revert: (/** @type {string} */ key) => {
+      const g = groups.find((x) => x.title === key);
+      g?.reset();
+      return g !== undefined;
+    },
+    discard: () => groups.forEach((g) => g.reset()),
   };
 }
 
@@ -1020,7 +868,7 @@ function settingsExtCard(stack, e, reload) {
 // structs are flat).
 
 /**
- * @typedef {{wrap: Node[], add: HTMLElement,
+ * @typedef {{wrap: Node[], body: Node[], add: HTMLElement,
  *   bind: () => void, getRows: () => import("./editforms.js").RowEdit[],
  *   setRows: (rows: import("./editforms.js").RowEdit[]) => void,
  *   openDialogFor: (i: number | null) => void, detach: () => void}} RowTable
@@ -1050,7 +898,7 @@ function openRowDialog({
   const inputs = new Map();
   const errBox = h("div");
   const wraps = fields.map((f) => {
-    const x = editField(f, values[f.name], (v) => (values[f.name] = v));
+    const x = editRow(f, values[f.name], (v) => (values[f.name] = v));
     inputs.set(f.name, x.input);
     // A picker that also takes free text (e.g. a tile's group): a
     // <datalist> of what is already used, offered alongside typing.
@@ -1058,7 +906,7 @@ function openRowDialog({
     if (options?.length && x.input instanceof HTMLInputElement) {
       const listId = `${f.id}-list`;
       x.input.setAttribute("list", listId);
-      x.wrap.append(
+      (x.row.querySelector(".kp-field") ?? x.row).append(
         h(
           "datalist",
           { id: listId },
@@ -1068,7 +916,7 @@ function openRowDialog({
         ),
       );
     }
-    return x.wrap;
+    return x.row;
   });
   const save = h(
     "button",
@@ -1084,7 +932,7 @@ function openRowDialog({
     title,
     description: "Nothing is written until the plan is reviewed and committed.",
     body: [
-      h("div", { class: "edit-grid" }, ...wraps),
+      h("div", { class: "kp-formgrid" }, ...wraps),
       errBox,
       h("div", { class: "kp-dialog__actions" }, cancel, save),
     ],
@@ -1261,6 +1109,7 @@ function rowTable({
   });
   return {
     wrap: [h("div", { class: "row-buttons" }, add), t.wrap],
+    body: [t.wrap],
     add,
     bind: () => {
       table = dataTable(t.wrap);
@@ -1285,18 +1134,13 @@ function appsEditCard(stack, e, reload) {
   const apps = m.apps ?? [];
   /** @type {Map<string, HTMLInputElement>} */
   const removeBoxes = new Map();
-  const removeList = h(
-    "div",
-    { class: "edit-grid" },
-    ...apps.map((a) => {
-      const x = editField(appsRemoveField(a), false, () => {});
-      removeBoxes.set(a, /** @type {HTMLInputElement} */ (x.input));
-      return x.wrap;
-    }),
-  );
-  const addBlankField = appsAddBlankField();
+  const removeRows = apps.map((a) => {
+    const x = editRow(appsRemoveField(a), false, () => {});
+    removeBoxes.set(a, /** @type {HTMLInputElement} */ (x.input));
+    return x.row;
+  });
   let addBlankText = "";
-  const addBlankX = editField(addBlankField, "", (v) => {
+  const addBlankX = editRow(appsAddBlankField(), "", (v) => {
     addBlankText = String(v);
   });
 
@@ -1325,7 +1169,7 @@ function appsEditCard(stack, e, reload) {
     addLabel: "Add a storage entry…",
     driveKey: `row-table:storage:${stack}`,
     rows: startStorage,
-    onChange: () => repaintStatus(),
+    onChange: () => storageG.sync(),
   });
   const startDataMounts = rowModel(m.data_mounts ?? []);
   const dataMounts = rowTable({
@@ -1355,7 +1199,7 @@ function appsEditCard(stack, e, reload) {
     addLabel: "Add a data mount…",
     driveKey: `row-table:data_mounts:${stack}`,
     rows: startDataMounts,
-    onChange: () => repaintStatus(),
+    onChange: () => mountsG.sync(),
   });
   const startLogFiles = rowModel(m.log_files ?? []);
   const logFiles = rowTable({
@@ -1377,112 +1221,95 @@ function appsEditCard(stack, e, reload) {
     addLabel: "Add a log file…",
     driveKey: `row-table:log_files:${stack}`,
     rows: startLogFiles,
-    onChange: () => repaintStatus(),
+    onChange: () => logsG.sync(),
+  });
+  const storageG = tableGroup({
+    id: "group-storage",
+    title: "Storage",
+    desc: "Folders on the host bind-mounted into the container; each is backed up nightly unless marked no_backup.",
+    table: storage,
+    start: startStorage,
+  });
+  const mountsG = tableGroup({
+    id: "group-data-mounts",
+    title: "Data mounts",
+    desc: "Large host datasets mounted read-write into the container (a film library, a download folder); never backed up by this stack.",
+    table: dataMounts,
+    start: startDataMounts,
+  });
+  const logsG = tableGroup({
+    id: "group-log-files",
+    title: "Log files",
+    desc: "Log files inside the container that the dashboard rotates and caps, so they never fill the disk.",
+    table: logFiles,
+    start: startLogFiles,
   });
 
-  const status = h("span", {
-    class: "measured kp-state-word",
-    "data-kp-words": "Changed; not committed.",
-    role: "status",
+  const { node, bar } = editCard({
+    id: "apps-form",
+    form: "apps",
+    title: "Apps & storage",
+    desc: "Remove or add the stack's apps, and the folders and logs they use. Removing an app drops it from apps:, its directory and its storage entries; data already on the container is untouched.",
+    groups: [
+      editGroup({
+        id: "group-apps-remove",
+        title: "Remove apps",
+        desc: apps.length
+          ? "A ticked app is dropped from the stack when the change is committed."
+          : "This stack has no apps yet, so there is nothing to remove.",
+        rows: removeRows,
+      }),
+      editGroup({
+        id: "group-apps-add",
+        title: "Add blank apps",
+        desc: "A blank app gets a directory and a minimal docker-compose.yml to fill in; an app from a preset is added in the card above.",
+        rows: [addBlankX.row],
+      }),
+    ],
+    blocks: [storageG.block, mountsG.block, logsG.block],
   });
-  const repaintStatus = () => {
-    const changed =
-      [...removeBoxes.values()].some((b) => b.checked) ||
-      addBlankText.trim() !== "" ||
-      rowsChanged(storage.getRows(), startStorage) ||
-      rowsChanged(dataMounts.getRows(), startDataMounts) ||
-      rowsChanged(logFiles.getRows(), startLogFiles);
-    status.textContent = changed ? "Changed; not committed." : "";
-  };
-  addBlankX.input.addEventListener("input", repaintStatus);
-
-  const review = h(
-    "button",
-    { type: "button", class: "kp-button", id: "apps-review" },
-    "Review and commit…",
-  );
-  review.addEventListener("click", () => {
-    const remove = [...removeBoxes.entries()]
-      .filter(([, box]) => box.checked)
-      .map(([a]) => a);
-    const addBlank = addBlankText
-      .split(",")
-      .map((s) => s.trim())
-      .filter((s) => s !== "");
-    const edit = appsBody({
-      remove,
-      addBlank,
-      storage: rowsChanged(storage.getRows(), startStorage)
-        ? storage.getRows()
-        : null,
-      dataMounts: rowsChanged(dataMounts.getRows(), startDataMounts)
-        ? dataMounts.getRows()
-        : null,
-      logFiles: rowsChanged(logFiles.getRows(), startLogFiles)
-        ? logFiles.getRows()
-        : null,
-    });
-    if (!changesSomething(edit)) {
-      notify("Nothing is changed yet.", "info");
-      return;
-    }
-    openPlanDialog({
-      id: `edit:apps:${stack}`,
-      title: `Apps & storage · ${stack}`,
-      planUrl: `/data/stacks/${encodeURIComponent(stack)}/plan`,
-      planBody: { edit },
-      commitUrl: `/data/stacks/${encodeURIComponent(stack)}/commit`,
-      commitBody: stackCommit(edit),
-      onCommitted: () => void reload(),
-    });
-  });
-  const node = h(
-    "section",
-    {
-      class: "kp-card edit-card",
-      "aria-label": "Apps & storage",
-      id: "apps-form",
+  wireBar(
+    bar,
+    () => {
+      const remove = [...removeBoxes.entries()]
+        .filter(([, box]) => box.checked)
+        .map(([a]) => a);
+      const addBlank = addBlankText
+        .split(",")
+        .map((s) => s.trim())
+        .filter((s) => s !== "");
+      const edit = appsBody({
+        remove,
+        addBlank,
+        storage: rowsChanged(storage.getRows(), startStorage)
+          ? storage.getRows()
+          : null,
+        dataMounts: rowsChanged(dataMounts.getRows(), startDataMounts)
+          ? dataMounts.getRows()
+          : null,
+        logFiles: rowsChanged(logFiles.getRows(), startLogFiles)
+          ? logFiles.getRows()
+          : null,
+      });
+      if (!changesSomething(edit)) {
+        notify("Nothing is changed yet.", "info");
+        return null;
+      }
+      return openPlanDialog({
+        id: `edit:apps:${stack}`,
+        title: `Apps & storage · ${stack}`,
+        planUrl: `/data/stacks/${encodeURIComponent(stack)}/plan`,
+        planBody: { edit },
+        commitUrl: `/data/stacks/${encodeURIComponent(stack)}/commit`,
+        commitBody: stackCommit(edit),
+        onCommitted: () => void reload(),
+      });
     },
-    h("h2", null, "Apps & storage"),
-    h(
-      "p",
-      { class: "measured" },
-      "Removing an app drops it from apps:, its directory and its storage entries — data already on the container is untouched. A blank app gets a directory and a minimal docker-compose.yml to fill in.",
-    ),
-    apps.length
-      ? h(
-          "div",
-          { class: "kp-field" },
-          h("span", { class: "kp-field__label" }, "Remove an app"),
-          removeList,
-        )
-      : h("p", { class: "measured" }, "This stack has no apps yet."),
-    addBlankX.wrap,
-    h("h3", null, "storage:"),
-    h(
-      "p",
-      { class: "measured" },
-      "Folders on the host bind-mounted into the container; each is backed up nightly unless marked no_backup.",
-    ),
-    ...storage.wrap,
-    h("h3", null, "data_mounts:"),
-    h(
-      "p",
-      { class: "measured" },
-      "Large host datasets mounted read-write into the container (a film library, a download folder); never backed up by this stack.",
-    ),
-    ...dataMounts.wrap,
-    h("h3", null, "log_files:"),
-    h(
-      "p",
-      { class: "measured" },
-      "Log files inside the container that the dashboard rotates and caps, so they never fill the disk.",
-    ),
-    ...logFiles.wrap,
-    h("div", { class: "row-buttons" }, review, " ", status),
+    tableHooks([storageG, mountsG, logsG]),
   );
   return {
     node,
+    bar,
     bind: () => {
       storage.bind();
       dataMounts.bind();
@@ -1509,19 +1336,15 @@ function latchEditCard(stack, e, reload) {
   const latch = m.latch ?? { latch_secrets: [], latch_files: [] };
   /** @type {Map<string, HTMLInputElement>} */
   const secretBoxes = new Map();
-  const secretsList = h(
-    "div",
-    { class: "edit-grid" },
-    ...apps.map((a) => {
-      const x = editField(
-        latchSecretField(a),
-        latch.latch_secrets.includes(a),
-        () => repaintStatus(),
-      );
-      secretBoxes.set(a, /** @type {HTMLInputElement} */ (x.input));
-      return x.wrap;
-    }),
-  );
+  const secretRows = apps.map((a) => {
+    const x = editRow(
+      latchSecretField(a),
+      latch.latch_secrets.includes(a),
+      () => {},
+    );
+    secretBoxes.set(a, /** @type {HTMLInputElement} */ (x.input));
+    return x.row;
+  });
   const startFiles = rowModel(latch.latch_files);
   const files = rowTable({
     remember: "stack-latch-files",
@@ -1548,84 +1371,69 @@ function latchEditCard(stack, e, reload) {
     addLabel: "Add a latch file…",
     driveKey: `row-table:latch_files:${stack}`,
     rows: startFiles,
-    onChange: () => repaintStatus(),
+    onChange: () => filesG.sync(),
   });
-
-  const status = h("span", {
-    class: "measured kp-state-word",
-    "data-kp-words": "Changed; not committed.",
-    role: "status",
+  const filesG = tableGroup({
+    id: "group-latch-files",
+    title: "Secret files",
+    desc: "Secret files this stack receives from latch at deploy time, and where they land in the container.",
+    table: files,
+    start: startFiles,
   });
-  const repaintStatus = () => {
-    const wantSecrets = apps.filter((a) => secretBoxes.get(a)?.checked);
-    const changed =
-      JSON.stringify([...wantSecrets].sort()) !==
-        JSON.stringify([...latch.latch_secrets].sort()) ||
-      rowsChanged(files.getRows(), startFiles);
-    status.textContent = changed ? "Changed; not committed." : "";
-  };
-
-  const review = h(
-    "button",
-    { type: "button", class: "kp-button", id: "latch-review" },
-    "Review and commit…",
-  );
-  review.addEventListener("click", () => {
-    const wantSecrets = apps.filter((a) => secretBoxes.get(a)?.checked);
-    const secretErrors = latchSecretsProblems(wantSecrets);
-    if (Object.keys(secretErrors).length) {
-      notify(Object.values(secretErrors)[0], "warning");
-      return;
-    }
-    const secretsChanged =
-      JSON.stringify([...wantSecrets].sort()) !==
-      JSON.stringify([...latch.latch_secrets].sort());
-    const edit = latchBody({
-      secrets: secretsChanged ? wantSecrets : null,
-      files: rowsChanged(files.getRows(), startFiles) ? files.getRows() : null,
-    });
-    if (!changesSomething(edit)) {
-      notify("Nothing is changed yet.", "info");
-      return;
-    }
-    openPlanDialog({
-      id: `edit:latch:${stack}`,
-      title: `Latch · ${stack}`,
-      planUrl: `/data/stacks/${encodeURIComponent(stack)}/plan`,
-      planBody: { edit },
-      commitUrl: `/data/stacks/${encodeURIComponent(stack)}/commit`,
-      commitBody: stackCommit(edit),
-      onCommitted: () => void reload(),
-    });
+  const { node, bar } = editCard({
+    id: "latch-form",
+    form: "latch",
+    title: "Latch",
+    desc: "Which apps' .env comes from latch, and which secret files this stack gets from latch. A value must never contain '${': latch --expand parses every file it is given, so one unresolvable placeholder would break every stack's secrets.",
+    groups: [
+      editGroup({
+        id: "group-latch-secrets",
+        title: "Apps whose .env comes from latch",
+        desc: apps.length
+          ? "A ticked app reads its .env from latch instead of a plaintext file."
+          : "This stack has no apps yet, so there is no .env to move to latch.",
+        rows: secretRows,
+      }),
+    ],
+    blocks: [filesG.block],
   });
-  const node = h(
-    "section",
-    { class: "kp-card edit-card", "aria-label": "Latch", id: "latch-form" },
-    h("h2", null, "Latch"),
-    h(
-      "p",
-      { class: "measured" },
-      "Which apps' .env comes from latch, and which secret FILES this stack gets from latch. A value must never contain '${': latch --expand parses every file it is given, so one unresolvable placeholder would break every stack's secrets.",
-    ),
-    apps.length
-      ? h(
-          "div",
-          { class: "kp-field" },
-          h("span", { class: "kp-field__label" }, "latch_secrets"),
-          secretsList,
-        )
-      : h("p", { class: "measured" }, "This stack has no apps yet."),
-    h("h3", null, "latch_files:"),
-    h(
-      "p",
-      { class: "measured" },
-      "Secret files this stack receives from latch at deploy time, and where they land in the container.",
-    ),
-    ...files.wrap,
-    h("div", { class: "row-buttons" }, review, " ", status),
+  wireBar(
+    bar,
+    () => {
+      const wantSecrets = apps.filter((a) => secretBoxes.get(a)?.checked);
+      const secretErrors = latchSecretsProblems(wantSecrets);
+      if (Object.keys(secretErrors).length) {
+        notify(Object.values(secretErrors)[0], "warning");
+        return null;
+      }
+      const secretsChanged =
+        JSON.stringify([...wantSecrets].sort()) !==
+        JSON.stringify([...latch.latch_secrets].sort());
+      const edit = latchBody({
+        secrets: secretsChanged ? wantSecrets : null,
+        files: rowsChanged(files.getRows(), startFiles)
+          ? files.getRows()
+          : null,
+      });
+      if (!changesSomething(edit)) {
+        notify("Nothing is changed yet.", "info");
+        return null;
+      }
+      return openPlanDialog({
+        id: `edit:latch:${stack}`,
+        title: `Latch · ${stack}`,
+        planUrl: `/data/stacks/${encodeURIComponent(stack)}/plan`,
+        planBody: { edit },
+        commitUrl: `/data/stacks/${encodeURIComponent(stack)}/commit`,
+        commitBody: stackCommit(edit),
+        onCommitted: () => void reload(),
+      });
+    },
+    tableHooks([filesG]),
   );
   return {
     node,
+    bar,
     bind: () => files.bind(),
     detach: () => files.detach(),
   };
@@ -1659,11 +1467,6 @@ function tilesEditCard(stack, e, reload) {
     origin: key,
     row: /** @type {Record<string, unknown>} */ ({ key, ...t }),
   }));
-  const status = h("span", {
-    class: "measured kp-state-word",
-    "data-kp-words": "Changed; not committed.",
-    role: "status",
-  });
   const table = rowTable({
     remember: "stack-tiles",
     caption: `Tiles of ${stack}`,
@@ -1688,47 +1491,62 @@ function tilesEditCard(stack, e, reload) {
     addLabel: "Add a tile…",
     driveKey: `row-table:tiles:${stack}`,
     rows: startRows,
-    onChange: () => repaintStatus(),
+    onChange: () => {
+      const rows = table.getRows();
+      markRow(
+        tg.block,
+        tilesEditBody(rows, originals).tiles.length > 0
+          ? {
+              was: `${startRows.length} ${startRows.length === 1 ? "tile" : "tiles"}`,
+              now: `${rows.length} ${rows.length === 1 ? "tile" : "tiles"}, edited`,
+            }
+          : null,
+      );
+    },
   });
-  const repaintStatus = () => {
-    const changed = tilesEditBody(table.getRows(), originals).tiles.length > 0;
-    status.textContent = changed ? "Changed; not committed." : "";
-  };
-  const review = h(
-    "button",
-    { type: "button", class: "kp-button", id: "tiles-review" },
-    "Review and commit…",
-  );
-  review.addEventListener("click", () => {
-    const edit = tilesEditBody(table.getRows(), originals);
-    if (edit.tiles.length === 0) {
-      notify("Nothing is changed yet.", "info");
-      return;
-    }
-    openPlanDialog({
-      id: `edit:tiles:${stack}`,
-      title: `Tiles · ${stack}`,
-      planUrl: `/data/stacks/${encodeURIComponent(stack)}/plan`,
-      planBody: { edit },
-      commitUrl: `/data/stacks/${encodeURIComponent(stack)}/commit`,
-      commitBody: stackCommit(edit),
-      onCommitted: () => void reload(),
-    });
+  const tg = tableGroup({
+    id: "group-tiles",
+    title: "Tiles",
+    desc: "This stack's tiles on the dashboard's start page, keyed by the hostname each one opens. Renaming a tile's hostname keeps it; \"probe\" is never set here, the client fills it in at deploy time.",
+    table,
+    start: startRows,
   });
-  const node = h(
-    "section",
-    { class: "kp-card edit-card", "aria-label": "Tiles", id: "tiles-form" },
-    h("h2", null, "Tiles"),
-    h(
-      "p",
-      { class: "measured" },
-      "This stack's tiles on the dashboard's start page, keyed by the hostname each one opens. Renaming a tile's hostname keeps it; \"probe\" is never set here — the client fills it in at deploy time.",
-    ),
-    ...table.wrap,
-    h("div", { class: "row-buttons" }, review, " ", status),
+  const { node, bar } = editCard({
+    id: "tiles-form",
+    form: "tiles",
+    title: "Tiles",
+    desc: "The tiles this stack puts on the start page: their hostname, name, group and order.",
+    blocks: [tg.block],
+  });
+  wireBar(
+    bar,
+    () => {
+      const edit = tilesEditBody(table.getRows(), originals);
+      if (edit.tiles.length === 0) {
+        notify("Nothing is changed yet.", "info");
+        return null;
+      }
+      return openPlanDialog({
+        id: `edit:tiles:${stack}`,
+        title: `Tiles · ${stack}`,
+        planUrl: `/data/stacks/${encodeURIComponent(stack)}/plan`,
+        planBody: { edit },
+        commitUrl: `/data/stacks/${encodeURIComponent(stack)}/commit`,
+        commitBody: stackCommit(edit),
+        onCommitted: () => void reload(),
+      });
+    },
+    {
+      revert: () => {
+        table.setRows(startRows);
+        return true;
+      },
+      discard: () => table.setRows(startRows),
+    },
   );
   return {
     node,
+    bar,
     bind: () => table.bind(),
     detach: () => table.detach(),
   };
@@ -2093,8 +1911,28 @@ function checksEditCard(stack, e, apps, reload) {
 // ── feat-native-1 (D): native services ──────────────────────────────────
 
 /**
- * A labelled text field, for the native form's plain (non-`editforms.js`)
- * fields — one `service.yml` key each, its own stable id for Live view.
+ * Give a control its value and make that its saved value too, which is what
+ * kp's unsaved bar compares an edit against.
+ * @param {HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement} el
+ * @param {string | boolean} value
+ */
+function setBase(el, value) {
+  if (el instanceof HTMLInputElement && el.type === "checkbox") {
+    el.defaultChecked = value === true;
+    el.checked = value === true;
+  } else if (el instanceof HTMLSelectElement) {
+    el.value = String(value);
+    for (const o of el.options) o.defaultSelected = o.value === el.value;
+  } else {
+    el.defaultValue = String(value);
+    el.value = String(value);
+  }
+}
+
+/**
+ * A labelled text field as a row of the grid, for the native form's plain
+ * (non-`editforms.js`) fields — one `service.yml` key each, its own stable
+ * id for Live view.
  * @param {string} id
  * @param {string} label
  * @param {string} value
@@ -2103,10 +1941,12 @@ function checksEditCard(stack, e, apps, reload) {
 function nativeField(id, label, value, opts = {}) {
   const input = opts.textarea
     ? h("textarea", {
-        class: "kp-field__input mono",
+        class: "kp-field__input kp-field__input--multiline mono",
         id,
         rows: "3",
         spellcheck: "false",
+        "data-kp-autosize": "",
+        "data-kp-autosize-max": "12",
       })
     : h("input", {
         class: "kp-field__input mono",
@@ -2114,16 +1954,24 @@ function nativeField(id, label, value, opts = {}) {
         type: "text",
         placeholder: opts.placeholder ?? "",
       });
-  input.value = value;
+  setBase(input, value);
   return {
     input,
-    wrap: h(
-      "div",
-      { class: "kp-field" },
-      h("label", { class: "kp-field__label", for: id }, label),
-      input,
-      opts.help ? h("p", { class: "kp-field__help" }, opts.help) : "",
-    ),
+    row: gridRow({
+      label,
+      labelFor: id,
+      control: h(
+        "div",
+        { class: "kp-field" },
+        input,
+        h("p", {
+          class: "kp-field__error",
+          "data-kp-field-error": "",
+          hidden: "",
+        }),
+      ),
+      value: opts.help,
+    }),
   };
 }
 
@@ -2133,22 +1981,18 @@ function nativeField(id, label, value, opts = {}) {
  * @param {string} label
  * @param {{value: string, label: string}[]} options
  * @param {string} current
+ * @param {string} [help]
  */
-function nativeChoice(id, label, options, current) {
+function nativeChoice(id, label, options, current, help) {
   const input = h(
     "select",
     { class: "kp-field__input", id },
     ...options.map((o) => h("option", { value: o.value }, o.label)),
   );
-  input.value = current;
+  setBase(input, current);
   return {
     input,
-    wrap: h(
-      "div",
-      { class: "kp-field" },
-      h("label", { class: "kp-field__label", for: id }, label),
-      input,
-    ),
+    row: gridRow({ label, labelFor: id, control: input, value: help }),
   };
 }
 
@@ -2163,7 +2007,7 @@ function nativeChoice(id, label, options, current) {
 function nativeUnitForm(stack, natives, reload) {
   const sel = h(
     "select",
-    { class: "kp-field__input", id: "native-unit" },
+    { class: "kp-field__input", id: "native-unit", "data-kp-untracked": "" },
     ...natives.map((n) => h("option", { value: n.unit }, n.unit)),
   );
   const warn = h("div", {
@@ -2171,7 +2015,9 @@ function nativeUnitForm(stack, natives, reload) {
     role: "status",
     hidden: "",
   });
-  const binary = nativeField("native-binary", "Binary", "");
+  const binary = nativeField("native-binary", "Binary", "", {
+    help: "The executable systemd starts.",
+  });
   const envFile = nativeField("native-env-file", "Environment file", "", {
     help: "Empty: the unit has no EnvironmentFile.",
     placeholder: "/appdata/…/….env",
@@ -2191,12 +2037,19 @@ function nativeUnitForm(stack, natives, reload) {
     id: "native-stateless",
     class: "kp-field__check",
   });
+  const statelessRow = gridRow({
+    label: "Stateless",
+    labelFor: "native-stateless",
+    control: stateless,
+    value: "No data_dirs, by design.",
+  });
   const restoreNote = nativeField("native-restore-note", "Restore note", "", {
     textarea: true,
     help: "Printed in the DR runbook under this unit.",
   });
   const releaseRepo = nativeField("native-release-repo", "Release repo", "", {
     placeholder: "owner/name",
+    help: "The GitHub repository whose releases update the unit.",
   });
   const releaseAsset = nativeField(
     "native-release-asset",
@@ -2216,7 +2069,7 @@ function nativeUnitForm(stack, natives, reload) {
     "",
     {
       textarea: true,
-      help: "A shell one-liner run inside the container, after a snapshot is unpacked and before the unit starts, to put the restored data into the shape the live service expects. Empty: nothing runs; a unit with no backup_from_newest usually needs none.",
+      help: "A shell one-liner run inside the container after a snapshot is unpacked and before the unit starts. Empty: nothing runs.",
     },
   );
   const backupPause = nativeChoice(
@@ -2231,6 +2084,7 @@ function nativeUnitForm(stack, natives, reload) {
       },
     ],
     "false",
+    "Whether the unit is quiet while its data is archived.",
   );
   const updatePolicy = nativeChoice(
     "native-update-policy",
@@ -2241,6 +2095,7 @@ function nativeUnitForm(stack, natives, reload) {
       { value: "self", label: "Self (the unit's own update_cmd, nightly)" },
     ],
     "manual",
+    "Who updates the unit, and when.",
   );
   const metrics = nativeChoice(
     "native-metrics",
@@ -2250,16 +2105,7 @@ function nativeUnitForm(stack, natives, reload) {
       { value: "not_measured", label: "Not measured (noted, not drift)" },
     ],
     "measured",
-  );
-  const status = h("span", { class: "measured kp-state-word", role: "status" });
-  const review = h(
-    "button",
-    {
-      type: "button",
-      class: "kp-button kp-button--primary",
-      id: "native-review",
-    },
-    "Review and commit…",
+    "Whether a missing metrics endpoint counts as drift.",
   );
   const removeBtn = h(
     "button",
@@ -2270,37 +2116,44 @@ function nativeUnitForm(stack, natives, reload) {
     },
     "Remove this unit…",
   );
-  const pathLine = h("p", { class: "measured" });
+  const pathLine = h("p", { class: "measured", id: "native-path" });
+  const unitRow = gridRow({
+    label: "Unit",
+    labelFor: "native-unit",
+    control: sel,
+    value: pathLine,
+  });
   const show = () => {
     const n = natives.find((x) => x.unit === sel.value) ?? natives[0];
     pathLine.textContent = n
-      ? `${n.path} · unit file ${n.unit_file_path} (edited in the raw editor).`
+      ? `${n.path} · unit file ${n.unit_file_path} (edited in the Files card).`
       : "";
     const m = n?.manifest;
     warn.hidden = Boolean(m);
     warn.textContent = m
       ? ""
-      : `${n?.path ?? "this unit's service.yml"} does not read as a native service: use the raw editor below.`;
-    binary.input.value = m?.binary ?? "";
-    envFile.input.value = m?.env_file ?? "";
-    dataDirs.input.value = (m?.data_dirs ?? []).join("\n");
-    updateCmd.input.value = m?.update_cmd ?? "";
-    stateless.checked = m?.stateless ?? false;
-    restoreNote.input.value = m?.restore_note ?? "";
-    releaseRepo.input.value = m?.release_repo ?? "";
-    releaseAsset.input.value = m?.release_asset ?? "";
-    backupNewest.input.value = m?.backup_from_newest ?? "";
-    afterRestore.input.value = m?.after_restore ?? "";
-    backupPause.input.value =
+      : `${n?.path ?? "this unit's service.yml"} does not read as a native service: use the Files card.`;
+    setBase(binary.input, m?.binary ?? "");
+    setBase(envFile.input, m?.env_file ?? "");
+    setBase(dataDirs.input, (m?.data_dirs ?? []).join("\n"));
+    setBase(updateCmd.input, m?.update_cmd ?? "");
+    setBase(stateless, m?.stateless ?? false);
+    setBase(restoreNote.input, m?.restore_note ?? "");
+    setBase(releaseRepo.input, m?.release_repo ?? "");
+    setBase(releaseAsset.input, m?.release_asset ?? "");
+    setBase(backupNewest.input, m?.backup_from_newest ?? "");
+    setBase(afterRestore.input, m?.after_restore ?? "");
+    setBase(
+      backupPause.input,
       m?.backup_pause === "chassis"
         ? "chassis"
         : m?.backup_pause
           ? "true"
-          : "false";
-    updatePolicy.input.value = m?.update_policy ?? "manual";
-    metrics.input.value = m?.metrics === false ? "not_measured" : "measured";
+          : "false",
+    );
+    setBase(updatePolicy.input, m?.update_policy ?? "manual");
+    setBase(metrics.input, m?.metrics === false ? "not_measured" : "measured");
   };
-  sel.addEventListener("change", show);
   show();
   const edit = () => ({
     kind: "native",
@@ -2326,7 +2179,56 @@ function nativeUnitForm(stack, natives, reload) {
     ),
     metrics: /** @type {"measured" | "not_measured"} */ (metrics.input.value),
   });
-  review.addEventListener("click", () => {
+  const { node, bar } = editCard({
+    id: "native-form",
+    form: "native",
+    title: "Edit a native unit",
+    desc: "Change one unit's service.yml: its binary, state directories and update policy.",
+    groups: [
+      editGroup({
+        id: "group-native-unit",
+        title: "Unit",
+        desc: "The systemd unit whose service.yml is edited; the fields below follow the unit you pick.",
+        rows: [unitRow],
+      }),
+      editGroup({
+        id: "group-native-program",
+        title: "Program",
+        desc: "What systemd starts, the environment it reads and the release repository that updates it.",
+        rows: [binary.row, envFile.row, releaseRepo.row, releaseAsset.row],
+      }),
+      editGroup({
+        id: "group-native-update",
+        title: "Update and metrics",
+        desc: "Who updates the unit, how, and whether a missing metrics endpoint counts as drift.",
+        rows: [updatePolicy.row, updateCmd.row, metrics.row],
+      }),
+      editGroup({
+        id: "group-native-backup",
+        title: "Data, backup and restore",
+        desc: "What the nightly backup archives, how the unit is paused for it and how a restore puts the data back.",
+        rows: [
+          statelessRow,
+          dataDirs.row,
+          backupNewest.row,
+          backupPause.row,
+          afterRestore.row,
+          restoreNote.row,
+        ],
+      }),
+      gridRow({
+        control: buttonGroup([removeBtn]),
+        buttons: true,
+      }),
+    ],
+    blocks: [warn],
+  });
+  // Another unit is another saved state, not an edit.
+  sel.addEventListener("change", () => {
+    show();
+    markUnsavedClean(bar);
+  });
+  wireBar(bar, () =>
     openPlanDialog({
       id: `edit:native:${stack}`,
       title: `Native services · ${stack}`,
@@ -2335,8 +2237,8 @@ function nativeUnitForm(stack, natives, reload) {
       commitUrl: `/data/stacks/${encodeURIComponent(stack)}/commit`,
       commitBody: stackCommit(edit()),
       onCommitted: () => void reload(),
-    });
-  });
+    }),
+  );
   removeBtn.addEventListener("click", () => {
     const e = { kind: "remove_native", unit: sel.value };
     openPlanDialog({
@@ -2349,55 +2251,7 @@ function nativeUnitForm(stack, natives, reload) {
       onCommitted: () => void reload(),
     });
   });
-  return h(
-    "section",
-    {
-      class: "kp-card edit-card",
-      "aria-label": "Native services",
-      id: "native-form",
-    },
-    h("h3", null, "Edit a native unit"),
-    h(
-      "p",
-      { class: "measured" },
-      "Change one unit's service.yml: its binary, state directories and update policy.",
-    ),
-    h(
-      "div",
-      { class: "kp-field" },
-      h("label", { class: "kp-field__label", for: "native-unit" }, "Unit"),
-      sel,
-    ),
-    pathLine,
-    warn,
-    h(
-      "div",
-      { class: "edit-grid" },
-      binary.wrap,
-      envFile.wrap,
-      releaseRepo.wrap,
-      releaseAsset.wrap,
-      updatePolicy.wrap,
-      metrics.wrap,
-      backupNewest.wrap,
-      backupPause.wrap,
-      h(
-        "div",
-        { class: "kp-field kp-field--check" },
-        stateless,
-        h(
-          "label",
-          { class: "kp-field__label", for: "native-stateless" },
-          "Stateless (no data_dirs, by design)",
-        ),
-      ),
-    ),
-    dataDirs.wrap,
-    updateCmd.wrap,
-    afterRestore.wrap,
-    restoreNote.wrap,
-    h("div", { class: "row-buttons" }, review, " ", removeBtn, " ", status),
-  );
+  return { node, bar };
 }
 
 /**
@@ -2412,15 +2266,17 @@ function addNativeCard(stack, reload) {
   });
   const binary = nativeField("add-native-binary", "Binary", "", {
     placeholder: "/opt/worker/bin/worker",
+    help: "The executable systemd starts.",
   });
   const envFile = nativeField("add-native-env-file", "Environment file", "", {
     placeholder: "/appdata/…/….env",
+    help: "Empty: the unit has no EnvironmentFile.",
   });
   const dataDirs = nativeField(
     "add-native-data-dirs",
     "Data directories (one per line)",
     "",
-    { textarea: true },
+    { textarea: true, help: "What the nightly backup archives." },
   );
   const notifyChk = h("input", {
     type: "checkbox",
@@ -2430,7 +2286,11 @@ function addNativeCard(stack, reload) {
   notifyChk.checked = true;
   const review = h(
     "button",
-    { type: "button", class: "kp-button", id: "add-native-review" },
+    {
+      type: "button",
+      class: "kp-button kp-button--primary",
+      id: "add-native-review",
+    },
     "Review and commit…",
   );
   review.addEventListener("click", () => {
@@ -2459,59 +2319,64 @@ function addNativeCard(stack, reload) {
       onCommitted: () => void reload(),
     });
   });
-  return h(
-    "section",
-    {
-      class: "kp-card edit-card",
-      "aria-label": "Add a native unit",
-      id: "add-native",
-    },
-    h("h2", null, "Add a native unit"),
-    h(
-      "p",
-      { class: "measured" },
-      "A bare binary under systemd, no docker layer: its service.yml and a generic unit file, both under a new <unit>/ directory.",
-    ),
-    h("div", { class: "edit-grid" }, unit.wrap, binary.wrap, envFile.wrap),
-    dataDirs.wrap,
-    h(
-      "div",
-      { class: "kp-field kp-field--check" },
-      notifyChk,
-      h(
-        "label",
-        { class: "kp-field__label", for: "add-native-notify" },
-        "Type=notify (the chassis-rs kit's shape)",
-      ),
-    ),
-    h("div", { class: "row-buttons" }, review),
-  );
+  const { node } = editCard({
+    id: "add-native",
+    form: "add-native",
+    bar: false,
+    title: "Add a native unit",
+    desc: "A bare binary under systemd, no docker layer: its service.yml and a generic unit file, both under a new <unit>/ directory.",
+    groups: [
+      editGroup({
+        id: "group-add-native",
+        title: "The new unit",
+        desc: "Its name, the binary systemd starts and what the nightly backup archives; nothing is written until the plan is committed.",
+        rows: [
+          unit.row,
+          binary.row,
+          envFile.row,
+          dataDirs.row,
+          gridRow({
+            label: "Type=notify",
+            labelFor: "add-native-notify",
+            control: notifyChk,
+            value: "The chassis-rs kit's shape.",
+          }),
+        ],
+      }),
+      gridRow({ control: buttonGroup([review]), buttons: true }),
+    ],
+  });
+  return node;
 }
 
 /**
  * @param {string} stack
  * @param {EditRead} e
  * @param {() => Promise<void>} reload
+ * @returns {{node: HTMLElement, bar: HTMLElement | null}}
  */
 function nativeCard(stack, e, reload) {
-  return h(
+  const unitForm = e.natives.length
+    ? nativeUnitForm(stack, e.natives, reload)
+    : null;
+  const node = h(
     "div",
-    { id: "native-services" },
-    h("h2", null, "Native services"),
-    h(
-      "p",
-      { class: "measured" },
-      "Each unit's service.yml — its binary, its state and its own update policy.",
-    ),
-    e.natives.length
-      ? nativeUnitForm(stack, e.natives, reload)
+    { id: "native-services", class: "edit-native" },
+    unitForm
+      ? unitForm.node
       : h(
-          "p",
-          { class: "measured" },
-          "This stack has no native unit yet; add one below.",
+          "section",
+          { class: "kp-card edit-card", "aria-label": "Native services" },
+          h("h2", { class: "edit-card__title" }, "Native services"),
+          h(
+            "p",
+            { class: "measured" },
+            "This stack has no native unit yet; add one below. Each unit's service.yml holds its binary, its state and its own update policy.",
+          ),
         ),
     addNativeCard(stack, reload),
   );
+  return { node, bar: unitForm?.bar ?? null };
 }
 
 // ── feat-firewall-1 ─────────────────────────────────────────────────────

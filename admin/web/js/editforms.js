@@ -154,6 +154,103 @@ export function settingsForm(stack, m, images) {
 }
 
 /**
+ * @typedef {{id: string, title: string, desc: string, fields: EditField[]}} FieldGroup
+ */
+
+/**
+ * Sort a form's fields into titled groups, each with the one sentence that
+ * says what it is. A field no rule claims lands in the last group, so a
+ * field added to formspec.json is never lost from the page.
+ * @param {EditField[]} fields
+ * @param {{id: string, title: string, desc: string, has: (f: EditField) => boolean}[]} rules
+ * @returns {FieldGroup[]}
+ */
+function groupFields(fields, rules) {
+  /** @type {FieldGroup[]} */
+  const out = rules.map(({ id, title, desc }) => ({
+    id,
+    title,
+    desc,
+    fields: [],
+  }));
+  for (const f of fields) {
+    const i = rules.findIndex((r) => r.has(f));
+    out[i < 0 ? out.length - 1 : i].fields.push(f);
+  }
+  return out.filter((g) => g.fields.length);
+}
+
+/**
+ * The settings card's groups: size, start-up, app images, tile watching.
+ * @param {EditField[]} fields
+ * @returns {FieldGroup[]}
+ */
+export function settingsGroups(fields) {
+  const named =
+    (/** @type {string[]} */ names) => (/** @type {EditField} */ f) =>
+      names.includes(f.name);
+  return groupFields(fields, [
+    {
+      id: "size",
+      title: "Size of the container",
+      desc: "What the host gives the container: processor cores, memory, swap and disk.",
+      has: named(["cores", "memory_mb", "swap_mb", "disk_gb"]),
+    },
+    {
+      id: "start",
+      title: "Start-up and protection",
+      desc: "Whether the container starts with the host, in which order, and whether Proxmox refuses to destroy it.",
+      has: named(["onboot", "order", "protection"]),
+    },
+    {
+      id: "images",
+      title: "App images",
+      desc: "The image each app runs; a changed image reaches the container at the next deploy.",
+      has: (f) => f.name.startsWith("image:"),
+    },
+    {
+      id: "watch",
+      title: "Uptime checks of the tiles",
+      desc: "How often each tile is probed and how long it may go without a good probe before it shows down; blank uses the fleet default.",
+      has: (f) =>
+        f.name.startsWith(TILE_WATCH_PREFIX) ||
+        f.name.startsWith(TILE_DOWN_PREFIX),
+    },
+  ]);
+}
+
+/**
+ * The network and hardware card's groups.
+ * @param {EditField[]} fields
+ * @returns {FieldGroup[]}
+ */
+export function settingsExtGroups(fields) {
+  const named =
+    (/** @type {string[]} */ names) => (/** @type {EditField} */ f) =>
+      names.includes(f.name);
+  return groupFields(fields, [
+    {
+      id: "network",
+      title: "Network",
+      desc: "The container's address, its gateway, the bridge it attaches to and its VLAN tag.",
+      has: named(["ip", "gateway", "bridge", "vlan"]),
+    },
+    {
+      id: "lxc",
+      title: "Container flags",
+      desc: "Privilege, devices passed in and the timezone; these only take effect when the container is rebuilt.",
+      has: named(["unprivileged", "gpu", "vpn", "timezone"]),
+    },
+    {
+      id: "storage",
+      title: "Storage and lifetime",
+      desc: "The Proxmox storage the root disk lives on, and whether the stack is made and destroyed in one sitting.",
+      has: named(["storage", "on_demand"]),
+    },
+  ]);
+}
+
+/**
  * The field of one app's image, `<app>/<service>` = `key`.
  * @param {string} key
  * @param {string} image

@@ -2091,6 +2091,18 @@ export function mount(root, ctx) {
     // A part shows that class alone in the chart; the same part again shows
     // every class (the demo's behaviour for the Status class keys).
     let pickedClass = -1;
+    /**
+     * The bar's last full spec, drawn again with the pressed class.
+     * @type {Parameters<typeof setStackbar>[1] | null}
+     */
+    let mixSpec = null;
+    const paintMix = () => {
+      if (!mixSpec) return;
+      setStackbar(mixBar, {
+        ...mixSpec,
+        picked: pickedClass >= 0 ? [CLASSES[pickedClass].label] : [],
+      });
+    };
     mixBar.addEventListener(STACKBAR_PICK_EVENT, (e) => {
       const key = /** @type {CustomEvent} */ (e).detail?.key;
       const i = CLASSES.findIndex((c) => c.label === key);
@@ -2098,6 +2110,7 @@ export function mount(root, ctx) {
       chartSelect(over.fig, null);
       pickedClass = pickedClass === i ? -1 : i;
       if (pickedClass >= 0) chartSelect(over.fig, pickedClass, true);
+      paintMix();
     });
     mixBar.addEventListener(STACKBAR_RETRY_EVENT, () =>
       refreshOf(refreshEl)?.now("retry"),
@@ -2155,6 +2168,7 @@ export function mount(root, ctx) {
         const why = notReadWords(r.error);
         notRead(over.fig, "Requests over time", why);
         notRead(perHost.fig, "Requests per hostname", why);
+        mixSpec = null;
         setStackbar(mixBar, {
           state: "error",
           message: why,
@@ -2206,21 +2220,24 @@ export function mount(root, ctx) {
         });
 
       // Status mix: one bar over the exact total.
-      if (f.total === 0)
+      if (f.total === 0) {
+        mixSpec = null;
         setStackbar(mixBar, {
           state: "empty",
           message: "No requests reached the gateway in this window.",
           label: "Status mix",
         });
-      else
-        setStackbar(mixBar, {
+      } else {
+        mixSpec = {
           title: "Status mix",
           total: f.total,
           summary: `${count(f.total)} requests`,
           format: count,
           label: "Status mix",
           parts: statusParts(classes),
-        });
+        };
+        paintMix();
+      }
       mixNote.textContent = f.top4xx
         ? `${f.top4xx.status} is the biggest 4xx (${f.top4xx.host}${f.top4xx.path}, ${count(f.top4xx.n)} times).`
         : b.errors?.error

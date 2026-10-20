@@ -1,4 +1,4 @@
-// The kp-themes module chassis-rs serves at /static/kp/js/stackbar.js (kp-themes 11.0.0),
+// The kp-themes module chassis-rs serves at /static/kp/js/stackbar.js (kp-themes 11.1.1),
 // copied from kp-themes js/stackbar.d.ts: chassis serves the module, not its types.
 /** A share bar the page fills with setStackbar(). */
 export declare const STACKBAR = "[data-kp-stackbar]";
@@ -75,6 +75,10 @@ export type StackbarSpec = {
    * the bar's accessible name (default: every part in order)
    */
   label?: string;
+  /**
+   * keys of the parts the page has pressed; given (even empty), the parts are toggle buttons with `aria-pressed`
+   */
+  picked?: string[];
 };
 /** A share as words: one decimal under ten per cent, whole above. @param {number} share @param {string | undefined} lang */
 export declare function shareText(

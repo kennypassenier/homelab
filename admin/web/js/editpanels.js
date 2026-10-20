@@ -101,7 +101,7 @@ import {
   attachCardStates,
   setCardState,
 } from "/static/kp/js/card-state.js";
-import { viaForm } from "./drivable.js";
+import { declare, drivable, viaForm } from "./drivable.js";
 import { buttonGroup, gridRow } from "./gridrow.js";
 
 /**
@@ -1325,6 +1325,118 @@ function appsEditCard(stack, e, reload) {
 
 // ── feat-stacks-11: latch_secrets and latch_files ────────────────────────
 
+const RESTART_MOVE = declare({
+  id: "stack-restart-order-move",
+  page: "stack",
+  opens: "view",
+  row: "<stack>/<unit>/<earlier|later>",
+  at: (row) =>
+    row ? `/stacks/${encodeURIComponent(row.split("/")[0])}/settings` : null,
+  what: "move a native unit earlier or later in the stack's restart order (saved with the Latch card)",
+  shows: "on the Settings tab of a stack with two or more native units",
+});
+
+/**
+ * The restart order (gap 74, feat 6.5): the stack's native units in the
+ * order a deploy goes through them, and so the order a changed secret file
+ * restarts them in, on kp's reorder list (a handle, arrow keys and drag)
+ * with Earlier / Later buttons beside each unit for Live view and for a
+ * hand that does not drag. The order is the `natives:` list of the stack
+ * file; the card's Save writes it.
+ * @param {string} stack
+ * @param {string[]} natives
+ * @param {() => void} onChange
+ */
+function restartOrderGroup(stack, natives, onChange) {
+  const start = [...natives];
+  const list = h("ul", {
+    class: "kp-reorder rs-order",
+    "data-kp-reorder": "",
+    "aria-label": `Restart order of ${stack}`,
+  });
+  /** @param {string} unit */
+  const item = (unit) => {
+    /** @param {"earlier" | "later"} way */
+    const mover = (way) => {
+      const b = h(
+        "button",
+        {
+          type: "button",
+          class: "kp-button kp-button--sm",
+          title: `Restart ${unit} ${way}: ${way === "earlier" ? "before" : "after"} the unit ${way === "earlier" ? "above" : "below"} it`,
+        },
+        way === "earlier" ? "Earlier" : "Later",
+      );
+      b.addEventListener("click", () => {
+        const li = b.closest("li");
+        if (!li) return;
+        if (way === "earlier" && li.previousElementSibling)
+          list.insertBefore(li, li.previousElementSibling);
+        else if (way === "later" && li.nextElementSibling)
+          list.insertBefore(li.nextElementSibling, li);
+        else return;
+        changed();
+      });
+      return drivable(b, RESTART_MOVE, `${stack}/${unit}/${way}`);
+    };
+    return h(
+      "li",
+      { "data-kp-item": unit, "data-kp-label": unit },
+      h(
+        "button",
+        {
+          type: "button",
+          "data-kp-handle": "",
+          "aria-label": `Move ${unit}`,
+        },
+        "⠿",
+      ),
+      h("span", { class: "rs-order__n" }),
+      h("b", { class: "rs-order__name" }, unit),
+      h("span", { class: "rs-order__moves" }, mover("earlier"), mover("later")),
+    );
+  };
+  list.append(...start.map(item));
+  const order = () =>
+    [...list.children].map(
+      (c) => /** @type {HTMLElement} */ (c).dataset.kpItem ?? "",
+    );
+  const block = editBlock({
+    id: "group-restart-order",
+    title: "Restart order",
+    desc: "The order a deploy goes through this stack's native units, and so the order a changed secret file restarts them in: the first listed restarts first. Drag a handle, press an arrow key on it, or use Earlier and Later.",
+    body: [list],
+  });
+  block.dataset.kpName = "Restart order";
+  const changed = () => {
+    [...list.children].forEach((li, i) => {
+      const n = li.querySelector(".rs-order__n");
+      if (n) n.textContent = `${i + 1}`;
+    });
+    const now = order();
+    markRow(
+      block,
+      now.join() === start.join()
+        ? null
+        : { was: start.join(", then "), now: now.join(", then ") },
+    );
+    onChange();
+  };
+  list.addEventListener("kp-reorder", changed);
+  changed();
+  return {
+    block,
+    title: "Restart order",
+    /** The new order, or null while it is as the file has it. */
+    value: () => (order().join() === start.join() ? null : order()),
+    sync: changed,
+    reset: () => {
+      list.replaceChildren(...start.map(item));
+      changed();
+    },
+  };
+}
+
 /**
  * @param {string} stack
  * @param {EditRead} e
@@ -1380,6 +1492,9 @@ function latchEditCard(stack, e, reload) {
     table: files,
     start: startFiles,
   });
+  const natives = m.natives ?? [];
+  const orderG =
+    natives.length > 1 ? restartOrderGroup(stack, natives, () => {}) : null;
   const { node, bar } = editCard({
     id: "latch-form",
     form: "latch",
@@ -1395,7 +1510,7 @@ function latchEditCard(stack, e, reload) {
         rows: secretRows,
       }),
     ],
-    blocks: [filesG.block],
+    blocks: [filesG.block, ...(orderG ? [orderG.block] : [])],
   });
   wireBar(
     bar,
@@ -1414,6 +1529,7 @@ function latchEditCard(stack, e, reload) {
         files: rowsChanged(files.getRows(), startFiles)
           ? files.getRows()
           : null,
+        order: orderG?.value() ?? null,
       });
       if (!changesSomething(edit)) {
         notify("Nothing is changed yet.", "info");
@@ -1429,7 +1545,7 @@ function latchEditCard(stack, e, reload) {
         onCommitted: () => void reload(),
       });
     },
-    tableHooks([filesG]),
+    tableHooks(orderG ? [filesG, orderG] : [filesG]),
   );
   return {
     node,

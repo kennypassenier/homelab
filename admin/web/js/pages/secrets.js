@@ -247,19 +247,39 @@ function deployAfter(job, stack) {
 }
 
 /**
- * The restart plan of a stack: what each file restarts when it changes.
+ * The restart plan of a stack: what each file restarts when it changes, the
+ * files of the unit that restarts first at the top (the stack's restart
+ * order, edited on its Settings tab).
  * @param {string} stack
  * @param {import("../secretsview.js").Declared} d
  * @returns {{from: string, to: string, state: "unknown"}[]}
  */
 export function restartItems(stack, d) {
+  const rank = (/** @type {string} */ u) => {
+    const i = (d.restart_order ?? []).indexOf(u);
+    return i < 0 ? Number.MAX_SAFE_INTEGER : i;
+  };
   return d.files
     .filter((f) => !!f.restarts)
     .map((f) => ({
       from: f.from,
       to: /** @type {string} */ (f.restarts),
       state: /** @type {const} */ ("unknown"),
-    }));
+    }))
+    .sort((a, b) => rank(a.to) - rank(b.to));
+}
+
+/**
+ * The units a file change restarts, in their restart order, as one
+ * sentence ("paperless restarts postgres first, then redis"); empty when
+ * fewer than two units restart, because one has no order.
+ * @param {string} stack
+ * @param {import("../secretsview.js").Declared} d
+ */
+export function restartSentence(stack, d) {
+  const units = [...new Set(restartItems(stack, d).map((i) => i.to))];
+  if (units.length < 2) return "";
+  return `${stack} restarts ${units[0]} first, then ${units.slice(1).join(", then ")}.`;
 }
 
 /**
@@ -624,7 +644,7 @@ export function mount(root, opts = {}) {
     const restarts = restartItems(s, d);
     if (restarts.length) {
       parts.push(
-        `<section class="st-sub" aria-labelledby="sx-restarts-h"><h3 id="sx-restarts-h">What restarts when a file changes</h3><p class="kp-lede">A changed file restarts what reads it, so nothing is restarted blind.</p><div class="kp-deplist" data-kp-deplist id="sx-restarts" data-kp-dep-order="none" data-kp-dep-direction="from-reaches-to" data-kp-dep-heading="{n} restarts when ${esc(s)}'s files change" data-kp-dep-empty="Nothing restarts when a file changes."></div></section>`,
+        `<section class="st-sub" aria-labelledby="sx-restarts-h"><h3 id="sx-restarts-h">What restarts when a file changes</h3><p class="kp-lede">A changed file restarts what reads it, so nothing is restarted blind.${restartSentence(s, d) ? ` ${esc(restartSentence(s, d))} The order is set on the stack's Settings tab.` : ""}</p><div class="kp-deplist" data-kp-deplist id="sx-restarts" data-kp-dep-order="none" data-kp-dep-direction="from-reaches-to" data-kp-dep-heading="{n} restarts when ${esc(s)}'s files change" data-kp-dep-empty="Nothing restarts when a file changes."></div></section>`,
       );
     }
     const u = usesOf(s, d);

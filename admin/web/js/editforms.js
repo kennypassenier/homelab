@@ -1022,13 +1022,17 @@ export function appsBody(parts) {
 }
 
 /**
- * @param {{secrets: string[] | null, files: RowEdit[] | null}} parts
+ * `order`: the stack's native units in their new restart order (gap 74),
+ * null while it is as the file has it.
+ * @param {{secrets: string[] | null, files: RowEdit[] | null,
+ *   order?: string[] | null}} parts
  */
 export function latchBody(parts) {
   /** @type {{kind: "latch"} & Record<string, unknown>} */
   const out = { kind: "latch" };
   if (parts.secrets) out.secrets = parts.secrets;
   if (parts.files) out.files = rowBody(parts.files);
+  if (parts.order) out.order = parts.order;
   return out;
 }
 

@@ -22,6 +22,12 @@ pub struct LatchEdit {
     pub secrets: Option<Vec<String>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub files: Option<Vec<LatchFileEdit>>,
+    /// None: leave `natives:` alone. `Some(units)`: the whole list in the
+    /// order the units are processed on a deploy, and so the order a
+    /// changed secret file restarts them in (feat-kpadopt-2, gap 74). It
+    /// must name exactly the stack's native units, once each.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub order: Option<Vec<String>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
@@ -46,6 +52,11 @@ pub struct CurrentLatch {
     pub latch_secrets: Vec<String>,
     #[serde(default)]
     pub latch_files: Vec<CurrentLatchFile>,
+    /// The native units in file order: the order a deploy goes through them
+    /// (`core::ops::deploy` walks `natives` front to back), so the order a
+    /// changed secret file restarts the units it names.
+    #[serde(default)]
+    pub natives: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
@@ -95,6 +106,18 @@ fn plain(s: &str) -> bool {
 
 pub fn problems(m: &StackManifest, e: &LatchEdit) -> Vec<String> {
     let mut out = Vec::new();
+    if let Some(order) = &e.order {
+        let mut want = order.clone();
+        want.sort();
+        let mut have = m.natives.clone();
+        have.sort();
+        if want != have {
+            out.push(format!(
+                "restart order: name every native unit of this stack exactly once :: natives are [{}]",
+                m.natives.join(", ")
+            ));
+        }
+    }
     if let Some(apps) = &e.secrets {
         for a in apps {
             if let Some(p) = dollar_problem("latch_secrets", a) {
@@ -277,6 +300,15 @@ pub fn ops(manifest_text: &str, e: &LatchEdit) -> Vec<Op> {
             }
         }
     }
+    if let Some(order) = &e.order
+        && !order.is_empty()
+        && *order != now.natives
+    {
+        ops.push(Op::Set {
+            path: path("natives"),
+            value: Value::Sequence(order.iter().map(|u| Value::from(u.as_str())).collect()),
+        });
+    }
     ops
 }
 
@@ -287,6 +319,9 @@ pub fn describe(e: &LatchEdit) -> Vec<String> {
     }
     if let Some(files) = &e.files {
         parts.push(format!("latch files: {} row(s)", files.len()));
+    }
+    if let Some(order) = &e.order {
+        parts.push(format!("restart order: {}", order.join(", then ")));
     }
     parts
 }
@@ -379,5 +414,30 @@ natives: [kyu]
         };
         let got = ops(TEXT, &e);
         assert_eq!(got.len(), 1);
+    }
+
+    #[test]
+    fn the_restart_order_is_the_natives_list_in_a_new_order() {
+        let mut m = manifest();
+        m.natives = vec!["postgres".into(), "redis".into()];
+        let text = "stack_name: demo\nvmid: 200\nnatives: [postgres, redis]\n";
+        assert_eq!(current(text).natives, vec!["postgres", "redis"]);
+        let swap = LatchEdit {
+            order: Some(vec!["redis".into(), "postgres".into()]),
+            ..Default::default()
+        };
+        assert!(problems(&m, &swap).is_empty());
+        assert_eq!(ops(text, &swap).len(), 1);
+        assert_eq!(describe(&swap), vec!["restart order: redis, then postgres"]);
+        let same = LatchEdit {
+            order: Some(vec!["postgres".into(), "redis".into()]),
+            ..Default::default()
+        };
+        assert!(ops(text, &same).is_empty());
+        let wrong = LatchEdit {
+            order: Some(vec!["redis".into()]),
+            ..Default::default()
+        };
+        assert_eq!(problems(&m, &wrong).len(), 1);
     }
 }

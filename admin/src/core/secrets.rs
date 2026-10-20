@@ -14,6 +14,10 @@ use super::stackedit_latch::{CurrentLatch, CurrentLatchFile};
 pub struct Declared {
     pub secrets: Vec<String>,
     pub files: Vec<CurrentLatchFile>,
+    /// The stack's native units in the order a deploy restarts them
+    /// (`natives:` in file order); empty when it has none.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub restart_order: Vec<String>,
     /// "why :: fix" when the stack's file does not read; the page shows the
     /// warning chip and this text, split at " :: ".
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -45,6 +49,7 @@ pub fn declared(manifest: Option<&str>) -> Declared {
         Ok(c) => Declared {
             secrets: c.latch_secrets,
             files: c.latch_files,
+            restart_order: c.natives,
             unreadable: None,
         },
         Err(e) => Declared {

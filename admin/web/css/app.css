@@ -953,6 +953,23 @@ tr.unread td:first-child {
   grid-area: action;
   align-self: start;
 }
+/* The restart order: handle | number | unit | Earlier Later, on shared tracks. */
+.rs-order > li {
+  display: grid;
+  grid-template-columns: auto 2ch minmax(0, 1fr) auto;
+  align-items: center;
+  column-gap: var(--kp-space-sm, 0.5rem);
+  max-inline-size: 36rem;
+}
+.rs-order__n {
+  font-variant-numeric: tabular-nums;
+  color: var(--muted-foreground);
+}
+.rs-order__moves {
+  display: grid;
+  grid-auto-flow: column;
+  gap: var(--kp-space-xs, 0.25rem);
+}
 .edit-native > .edit-card + .edit-card {
   margin-block-start: var(--kp-space-md, 1rem);
 }

@@ -4161,6 +4161,18 @@
       "twins": false
     },
     {
+      "id": "stack-restart-order-move",
+      "page": "stack",
+      "what": "move a native unit earlier or later in the stack's restart order (saved with the Latch card)",
+      "opens": "view",
+      "row": "<stack>/<unit>/<earlier|later>",
+      "href": "/stacks/<stack>/settings",
+      "was": [],
+      "shows": "on the Settings tab of a stack with two or more native units",
+      "reach": [],
+      "twins": false
+    },
+    {
       "id": "stack-tab",
       "page": "stack",
       "what": "open one of the hub's six tabs",

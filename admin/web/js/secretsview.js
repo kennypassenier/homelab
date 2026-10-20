@@ -8,8 +8,10 @@
 /**
  * @typedef {{from: string, dest: string, mode?: string,
  *   owner?: string | null, restarts?: string | null}} LatchFile
- * @typedef {{secrets: string[], files: LatchFile[],
+ * @typedef {{secrets: string[], files: LatchFile[], restart_order?: string[],
  *   unreadable?: string | null}} Declared
+ *   `restart_order`: the stack's native units in the order a deploy restarts
+ *   them (absent from a dashboard before it was added)
  * @typedef {"ok" | "unreadable" | "none"} Kind
  * @typedef {{kind: "env", app: string} |
  *   {kind: "file", from: string, dest: string}} SecretRef

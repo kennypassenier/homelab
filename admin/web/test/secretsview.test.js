@@ -10,7 +10,7 @@ import {
   stackLine,
 } from "../js/secretsview.js";
 import { historyRows } from "../js/activity.js";
-import { restartItems, usesOf } from "../js/pages/secrets.js";
+import { restartItems, restartSentence, usesOf } from "../js/pages/secrets.js";
 
 test("feat-kp11demo-6: what restarts and which file feeds which app", () => {
   const d = {
@@ -28,6 +28,26 @@ test("feat-kp11demo-6: what restarts and which file feeds which app", () => {
   assert.deepEqual(u.uses.get("traefik/.env"), ["traefik"]);
   assert.deepEqual(u.uses.get("a/b.env"), [], "a file nothing reads");
   assert.equal(u.files.find((f) => f.key === "a/b.env")?.ghost, true);
+});
+
+test("gap 74: the restart plan follows the stack's restart order", () => {
+  const d = {
+    secrets: [],
+    restart_order: ["postgres", "redis"],
+    files: [
+      { from: "r.env", dest: "/x/r.env", restarts: "redis" },
+      { from: "p.env", dest: "/x/p.env", restarts: "postgres" },
+    ],
+  };
+  assert.deepEqual(
+    restartItems("paperless", d).map((i) => i.to),
+    ["postgres", "redis"],
+  );
+  assert.equal(
+    restartSentence("paperless", d),
+    "paperless restarts postgres first, then redis.",
+  );
+  assert.equal(restartSentence("paperless", { secrets: [], files: [] }), "");
 });
 
 test("redesign-371: the left pane's kinds, exact counts and lines", () => {

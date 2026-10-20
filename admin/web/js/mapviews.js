@@ -28,6 +28,7 @@ import { attachDataTables } from "/static/kp/js/datatable.js";
 import { setDeplist } from "/static/kp/js/deplist.js";
 import {
   MATRIX_PICK_EVENT,
+  MATRIX_RETRY_EVENT,
   setHeatLegend,
   setMatrix,
 } from "/static/kp/js/heat.js";
@@ -441,8 +442,11 @@ export function sidePanel(deps) {
 // The matrix
 // ════════════════════════════════════════════════════════════════════════
 
-/** The Matrix view: who reaches whom, stack by stack. */
-export function matrixView() {
+/**
+ * The Matrix view: who reaches whom, stack by stack.
+ * @param {{retry: () => void}} deps the failed plate's Retry reads the topology again
+ */
+export function matrixView(deps) {
   /** @type {Topology | null} */
   let topo = null;
   /** @type {"loading" | "failed" | "ready"} */
@@ -534,6 +538,7 @@ export function matrixView() {
       usersLabel: "Stacks reached",
     });
   };
+  el.addEventListener(MATRIX_RETRY_EVENT, () => deps.retry());
   el.addEventListener("kp-matrix-light", (e) => {
     const d = /** @type {CustomEvent} */ (e).detail;
     if (d.key && topo) {

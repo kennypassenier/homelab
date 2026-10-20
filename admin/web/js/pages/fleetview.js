@@ -361,7 +361,9 @@ export function mount(root) {
     traffic: () => (input.checked ? traffic : null),
     links: sideLinks,
   });
-  const matrix = matrixView();
+  const matrix = matrixView({
+    retry: () => void readTopology().catch(() => {}),
+  });
   const side = panel.el;
   const listBox = h("div", { class: "mp-list", hidden: "" });
   const matrixBox = h("div", { class: "mp-matrix", hidden: "" }, matrix.el);
@@ -580,7 +582,12 @@ export function mount(root) {
     else graph?.setTraffic(null);
   });
 
-  void (async () => {
+  /** Reads the topology; the matrix's failed plate calls it again. */
+  const readTopology = async () => {
+    if (topology === null) {
+      setCardState(topoStage, "loading", { words: "Reading the topology" });
+      matrix.set(null, "loading");
+    }
     const r = await fetchJson("/data/topology", "the topology", abort.signal);
     if (abort.signal.aborted) return;
     if (!r.ok) {
@@ -600,7 +607,8 @@ export function mount(root) {
     paintTopology();
     paintTiles();
     if (input.checked) void ensureTraffic();
-  })().catch(() => {});
+  };
+  void readTopology().catch(() => {});
   // A stack coming online or going down repaints the side panel.
   stops.push(
     subscribe(() => {

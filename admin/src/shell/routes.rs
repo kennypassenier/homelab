@@ -205,6 +205,50 @@ pub struct ChartQuery {
     /// `1h`, `6h`, `24h`, `7d` or `30d`; default 24h.
     #[serde(default)]
     range: Option<String>,
+    /// ask-kp11be-1: a custom window in unix seconds (`from` and `to` come
+    /// together). When both are present they win over `range`, so a chart
+    /// zoom reads exactly the window that was zoomed to.
+    #[serde(default)]
+    from: Option<u64>,
+    #[serde(default)]
+    to: Option<u64>,
+}
+
+/// The widest custom window `/data/charts` reads, seconds (the dearest
+/// preset, 30 d).
+const MAX_CUSTOM_SPAN: u64 = 30 * 86_400;
+/// The narrowest, so a zoom never asks Prometheus for a handful of points.
+const MIN_CUSTOM_SPAN: u64 = 60;
+
+/// The window a chart read covers: `(start, end, step)` in unix seconds. A
+/// custom `from`/`to` pair wins over `range`; otherwise the preset ends
+/// `now`. Err is a sentence for a 400.
+pub fn chart_bounds(
+    range: Option<&str>,
+    from: Option<u64>,
+    to: Option<u64>,
+    now: u64,
+) -> Result<(u64, u64, u64), &'static str> {
+    match (from, to) {
+        (Some(f), Some(t)) => {
+            if t <= f {
+                return Err("`to` must be after `from`");
+            }
+            let span = t - f;
+            if span < MIN_CUSTOM_SPAN {
+                return Err("the window is shorter than a minute");
+            }
+            if span > MAX_CUSTOM_SPAN {
+                return Err("the window is longer than 30 days");
+            }
+            Ok((f, t, (span / 240).max(15)))
+        }
+        (None, None) => {
+            let (span, step) = chart_window(range).ok_or("unknown range")?;
+            Ok((now.saturating_sub(span), now, step))
+        }
+        _ => Err("`from` and `to` come together"),
+    }
 }
 
 /// Seconds a range word spans, and the step that gives about 240 points.
@@ -231,13 +275,16 @@ async fn charts(State(c): State<ReadCtx>, Query(q): Query<ChartQuery>) -> Respon
             "set admin.prometheus_url (or HOMELAB_ADMIN_PROMETHEUS_URL) to Prometheus's address",
         );
     };
-    let Some((span, step)) = chart_window(q.range.as_deref()) else {
-        return refused(
-            StatusCode::BAD_REQUEST,
-            "the charts",
-            "unknown range",
-            "use one of 1h, 6h, 24h, 7d, 30d",
-        );
+    let (start, end, step) = match chart_bounds(q.range.as_deref(), q.from, q.to, now_s()) {
+        Ok(b) => b,
+        Err(why) => {
+            return refused(
+                StatusCode::BAD_REQUEST,
+                "the charts",
+                why,
+                "use range=1h, 6h, 24h, 7d or 30d, or from and to in unix seconds (60 s to 30 d apart)",
+            );
+        }
     };
     let panels = match (&q.stack, &prom.host_label) {
         (Some(s), _) => homelab_core::charts::stack_panels(s),
@@ -251,8 +298,6 @@ async fn charts(State(c): State<ReadCtx>, Query(q): Query<ChartQuery>) -> Respon
             );
         }
     };
-    let end = now_s();
-    let start = end.saturating_sub(span);
     // fix-220: the vmid→stack pairs a network device or cgroup id's humanized
     // label is resolved against — the same fleet view the rest of this
     // dashboard reads, never a lookup of its own.
@@ -678,4 +723,38 @@ pub fn read_router(ctx: ReadCtx) -> Router {
         .route("/data/disk-growth", get(disk_growth))
         .route("/data/fleet-traffic", get(fleet_traffic))
         .with_state(ctx)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::chart_bounds;
+
+    #[test]
+    fn a_preset_ends_now() {
+        assert_eq!(
+            chart_bounds(Some("1h"), None, None, 10_000),
+            Ok((6_400, 10_000, 15))
+        );
+        assert_eq!(
+            chart_bounds(None, None, None, 100_000).map(|b| b.1),
+            Ok(100_000)
+        );
+        assert!(chart_bounds(Some("2h"), None, None, 1).is_err());
+    }
+
+    #[test]
+    fn a_custom_window_wins_over_the_range() {
+        assert_eq!(
+            chart_bounds(Some("7d"), Some(1_000), Some(25_000), 99_999),
+            Ok((1_000, 25_000, 100))
+        );
+    }
+
+    #[test]
+    fn a_bad_custom_window_is_refused() {
+        assert!(chart_bounds(None, Some(1_000), None, 5).is_err());
+        assert!(chart_bounds(None, Some(2_000), Some(1_000), 5).is_err());
+        assert!(chart_bounds(None, Some(1_000), Some(1_030), 5).is_err());
+        assert!(chart_bounds(None, Some(0), Some(31 * 86_400), 5).is_err());
+    }
 }

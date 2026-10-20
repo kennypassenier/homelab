@@ -206,6 +206,7 @@ const BACKUPS = declare({
  * @typedef {import("../charts.js").Unit} Unit
  * @typedef {{ok: true, body: any} | {ok: false, error: import("../doctor.js").RouteError}} Read
  * @typedef {{key: string, el: HTMLElement, range: string, group: HTMLElement,
+ *   zoom: {from: number, to: number} | null, zoomRead: number,
  *   cards: Map<string, {el: HTMLElement, fig: HTMLElement, body: HTMLElement,
  *   setFoot: (parts: import("../dom.js").Child[]) => void,
  *   card: Card}>, section: Section}} Block one section of charts
@@ -445,6 +446,8 @@ export function mount(root, ctx) {
       el,
       range,
       group,
+      zoom: null,
+      zoomRead: 0,
       cards: made,
       section: { title: meta.title, desc: meta.desc, cards },
     };
@@ -941,9 +944,30 @@ export function mount(root, ctx) {
         const next = /** @type {CustomEvent} */ (e).detail?.range;
         if (!next || next === b.range) return;
         b.range = next;
+        b.zoom = null;
+        b.zoomRead += 1;
         for (const c of b.cards.values())
           c.fig.setAttribute("data-kp-chart-loading", "");
         void readOne(b);
+      });
+    }
+    // ask-kp11be-1: a zoom (a drag across a chart) reads exactly that window
+    // from /data/charts?from=&to=, finer than the preset's points; Reset
+    // reads the preset again. The side-by-side comparison keeps kp's own
+    // zoom of the points it already holds.
+    for (const b of all) {
+      if (b === compare?.block) continue;
+      b.group.addEventListener(CHART_ZOOM_EVENT, (e) => {
+        const z = /** @type {CustomEvent} */ (e).detail;
+        const win = z
+          ? { from: Math.floor(z.from / 1000), to: Math.ceil(z.to / 1000) }
+          : null;
+        if (!win && !b.zoom) return;
+        b.zoom = win;
+        const token = (b.zoomRead += 1);
+        for (const c of b.cards.values())
+          c.fig.setAttribute("data-kp-chart-loading", "");
+        void readOne(b, token);
       });
     }
     for (const b of all)
@@ -965,10 +989,15 @@ export function mount(root, ctx) {
     if (asked?.matches(".mk-card"))
       requestAnimationFrame(() => asked.scrollIntoView({ block: "start" }));
 
-    /** `/data/charts` for a window, one machine. @param {string} rng @param {string} which */
-    const fetchCharts = (rng, which) =>
+    /** `/data/charts` for a window, one machine; `win` (unix seconds) is a zoomed window that wins over `rng`. @param {string} rng @param {string} which @param {{from: number, to: number} | null} [win] */
+    const fetchCharts = (rng, which, win = null) =>
       fetchJson(
-        `/data/charts${setParams("", { stack: which && which !== "host" ? which : null, range: rng })}`,
+        `/data/charts${setParams("", {
+          stack: which && which !== "host" ? which : null,
+          ...(win
+            ? { from: String(win.from), to: String(win.to) }
+            : { range: rng }),
+        })}`,
         "the charts",
         abort.signal,
       );
@@ -1036,22 +1065,28 @@ export function mount(root, ctx) {
       }
     };
 
-    /** One section on its own (its window key was pressed). @param {Block} b */
-    const readOne = async (b) => {
+    /**
+     * One section on its own (its window key was pressed, or it was zoomed
+     * or reset). `token` is the zoom read that asked: a newer one drops it.
+     * @param {Block} b @param {number} [token]
+     */
+    const readOne = async (b, token = b.zoomRead) => {
       const asked = b.range;
+      const win = b.zoom;
       const r = await (b === compare?.block
         ? compare.fetch(asked)
-        : fetchCharts(asked, stack));
+        : fetchCharts(asked, stack, win));
       await readHistory(
         RANGE_SECONDS[/** @type {keyof typeof RANGE_SECONDS} */ (asked)],
       );
-      if (b.range === asked) paintBlock(b, r);
+      if (b.range === asked && b.zoomRead === token) paintBlock(b, r);
       ribbon.paint();
     };
 
     /** The whole page, once. @returns {Promise<boolean>} */
     const readAll = async () => {
       const asked = all.map((b) => b.range);
+      const zoomed = all.map((b) => b.zoom);
       const span = Math.max(
         ...all.map(
           (b) =>
@@ -1071,7 +1106,11 @@ export function mount(root, ctx) {
         get(TREND_RANGE),
         readHistory(span),
         ...all.map((b) =>
-          b === compare?.block ? compare.fetch(b.range) : get(b.range),
+          b === compare?.block
+            ? compare.fetch(b.range)
+            : b.zoom
+              ? fetchCharts(b.range, stack, b.zoom)
+              : get(b.range),
         ),
       ]);
       if (!day.ok) {
@@ -1084,7 +1123,8 @@ export function mount(root, ctx) {
         else paintHostTiles(day.body);
       }
       all.forEach((b, i) => {
-        if (b.range === asked[i]) paintBlock(b, results[i]);
+        if (b.range === asked[i] && b.zoom === zoomed[i])
+          paintBlock(b, results[i]);
       });
       ribbon.paint();
       return results.every((r) => r.ok) && day.ok;

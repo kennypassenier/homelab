@@ -426,6 +426,10 @@ impl ActConfig {
     pub fn uptime_file(&self) -> PathBuf {
         self.data_dir.join("uptime-history.json")
     }
+    /// ask-kp11be-7: the Inbox's per-row snoozes.
+    pub fn snoozes_file(&self) -> PathBuf {
+        self.data_dir.join("inbox-snoozes.json")
+    }
     pub fn notify_file(&self) -> PathBuf {
         self.data_dir.join("notifications.json")
     }

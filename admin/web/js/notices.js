@@ -10,7 +10,7 @@ import { formatDateTime, humanDuration } from "./format.js";
 /**
  * @typedef {"action_done" | "action_failed" | "action_deferred" |
  *   "schedule_missed" | "incident" | "host_event" | "fleet_check" |
- *   "alert" | "alert_resolved"} NoticeKind
+ *   "alert" | "alert_resolved" | "reminder"} NoticeKind
  * @typedef {"critical" | "warning" | "info" | "ok"} NoticeLevel
  * @typedef {{state: "sent"} | {state: "failed", why: string} |
  *   {state: "skipped", why: string} | {state: "by_sender", who: string}} Push
@@ -44,6 +44,7 @@ const KINDS = {
   fleet_check: { label: "nightly check", tone: "warn" },
   alert: { label: "alert", tone: "bad" },
   alert_resolved: { label: "alert resolved", tone: "ok" },
+  reminder: { label: "reminder", tone: "info" },
 };
 
 /** @param {NoticeKind} k */

@@ -19,11 +19,16 @@ import { levelBadge } from "./notices.js";
  * @typedef {{key: string, severity: Severity, title: string, why: string,
  *   href: string, stack: string | null, at: number, source: string,
  *   count?: number, first_at?: number, ids?: number[],
- *   problem?: {what: string, why?: string, remedy?: string}}} InboxItem
+ *   problem?: {what: string, why?: string, remedy?: string},
+ *   snoozeKey?: string}} InboxItem
  *   `key`: stable over reads; `source`: which list it came from; `count`
  *   and `first_at`: how often the same thing was said and since when, for
  *   a row that stands for several notices; `ids`: the notices a row stands
- *   for, all marked seen together.
+ *   for, all marked seen together; `snoozeKey`: what a snooze is kept under
+ *   when `key` moves (a group of notices takes the newest notice's key).
+ * @typedef {{key: string, until: number, title: string, href?: string,
+ *   remind: boolean, set_at: number}} Snooze one row the server holds
+ *   snoozed (ask-kp11be-7)
  */
 
 /** Notice kinds that report something finished well: never an Inbox row. */
@@ -93,6 +98,7 @@ export function inboxItems(src) {
       count: 1,
       ids: [n.id],
       source: "notices",
+      snoozeKey: `notice-group:${group}`,
       // kp11: the failure's fold ("What went wrong") reads these.
       ...(n.remedy
         ? {
@@ -137,6 +143,26 @@ export const worst = (items) => items[0]?.severity ?? null;
 const extras = new Map();
 /** @type {Set<() => void>} */
 const listeners = new Set();
+/** @type {Snooze[]} */
+let snoozes = [];
+
+/**
+ * The snoozes the server holds (rowsnooze.js): their rows leave the list and
+ * the counter until their moment.
+ * @param {Snooze[]} list
+ */
+export function setSnoozes(list) {
+  snoozes = list;
+  changed();
+}
+
+/**
+ * The snoozes still running as of now, soonest first.
+ * @param {number} [now] unix seconds
+ */
+export const snoozedNow = (now = Date.now() / 1000) =>
+  snoozes.filter((s) => s.until > now).sort((a, b) => a.until - b.until);
+
 /** @type {() => {asks: import("./asks.js").Ask[], notices: import("./notices.js").Notice[] | null}} */
 let read = () => ({ asks: [], notices: null });
 
@@ -178,13 +204,15 @@ export function setInboxSource(name, items) {
  */
 export function inboxNow() {
   const r = read();
+  const now = Date.now() / 1000;
+  const away = new Set(snoozedNow(now).map((s) => s.key));
   return {
     items: inboxItems({
       asks: r.asks,
       notices: r.notices ?? [],
-      now: Date.now() / 1000,
+      now,
       extra: [...extras.values()].flat(),
-    }),
+    }).filter((i) => !away.has(i.snoozeKey ?? i.key)),
     ready: r.notices != null,
   };
 }

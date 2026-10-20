@@ -2383,6 +2383,78 @@
       "twins": false
     },
     {
+      "id": "inbox-snooze",
+      "page": "needs-you",
+      "what": "snooze a row: it leaves the list and the counter until the moment you pick",
+      "opens": "dialog",
+      "row": "<row key>",
+      "href": "/inbox",
+      "was": [],
+      "shows": null,
+      "reach": [],
+      "twins": false
+    },
+    {
+      "id": "inbox-snooze-end",
+      "page": "needs-you",
+      "what": "end a snooze now: the row is back in the list",
+      "opens": "run",
+      "row": "<row key>",
+      "href": "/inbox",
+      "was": [],
+      "shows": "in the Snoozed fold, for a snoozed row",
+      "reach": [],
+      "twins": false
+    },
+    {
+      "id": "inbox-snooze-for",
+      "page": "needs-you",
+      "what": "snooze the row for 1 hour, 4 hours, until tonight 18:00, tomorrow 07:00, Monday 07:00 or a date and time (at most 90 days); pick is the button of the date panel",
+      "opens": "run",
+      "row": "1h|4h|tonight|tomorrow|monday|pick",
+      "href": "/inbox",
+      "was": [],
+      "shows": "in the snooze dialog",
+      "reach": [
+        {
+          "do": "click",
+          "control": "inbox-snooze",
+          "row": "*"
+        }
+      ],
+      "twins": false
+    },
+    {
+      "id": "inbox-snooze-remind",
+      "page": "needs-you",
+      "what": "tick or untick: leave a reminder notice in the Inbox when the snoozed row comes back",
+      "opens": "view",
+      "row": null,
+      "href": "/inbox",
+      "was": [],
+      "shows": "in the snooze dialog",
+      "reach": [
+        {
+          "do": "click",
+          "control": "inbox-snooze",
+          "row": "*"
+        }
+      ],
+      "twins": false
+    },
+    {
+      "id": "inbox-snoozed",
+      "page": "needs-you",
+      "what": "fold or unfold Snoozed rows (not counted in the counter)",
+      "opens": "view",
+      "row": null,
+      "href": "/inbox",
+      "was": [],
+      "shows": null,
+      "reach": [],
+      "twins": false
+    },
+    {
       "id": "inbox-source",
       "page": "needs-you",
       "what": "a row's source chip: open its stack or Activity",

@@ -18,6 +18,7 @@ import { onAnswered } from "./answer.js";
 import { fetchJson, fetchReport } from "./dom.js";
 import { setInboxSource } from "./inboxlist.js";
 import { checkRowsOf, setupRows, todayRows, updateRows } from "./inboxrows.js";
+import { startRowSnoozes } from "./rowsnooze.js";
 import { current, subscribe } from "./store.js";
 
 /** How often the kept answers and the manual checks are read again. */
@@ -111,6 +112,7 @@ export function startInboxSources() {
   paintSetup();
   void readKept().catch(() => {});
   void readChecks().catch(() => {});
+  startRowSnoozes();
   onAnswered(() => void readChecks().catch(() => {}));
   setInterval(() => {
     void readKept().catch(() => {});

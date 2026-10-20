@@ -150,3 +150,11 @@
     flex: 0 0 auto;
   }
 }
+
+/* The snooze dialog: the reminder tick above kp's snooze picker. */
+.ib-snooze__remind {
+  margin-block-end: var(--kp-space-md, 1rem);
+}
+.ib-snooze__err:empty {
+  display: none;
+}

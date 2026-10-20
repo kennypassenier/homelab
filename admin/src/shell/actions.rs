@@ -2997,6 +2997,10 @@ pub fn mount(
     ));
     app.dashboard_routes(router(actions.clone()));
     app.dashboard_routes(super::actions_notify::router(notify.clone()));
+    // ask-kp11be-7: the Inbox's per-row snooze and remind-me.
+    let row_snoozes =
+        super::rowsnooze::RowSnoozes::load(cfg.snoozes_file(), clock.clone(), publish.clone());
+    app.dashboard_routes(super::rowsnooze::router(row_snoozes.clone()));
     app.dashboard_routes(super::scheduler::router(scheduler.clone()));
     let (tick, poll) = (cfg.tick(), Duration::from_secs(cfg.incidents_poll_s));
     let host_notices_poll = Duration::from_secs(cfg.host_notices_poll_s);
@@ -3056,6 +3060,7 @@ pub fn mount(
             host_notices_poll,
         );
         super::actions_notify::spawn_digest(notify.clone(), today, Duration::from_secs(60));
+        super::rowsnooze::spawn(row_snoozes, notify.clone());
         super::watch::spawn(
             host.clone(),
             shared_for_watch,

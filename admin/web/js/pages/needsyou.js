@@ -23,11 +23,11 @@
 
 import { act, loadNotices, onAct, send } from "../act.js";
 import { openAction, openBatch } from "../actiondialog.js";
-import { refusalCallout } from "../actui.js";
+import { openDialog, refusalCallout } from "../actui.js";
 import { ensureStyle, fetchJson, h, slowRead } from "../dom.js";
 import { declare, drivable } from "../drivable.js";
 import { formatDateTime } from "../format.js";
-import { inboxNow, onInbox } from "../inboxlist.js";
+import { inboxNow, onInbox, snoozedNow } from "../inboxlist.js";
 import {
   KINDS,
   askKey,
@@ -47,6 +47,14 @@ import {
   putState,
 } from "../inboxcards.js";
 import { feedToday, feedUpdates, readChecks } from "../inboxsources.js";
+import {
+  SNOOZE_MAX,
+  endSnooze,
+  onSnoozeStatus,
+  readSnoozes,
+  snoozeRow,
+  snoozeStatus,
+} from "../rowsnooze.js";
 import { current, subscribe } from "../store.js";
 import { stage } from "../stage.js";
 import { countOf, pageHeader } from "../ui.js";
@@ -65,6 +73,11 @@ import {
   valueOf,
 } from "/static/kp/js/segmented.js";
 import { registerShortcuts } from "/static/kp/js/shortcuts.js";
+import {
+  SNOOZE_EVENT,
+  attachSnoozes,
+  setSnoozeBusy,
+} from "/static/kp/js/snooze.js";
 import { attachVersionDeltas } from "/static/kp/js/version-delta.js";
 
 const CHECK_AGAIN = declare({
@@ -149,6 +162,46 @@ const WORTH_OPEN = declare({
   opens: "view",
   row: "worth:drills|worth:host-release|worth:doctor",
   what: "a Worth a look row's button: drill the backups, update the host, the doctor report",
+});
+
+// ask-kp11be-7: snooze a row, optionally with a reminder when it is back.
+const SNOOZE_OPEN = declare({
+  id: "inbox-snooze",
+  page: "needs-you",
+  opens: "dialog",
+  row: "<row key>",
+  what: "snooze a row: it leaves the list and the counter until the moment you pick",
+});
+const SNOOZE_FOR = declare({
+  id: "inbox-snooze-for",
+  page: "needs-you",
+  opens: "run",
+  row: "1h|4h|tonight|tomorrow|monday|pick",
+  what: "snooze the row for 1 hour, 4 hours, until tonight 18:00, tomorrow 07:00, Monday 07:00 or a date and time (at most 90 days); pick is the button of the date panel",
+  shows: "in the snooze dialog",
+  reach: [{ do: "click", control: "inbox-snooze", row: "*" }],
+});
+const SNOOZE_REMIND = declare({
+  id: "inbox-snooze-remind",
+  page: "needs-you",
+  opens: "view",
+  what: "tick or untick: leave a reminder notice in the Inbox when the snoozed row comes back",
+  shows: "in the snooze dialog",
+  reach: [{ do: "click", control: "inbox-snooze", row: "*" }],
+});
+const SNOOZE_END = declare({
+  id: "inbox-snooze-end",
+  page: "needs-you",
+  opens: "run",
+  row: "<row key>",
+  what: "end a snooze now: the row is back in the list",
+  shows: "in the Snoozed fold, for a snoozed row",
+});
+const SNOOZED = declare({
+  id: "inbox-snoozed",
+  page: "needs-you",
+  opens: "view",
+  what: "fold or unfold Snoozed rows (not counted in the counter)",
 });
 
 /** The bar on a row's start edge, by how serious it is. */
@@ -349,6 +402,36 @@ export function mount(root) {
     worthStage,
   );
 
+  // Snoozed rows: folded, not counted (ask-kp11be-7).
+  const snoozedList = h("ul", {
+    class: "kp-action-list ib-snoozed-list",
+    "aria-label": "Snoozed rows",
+  });
+  const snoozedStage = stage(snoozedList);
+  const snoozedN = h("span", null, "");
+  const snoozedSummary = drivable(
+    h(
+      "summary",
+      { title: "Fold or unfold the rows you snoozed" },
+      h("strong", null, "Snoozed", snoozedN),
+      h(
+        "span",
+        { class: "inbox-worth__desc" },
+        "Rows you hid until a moment you picked. They come back by themselves; End snooze brings one back now. Not counted.",
+      ),
+    ),
+    SNOOZED,
+  );
+  const snoozed = h(
+    "details",
+    {
+      class:
+        "kp-card ib-card inbox-worth kp-accordion__item kp-accordion__item--bare",
+    },
+    snoozedSummary,
+    snoozedStage,
+  );
+
   root.replaceChildren(
     head.el,
     ...(note ? [note.el] : []),
@@ -356,6 +439,7 @@ export function mount(root) {
     listCard,
     checks.el,
     bulk.el,
+    snoozed,
     worth,
   );
   cleanups.push(
@@ -377,7 +461,7 @@ export function mount(root) {
   // ---- one row ------------------------------------------------------------
   /**
    * A row's button or link, in its column.
-   * @param {{role: "open" | "act" | "seen", label: string, hint: string,
+   * @param {{role: "open" | "act" | "seen" | "snooze", label: string, hint: string,
    *   href?: string, primary?: boolean}} o
    */
   const rowButton = (o) => {
@@ -410,7 +494,7 @@ export function mount(root) {
    * @param {import("../inboxrows.js").Row} r
    * @returns {HTMLElement[]}
    */
-  const actsOf = (r) => {
+  const actsBase = (r) => {
     const kind = kindOf(r);
     const bad = r.severity === "bad";
     if (r.source === "asks") {
@@ -539,6 +623,96 @@ export function mount(root) {
       out.push(b);
     }
     return out;
+  };
+
+  /**
+   * A row's buttons and, for every row but a host question (it has its own
+   * clock), Snooze… (ask-kp11be-7).
+   * @param {import("../inboxrows.js").Row} r
+   * @returns {HTMLElement[]}
+   */
+  const actsOf = (r) => {
+    const out = actsBase(r);
+    if (r.source === "asks") return out;
+    const b = drivable(
+      rowButton({
+        role: "snooze",
+        label: "Snooze…",
+        hint: "Hide this row until a moment you pick; it comes back by itself, optionally with a reminder",
+      }),
+      SNOOZE_OPEN,
+      r.key,
+    );
+    b.addEventListener("click", () => openSnooze(r));
+    return [...out, b];
+  };
+
+  /**
+   * The snooze dialog: kp's snooze picker and the reminder tick.
+   * @param {import("../inboxrows.js").Row} r
+   */
+  const openSnooze = (r) => {
+    const picker = h("div", {
+      class: "kp-snooze ib-snooze",
+      "data-kp-snooze": "",
+      "data-kp-look": "chips",
+      "data-kp-snooze-choices": "1h 4h tonight tomorrow monday pick",
+      "data-kp-snooze-morning": "07:00",
+      "data-kp-snooze-max": SNOOZE_MAX,
+      "aria-label": `Snooze ${r.title}`,
+    });
+    const remindBox = h("input", {
+      class: "kp-switch__input",
+      type: "checkbox",
+      role: "switch",
+      checked: true,
+    });
+    remindBox.checked = true;
+    drivable(remindBox, SNOOZE_REMIND);
+    const err = h("div", { class: "ib-snooze__err" });
+    const d = openDialog({
+      title: "Snooze this row",
+      description: `${r.title}. It leaves the list and the counter until the moment you pick, then comes back by itself. Nothing about it is fixed or answered.`,
+      body: [
+        h(
+          "label",
+          { class: "kp-switch ib-snooze__remind" },
+          remindBox,
+          h("span", { class: "kp-switch__state", "aria-hidden": "true" }),
+          h("span", null, "Leave a reminder notice when it comes back"),
+        ),
+        picker,
+        err,
+      ],
+    });
+    attachSnoozes(d.dialog);
+    const mark = () => {
+      for (const b of /** @type {NodeListOf<HTMLElement>} */ (
+        picker.querySelectorAll(".kp-snooze__chip[data-value]")
+      ))
+        if (b.dataset.value) drivable(b, SNOOZE_FOR, b.dataset.value);
+      const apply = picker.querySelector(
+        ".kp-snooze__actions .kp-button--primary",
+      );
+      if (apply instanceof HTMLElement) drivable(apply, SNOOZE_FOR, "pick");
+    };
+    const watch = new MutationObserver(mark);
+    watch.observe(picker, { childList: true, subtree: true });
+    void d.closed.then(() => watch.disconnect());
+    mark();
+    picker.addEventListener(SNOOZE_EVENT, async (event) => {
+      const at = Date.parse(/** @type {CustomEvent} */ (event).detail.until);
+      setSnoozeBusy(picker, true);
+      const res = await snoozeRow(r, Math.round(at / 1000), remindBox.checked);
+      setSnoozeBusy(picker, false);
+      if (!res.ok) {
+        err.replaceChildren(
+          refusalCallout(res.error, "destructive", "Not snoozed"),
+        );
+        return;
+      }
+      d.close();
+    });
   };
 
   /** @param {HTMLElement} el */
@@ -1038,7 +1212,87 @@ export function mount(root) {
     checks.paint();
     bulk.paint();
   };
-  cleanups.push(onInbox(paintAll), onAct("notices", paintAll));
+  /** The Snoozed fold follows what the server holds. */
+  const paintSnoozed = () => {
+    const st = snoozeStatus();
+    if (st.state === "loading") {
+      setCardState(snoozedStage, "loading", { words: "Reading the snoozes" });
+      return;
+    }
+    if (st.state === "error") {
+      setCardState(snoozedStage, "error", {
+        title: "The snoozed rows could not be read",
+        text: st.why,
+      });
+      return;
+    }
+    const rows = snoozedNow();
+    snoozedN.textContent = ` · ${rows.length}`;
+    if (!rows.length) {
+      setCardState(snoozedStage, "empty", {
+        title: "Nothing is snoozed",
+        text: "Snooze… on a row hides it until a moment you pick; it shows here until then.",
+      });
+      snoozedList.replaceChildren();
+      return;
+    }
+    snoozedList.replaceChildren(
+      ...rows.map((e) => {
+        const end = drivable(
+          h(
+            "button",
+            {
+              type: "button",
+              class: "kp-button kp-button--sm",
+              title: "Bring this row back into the list now",
+              "data-kp-action": "act",
+            },
+            "End snooze",
+          ),
+          SNOOZE_END,
+          e.key,
+        );
+        end.addEventListener("click", () => {
+          end.setAttribute("disabled", "");
+          void endSnooze(e.key).then((res) => {
+            if (!res.ok) {
+              end.removeAttribute("disabled");
+              end.after(refusalCallout(res.error, "destructive", "Not ended"));
+            }
+          });
+        });
+        return h(
+          "li",
+          { "data-key": e.key, "data-kp-state": "new" },
+          h(
+            "div",
+            { class: "kp-action-list__main" },
+            h("strong", { class: "kp-action-list__title" }, e.title),
+            h(
+              "span",
+              { class: "kp-action-list__text" },
+              `Comes back ${formatDateTime(e.until)}${e.remind ? ", with a reminder notice" : ""}.`,
+            ),
+          ),
+          h("div", { class: "kp-row-actions" }, end),
+        );
+      }),
+    );
+    setCardState(snoozedStage, "ready");
+  };
+  snoozedStage.addEventListener("kp-card-retry", () => {
+    setCardState(snoozedStage, "loading", { words: "Reading the snoozes" });
+    void readSnoozes().catch(() => {});
+  });
+  cleanups.push(
+    onInbox(() => {
+      paintAll();
+      paintSnoozed();
+    }),
+    onSnoozeStatus(paintSnoozed),
+    onAct("notices", paintAll),
+  );
+  paintSnoozed();
   // Open questions count down: their rows and cards follow the clock.
   const clock = window.setInterval(() => {
     if (current().asks.length) paintList();

@@ -22,6 +22,7 @@ pub mod queryflag;
 pub mod releases;
 pub mod retired;
 pub mod routes;
+pub mod rowsnooze;
 pub mod scheduler;
 pub mod secrets;
 pub mod slow;

@@ -56,6 +56,8 @@ pub enum Kind {
     Down,
     /// … and answer again.
     Up,
+    /// ask-kp11be-7: a row someone snoozed with "remind me" is due again.
+    Reminder,
 }
 
 /// How bad a notice is, worst first (the digest's order).
@@ -535,6 +537,10 @@ pub fn draft_urgency(d: &Draft) -> homelab_core::notify::Urgency {
         Kind::Down | Kind::Up => urgency(&Event::Alert {
             alertname: homelab_core::notify::SERVICE_DOWN_ALERTS[0],
         }),
+        Kind::Reminder => Urgency {
+            urgent: false,
+            why: "not pushed: it only brings a row you snoozed back",
+        },
         Kind::HostEvent | Kind::FleetCheck | Kind::Alert | Kind::AlertResolved => Urgency {
             urgent: false,
             why: "pushed at its source",
@@ -785,6 +791,7 @@ pub fn push_payload(d: &Draft, version: &str, base_url: &str) -> String {
         Kind::AlertResolved => "alert-resolved",
         Kind::Down => "down",
         Kind::Up => "up",
+        Kind::Reminder => "reminder",
     };
     let ok = matches!(d.kind, Kind::ActionDone | Kind::ActionDeferred | Kind::Up);
     let short =

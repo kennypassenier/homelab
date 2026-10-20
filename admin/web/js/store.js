@@ -131,6 +131,8 @@ export const ACT_EVENTS = /** @type {const} */ ([
   "notification",
   "notifications_read",
   "notify_settings",
+  // ask-kp11be-7: a row was snoozed or its snooze ended.
+  "inbox_snoozes",
   "schedules",
   "resync",
   // Milestone edit: the working copy moved, host.toml was written.

@@ -12,6 +12,13 @@ import { IMPORT_FIELDS, importBody, importErrors } from "./editforms.js";
 import { editField, markErrors, openPlanDialog } from "./editui.js";
 import { commitBody } from "./plan.js";
 import { stackHref } from "./router.js";
+import {
+  FILE_EVENT,
+  REMOVE_EVENT,
+  attachUploads,
+  setDone,
+  setError,
+} from "/static/kp/js/upload.js";
 
 /**
  * Open the import dialog.
@@ -22,25 +29,64 @@ export async function openImport(navigate) {
   const values = { bundle: "", name: "", vmid: "" };
   /** @type {Map<string, HTMLElement>} */
   const inputs = new Map();
+  // kp's upload zone: choose or drop one bundle; the file is read here in the
+  // browser (never sent anywhere but the plan), refusals say why on the row.
   const file = h("input", {
     type: "file",
-    class: "kp-field__input",
+    class: "kp-sr-only",
     id: "import-file",
     accept: ".yml,.yaml,text/yaml,application/yaml",
+    "data-kp-upload-input": "",
   });
+  const drop = h(
+    "div",
+    {
+      class: "kp-upload",
+      "data-kp-upload": "",
+      "data-kp-max-bytes": String(1024 * 1024),
+      "data-kp-max-files": "1",
+    },
+    file,
+    h(
+      "label",
+      {
+        class: "kp-upload__zone",
+        for: "import-file",
+        "data-kp-upload-zone": "",
+      },
+      "Drop a bundle (.yml) here or choose it. The file is read in this browser; its text appears below.",
+    ),
+    h("ul", { class: "kp-upload__list", "data-kp-upload-list": "" }),
+  );
   const fields = IMPORT_FIELDS.map((f) => {
     const x = editField(f, "", (v) => (values[f.name] = v));
     inputs.set(f.name, x.input);
     return x.wrap;
   });
-  file.addEventListener("change", async () => {
-    const f = file.files?.[0];
-    if (!f) return;
-    const text = await f.text();
-    const el = /** @type {HTMLTextAreaElement} */ (inputs.get("bundle"));
+  const bundleEl = () =>
+    /** @type {HTMLTextAreaElement} */ (inputs.get("bundle"));
+  const setBundle = (/** @type {string} */ text) => {
+    const el = bundleEl();
     el.value = text;
     el.dispatchEvent(new Event("input", { bubbles: true }));
     el.dispatchEvent(new Event("change", { bubbles: true }));
+  };
+  let fromFile = false;
+  drop.addEventListener(FILE_EVENT, async (e) => {
+    const { file: f, item } = /** @type {CustomEvent} */ (e).detail;
+    try {
+      const text = await f.text();
+      setBundle(text);
+      fromFile = true;
+      setDone(item, "Read; review the text below.");
+    } catch {
+      setError(item, "This browser could not read the file.");
+    }
+  });
+  drop.addEventListener(REMOVE_EVENT, () => {
+    // Taking the file away takes its text away, but never text typed by hand.
+    if (fromFile) setBundle("");
+    fromFile = false;
   });
   const review = h(
     "button",
@@ -60,12 +106,8 @@ export async function openImport(navigate) {
       h(
         "div",
         { class: "kp-field" },
-        h(
-          "label",
-          { class: "kp-field__label", for: "import-file" },
-          "Upload a bundle",
-        ),
-        file,
+        h("span", { class: "kp-field__label" }, "Upload a bundle"),
+        drop,
       ),
       ...fields,
       note,
@@ -75,6 +117,7 @@ export async function openImport(navigate) {
     wide: true,
   });
   d.dialog.dataset.form = "import";
+  const detachUpload = attachUploads(d.dialog);
   /** @type {{names: string[], vmids: number[]}} */
   let taken = { names: [], vmids: [] };
   void fetchJson("/data/presets", "the taken names and numbers").then((r) => {
@@ -115,6 +158,9 @@ export async function openImport(navigate) {
     review: () => review,
     close: () => d.close(),
   });
-  d.closed.then(unregister);
+  d.closed.then(() => {
+    unregister();
+    detachUpload();
+  });
   return d;
 }

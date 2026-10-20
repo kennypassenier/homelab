@@ -31,18 +31,6 @@ import { formatDateTime, humanDuration } from "./format.js";
  * @typedef {import("./format.js").TimeOptions} TimeOptions
  */
 
-/** How long a snooze can be picked for, in minutes (the server takes 0 to 10080). */
-export const SNOOZE_CHOICES = /** @type {const} */ ([
-  { minutes: 15, label: "15 minutes" },
-  { minutes: 30, label: "30 minutes" },
-  { minutes: 60, label: "1 hour" },
-  { minutes: 120, label: "2 hours" },
-  { minutes: 240, label: "4 hours" },
-  { minutes: 480, label: "8 hours" },
-  { minutes: 1440, label: "1 day" },
-  { minutes: 10080, label: "1 week" },
-]);
-
 /** @type {Record<NoticeKind, {label: string, tone: "ok" | "warn" | "bad" | "info"}>} */
 const KINDS = {
   action_done: { label: "action done", tone: "ok" },
@@ -58,10 +46,6 @@ const KINDS = {
 
 /** @param {NoticeKind} k */
 export const kindBadge = (k) => KINDS[k] ?? { label: String(k), tone: "info" };
-
-/** The kind column's sort order. */
-export const KIND_ORDER =
-  "alert,incident,action failed,nightly check,schedule missed,host,action deferred,alert resolved,action done";
 
 /** @type {Record<NoticeLevel, {label: string, tone: "ok" | "warn" | "bad" | "info"}>} */
 const LEVELS = {
@@ -82,9 +66,6 @@ export function levelBadge(n) {
     return LEVELS.warning;
   return LEVELS[l] ?? LEVELS.info;
 }
-
-/** The level column's sort order, worst first. */
-export const LEVEL_ORDER = "urgent,warning,info,ok";
 
 /**
  * A Fix button's words.

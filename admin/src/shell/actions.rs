@@ -2841,6 +2841,10 @@ pub fn mount(
     // replace-kuma: the minute watch, and what it holds for the start page.
     let shared_for_watch = shared.clone();
     let watched: super::watch::Watched = Default::default();
+    // ask-kp11be-2: the capped watch/ping history survives a restart.
+    if let Ok(mut w) = watched.try_lock() {
+        super::watch::load_history(&mut w, cfg.uptime_file(), clock().max(0));
+    }
     app.dashboard_routes(super::watch::router(watched.clone()));
     let actions = Actions::start(ActionsDeps {
         host: host.clone(),

@@ -42,5 +42,6 @@ pub mod textdiff;
 pub mod topology;
 pub mod trend;
 pub mod updateflow;
+pub mod uptime;
 pub mod watch;
 pub mod yamledit;

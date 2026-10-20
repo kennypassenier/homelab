@@ -13,6 +13,7 @@
 //! as one with no reading.
 
 use std::collections::{BTreeMap, HashSet};
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -20,8 +21,10 @@ use tokio::sync::Mutex;
 
 use super::actions::{Actions, Clock, HostPort, JobState};
 use super::actions_notify::NotifyCenter;
+use super::actions_state::{read_json, write_json};
 use super::host_link::Shared;
 use crate::core::notify::{Detail, Draft, Kind, Level};
+use crate::core::uptime::{self, Sample, Store};
 use crate::core::watch::{Change, DOWN_AFTER_S, Seen, Target, step, step_deploying, view};
 
 /// Fallback cadence, unless the host's `watch_interval_s` says otherwise
@@ -64,6 +67,74 @@ struct TilesAnswer {
 pub struct WatchState {
     pub targets: Vec<Target>,
     pub seen: BTreeMap<String, Seen>,
+    /// ask-kp11be-2: what every round measured, as capped hourly cells
+    /// (`core::uptime`), loaded from and flushed to `history_file`.
+    pub history: Store,
+    /// Not yet on disk.
+    pub history_dirty: bool,
+    pub history_file: Option<PathBuf>,
+    /// When the host was last pinged for the history (unix seconds).
+    pub last_ping_at: i64,
+}
+
+/// How often the history reaches the disk. A power cut loses at most this
+/// much of it (the write itself is temp + fsync + rename, never half a file).
+pub const FLUSH_EVERY: Duration = Duration::from_secs(600);
+
+/// How often the host is pinged for the Host page's reachability history.
+pub const PING_EVERY_S: i64 = 60;
+
+/// Load the history from `file` into `w` (before the watch is shared). A
+/// file that does not read is set aside as `.bad` and the history starts
+/// empty: it is a measurement log, losing it must not stop the dashboard.
+pub fn load_history(w: &mut WatchState, file: PathBuf, now: i64) {
+    match read_json::<Store>(&file) {
+        Ok(Some(mut s)) => {
+            s.trim(now);
+            w.history = s;
+        }
+        Ok(None) => {}
+        Err(e) => {
+            tracing::warn!("uptime history not read, starting empty: {e}");
+            let _ = std::fs::rename(&file, file.with_extension("json.bad"));
+        }
+    }
+    w.history_file = Some(file);
+}
+
+/// Write the history if it changed since the last write.
+pub async fn flush_history(w: &Watched) {
+    let (file, store) = {
+        let mut s = w.lock().await;
+        if !s.history_dirty {
+            return;
+        }
+        let Some(f) = s.history_file.clone() else {
+            return;
+        };
+        s.history_dirty = false;
+        (f, s.history.clone())
+    };
+    let mut store = store;
+    store.schema_version = 1;
+    if let Err(e) = tokio::task::spawn_blocking(move || write_json(&file, &store))
+        .await
+        .map_err(|e| e.to_string())
+        .and_then(|r| r.map_err(|e| e.to_string()))
+    {
+        tracing::warn!("uptime history not written: {e}");
+        w.lock().await.history_dirty = true;
+    }
+}
+
+#[derive(serde::Deserialize)]
+struct UptimeQuery {
+    #[serde(default)]
+    hours: Option<i64>,
+    #[serde(default)]
+    bucket_s: Option<i64>,
+    #[serde(default)]
+    offset_s: Option<i64>,
 }
 
 pub type Watched = Arc<Mutex<WatchState>>;
@@ -81,6 +152,29 @@ pub fn router(w: Watched) -> axum::Router {
             axum::routing::get(
                 |axum::extract::State(w): axum::extract::State<Watched>| async move {
                     axum::Json(serde_json::json!({ "targets": snapshot(&w).await }))
+                },
+            ),
+        )
+        // ask-kp11be-2: the capped history behind the Apps uptime strips and
+        // the Host page's reachability. `hours` up to 90 days, `bucket_s`
+        // a multiple of an hour, `offset_s` the reader's UTC offset.
+        .route(
+            "/data/uptime",
+            axum::routing::get(
+                |axum::extract::State(w): axum::extract::State<Watched>,
+                 axum::extract::Query(q): axum::extract::Query<UptimeQuery>| async move {
+                    let now = std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .map(|d| d.as_secs() as i64)
+                        .unwrap_or(0);
+                    let s = w.lock().await;
+                    axum::Json(uptime::view(
+                        &s.history,
+                        now,
+                        q.hours.unwrap_or(24 * 90),
+                        q.bucket_s.unwrap_or(86_400),
+                        q.offset_s.unwrap_or(0).clamp(-14 * 3600, 14 * 3600),
+                    ))
                 },
             ),
         )
@@ -136,6 +230,15 @@ pub fn spawn(
     actions: Actions,
     clock: Clock,
 ) {
+    let flusher = watched.clone();
+    tokio::spawn(async move {
+        let mut t = tokio::time::interval(FLUSH_EVERY);
+        t.tick().await;
+        loop {
+            t.tick().await;
+            flush_history(&flusher).await;
+        }
+    });
     tokio::spawn(async move {
         // The loop ticks at the smallest interval a tile may ask for
         // (`watch_every >= 10`); each tile and the fleet default decide for
@@ -335,6 +438,20 @@ pub async fn round(
         }
     }
 
+    // ask-kp11be-2: one timed ping a minute feeds the Host page's
+    // reachability history (the Ping command is the cheapest host read).
+    let ping_due = link_error.is_none() && now - watched.lock().await.last_ping_at >= PING_EVERY_S;
+    let ping = if ping_due {
+        let t = std::time::Instant::now();
+        let r = host
+            .ask_traced(homelab_proto::Command::Ping, Duration::from_secs(15), None)
+            .await;
+        let ms = t.elapsed().as_millis() as u64;
+        Some((now, r.ok().filter(|r| r.ok).map(|_| ms)))
+    } else {
+        None
+    };
+
     let mut news = Vec::new();
     {
         let mut w = watched.lock().await;
@@ -348,17 +465,39 @@ pub async fn round(
             let keep: Vec<String> = readings.iter().map(|(t, _)| t.key.clone()).collect();
             w.seen.retain(|k, _| keep.contains(k));
         }
+        let w = &mut *w;
         for (target, outcome) in &readings {
             let seen = w.seen.entry(target.key.clone()).or_default();
             match outcome {
                 Probe::TooSoon => {}
-                Probe::Deploying => step_deploying(seen, now),
+                Probe::Deploying => {
+                    step_deploying(seen, now);
+                    w.history.record(&target.key, now, Sample::Deploying);
+                    w.history_dirty = true;
+                }
                 Probe::Answer(answer, down_after_s) => {
+                    // The history counts every lost reading, not only the
+                    // ones that outlast the five minutes before a Down notice.
+                    w.history.record(
+                        &target.key,
+                        now,
+                        if answer.is_ok() {
+                            Sample::Up
+                        } else {
+                            Sample::Down
+                        },
+                    );
+                    w.history_dirty = true;
                     if let Some(c) = step(seen, now, answer.clone(), *down_after_s) {
                         news.push((target.clone(), c));
                     }
                 }
             }
+        }
+        if let Some((at, ms)) = ping {
+            w.history.record_ping("ping:host", at, ms);
+            w.last_ping_at = at;
+            w.history_dirty = true;
         }
         w.targets = readings.into_iter().map(|(t, _)| t).collect();
     }

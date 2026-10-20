@@ -422,6 +422,10 @@ impl ActConfig {
     pub fn schedules_file(&self) -> PathBuf {
         self.data_dir.join("schedules.json")
     }
+    /// ask-kp11be-2: the capped hourly watch/ping history (`core::uptime`).
+    pub fn uptime_file(&self) -> PathBuf {
+        self.data_dir.join("uptime-history.json")
+    }
     pub fn notify_file(&self) -> PathBuf {
         self.data_dir.join("notifications.json")
     }

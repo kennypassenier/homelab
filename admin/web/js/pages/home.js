@@ -50,6 +50,8 @@ import {
   setFacetValues,
 } from "/static/kp/js/facets.js";
 import { attachHoverCards } from "/static/kp/js/hovercard.js";
+import { attachUptimes, setUptime } from "/static/kp/js/uptime.js";
+import { periodsOf, shareText, tileKey, uptimeQuery } from "../uptimeview.js";
 import { attachMenuButtons } from "/static/kp/js/menu-button.js";
 
 /**
@@ -191,6 +193,12 @@ export function mount(root) {
   let watch = new Map();
   /** @type {string | null} why the tiles could not be read */
   let failed = null;
+  /**
+   * The 90-day history (`/data/uptime`): null while it is read, a string
+   * when it could not be, else the server's keys.
+   * @type {Map<string, {periods?: any[], uptime?: number | null}> | string | null}
+   */
+  let uptimeHist = null;
   let q = new URLSearchParams(location.search).get("q") ?? "";
   /** @type {string[] | null} the states kept; null: all */
   let kept = null;
@@ -339,6 +347,36 @@ export function mount(root) {
             : `answers${st.checkedAt ? `, checked ${formatDateTime(st.checkedAt)}` : ""}`;
     const row = (/** @type {string} */ k, /** @type {string} */ v) =>
       h("div", { class: "kp-kv__row" }, h("dt", null, k), h("dd", null, v));
+    // ask-kp11be-2: the 90 days this app answered, one cell a day.
+    const strip = h("div", {
+      class: "kp-uptime ap-hover__uptime",
+      "data-kp-uptime": "",
+      "data-kp-uptime-count": "90",
+      "data-kp-uptime-fit": "scroll",
+    });
+    const entry =
+      uptimeHist instanceof Map
+        ? uptimeHist.get(tileKey(uptimeHist, t))
+        : undefined;
+    setUptime(strip, {
+      label: "Answered, last 90 days",
+      state:
+        uptimeHist === null
+          ? "loading"
+          : typeof uptimeHist === "string"
+            ? "error"
+            : entry?.periods?.some((p) => p.state !== "none")
+              ? "ready"
+              : "empty",
+      periods: periodsOf(entry, "day"),
+      from: "90 days ago",
+      to: "Today",
+      count: 90,
+      open: "info",
+      ...(typeof uptimeHist === "string" ? { text: uptimeHist } : {}),
+      message: "No reading yet: the watch has not measured this app.",
+    });
+    queueMicrotask(() => attachUptimes(strip));
     return h(
       "div",
       { class: "ap-hover" },
@@ -357,7 +395,9 @@ export function mount(root) {
               ),
             ]
           : []),
+        row("Last 90 days", shareText(entry?.uptime, "90 days")),
       ),
+      strip,
     );
   };
   const detachHover = attachHoverCards(root, { fill });
@@ -725,6 +765,19 @@ export function mount(root) {
     }
   });
 
+  /** The capped 90-day history behind the hover card's strip. */
+  const readHistory = async () => {
+    const r = await fetchJson(
+      `/data/uptime?${uptimeQuery("day", Math.floor(Date.now() / 1000))}`,
+      "the uptime history",
+      abort.signal,
+    );
+    if (abort.signal.aborted) return;
+    uptimeHist = r.ok
+      ? new Map(Object.entries(r.body.keys ?? {}))
+      : `${r.error.what}: ${r.error.why}`;
+  };
+
   /** @returns {Promise<boolean>} whether the watch could be read */
   const readWatch = async () => {
     const w = await fetchJson("/data/watch", "the watch", abort.signal);
@@ -741,6 +794,7 @@ export function mount(root) {
     const targets = w.body.targets ?? [];
     watch = new Map(targets.map((x) => [x.key, x]));
     paint();
+    void readHistory().catch(() => {});
     return true;
   };
   const load = async () => {

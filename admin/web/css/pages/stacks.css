@@ -561,3 +561,7 @@ dialog.kp-drawer.sk-drawer--plan {
   gap: var(--kp-space-xs, 0.25rem);
   min-inline-size: 14rem;
 }
+/* The 90-day strip in the hover card: one cell a day, scrolling when narrow. */
+.ap-hover__uptime {
+  min-inline-size: min(26rem, 80vw);
+}

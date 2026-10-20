@@ -585,6 +585,91 @@ async fn fleet_cpu(State(c): State<ReadCtx>) -> Response {
     .into_response()
 }
 
+/// ask-kp11be-2 (SMART history): every drive's SMART state per day (or hour)
+/// over up to 90 days, read from Prometheus on request. Prometheus is the
+/// store, so its own retention is the cap; the window and step are clamped
+/// here (at most 2160 hourly points per drive).
+#[derive(Deserialize)]
+struct DriveHistoryQuery {
+    #[serde(default)]
+    hours: Option<u64>,
+    #[serde(default)]
+    bucket_s: Option<u64>,
+    #[serde(default)]
+    offset_s: Option<i64>,
+}
+
+async fn drive_history(State(c): State<ReadCtx>, Query(q): Query<DriveHistoryQuery>) -> Response {
+    let Some(prom) = &c.prometheus else {
+        return refused(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "the drives' SMART history",
+            "no Prometheus is configured for this dashboard",
+            "set admin.prometheus_url (or HOMELAB_ADMIN_PROMETHEUS_URL) to Prometheus's address",
+        );
+    };
+    let hours = q.hours.unwrap_or(24 * 90).clamp(1, 24 * 90);
+    let bucket = (q.bucket_s.unwrap_or(86_400).max(3600) / 3600) * 3600;
+    let offset = q.offset_s.unwrap_or(0).clamp(-14 * 3600, 14 * 3600);
+    let end = now_s();
+    let start = end.saturating_sub(hours * 3600);
+    let series = match prom
+        .range(
+            "min by (device) (min_over_time(smart_device_health_ok[1h]))",
+            start,
+            end,
+            3600,
+            Some("device"),
+        )
+        .await
+    {
+        Ok(s) => s,
+        Err(e) => {
+            return refused(
+                StatusCode::BAD_GATEWAY,
+                "the drives' SMART history",
+                &e,
+                "check that Prometheus answers queries from this dashboard",
+            );
+        }
+    };
+    let b = bucket as i64;
+    let first = (start as i64 + offset).div_euclid(b) * b;
+    let last = (end as i64 + offset).div_euclid(b) * b;
+    let mut drives = serde_json::Map::new();
+    for s in series {
+        let Some(name) = s["label"].as_str().filter(|l| !l.is_empty()) else {
+            continue;
+        };
+        let pts: Vec<(i64, f64)> = s["points"]
+            .as_array()
+            .map(|a| {
+                a.iter()
+                    .filter_map(|p| Some((p[0].as_f64()? as i64, p[1].as_f64()?)))
+                    .collect()
+            })
+            .unwrap_or_default();
+        let mut periods = Vec::new();
+        let mut at = first;
+        while at <= last {
+            let (lo, hi) = (at - offset, at - offset + b);
+            let inside: Vec<&(i64, f64)> = pts.iter().filter(|p| p.0 >= lo && p.0 < hi).collect();
+            let bad = inside.iter().filter(|p| p.1 < 1.0).count();
+            periods.push(serde_json::json!({
+                "start": lo,
+                "state": if inside.is_empty() { "none" } else if bad > 0 { "down" } else { "up" },
+                "readings": inside.len(),
+                "not_ok": bad,
+            }));
+            at += b;
+        }
+        drives.insert(name.to_string(), serde_json::json!({ "periods": periods }));
+    }
+    Json(serde_json::json!({
+        "drives": drives, "hours": hours, "bucket_s": bucket, "measured_at": end,
+    }))
+    .into_response()
+}
 /// feat-overview-12 (disk-growth prediction): every stack's root disk, and
 /// every filesystem of the hypervisor, fitted over `range` (default 7d) and
 /// warned about within `within_days` (default
@@ -775,6 +860,7 @@ pub fn read_router(ctx: ReadCtx) -> Router {
         .route("/data/disk-growth", get(disk_growth))
         .route("/data/fleet-traffic", get(fleet_traffic))
         .route("/data/fleet-cpu", get(fleet_cpu))
+        .route("/data/drive-history", get(drive_history))
         .with_state(ctx)
 }
 

@@ -116,6 +116,7 @@ import {
 import { gridRow, formGrid } from "../gridrow.js";
 import { attachBarCells, setBarCell } from "/static/kp/js/barcell.js";
 import { attachUptimes, setUptime } from "/static/kp/js/uptime.js";
+import { periodsOf, uptimeQuery } from "../uptimeview.js";
 
 const RANGES = /** @type {const} */ (["1h", "6h", "24h", "7d", "30d"]);
 const TABS = /** @type {const} */ (["system", "traffic"]);
@@ -1650,9 +1651,59 @@ export function mount(root, ctx) {
       /** @type {string} */
       let names = "";
       const handle = () => tableOf(wrap);
+      /**
+       * The 90-day SMART history (`/data/drive-history`): null while it is
+       * read, a string when it could not be, else the server's drives.
+       * @type {Record<string, {periods: any[]}> | string | null}
+       */
+      let smart90 = null;
+      /** Draw every drive's 90-day line from what was read. */
+      const fillSmart90 = () => {
+        for (const strip of /** @type {NodeListOf<HTMLElement>} */ (
+          tbody.querySelectorAll("[data-mk-smart90]")
+        )) {
+          const name = strip.dataset.mkSmart90 ?? "";
+          const entry =
+            typeof smart90 === "object" ? smart90?.[name] : undefined;
+          const periods = periodsOf(entry, "day", "SMART ok in");
+          setUptime(strip, {
+            label: `${name} SMART, last 90 days`,
+            periods,
+            from: "90 days ago",
+            to: "Today",
+            count: 90,
+            open: "info",
+            state:
+              smart90 === null
+                ? "loading"
+                : typeof smart90 === "string"
+                  ? "error"
+                  : periods.some((p) => p.state !== "none")
+                    ? "ready"
+                    : "empty",
+            ...(typeof smart90 === "string" ? { text: smart90 } : {}),
+            message: "No SMART reading kept for this drive yet.",
+          });
+        }
+      };
+      const loadSmart90 = async () => {
+        smart90 = null;
+        fillSmart90();
+        const r = await fetchJson(
+          `/data/drive-history?${uptimeQuery("day", Math.floor(Date.now() / 1000))}`,
+          "the drives' SMART history",
+          abort.signal,
+        );
+        if (abort.signal.aborted) return;
+        smart90 = r.ok
+          ? (r.body.drives ?? {})
+          : `${r.error.what}: ${r.error.why}`;
+        fillSmart90();
+      };
       return {
         init() {
           handle()?.state("loading");
+          void loadSmart90().catch(() => {});
         },
         /** @param {string} why */
         notRead(why) {
@@ -1678,6 +1729,7 @@ export function mount(root, ctx) {
             queueMicrotask(() => attachPageCharts(tbody));
           }
           for (const d of list) fillDrive(d);
+          if (rebuild) fillSmart90();
           const t = handle();
           t?.state("ready");
           t?.refresh();
@@ -1740,6 +1792,14 @@ export function mount(root, ctx) {
                 class: "kp-uptime",
                 "data-kp-uptime": "",
                 "data-mk-health": d.name,
+              }),
+              // ask-kp11be-2: the same drive over 90 days, one cell a day.
+              h("div", {
+                class: "kp-uptime",
+                "data-kp-uptime": "",
+                "data-kp-uptime-count": "90",
+                "data-kp-uptime-fit": "scroll",
+                "data-mk-smart90": d.name,
               }),
               h(
                 "div",

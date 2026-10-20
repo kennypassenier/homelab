@@ -34,6 +34,33 @@
 .nr-snooze {
   justify-self: stretch;
 }
+/* Every control fills its track, so the controls of the card end on one edge. */
+.nr-card
+  .kp-formgrid__control
+  > :is(.kp-time, .kp-segmented, .kp-switch, .kp-snooze) {
+  inline-size: 100%;
+  box-sizing: border-box;
+}
+.nr-card .kp-formgrid__control > .kp-segmented {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: 1fr;
+}
+.nr-card .kp-formgrid__control > .kp-time > .kp-time__control {
+  display: flex;
+  inline-size: 100%;
+}
+.nr-card .kp-formgrid__control > .kp-time .kp-time__input {
+  flex: 1 1 0;
+  min-inline-size: 0;
+}
+.nr-card .kp-formgrid__control > .kp-switch {
+  display: flex;
+}
+/* The label of the test row stands on the first line of its note, not on the middle of it. */
+.nr-card #nr-test-l {
+  align-self: start;
+}
 .nr-col-btn {
   min-inline-size: 11rem;
   justify-content: center;

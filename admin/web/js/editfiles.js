@@ -85,6 +85,7 @@ export function filesCard(stack, e, reload, pending) {
     const li = h(
       "li",
       {
+        class: "edit-files__row",
         role: "option",
         "data-kp-pane-key": f,
         "data-kp-name": f,

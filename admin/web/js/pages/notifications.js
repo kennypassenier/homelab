@@ -531,7 +531,7 @@ export function mount(root) {
             [],
             [
               hint(
-                "Sends one push to your phone now, through the same route real notices use, to show that pushes arrive. It goes out even while pushes are off or held, and it is not kept in the Inbox.",
+                "Sends one push to your phone now, to show that pushes arrive. It goes out even while pushes are off or held; the Inbox does not keep it.",
               ),
             ],
             [testPush],

@@ -170,7 +170,7 @@ export async function openRollback(stack) {
         ? "No working copy yet"
         : "No commits to go back to",
     });
-  deployChosen.disabled = !v.commits.length;
+  deployChosen.hidden = !v.commits.length;
   setCardState(waiting, "ready");
   d.closed.then(() => {
     detach();

@@ -480,15 +480,25 @@ test("the plan reads as files, effects and whether it may go", () => {
     restarts_dashboard: false,
   };
   const v = planView(plan);
+  const hunk = /** @type {any[]} */ (v.files[0].hunks)[0];
   assert.deepEqual(
-    v.files[0].hunks[0].lines.map((l) => [l.kind, l.no]),
+    hunk.lines.map((/** @type {any} */ l) => [l.kind, l.no]),
     [
       ["same", 33],
       ["removed", 34],
       ["added", 34],
     ],
   );
-  assert.equal(v.files[0].hunks[0].head, "@@ −33,2 +33,2 @@");
+  assert.deepEqual(
+    [
+      v.files[0].status,
+      v.files[0].added,
+      v.files[0].removed,
+      hunk.oldStart,
+      hunk.newLen,
+    ],
+    ["modified", 1, 1, 33, 2],
+  );
   assert.equal(v.effects[0].what, "Resize applies it");
   assert.equal(v.effects[0].by, "by resize");
   assert.match(v.applied, /change 1 file/);

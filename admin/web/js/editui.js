@@ -16,6 +16,7 @@ import { driven, register } from "./drivehooks.js";
 import { h } from "./dom.js";
 import { mountJobPanel } from "./jobpanel.js";
 import { commitBody, committedText, planView } from "./plan.js";
+import { attachDiffs, setDiff } from "/static/kp/js/diff.js";
 import { clearError, showError } from "/static/kp/js/forms.js";
 import {
   BEFORE_STEP_EVENT,
@@ -207,72 +208,24 @@ export function planBlock(plan) {
 }
 
 /**
- * The files' diffs, one `details` each, open unless `opts.open` is false
- * (the Update flow folds them, review item 7).
+ * The files' diffs as kp's diff component: a header per file (status, path,
+ * +N −M, Copy path), unchanged lines folded, the changed words marked. Open
+ * unless `opts.open` is false (the Update flow folds them, review item 7).
  * @param {ReturnType<typeof import("./plan.js").fileViews>} files
  * @param {{open: boolean}} [opts]
  * @returns {HTMLElement[]}
  */
 export function diffBlocks(files, opts = { open: true }) {
-  /** @type {HTMLElement[]} */
-  const out = [];
-  for (const f of files) {
-    // kp-themes' diff component [TH54]: a `<pre class="kp-diff">` of
-    // `.kp-diff__line[data-kind]` lines, each a number, a sign (its own
-    // column, so the change survives without colour) and the text. A hunk
-    // opens with kp's `.kp-diff__hunk` row: the `@@ … @@` range, then the
-    // place it sits in as `.kp-diff__hunk-context`.
-    const table = h("pre", {
-      class: "kp-diff",
-      "aria-label": `Changes in ${f.path}`,
-    });
-    for (const hk of f.hunks) {
-      const [, range = hk.head, context = ""] =
-        /^(@@[^@]*@@)\s*(.*)$/.exec(hk.head) ?? [];
-      table.append(
-        h(
-          "div",
-          { class: "kp-diff__hunk" },
-          context ? `${range} ` : range,
-          ...(context
-            ? [h("span", { class: "kp-diff__hunk-context" }, context)]
-            : []),
-        ),
-      );
-      for (const l of hk.lines)
-        table.append(
-          h(
-            "span",
-            { class: "kp-diff__line", "data-kind": l.kind },
-            h(
-              "span",
-              { class: "kp-diff__number" },
-              l.no == null ? "" : String(l.no),
-            ),
-            h("span", { class: "kp-diff__sign" }, l.mark),
-            h("span", null, l.text),
-          ),
-        );
-    }
-    out.push(
-      h(
-        "details",
-        {
-          class: "plan-file kp-accordion__item kp-accordion__item--bare",
-          ...(opts.open ? { open: "" } : {}),
-        },
-        h(
-          "summary",
-          null,
-          badge(f.badge),
-          " ",
-          h("span", { class: "mono" }, f.title),
-        ),
-        table,
-      ),
-    );
-  }
-  return out;
+  if (!files.length) return [];
+  const root = h("div", {
+    class: "kp-diffview",
+    "data-kp-diffview": "",
+    "data-kp-diff-open": opts.open ? "all" : "none",
+    "data-kp-diff-label": "Changes to the files",
+  });
+  attachDiffs(root);
+  setDiff(root, files);
+  return [root];
 }
 
 /**

@@ -934,10 +934,6 @@ tr.unread td:first-child {
   font-size: 0.85rem;
   margin: 0.25rem 0 0;
 }
-.plan-file summary {
-  cursor: pointer;
-  overflow-wrap: anywhere;
-}
 tr.rule-new td {
   font-style: italic;
 }

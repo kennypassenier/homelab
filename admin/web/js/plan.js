@@ -21,28 +21,26 @@
  */
 
 /**
- * Each file's diff as the page draws it (the edit plan, the Deploy review
- * and Overview's "Apply the whole fleet" section share it).
+ * Each file's diff as kp's diff component takes it (`setDiff`): the edit
+ * plan, the Deploy review and Overview's "Apply the whole fleet" section
+ * share it. The component draws the header (status, path, +N −M), folds
+ * the unchanged lines and marks the changed words.
  * @param {FileDiff[]} list
+ * @returns {import("/static/kp/js/diff.js").DiffFile[]}
  */
 export function fileViews(list) {
   return list.map((f) => ({
     path: f.path,
-    // Review item 7: the status is the badge's word; the title does not
-    // say it a second time ("changed … changed").
-    title: `${f.path} · +${f.added} −${f.removed}`,
-    badge: {
-      label: f.status,
-      tone:
-        f.status === "removed" ? "bad" : f.status === "added" ? "ok" : "info",
-    },
+    status: f.status === "changed" ? "modified" : f.status,
+    added: f.added,
+    removed: f.removed,
     hunks: f.hunks.map((h) => ({
-      head: `@@ −${h.old_start},${h.old_len} +${h.new_start},${h.new_len} @@`,
+      oldStart: h.old_start,
+      oldLen: h.old_len,
+      newStart: h.new_start,
+      newLen: h.new_len,
       lines: h.lines.map((l) => ({
-        // kp-themes' diff component (`.kp-diff__line[data-kind]`): "added",
-        // "removed", or "same" for a context line.
         kind: l.op === "+" ? "added" : l.op === "-" ? "removed" : "same",
-        mark: l.op === "=" ? " " : l.op,
         no: l.op === "+" ? l.new : l.old,
         text: l.text,
       })),

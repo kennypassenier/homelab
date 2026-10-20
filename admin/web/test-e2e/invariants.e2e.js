@@ -8195,7 +8195,7 @@ test("invariants: Deploy all changes keeps a stack's diff inside its table (feat
     const more = page.locator("#ap-plan [data-drive=deploy-all-diff]");
     await more.first().waitFor({ timeout: 20000 });
     await more.first().click();
-    const diff = page.locator("#ap-plan .ap-diff").first();
+    const diff = page.locator("#ap-plan .kp-diffview").first();
     await diff.waitFor({ timeout: 10000 });
     const edges = await page.evaluate(() => {
       const wrap = /** @type {HTMLElement} */ (
@@ -8204,7 +8204,7 @@ test("invariants: Deploy all changes keeps a stack's diff inside its table (feat
       const right = Math.max(
         ...[
           ...document.querySelectorAll(
-            "#ap-plan .ap-diff, #ap-plan .ap-diff pre",
+            "#ap-plan .kp-diffview, #ap-plan .kp-diffview pre",
           ),
         ].map((e) => e.getBoundingClientRect().right),
       );

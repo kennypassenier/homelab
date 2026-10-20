@@ -6,6 +6,8 @@
 // below.
 
 import { h } from "./dom.js";
+import { diffBlocks } from "./editui.js";
+import { fileViews } from "./plan.js";
 
 /**
  * @typedef {import("./applyplan.js").Plan} Plan
@@ -118,9 +120,8 @@ export function sentenceParts(c) {
 }
 
 /**
- * A stack's file diffs as kp diff blocks: a header per file with its
- * +N −M, then its hunks (the range in quiet ink, the place in bold) and
- * lines with a sign column that carries the change without colour.
+ * A stack's file diffs as kp's diff component: a header per file with its
+ * +N −M, the unchanged lines folded, the changed words marked.
  * @param {import("./plan.js").FileDiff[]} files
  * @returns {HTMLElement}
  */
@@ -131,55 +132,7 @@ export function diffFiles(files) {
       { class: "ap-none" },
       "No file changed since the last apply.",
     );
-  return h(
-    "div",
-    { class: "ap-diffs" },
-    ...files.map((f) =>
-      h(
-        "div",
-        { class: "ap-diff" },
-        h(
-          "div",
-          { class: "ap-diff__file" },
-          h("span", { class: "kp-mono" }, f.path),
-          h("span", { class: "ap-add" }, `+${f.added}`),
-          h("span", { class: "ap-del" }, `−${f.removed}`),
-        ),
-        h(
-          "pre",
-          { class: "kp-diff", "aria-label": `Changes to ${f.path}` },
-          ...f.hunks.flatMap((hk) => [
-            h(
-              "div",
-              { class: "kp-diff__hunk" },
-              `@@ −${hk.old_start},${hk.old_len} +${hk.new_start},${hk.new_len} @@`,
-            ),
-            ...hk.lines.map((l) =>
-              h(
-                "span",
-                {
-                  class: "kp-diff__line",
-                  "data-kind":
-                    l.op === "+" ? "added" : l.op === "-" ? "removed" : "same",
-                },
-                h(
-                  "span",
-                  { class: "kp-diff__number" },
-                  String((l.op === "+" ? l.new : l.old) ?? ""),
-                ),
-                h(
-                  "span",
-                  { class: "kp-diff__sign" },
-                  l.op === "+" ? "+" : l.op === "-" ? "-" : " ",
-                ),
-                h("span", null, l.text),
-              ),
-            ),
-          ]),
-        ),
-      ),
-    ),
-  );
+  return h("div", { class: "ap-diffs" }, ...diffBlocks(fileViews(files)));
 }
 
 export { plural };

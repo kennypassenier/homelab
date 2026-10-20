@@ -143,19 +143,8 @@
 }
 .ap-diffs {
   display: grid;
-  gap: var(--kp-space-sm, 0.5rem);
+  grid-template-columns: minmax(0, 1fr);
   padding-block: var(--kp-space-sm, 0.5rem);
-}
-.ap-diff {
-  display: grid;
-  gap: var(--kp-space-sm, 0.5rem);
-}
-.ap-diff__file {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) max-content max-content;
-  gap: var(--kp-space-sm, 0.5rem);
-  align-items: baseline;
-  font-size: var(--kp-text-sm);
 }
 .ap-sentence {
   min-block-size: 3rem;

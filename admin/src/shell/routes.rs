@@ -143,6 +143,10 @@ async fn current_op(State(c): State<Ctx>) -> Response {
 struct HistoryQuery {
     #[serde(default)]
     since: u64,
+    /// ask-kp11be-8: the window's end, unix seconds; absent reads up to
+    /// now.
+    #[serde(default)]
+    until: Option<u64>,
     #[serde(default = "history_limit")]
     limit: usize,
 }
@@ -150,16 +154,35 @@ fn history_limit() -> usize {
     500
 }
 
+/// ask-kp11be-8: drop the entries that started after `until` from a
+/// `{ "entries": [...] }` answer. A host that knows the bound has already
+/// done it; an older host answers everything since `since`, and the window
+/// the page asked for is still the window it gets.
+fn cut_history_at(report: &mut serde_json::Value, until: u64) {
+    if let Some(list) = report.get_mut("entries").and_then(|e| e.as_array_mut()) {
+        list.retain(|e| {
+            e.get("start")
+                .and_then(|s| s.as_u64())
+                .is_none_or(|s| s <= until)
+        });
+    }
+}
+
 async fn history(State(c): State<Ctx>, Query(q): Query<HistoryQuery>) -> Response {
-    report(
-        &c,
+    let (status, mut body) = report_value(
+        &c.host,
         "history",
         Command::History {
             since: q.since,
+            until: q.until,
             limit: q.limit.min(5000),
         },
     )
-    .await
+    .await;
+    if let (Some(until), Some(report)) = (q.until, body.get_mut("report")) {
+        cut_history_at(report, until);
+    }
+    (status, Json(body)).into_response()
 }
 
 pub fn router(
@@ -866,7 +889,17 @@ pub fn read_router(ctx: ReadCtx) -> Router {
 
 #[cfg(test)]
 mod tests {
-    use super::chart_bounds;
+    use super::{chart_bounds, cut_history_at};
+
+    #[test]
+    fn an_older_hosts_unbounded_history_is_cut_at_the_window_end() {
+        let mut r = serde_json::json!({ "entries": [
+            { "kind": "op", "start": 100 }, { "kind": "phase", "start": 200 },
+            { "kind": "op", "start": 201 }
+        ] });
+        cut_history_at(&mut r, 200);
+        assert_eq!(r["entries"].as_array().map(Vec::len), Some(2));
+    }
 
     #[test]
     fn a_preset_ends_now() {

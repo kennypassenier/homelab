@@ -473,8 +473,15 @@ pub enum Command {
     /// arch-history: what the host did since `since` (unix seconds), newest
     /// `limit` entries. Answered as JSON `{ "entries": [...] }`, each a
     /// `homelab_core::history::HistoryEntry`.
+    ///
+    /// ask-kp11be-8: `until` (unix seconds) bounds the read from above, for
+    /// a calendar window in the past. An older host does not know the field
+    /// and answers everything since `since`; the dashboard route cuts that
+    /// answer at `until` itself.
     History {
         since: u64,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        until: Option<u64>,
         #[serde(default = "history_limit_default")]
         limit: usize,
     },

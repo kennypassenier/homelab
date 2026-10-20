@@ -1778,7 +1778,11 @@ impl Actions {
             .inner
             .host
             .ask_traced(
-                Command::History { since, limit: 5000 },
+                Command::History {
+                    since,
+                    until: None,
+                    limit: 5000,
+                },
                 Duration::from_secs(30),
                 None,
             )

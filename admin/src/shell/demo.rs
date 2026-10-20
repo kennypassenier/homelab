@@ -1037,8 +1037,8 @@ pub async fn run_demo(
                             })).collect();
                             serde_json::json!({ "retired": rows }).to_string()
                         }
-                        Command::History { since, limit } => serde_json::json!({
-                            "entries": homelab_core::history::select(history.lock().unwrap_or_else(|e| e.into_inner()).clone(), since, limit),
+                        Command::History { since, until, limit } => serde_json::json!({
+                            "entries": homelab_core::history::select_between(history.lock().unwrap_or_else(|e| e.into_inner()).clone(), since, until, limit),
                         }).to_string(),
                         Command::Incidents { .. } => serde_json::json!({ "incidents": &incidents }).to_string(),
                         // One made-up notice, so the notification centre has

@@ -81,7 +81,23 @@ pub fn parse(text: &str) -> Vec<HistoryEntry> {
 
 /// The entries that started at or after `since`, newest `limit` of them.
 pub fn select(entries: Vec<HistoryEntry>, since: u64, limit: usize) -> Vec<HistoryEntry> {
-    let mut kept: Vec<HistoryEntry> = entries.into_iter().filter(|e| e.start() >= since).collect();
+    select_between(entries, since, None, limit)
+}
+
+/// ask-kp11be-8: [`select`] with an upper bound — the entries that started
+/// at or after `since` and, when `until` is given, at or before it; the
+/// newest `limit` of them. A calendar window in the past reads only its
+/// own days instead of everything up to now.
+pub fn select_between(
+    entries: Vec<HistoryEntry>,
+    since: u64,
+    until: Option<u64>,
+    limit: usize,
+) -> Vec<HistoryEntry> {
+    let mut kept: Vec<HistoryEntry> = entries
+        .into_iter()
+        .filter(|e| e.start() >= since && until.is_none_or(|u| e.start() <= u))
+        .collect();
     if kept.len() > limit {
         kept.drain(..kept.len() - limit);
     }
@@ -108,4 +124,31 @@ pub fn prune(text: &str, now: u64, max_age_s: u64, max_bytes: usize) -> Option<S
     lines.drain(..first);
     let out: String = lines.concat();
     (out != text).then_some(out)
+}
+
+#[cfg(test)]
+mod bounded_read_tests {
+    use super::*;
+
+    fn phase(start: u64) -> HistoryEntry {
+        HistoryEntry::Phase {
+            start,
+            end: start + 1,
+            name: "backup".into(),
+            count: 1,
+        }
+    }
+
+    /// ask-kp11be-8: a window reads its own days, newest `limit` of them.
+    #[test]
+    fn select_between_keeps_only_the_window() {
+        let all = vec![phase(100), phase(200), phase(300), phase(400)];
+        let got = select_between(all.clone(), 150, Some(300), 10);
+        assert_eq!(
+            got.iter().map(|e| e.start()).collect::<Vec<_>>(),
+            [200, 300]
+        );
+        assert_eq!(select_between(all.clone(), 150, None, 10).len(), 3);
+        assert_eq!(select_between(all, 150, Some(300), 1)[0].start(), 300);
+    }
 }

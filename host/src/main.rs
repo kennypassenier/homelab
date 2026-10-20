@@ -3785,6 +3785,7 @@ span_days = 7\n";
                 id: 1,
                 command: Rpc::History {
                     since: 150,
+                    until: None,
                     limit: 10,
                 },
             },
@@ -11029,11 +11030,19 @@ async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse {
         // Answered by the session loop itself; reaching here means a caller
         // bypassed it (a test harness), which changes nothing.
         // arch-history: what the host did since a moment.
-        Rpc::History { since, limit } => {
+        Rpc::History {
+            since,
+            until,
+            limit,
+        } => {
             let text = std::fs::read_to_string(format!("{}/history.jsonl", state.config.state_dir))
                 .unwrap_or_default();
-            let entries =
-                homelab_core::history::select(homelab_core::history::parse(&text), since, limit);
+            let entries = homelab_core::history::select_between(
+                homelab_core::history::parse(&text),
+                since,
+                until,
+                limit,
+            );
             RpcResponse {
                 id: req.id,
                 ok: true,

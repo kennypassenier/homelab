@@ -38,6 +38,7 @@ import {
 } from "../dom.js";
 import { declare, drivable } from "../drivable.js";
 import { diffBlocks } from "../editui.js";
+import { longCountdown } from "../longcountdown.js";
 import { formatDateTime, humanDuration } from "../format.js";
 import { inboxNow } from "../inboxlist.js";
 import { jobLogViewer } from "../joblog.js";
@@ -67,7 +68,6 @@ import { attachDataTables } from "/static/kp/js/datatable.js";
 import { attachIdmarks } from "/static/kp/js/idmark.js";
 import { setPipeline, attachPipelines } from "/static/kp/js/pipeline.js";
 import { bindSelection } from "../selectbind.js";
-import { attachCountdowns } from "/static/kp/js/countdown.js";
 import { attachDisabledReasons } from "/static/kp/js/reason.js";
 import {
   attachSteplists,
@@ -1340,6 +1340,16 @@ export function mount(root, scope) {
           : `${i.stack}'s apps on a moving tag run what their tags point at now`,
       )
       .join("; ");
+    // gap 124: a 7-day window reads in days (js/longcountdown.js).
+    stopUndoClock();
+    /** @type {(() => void)[]} */
+    const clocks = [];
+    /** @param {number} until @param {string} name */
+    const undoClock = (until, name) => {
+      const c = longCountdown(until, name);
+      clocks.push(c.stop);
+      return c.el;
+    };
     doneCard.replaceChildren(
       h(
         "div",
@@ -1404,14 +1414,10 @@ export function mount(root, scope) {
                     h(
                       "dd",
                       null,
-                      h("div", {
-                        class: "kp-countdown",
-                        "data-kp-countdown-until": String(
-                          (j.finished_at + UNDO_WINDOW_S) * 1000,
-                        ),
-                        "data-kp-countdown-name": "The undo window closes in",
-                        "data-kp-countdown-controls": "none",
-                      }),
+                      undoClock(
+                        (j.finished_at + UNDO_WINDOW_S) * 1000,
+                        "The undo window closes in",
+                      ),
                     ),
                   ]
                 : []),
@@ -1480,8 +1486,7 @@ export function mount(root, scope) {
         ),
       ),
     );
-    stopUndoClock();
-    stopUndoClock = attachCountdowns(doneCard);
+    stopUndoClock = () => clocks.forEach((stop) => stop());
     doneCard
       .querySelector("[data-drive-row=again]")
       ?.addEventListener("click", () => {

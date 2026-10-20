@@ -3113,8 +3113,9 @@ function settingsHub(panel, c) {
   secrets.el.classList.add("sh-span-12");
   stops.push(mountSecrets(secrets.body, { stack: name }));
 
-  const sizeKv = h("dl", { class: "sh-kv" });
-  const sizeStage = stage(sizeKv);
+  // The facts on kp's form grid: the names on one edge, the values on the next.
+  const sizeKv = h("dl", { class: "kp-kv" });
+  const sizeStage = stage(h("div", { class: "kp-formgrid" }, sizeKv));
   setCardState(sizeStage, "loading", { words: "Reading the stack's files" });
   const editBtn = drivable(
     h(
@@ -3313,10 +3314,14 @@ function settingsHub(panel, c) {
       });
     } else {
       sizeKv.replaceChildren(
-        ...sizeFacts({ manifest: e.manifest, diskPct }).flatMap((f) => [
-          h("dt", null, f.label),
-          h("dd", { class: f.mono ? "mono" : null }, f.value),
-        ]),
+        ...sizeFacts({ manifest: e.manifest, diskPct }).map((f) =>
+          h(
+            "div",
+            { class: "kp-kv__row" },
+            h("dt", null, f.label),
+            h("dd", { class: f.mono ? "mono" : null }, f.value),
+          ),
+        ),
       );
       setCardState(sizeStage, "ready");
     }

@@ -33,6 +33,7 @@ import {
   changeText,
   count,
   drives,
+  durationText,
   extremes,
   fill,
   healthPeriods,
@@ -42,9 +43,11 @@ import {
   nowValue,
   peak,
   poweredOn,
+  requestsNote,
   ribbonRuns,
   statusClasses,
   statusParts,
+  statusTone,
   trafficFigures,
   usualMachines,
 } from "../metricsview.js";
@@ -90,7 +93,7 @@ import {
   setGanttState,
   setGanttWindow,
 } from "/static/kp/js/gantt.js";
-import { CHANGE_EVENT, combobox } from "/static/kp/js/combobox.js";
+import { CHANGE_EVENT, combobox, drawnSelect } from "/static/kp/js/combobox.js";
 import { attachUsualPickers, setUsual } from "/static/kp/js/usual-picker.js";
 import { attachIdmarks, idmarkColours } from "/static/kp/js/idmark.js";
 import { attachHoverCards } from "/static/kp/js/hovercard.js";
@@ -164,6 +167,11 @@ const HOSTNAMES_AS = declare({
   what: "show the hostnames as a heat grid (hostname by hour) or as a sortable table",
   shows: "on the Traffic view",
   reach: [{ do: "click", control: "metrics-view", row: "traffic" }],
+});
+const REQUESTS_HOST = declareField({
+  id: "metrics-requests-host",
+  page: "metrics",
+  what: "the hostname whose recent requests the Traffic view lists",
 });
 const SHOWING = declare({
   id: "metrics-showing",
@@ -2134,6 +2142,87 @@ export function mount(root, ctx) {
     );
     clientsCard.body.replaceChildren(clientsTable);
 
+    // ask-kp11be-9: the newest requests to one hostname (method, path,
+    // status, duration; the server leaves the client address out).
+    const REQ_LIMIT = 50;
+    const reqSel = h("select", {
+      class: "kp-field__input",
+      id: REQUESTS_HOST,
+      "data-kp-select": "",
+      disabled: "",
+    });
+    const reqNote = h("span", { role: "status" }, "Reading the hostnames…");
+    const reqBody = h("tbody");
+    const reqTable = h(
+      "div",
+      {
+        class: "kp-datatable mk-table",
+        "data-kp-datatable": "",
+        "data-kp-busy-overlay": "",
+        "data-kp-page-size": String(REQ_LIMIT),
+        "data-kp-page-sizes": "none",
+        "data-kp-sort-multi": "",
+        "data-kp-remember": "metrics-requests",
+      },
+      h(
+        "div",
+        { class: "kp-table-wrap" },
+        h(
+          "table",
+          { class: "kp-table" },
+          h(
+            "caption",
+            { class: "kp-sr-only" },
+            "The newest requests to one hostname",
+          ),
+          h(
+            "thead",
+            null,
+            h(
+              "tr",
+              null,
+              h("th", { scope: "col", "data-kp-sort": "text" }, "Method"),
+              h("th", { scope: "col", "data-kp-sort": "text" }, "Path"),
+              h("th", { scope: "col", "data-kp-sort": "number" }, "Status"),
+              h(
+                "th",
+                { scope: "col", "data-kp-sort": "number", class: "mk-n" },
+                "Duration",
+              ),
+            ),
+          ),
+          reqBody,
+        ),
+      ),
+      h(
+        "div",
+        { class: "kp-empty", "data-kp-datatable-empty": "", hidden: "" },
+        "No request to this hostname in this window.",
+      ),
+    );
+    const reqCard = section({
+      title: "Recent requests",
+      desc: "The newest requests to one hostname behind the gateway, from its access log: method, path without its query, status and how long the gateway took. Client addresses are never shown here.",
+      id: "chart-request-list",
+      level: "h3",
+    });
+    reqCard.el.classList.add("mk-card", "mk-span-3");
+    reqCard.el.dataset.key = "request-list";
+    reqCard.body.replaceChildren(
+      formGrid(
+        [
+          gridRow({
+            label: "Hostname",
+            labelFor: REQUESTS_HOST,
+            control: reqSel,
+            value: reqNote,
+          }),
+        ],
+        "mk-requests__pick",
+      ),
+      reqTable,
+    );
+
     const group = h(
       "div",
       {
@@ -2159,6 +2248,7 @@ export function mount(root, ctx) {
         perHost.el,
         hostsCard.el,
         clientsCard.el,
+        reqCard.el,
       ),
     );
     root.append(
@@ -2170,6 +2260,7 @@ export function mount(root, ctx) {
       detachers.push(attachBarCells(root));
       tableOf(hostsTable)?.state("loading");
       tableOf(clientsTable)?.state("loading");
+      tableOf(reqTable)?.state("loading");
       setHeat(heatEl, {
         state: "loading",
         skeleton: { rows: 8, columns: 24 },
@@ -2249,6 +2340,106 @@ export function mount(root, ctx) {
       }
     };
 
+    // The hostname whose requests are listed, and the one the table shows.
+    let reqHost = "";
+    let reqShown = "";
+    let reqSeq = 0;
+    /** @param {string[]} names the hostnames, busiest first */
+    const fillRequestHosts = (names) => {
+      const list = names.filter(Boolean);
+      reqSel.replaceChildren(
+        ...(list.length ? list : ["no hostname"]).map((n) =>
+          h("option", { value: list.length ? n : "" }, n),
+        ),
+      );
+      reqSel.disabled = !list.length;
+      reqHost = list.includes(reqHost) ? reqHost : (list[0] ?? "");
+      reqSel.value = reqHost;
+      drawnSelect(reqSel)?.refresh();
+      if (!reqHost) {
+        reqBody.replaceChildren();
+        reqNote.textContent = "No hostname reached the gateway in this window.";
+        tableOf(reqTable)?.state("ready");
+        tableOf(reqTable)?.refresh();
+      }
+    };
+    const readRequests = async () => {
+      if (!reqHost) return;
+      const host = reqHost;
+      const seq = ++reqSeq;
+      // A new hostname shows its loading state; a reread of the same one
+      // keeps its rows on screen until the new ones arrive.
+      if (reqShown !== host) {
+        reqNote.textContent = `Reading the newest requests to ${host}…`;
+        tableOf(reqTable)?.state("loading");
+      }
+      const r = await fetchJson(
+        `/data/traffic/requests${setParams("", { host, range, limit: String(REQ_LIMIT) })}`,
+        "the recent requests",
+        abort.signal,
+      );
+      if (seq !== reqSeq || abort.signal.aborted) return;
+      if (!r.ok) {
+        reqShown = "";
+        reqNote.textContent = notReadWords(r.error);
+        tableOf(reqTable)?.fail(notReadWords(r.error));
+        return;
+      }
+      const samples =
+        /** @type {import("../metricsview.js").RequestSample[]} */ (
+          r.body.samples ?? []
+        );
+      reqBody.replaceChildren(
+        ...samples.map((s, i) =>
+          h(
+            "tr",
+            { "data-kp-row-key": `${s.at_ms}-${i}` },
+            h(
+              "td",
+              { "data-label": "Method" },
+              h("span", { class: "mono" }, s.method || "—"),
+            ),
+            h(
+              "td",
+              { "data-label": "Path", title: s.path },
+              h("span", { class: "mono mk-path" }, s.path || "/"),
+            ),
+            h(
+              "td",
+              { "data-label": "Status", "data-kp-sort-value": s.status },
+              h(
+                "span",
+                { class: `kp-badge kp-badge--${statusTone(s.status)}` },
+                String(s.status),
+              ),
+            ),
+            h(
+              "td",
+              {
+                class: "mk-n",
+                "data-label": "Duration",
+                "data-kp-sort-value": s.duration_ms ?? -1,
+              },
+              durationText(s.duration_ms),
+            ),
+          ),
+        ),
+      );
+      reqShown = host;
+      reqNote.textContent = requestsNote(
+        host,
+        samples.length,
+        REQ_LIMIT,
+        range,
+      );
+      tableOf(reqTable)?.state("ready");
+      tableOf(reqTable)?.refresh();
+    };
+    reqSel.addEventListener("change", () => {
+      reqHost = reqSel.value;
+      void readRequests();
+    });
+
     return async () => {
       const [r] = await Promise.all([
         fetchJson(
@@ -2277,6 +2468,9 @@ export function mount(root, ctx) {
         });
         tableOf(hostsTable)?.fail(why);
         tableOf(clientsTable)?.fail(why);
+        reqShown = "";
+        reqNote.textContent = why;
+        tableOf(reqTable)?.fail(why);
         tilesNotRead(strip.tiles);
         return false;
       }
@@ -2490,6 +2684,8 @@ export function mount(root, ctx) {
       );
       attachIdmarks(hostsBody);
       tableOf(hostsTable)?.refresh();
+      fillRequestHosts(rows.map(([name]) => name));
+      void readRequests();
 
       // Busiest clients.
       const clients = /** @type {[string, number][]} */ (b.clients?.rows ?? []);

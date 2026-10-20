@@ -332,3 +332,8 @@ main.mk-page > .mk-failed:empty {
     display: none !important;
   }
 }
+
+/* ask-kp11be-9: a long request path wraps instead of widening the table. */
+.mk-path {
+  overflow-wrap: anywhere;
+}

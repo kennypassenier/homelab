@@ -26,6 +26,7 @@ pub mod notify;
 pub mod presetedit;
 pub mod releasenotes;
 pub mod releaseoptions;
+pub mod requests;
 pub mod rowsnooze;
 pub mod schedule;
 pub mod secrets;

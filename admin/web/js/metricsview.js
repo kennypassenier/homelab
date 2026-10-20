@@ -774,3 +774,52 @@ export function machinesOf(text) {
   ].slice(0, 3);
   return seen.length ? seen : ["host"];
 }
+
+// ── recent requests of one hostname (ask-kp11be-9) ──────────────────────
+
+/**
+ * @typedef {{at_ms: number, method: string, path: string, status: number,
+ *   duration_ms: number | null}} RequestSample
+ *   One request of the access log: nothing but these (the server drops the
+ *   client address and the rest before it answers).
+ */
+
+/**
+ * How long the gateway took, in the unit a person reads.
+ * @param {number | null | undefined} ms
+ */
+export function durationText(ms) {
+  if (ms == null || !Number.isFinite(ms)) return "—";
+  if (ms >= 1000) return `${(ms / 1000).toFixed(ms >= 10000 ? 0 : 1)} s`;
+  return `${ms >= 100 ? Math.round(ms) : ms.toFixed(1)} ms`;
+}
+
+/**
+ * The badge tone of an HTTP status.
+ * @param {number} status
+ * @returns {"success" | "info" | "warning" | "destructive"}
+ */
+export function statusTone(status) {
+  return status >= 500
+    ? "destructive"
+    : status >= 400
+      ? "warning"
+      : status >= 300
+        ? "info"
+        : "success";
+}
+
+/**
+ * The line over the requests table: how many, of which hostname, and
+ * whether that is all of them.
+ * @param {string} host
+ * @param {number} shown
+ * @param {number} limit what was asked for
+ * @param {string} range the window, e.g. "24h"
+ */
+export function requestsNote(host, shown, limit, range) {
+  if (shown === 0) return `No request to ${host} in the last ${range}.`;
+  return shown >= limit
+    ? `The newest ${count(shown)} requests to ${host} in the last ${range}, newest first.`
+    : `All ${count(shown)} ${shown === 1 ? "request" : "requests"} to ${host} in the last ${range}, newest first.`;
+}

@@ -33,6 +33,36 @@ fn prev_cache() -> &'static PrevCache {
 /// The biggest error answers kept beside the status mix.
 const TOP_ERRORS: usize = 5;
 
+/// ask-kp11be-9: the most recent requests to one hostname over the `span`
+/// seconds ending at `end`, as method, path, status and duration. The
+/// client address and everything else of the log line is dropped by
+/// [`crate::core::requests::parse_sample`] before anything leaves here.
+pub async fn requests(
+    loki: &Loki,
+    job: &str,
+    host: &str,
+    span: u64,
+    end: u64,
+    limit: usize,
+) -> Result<serde_json::Value, String> {
+    use crate::core::requests::{MAX_SAMPLES, samples, valid_host};
+    if !valid_host(host) {
+        return Err(format!("{host:?} is not a hostname"));
+    }
+    let limit = limit.clamp(1, MAX_SAMPLES);
+    let job = job.replace('"', "");
+    let q = format!("{{job=\"{job}\"}} | json | __error__=\"\" | RequestHost=\"{host}\"");
+    let lines = loki.lines(&q, end.saturating_sub(span), end, limit).await?;
+    let rows = samples(&lines, limit);
+    Ok(serde_json::json!({
+        "host": host,
+        "from": end.saturating_sub(span),
+        "to": end,
+        "limit": limit,
+        "samples": rows,
+    }))
+}
+
 /// Every read the Traffic tab shows, over the `span` seconds ending at
 /// `end`, charts in `step`-second buckets.
 pub async fn read(loki: &Loki, job: &str, span: u64, step: u64, end: u64) -> serde_json::Value {

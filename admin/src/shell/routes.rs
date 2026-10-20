@@ -517,6 +517,47 @@ async fn traffic(State(c): State<ReadCtx>, Query(q): Query<ChartQuery>) -> Respo
     Json(super::traffic::read(loki, job, span, step, now_s()).await).into_response()
 }
 
+#[derive(Deserialize)]
+struct RequestsQuery {
+    host: String,
+    range: Option<String>,
+    limit: Option<usize>,
+}
+
+/// ask-kp11be-9: the recent requests to one hostname (method, path, status,
+/// duration; never a client address), from the proxy's access log.
+async fn traffic_requests(State(c): State<ReadCtx>, Query(q): Query<RequestsQuery>) -> Response {
+    let (Some(loki), Some(job)) = (&c.loki, &c.traffic_job) else {
+        return refused(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "the requests",
+            "no Loki or no traffic_job is configured for this dashboard",
+            "set admin.loki_url and admin.traffic_job (the access log's Loki job)",
+        );
+    };
+    let Some((span, _)) = chart_window(q.range.as_deref()) else {
+        return refused(
+            StatusCode::BAD_REQUEST,
+            "the requests",
+            "unknown range",
+            "use one of 1h, 6h, 24h, 7d, 30d",
+        );
+    };
+    if !crate::core::requests::valid_host(&q.host) {
+        return refused(
+            StatusCode::BAD_REQUEST,
+            "the requests",
+            "that is not a hostname",
+            "pick a hostname from the Traffic tab's list",
+        );
+    }
+    let limit = q.limit.unwrap_or(crate::core::requests::DEFAULT_SAMPLES);
+    match super::traffic::requests(loki, job, &q.host, span, now_s(), limit).await {
+        Ok(v) => Json(v).into_response(),
+        Err(e) => failed("the requests", e),
+    }
+}
+
 /// The stack names the fleet currently reports, for a fleet-wide Prometheus
 /// query (feat-overview-11, feat-overview-12, feat-firewall-3) — the same
 /// source `/data/host` reads.
@@ -879,6 +920,7 @@ pub fn read_router(ctx: ReadCtx) -> Router {
         .route("/data/logs", get(logs))
         .route("/data/charts", get(charts))
         .route("/data/traffic", get(traffic))
+        .route("/data/traffic/requests", get(traffic_requests))
         .route("/data/capacity", get(capacity))
         .route("/data/disk-growth", get(disk_growth))
         .route("/data/fleet-traffic", get(fleet_traffic))

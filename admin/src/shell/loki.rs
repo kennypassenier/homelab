@@ -111,6 +111,32 @@ impl Loki {
         Ok(out)
     }
 
+    /// ask-kp11be-9: the raw log lines a LogQL stream query names, newest
+    /// first, at most `limit`, over `[from, to]` (unix seconds). The same
+    /// `query_range` read as every other (fix-221).
+    pub async fn lines(
+        &self,
+        logql: &str,
+        from: u64,
+        to: u64,
+        limit: usize,
+    ) -> Result<Vec<LogLine>, String> {
+        let limit = limit.min(self.max_limit);
+        let v = self
+            .get(
+                "query_range",
+                &[
+                    ("query", logql.to_string()),
+                    ("start", from.to_string()),
+                    ("end", to.to_string()),
+                    ("limit", limit.to_string()),
+                    ("direction", "backward".to_string()),
+                ],
+            )
+            .await?;
+        logs::parse_answer(&v.to_string(), limit)
+    }
+
     async fn get(&self, path: &str, q: &[(&str, String)]) -> Result<serde_json::Value, String> {
         let url = format!("{}/loki/api/v1/{}", self.base, path);
         let res = self

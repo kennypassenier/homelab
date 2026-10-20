@@ -299,8 +299,46 @@ const CLIENTS: &[(&str, f64)] = &[
 /// Requests per second, on average, over the day.
 const RATE: f64 = 0.44;
 
+/// ask-kp11be-9: made-up access-log lines of one hostname (a stream query,
+/// no aggregation), newest first, the client address included so the
+/// dashboard has something to leave out.
+fn request_lines(query: &str, w: &Window) -> serde_json::Value {
+    let host = query
+        .split("RequestHost=\"")
+        .nth(1)
+        .and_then(|r| r.split('"').next())
+        .unwrap_or("demo.example.org");
+    const PATHS: [&str; 6] = [
+        "/",
+        "/api/items?page=2",
+        "/static/app.js",
+        "/favicon.ico",
+        "/api/stream",
+        "/wp-login.php",
+    ];
+    const STATUS: [u16; 6] = [200, 200, 304, 404, 500, 403];
+    let values: Vec<serde_json::Value> = (0..40u64)
+        .map(|i| {
+            let k = (i as usize * 5 + 1) % PATHS.len();
+            let line = serde_json::json!({
+                "ClientHost": "198.51.100.23", "RequestHost": host,
+                "RequestMethod": if k == 5 { "POST" } else { "GET" },
+                "RequestPath": PATHS[k], "DownstreamStatus": STATUS[k],
+                "Duration": 4_000_000u64 + i * 1_700_000,
+            });
+            let ns = (w.end.saturating_sub(20 + i * 47) as u128) * 1_000_000_000;
+            serde_json::json!([ns.to_string(), line.to_string()])
+        })
+        .collect();
+    serde_json::json!({ "status": "success", "data": { "resultType": "streams",
+        "result": [{ "stream": { "job": "demo-traffic" }, "values": values }] } })
+}
+
 /// The access log's answers (the Traffic tab).
 fn traffic(query: &str, w: &Window, now: u64) -> serde_json::Value {
+    if !query.contains("count_over_time") && query.contains("RequestHost=") {
+        return request_lines(query, w);
+    }
     let span = lookback(query) as f64;
     // An instant read of a whole window (a table, a total): one number per
     // row, from the window's length.

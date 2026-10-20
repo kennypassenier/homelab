@@ -5159,6 +5159,13 @@
       "row": null
     },
     {
+      "id": "metrics-requests-host",
+      "page": "metrics",
+      "what": "the hostname whose recent requests the Traffic view lists",
+      "was": [],
+      "row": null
+    },
+    {
       "id": "metrics-scope",
       "page": "metrics",
       "what": "the machines picker on Metrics: type a stack name to search the list",

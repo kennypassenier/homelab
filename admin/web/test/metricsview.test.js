@@ -10,6 +10,9 @@ import {
   byTitle,
   changeText,
   count,
+  durationText,
+  requestsNote,
+  statusTone,
   drives,
   extremes,
   fill,
@@ -498,4 +501,29 @@ test("kp11-metrics: a drive's health strip cuts the window into cells: down when
     pendPoints: [],
   });
   assert.equal(hourly.length, 4);
+});
+
+test("the recent requests read as a duration, a status tone and one line", () => {
+  assert.equal(durationText(12.34), "12.3 ms");
+  assert.equal(durationText(250.6), "251 ms");
+  assert.equal(durationText(1500), "1.5 s");
+  assert.equal(durationText(null), "—");
+  assert.deepEqual([200, 304, 404, 503].map(statusTone), [
+    "success",
+    "info",
+    "warning",
+    "destructive",
+  ]);
+  assert.equal(
+    requestsNote("films.example.org", 50, 50, "24h"),
+    "The newest 50 requests to films.example.org in the last 24h, newest first.",
+  );
+  assert.equal(
+    requestsNote("films.example.org", 1, 50, "1h"),
+    "All 1 request to films.example.org in the last 1h, newest first.",
+  );
+  assert.equal(
+    requestsNote("a.b", 0, 50, "1h"),
+    "No request to a.b in the last 1h.",
+  );
 });

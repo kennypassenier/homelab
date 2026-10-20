@@ -63,6 +63,7 @@ import { addDays } from "../backupsview.js";
 import { resourcesTab } from "../hubresources.js";
 import {
   depItems,
+  paintProblems,
   problemItems,
   statusBlock,
   statusRows,
@@ -72,7 +73,6 @@ import { setDeplist } from "/static/kp/js/deplist.js";
 import { setCode } from "/static/kp/js/code.js";
 import { HEAT_PICK_EVENT, setHeat } from "/static/kp/js/heat.js";
 import { UPTIME_PICK_EVENT, setUptime } from "/static/kp/js/uptime.js";
-import { setProblems } from "/static/kp/js/problems.js";
 import {
   DANGER,
   LEVELS,
@@ -1149,7 +1149,7 @@ function overviewTab(panel, c) {
       });
     else {
       setCardState(needsStage, "ready");
-      setProblems(
+      paintProblems(
         needsList,
         problemItems(probs, name, (p) => problemAction(c, p)),
         { mode: "fold", foldFrom: 3 },

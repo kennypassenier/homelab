@@ -3176,18 +3176,6 @@
       "twins": false
     },
     {
-      "id": "read-host-checks",
-      "page": "host",
-      "what": "the Host checks card's own Run checks",
-      "opens": "run",
-      "row": null,
-      "href": "/host",
-      "was": [],
-      "shows": null,
-      "reach": [],
-      "twins": false
-    },
-    {
       "id": "refusal-fix",
       "page": "update",
       "what": "the button under a refusal whose fix is an action (Deploy a stack that already names the newer version)",
@@ -3451,7 +3439,11 @@
       "opens": "run",
       "row": null,
       "href": "/host",
-      "was": [],
+      "was": [
+        {
+          "id": "read-host-checks"
+        }
+      ],
       "shows": null,
       "reach": [],
       "twins": false

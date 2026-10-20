@@ -48,7 +48,9 @@ import {
   route,
 } from "./router.js";
 import { current, start, subscribe } from "./store.js";
-import { breadcrumbs, skeletonLines } from "./ui.js";
+import { stage } from "./stage.js";
+import { breadcrumbs } from "./ui.js";
+import { attachCardStates, setCardState } from "/static/kp/js/card-state.js";
 import { mount as activity } from "./pages/activity.js";
 import { mount as backups } from "./pages/backups.js";
 import { mount as firewall } from "./pages/firewall.js";
@@ -203,12 +205,27 @@ const VIEW_MOUNTS = {
 };
 
 /**
+ * The page while it waits for the first read: kp's own busy card over a
+ * page-sized data-state card (the package's loading state, never plain words).
+ * @param {string} words what is being read
+ * @returns {() => void} take the card's wiring away
+ */
+function bootCard(words) {
+  const card = stage(document.createElement("div"));
+  card.classList.add("boot-stage");
+  setCardState(card, "loading", { words });
+  const holder = h("div", { class: "boot" }, card);
+  page.replaceChildren(holder);
+  return attachCardStates(holder);
+}
+
+/**
  * `/`: the Inbox when it holds something, Apps otherwise (Kenny,
- * 2026-10-03). Waits, with a skeleton, until the Inbox's live sources have
+ * 2026-10-03). Waits, with the busy card, until the Inbox's live sources have
  * answered once (at most 3 s), then sends the address on.
  */
 function landing() {
-  page.replaceChildren(skeletonLines(4, "Opening the dashboard"));
+  const unboot = bootCard("Opening the dashboard");
   const decide = () => {
     const { items, ready } = inboxNow();
     if (!ready && Date.now() - since < 3000) return false;
@@ -222,7 +239,7 @@ function landing() {
     return true;
   };
   const since = Date.now();
-  if (decide()) return () => {};
+  if (decide()) return unboot;
   const off = onInbox(() => {
     if (decide()) off();
   });
@@ -232,6 +249,7 @@ function landing() {
   return () => {
     off();
     clearTimeout(t);
+    unboot();
   };
 }
 
@@ -242,13 +260,16 @@ function render() {
   const r0 = route(location.pathname);
   if (needsFleet(r0, location.search) && !current().fleet) {
     cleanup();
-    page.replaceChildren(skeletonLines(3, "Finding the stack"));
+    const unboot = bootCard("Finding the stack");
     const off = subscribe(() => {
       if (!current().fleet) return;
       off();
       render();
     });
-    cleanup = () => off();
+    cleanup = () => {
+      off();
+      unboot();
+    };
     return;
   }
   const target = redirectFor(r0, location.search, {

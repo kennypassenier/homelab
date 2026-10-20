@@ -2099,14 +2099,6 @@ details.nx-card--fold[open] > summary::before {
 }
 
 /* -- loading, empty (DESIGN_LANGUAGE §7) -- */
-.nx-skeleton {
-  display: grid;
-  gap: 8px;
-}
-.nx-skeleton .kp-skeleton {
-  display: block;
-  block-size: 1em;
-}
 .nx-empty {
   display: grid;
   justify-items: center;
@@ -2714,4 +2706,18 @@ details.nx-card--fold[open] > summary::before {
   .app-body__rail {
     display: none;
   }
+}
+
+/* A list or block read from somewhere sits in a flat kp data-state card
+   (stage.js): the package's busy card, empty and failed plates fill the same
+   box. */
+.hb-stage {
+  padding: 0;
+  border: 0;
+  background: none;
+  box-shadow: none;
+  min-block-size: 8rem;
+}
+.boot-stage {
+  min-block-size: 24rem;
 }

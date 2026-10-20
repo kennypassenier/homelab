@@ -48,10 +48,11 @@ import {
 } from "../inboxcards.js";
 import { feedToday, feedUpdates, readChecks } from "../inboxsources.js";
 import { current, subscribe } from "../store.js";
-import { countOf, pageHeader, skeletonLines } from "../ui.js";
+import { stage } from "../stage.js";
+import { countOf, pageHeader } from "../ui.js";
 import { ALERT_DISMISS_EVENT } from "/static/kp/js/overlays.js";
 import { legacyUpdateHref, updateHref } from "../updateflow.js";
-import { attachCardStates } from "/static/kp/js/card-state.js";
+import { attachCardStates, setCardState } from "/static/kp/js/card-state.js";
 import { attachRowKeys, removeRow, setRowBusy } from "/static/kp/js/actions.js";
 import { setKeys } from "/static/kp/js/keys.js";
 import { setProblems } from "/static/kp/js/problems.js";
@@ -322,6 +323,7 @@ export function mount(root) {
     class: "kp-action-list ib-worth-list",
     "aria-label": "Worth a look",
   });
+  const worthStage = stage(worthList);
   const worthN = h("span", null, "");
   const worthSummary = drivable(
     h(
@@ -344,7 +346,7 @@ export function mount(root) {
         "kp-card ib-card inbox-worth kp-accordion__item kp-accordion__item--bare",
     },
     worthSummary,
-    worthList,
+    worthStage,
   );
 
   root.replaceChildren(
@@ -951,9 +953,9 @@ export function mount(root) {
       ),
     );
   const readWorth = async () => {
-    worthList.replaceChildren(
-      h("li", null, skeletonLines(2, "Reading what is worth a look")),
-    );
+    setCardState(worthStage, "loading", {
+      words: "Reading what is worth a look",
+    });
     // The fleet's stack names come with the store's first read.
     if (!current().fleet)
       await new Promise((resolve) => {
@@ -1004,6 +1006,7 @@ export function mount(root) {
         "System ▸ Host, the doctor section",
       ),
     );
+    setCardState(worthStage, "ready");
   };
 
   // ---- Check again --------------------------------------------------------

@@ -77,16 +77,16 @@ import { cover } from "../statecover.js";
 import { current, subscribe } from "../store.js";
 import {
   attentionBand,
-  emptyState,
   ensureStyle,
   keyRow,
   kpiStrip,
   pageHeader,
   section,
   segSwitch,
-  skeletonLines,
 } from "../ui.js";
 import { openJobDialog } from "../jobpanel.js";
+import { stage } from "../stage.js";
+import { attachCardStates, setCardState } from "/static/kp/js/card-state.js";
 import { jobLogViewer } from "../joblog.js";
 import { setParams } from "../urlstate.js";
 import { tabRow } from "../dom.js";
@@ -668,8 +668,10 @@ function mountNow(body, x) {
     "All jobs (the last 200)",
   );
   drivable(allJobs, ALL_JOBS);
+  const runStage = stage(runList);
+  setCardState(runStage, "loading", { words: "Reading the jobs" });
   running.body.append(
-    runList,
+    runStage,
     h(
       "div",
       { class: "ac-foot" },
@@ -1195,20 +1197,18 @@ function mountNow(body, x) {
     }
     if (!run.length) {
       const idle = () => {
-        if (runningJobs().length || runList.querySelector(".nx-empty")) return;
-        runList.replaceChildren(
-          act.jobsRead
-            ? emptyState({
-                title: "Nothing is running",
-                text: "A job you start from any stack's page shows here live, step by step; the running pill in the bar follows it too.",
-              })
-            : skeletonLines(3, "Reading the jobs"),
-        );
+        if (runningJobs().length) return;
+        if (act.jobsRead)
+          setCardState(runStage, "empty", {
+            title: "Nothing is running",
+            text: "A job you start from any stack's page shows here live, step by step; the running pill in the bar follows it too.",
+          });
+        else setCardState(runStage, "loading", { words: "Reading the jobs" });
       };
       // The empty state waits for the last job's exit.
       if (gone.length) void Promise.all(gone).then(idle);
       else idle();
-    } else runList.querySelector(".nx-empty, .nx-skeleton")?.remove();
+    } else setCardState(runStage, "ready");
     const queued = run.filter((j) => j.state === "queued").length;
     runFoot.textContent = `${run.length - queued} running · ${queued} queued`;
     cancelAll.hidden = queued === 0 || cancelGone;
@@ -1216,6 +1216,7 @@ function mountNow(body, x) {
 
   // ── kp parts the page carries ─────────────────────────────────────────
   const detachKp = [
+    attachCardStates(running.body),
     attachToolbars(timeline.body),
     attachTicks(timeline.body),
     attachGantts(timeline.body, {

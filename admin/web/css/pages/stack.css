@@ -212,9 +212,6 @@
   margin: 0;
   overflow-wrap: anywhere;
 }
-.sh-kv > .nx-skeleton {
-  grid-column: 1 / -1;
-}
 .sh-hint {
   margin: 0;
   font-size: var(--kp-text-xs);
@@ -502,13 +499,6 @@
 /* ===== The hub on kp-themes 11 (feat-kp11demo-13) ========================
    Flat data-state cards inside the hub's sections, the checks' count line,
    the app detail and the backup strips on shared grids. */
-.hb-stage {
-  padding: 0;
-  border: 0;
-  background: none;
-  box-shadow: none;
-  min-block-size: 8rem;
-}
 .hb-stage--chart {
   min-block-size: 18rem;
 }

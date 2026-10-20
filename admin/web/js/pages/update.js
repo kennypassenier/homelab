@@ -23,6 +23,8 @@
 
 import { act, onAct, send } from "../act.js";
 import { refusalCallout } from "../actui.js";
+import { stage } from "../stage.js";
+import { attachCardStates, setCardState } from "/static/kp/js/card-state.js";
 import {
   ensureStyle,
   errorBox,
@@ -42,14 +44,7 @@ import { feedUpdates } from "../inboxsources.js";
 import { openPinRollback } from "../pinupdate.js";
 import { planView } from "../plan.js";
 import { current } from "../store.js";
-import {
-  doneMark,
-  emptyState,
-  pageHeader,
-  section,
-  segSwitch,
-  skeletonLines,
-} from "../ui.js";
+import { doneMark, emptyState, pageHeader, section, segSwitch } from "../ui.js";
 import {
   firstChosen,
   flowRows,
@@ -430,11 +425,11 @@ export function mount(root, scope) {
     desc: "Read before you start. Everything below is worked out from the stack files and the fleet map — nothing to know by heart.",
   });
   const tiles = h("div", { class: "uf-impact" });
-  const deps = h(
-    "div",
-    { class: "uf-deps" },
-    skeletonLines(2, "Reading who reaches these apps"),
-  );
+  const deps = h("div", { class: "uf-deps" });
+  const depsStage = stage(deps);
+  setCardState(depsStage, "loading", {
+    words: "Reading who reaches these apps",
+  });
   const depsCard = h(
     "section",
     { class: "uf-sub", "aria-labelledby": "uf-deps-h" },
@@ -448,10 +443,11 @@ export function mount(root, scope) {
         "Stacks that reach these apps (from the fleet map). They keep running; their requests fail for the downtime above.",
       ),
     ),
-    deps,
+    depsStage,
   );
   const majorBox = h("div", { class: "uf-major" });
   const diff = h("div", { class: "uf-diff" });
+  const diffStage = stage(diff);
   const diffFold = h(
     "details",
     { class: "uf-fold kp-accordion__item kp-accordion__item--bare" },
@@ -466,7 +462,7 @@ export function mount(root, scope) {
       ),
       DIFF,
     ),
-    diff,
+    diffStage,
   );
   const blocked = h("div");
   const backBtn = drivable(
@@ -610,6 +606,7 @@ export function mount(root, scope) {
   root.replaceChildren(
     h("div", { class: "uf-page" }, head.el, steps.el, panels),
   );
+  const detachStages = attachCardStates(root);
 
   /** @type {Item[]} */
   let items = [];
@@ -980,7 +977,11 @@ export function mount(root, scope) {
       );
       if (abort.signal.aborted) return;
       if (!r.ok) {
-        deps.replaceChildren(errorBox(r.error));
+        setCardState(depsStage, "error", {
+          title: "Who reaches these apps did not read",
+          text: r.error.why,
+          retry: false,
+        });
         return;
       }
       const rows = whoNotices(c, r.body.dependencies ?? []);
@@ -1007,6 +1008,7 @@ export function mount(root, scope) {
               ),
             ]),
       );
+      setCardState(depsStage, "ready");
     })().catch(() => {});
     // The change to the files: each pin's newer reference (its registry's
     // digest), then each stack's plan with all its moves.
@@ -1014,9 +1016,10 @@ export function mount(root, scope) {
     plansBlocked = false;
     moves = new Map();
     blocked.replaceChildren();
-    diff.replaceChildren(
-      skeletonLines(3, "Reading the change to the stack files"),
-    );
+    diff.replaceChildren();
+    setCardState(diffStage, "loading", {
+      words: "Reading the change to the stack files",
+    });
     paintGo();
     if (!pins.length) {
       diff.replaceChildren(
@@ -1026,6 +1029,7 @@ export function mount(root, scope) {
           "No file changes: apps on a moving tag keep their image line and pull what it points at now.",
         ),
       );
+      setCardState(diffStage, "ready");
       plansReady = true;
       paintGo();
       return;
@@ -1089,6 +1093,7 @@ export function mount(root, scope) {
         ? out
         : [h("p", { class: "uf-hint" }, "No file changes.")]),
     );
+    setCardState(diffStage, "ready");
     plansReady = true;
     paintGo();
   };
@@ -1548,6 +1553,7 @@ export function mount(root, scope) {
     detachGates();
     detachDeltas();
     jobLog.stop();
+    detachStages();
     for (const f of detachRun) f();
   };
 }

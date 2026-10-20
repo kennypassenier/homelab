@@ -54,6 +54,7 @@ import { inboxNow, onInbox } from "../inboxlist.js";
 import { finished } from "../jobs.js";
 import { mountJobPanel } from "../jobpanel.js";
 import { lineTime, logsUrl } from "../logs.js";
+import { stage } from "../stage.js";
 import { openPinRollback, openPinUpdate } from "../pinupdate.js";
 import { movesOf } from "../updateflow.js";
 import { openRollback } from "../rollbackdialog.js";
@@ -68,7 +69,11 @@ import {
   statusBlock,
   statusRows,
 } from "../hubparts.js";
-import { attachCardStates, setCardState } from "/static/kp/js/card-state.js";
+import {
+  CARD_RETRY_EVENT,
+  attachCardStates,
+  setCardState,
+} from "/static/kp/js/card-state.js";
 import { setDeplist } from "/static/kp/js/deplist.js";
 import { setCode } from "/static/kp/js/code.js";
 import { HEAT_PICK_EVENT, setHeat, setHeatLegend } from "/static/kp/js/heat.js";
@@ -142,7 +147,6 @@ import {
   moreMenu,
   section,
   segSwitch,
-  skeletonLines,
 } from "../ui.js";
 
 /** How far back the History tab reads. */
@@ -994,7 +998,8 @@ function overviewTab(panel, c) {
   deps.el.classList.add("sh-span-6");
 
   const feedList = h("ul", { class: "sh-feed" });
-  feedList.append(skeletonLines(4, "Reading the history"));
+  const feedStage = stage(feedList);
+  setCardState(feedStage, "loading", { words: "Reading the history" });
   const recent = section({
     title: "Recent history",
     desc: "What happened to this stack and who did it, newest first.",
@@ -1007,7 +1012,7 @@ function overviewTab(panel, c) {
       ),
     ],
   });
-  recent.body.append(feedList);
+  recent.body.append(feedStage);
   recent.el.classList.add("sh-span-6");
 
   // checks.yml, folded: the editor Live view's `checks` form lands on.
@@ -1232,17 +1237,13 @@ function overviewTab(panel, c) {
     }
     if (history) {
       const rows = historyFeed(history).slice(0, 4);
-      feedList.replaceChildren(
-        ...(rows.length
-          ? rows.map((r) => feedRow(r))
-          : [
-              h(
-                "li",
-                { class: "sh-feed__empty" },
-                `Nothing was done with ${name} in the last ${HISTORY_DAYS} days.`,
-              ),
-            ]),
-      );
+      feedList.replaceChildren(...rows.map((r) => feedRow(r)));
+      if (rows.length) setCardState(feedStage, "ready");
+      else
+        setCardState(feedStage, "empty", {
+          title: "Nothing was done",
+          text: `Nothing was done with ${name} in the last ${HISTORY_DAYS} days.`,
+        });
     }
   };
   stops.push(c.onChange(paint));
@@ -1349,26 +1350,6 @@ function overviewTab(panel, c) {
   return () => {
     for (const s of stops.reverse()) s();
   };
-}
-
-/**
- * `inner` inside a kp card that carries the four data states: its loading
- * is the package's busy card over the whole footprint, its empty and failed
- * plates fill the same box. A flat card (no frame of its own) so it can sit
- * inside a section.
- * @param {HTMLElement} inner
- * @returns {HTMLElement}
- */
-function stage(inner) {
-  return h(
-    "div",
-    { class: "kp-card hb-stage", "data-kp-state": "loading" },
-    h(
-      "div",
-      { class: "kp-card__stage" },
-      h("div", { class: "kp-card__data" }, inner),
-    ),
-  );
 }
 
 /**
@@ -2849,7 +2830,8 @@ function historyTab(panel, c) {
   );
   drivable(searchBox, HISTORY_SEARCH, name);
   const list = h("ul", { class: "sh-feed sh-feed--full" });
-  list.append(skeletonLines(6, "Reading the history"));
+  const listStage = stage(list);
+  setCardState(listStage, "loading", { words: "Reading the history" });
   const card = h(
     "section",
     { class: "kp-card nx-card", "aria-labelledby": "hist-h" },
@@ -2864,16 +2846,17 @@ function historyTab(panel, c) {
       ),
     ),
     tb,
-    list,
+    listStage,
   );
   const detachTb = attachToolbars(tb);
   const incList = h("ul", { class: "sh-feed" });
-  incList.append(skeletonLines(2, "Reading the incidents"));
+  const incStage = stage(incList);
+  setCardState(incStage, "loading", { words: "Reading the incidents" });
   const incidents = section({
     title: "Incidents",
     desc: "Each failed operation on this stack kept a bundle of what it saw; Show opens it.",
   });
-  incidents.body.append(incList);
+  incidents.body.append(incStage);
   // redesign-flows-6: the updates of the last 7 days, each with its Roll
   // back (the demo's "1 click, for 7 days, from the stack's History").
   const updatesAbort = new AbortController();
@@ -2891,18 +2874,10 @@ function historyTab(panel, c) {
   };
   const paint = () => {
     if (failed) {
-      list.replaceChildren(
-        h(
-          "li",
-          { class: "kp-alert kp-alert--destructive", role: "alert" },
-          h("strong", null, "The history did not read"),
-          h(
-            "span",
-            null,
-            `${failed.why}${failed.fix ? ` — ${failed.fix}` : ""}`,
-          ),
-        ),
-      );
+      setCardState(listStage, "error", {
+        title: "The history did not read",
+        text: `${failed.why}${failed.fix ? ` — ${failed.fix}` : ""}`,
+      });
       count.textContent = "";
       return;
     }
@@ -2910,19 +2885,15 @@ function historyTab(panel, c) {
     const shown = filterFeed(rows, who, q);
     count.textContent = `${shown.length === rows.length ? rows.length : `${shown.length} of ${rows.length}`} ${rows.length === 1 ? "operation" : "operations"}, ${HISTORY_DAYS} days`;
     countOf(count, list, ":scope > li[data-who]");
-    list.replaceChildren(
-      ...(shown.length
-        ? shown.map((r) => feedRow(r))
-        : [
-            h(
-              "li",
-              { class: "sh-feed__empty" },
-              rows.length
-                ? "Nothing matches: clear the search or turn a chip off."
-                : `Nothing was done with ${name} in the last ${HISTORY_DAYS} days.`,
-            ),
-          ]),
-    );
+    list.replaceChildren(...shown.map((r) => feedRow(r)));
+    if (shown.length) setCardState(listStage, "ready");
+    else
+      setCardState(listStage, "empty", {
+        title: rows.length ? "Nothing matches" : "Nothing was done",
+        text: rows.length
+          ? "Clear the search or turn a chip off."
+          : `Nothing was done with ${name} in the last ${HISTORY_DAYS} days.`,
+      });
   };
   /** @param {KeyboardEvent} e */
   const esc = (e) => {
@@ -2979,23 +2950,35 @@ function historyTab(panel, c) {
                 ),
               );
             })
-          : [h("li", { class: "sh-feed__empty" }, noIncidentsText(name))]),
+          : []),
       );
+      if (names.length) setCardState(incStage, "ready");
+      else
+        setCardState(incStage, "empty", {
+          title: "No incidents",
+          text: noIncidentsText(name),
+        });
     } else
-      incList.replaceChildren(
-        h(
-          "li",
-          { class: "kp-alert kp-alert--destructive", role: "alert" },
-          `The incidents did not read: ${ir.error.why}`,
-        ),
-      );
+      setCardState(incStage, "error", {
+        title: "The incidents did not read",
+        text: ir.error.why,
+      });
   };
   const reload = () => void load().catch(() => {});
+  const detachCards = attachCardStates(panel);
+  const retry = () => {
+    setCardState(listStage, "loading", { words: "Reading the history" });
+    setCardState(incStage, "loading", { words: "Reading the incidents" });
+    reload();
+  };
+  listStage.addEventListener(CARD_RETRY_EVENT, retry);
+  incStage.addEventListener(CARD_RETRY_EVENT, retry);
   const stopAnswers = onAnswered(reload);
   reload();
   return () => {
     stopAnswers();
     updatesAbort.abort();
+    detachCards();
     detachTb();
     document.removeEventListener("keydown", esc);
   };
@@ -3030,7 +3013,8 @@ function settingsHub(panel, c) {
   stops.push(mountSecrets(secrets.body, { stack: name }));
 
   const sizeKv = h("dl", { class: "sh-kv" });
-  sizeKv.append(skeletonLines(5, "Reading the stack's files"));
+  const sizeStage = stage(sizeKv);
+  setCardState(sizeStage, "loading", { words: "Reading the stack's files" });
   const editBtn = drivable(
     h(
       "button",
@@ -3051,11 +3035,12 @@ function settingsHub(panel, c) {
     desc: "What the container gets from the host. Changes are saved as a commit and need a deploy.",
     tools: [editBtn],
   });
-  size.body.append(sizeKv);
+  size.body.append(sizeStage);
   size.el.classList.add("sh-span-6");
 
   const fileUl = h("ul", { class: "sh-feed sh-files" });
-  fileUl.append(skeletonLines(3, "Reading the stack's files"));
+  const fileStage = stage(fileUl);
+  setCardState(fileStage, "loading", { words: "Reading the stack's files" });
   const editorHost = h("div", { class: "sh-editor" });
   const editor = /** @type {HTMLDetailsElement} */ (
     h(
@@ -3095,7 +3080,7 @@ function settingsHub(panel, c) {
     desc: "The stack's files in the repository — the truth a deploy makes real. Edit, review the change, commit.",
     tools: [openEditor],
   });
-  files.body.append(fileUl, editor);
+  files.body.append(fileStage, editor);
   files.el.classList.add("sh-span-12");
   // Mounted at once (folded or not): Live view's edit forms reach their
   // fields through the handle the editor registers when it has read.
@@ -3220,51 +3205,45 @@ function settingsHub(panel, c) {
     const e = S.edit;
     if (!e && !S.editError) return;
     if (!e?.manifest) {
-      sizeKv.replaceChildren(
-        h(
-          "p",
-          { class: "sh-muted" },
-          `The stack's files do not read: ${S.editError ?? "its stack file is missing"}.`,
-        ),
-      );
-    } else
+      setCardState(sizeStage, "error", {
+        title: "The stack's files do not read",
+        text: `${S.editError ?? "Its stack file is missing"}.`,
+        retry: false,
+      });
+    } else {
       sizeKv.replaceChildren(
         ...sizeFacts({ manifest: e.manifest, diskPct }).flatMap((f) => [
           h("dt", null, f.label),
           h("dd", { class: f.mono ? "mono" : null }, f.value),
         ]),
       );
+      setCardState(sizeStage, "ready");
+    }
     const paths = Object.keys(e?.texts ?? {});
     fileUl.replaceChildren(
-      ...(paths.length
-        ? fileList(paths).map((f) =>
-            h(
-              "li",
-              null,
-              h(
-                "span",
-                { class: "sh-files__icon", "aria-hidden": "true" },
-                "▤",
-              ),
-              h(
-                "span",
-                { class: "sh-feed__what" },
-                h("b", { class: "mono" }, f.path),
-                f.what ? h("span", { class: "sh-feed__detail" }, f.what) : null,
-              ),
-              h("span", null),
-            ),
-          )
-        : [
-            h(
-              "li",
-              { class: "sh-feed__empty" },
-              e?.head
-                ? `The repository holds no files for ${name}.`
-                : "The working copy has no commit yet.",
-            ),
-          ]),
+      ...fileList(paths).map((f) =>
+        h(
+          "li",
+          null,
+          h("span", { class: "sh-files__icon", "aria-hidden": "true" }, "▤"),
+          h(
+            "span",
+            { class: "sh-feed__what" },
+            h("b", { class: "mono" }, f.path),
+            f.what ? h("span", { class: "sh-feed__detail" }, f.what) : null,
+          ),
+          h("span", null),
+        ),
+      ),
     );
+    if (paths.length) setCardState(fileStage, "ready");
+    else
+      setCardState(fileStage, "empty", {
+        title: "No files",
+        text: e?.head
+          ? `The repository holds no files for ${name}.`
+          : "The working copy has no commit yet.",
+      });
     const fw = e?.manifest?.firewall;
     const rules = Array.isArray(fw?.rules) ? fw.rules.length : 0;
     fwSummary.replaceChildren(
@@ -3311,6 +3290,7 @@ function settingsHub(panel, c) {
   };
   if (want) open(want);
   stops.push(c.onSection(open));
+  stops.push(attachCardStates(panel));
   return () => {
     for (const s of stops.reverse()) s();
   };

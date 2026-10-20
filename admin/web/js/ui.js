@@ -33,8 +33,8 @@
 //   drawer       a side panel, kp-themes' `dialog.kp-drawer`
 //   chip / dot / meter / swatch   small marks
 //                (kp-badge, kp-health, kp-meter)
-//   failBox / skeletonLines / emptyState   the error, loading and empty states
-//                in the block's own footprint
+//   failBox / emptyState   the error and empty states in the block's own
+//                footprint (loading is the component's own state, or stage.js)
 //   kbd / keyRow   keyboard: a key, the shortcut line
 //   sparkline    a 28 px trend line for a tile or a table row
 //   doneMark     the big done tick (the Update flow, the Inbox)
@@ -719,30 +719,6 @@ export function section(spec) {
       fill();
     },
   };
-}
-
-/**
- * Lines of skeleton text in the final geometry (DESIGN_LANGUAGE §7):
- * shown from the first frame, replaced in place by the content.
- * @param {number} [lines]
- * @param {string} [label] what is loading, for a screen reader
- */
-export function skeletonLines(lines = 3, label = "Loading") {
-  return h(
-    "div",
-    {
-      class: "nx-skeleton",
-      role: "status",
-      "aria-label": label,
-      "data-kp-state": "loading",
-    },
-    ...Array.from({ length: lines }, (_, i) =>
-      h("span", {
-        class: "kp-skeleton",
-        style: `inline-size: ${i === lines - 1 ? 60 : 100}%`,
-      }),
-    ),
-  );
 }
 
 /**

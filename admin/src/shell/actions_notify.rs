@@ -160,6 +160,21 @@ pub struct NotifyCenter {
     /// `HOMELAB_ADMIN_NOTIFY_SNOOZE_MAX_S`) and how late a digest may still
     /// go out (`notify::DIGEST_LATE_S`, `HOMELAB_ADMIN_NOTIFY_DIGEST_LATE_S`).
     limits: std::sync::RwLock<NotifyLimits>,
+    /// ask-kp11be-10: when the last test push went out (unix seconds, 0 =
+    /// never), so the button cannot be used to flood a phone.
+    last_test_push: std::sync::atomic::AtomicI64,
+}
+
+/// ask-kp11be-10: the shortest time between two test pushes, seconds.
+pub const TEST_PUSH_EVERY_S: i64 = 10;
+
+/// Why a test push did not go out.
+#[derive(Debug, PartialEq, Eq)]
+pub enum TestPushError {
+    /// Pressed again too soon; the seconds left to wait.
+    TooSoon(i64),
+    /// The push route refused or did not answer.
+    Failed(String),
 }
 
 /// The three notification-centre limits `mount()` fills from `ActConfig`;
@@ -210,6 +225,47 @@ impl NotifyCenter {
                 homelab_core::notify::DEFAULT_DASHBOARD_URL.to_string(),
             ),
             limits: std::sync::RwLock::new(NotifyLimits::default()),
+            last_test_push: std::sync::atomic::AtomicI64::new(0),
+        }))
+    }
+
+    /// ask-kp11be-10: send one test push through the same route real
+    /// notices use, so a person can see that pushes reach the phone. It
+    /// stores no notice, and it goes out whatever the rules say (a test of
+    /// a push that is switched off would prove nothing about the route);
+    /// the answer says whether the rules would hold a real one back, so the
+    /// page can tell the person. At most one every [`TEST_PUSH_EVERY_S`].
+    pub async fn test_push(&self) -> Result<serde_json::Value, TestPushError> {
+        use std::sync::atomic::Ordering;
+        let now = (self.clock)();
+        let last = self.last_test_push.load(Ordering::Relaxed);
+        if last > 0 && now - last < TEST_PUSH_EVERY_S {
+            return Err(TestPushError::TooSoon(TEST_PUSH_EVERY_S - (now - last)));
+        }
+        self.last_test_push.store(now, Ordering::Relaxed);
+        let payload = homelab_core::notify::push_payload(
+            "homelab-admin",
+            "test-push",
+            "test",
+            false,
+            Some("Test push from the dashboard: pushes reach this device."),
+            env!("CARGO_PKG_VERSION"),
+            Some(&homelab_core::notify::click_url(
+                &self.base(),
+                homelab_core::notify::page::NOTIFICATIONS,
+            )),
+        );
+        self.pusher
+            .push(payload)
+            .await
+            .map_err(TestPushError::Failed)?;
+        let settings = self.state.lock().await.settings.clone();
+        Ok(serde_json::json!({
+            "sent": true,
+            "at": now,
+            // What a real notice would meet: pushes off, or snoozed.
+            "pushes_on": settings.push,
+            "snoozed": settings.snoozed(now),
         }))
     }
 
@@ -635,9 +691,34 @@ async fn snooze(
     }
 }
 
+async fn test_push(State(c): State<Arc<NotifyCenter>>) -> Response {
+    match c.test_push().await {
+        Ok(v) => Json(v).into_response(),
+        Err(TestPushError::TooSoon(wait)) => (
+            StatusCode::TOO_MANY_REQUESTS,
+            Json(Refusal::new(
+                "the test push",
+                format!("the last test push went out a moment ago; wait {wait} s"),
+                "press the button again after that",
+            )),
+        )
+            .into_response(),
+        Err(TestPushError::Failed(why)) => (
+            StatusCode::BAD_GATEWAY,
+            Json(Refusal::new(
+                "the test push",
+                why,
+                "check HOMELAB_ADMIN_NOTIFY_URL and the hub's token; the dashboard's log has the detail",
+            )),
+        )
+            .into_response(),
+    }
+}
+
 /// Mounted with `dashboard_routes`.
 pub fn router(center: Arc<NotifyCenter>) -> Router {
     Router::new()
+        .route("/data/notifications/test-push", post(test_push))
         .route("/data/notifications", get(list))
         .route("/data/notifications/read", post(mark))
         .route(

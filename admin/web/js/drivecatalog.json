@@ -3757,6 +3757,18 @@
       "twins": false
     },
     {
+      "id": "send-test-push",
+      "page": "notifications",
+      "what": "send one test push to the phone, through the route real notices use (not stored in the Inbox)",
+      "opens": "run",
+      "row": null,
+      "href": "/system/notifications",
+      "was": [],
+      "shows": null,
+      "reach": [],
+      "twins": false
+    },
+    {
       "id": "settings-check-and-write",
       "page": "settings",
       "what": "write the staged host.toml changes (Save)",

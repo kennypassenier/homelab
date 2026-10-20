@@ -98,6 +98,13 @@ const PUSH_OFF = declare({
   shows: "after Turn push off… was pressed",
   reach: [{ do: "click", control: "push-off-open" }],
 });
+// ask-kp11be-10: one test push, to see that pushes reach the phone.
+const SEND_TEST_PUSH = declare({
+  id: "send-test-push",
+  page: "notifications",
+  opens: "run",
+  what: "send one test push to the phone, through the route real notices use (not stored in the Inbox)",
+});
 const STACK_PUSH = declare({
   id: "stack-push",
   page: "notifications",
@@ -404,6 +411,19 @@ export function mount(root) {
     ),
     PUSH_TO_PHONE,
   );
+  const testPush = drivable(
+    h(
+      "button",
+      {
+        type: "button",
+        class: "kp-button nr-col-btn",
+        title:
+          "Send one test push to the phone now, through the route real notices use",
+      },
+      "Send test push",
+    ),
+    SEND_TEST_PUSH,
+  );
   const pushOff = drivable(
     h(
       "button",
@@ -505,6 +525,17 @@ export function mount(root) {
             ),
           ),
           rule("nr-push-l", "Push to phone", [gate], [], [pushOpen, pushOn]),
+          rule(
+            "nr-test-l",
+            "Test push",
+            [],
+            [
+              hint(
+                "Sends one push to your phone now, through the same route real notices use, to show that pushes arrive. It goes out even while pushes are off or held, and it is not kept in the Inbox.",
+              ),
+            ],
+            [testPush],
+          ),
         ),
       ),
     ),
@@ -660,6 +691,37 @@ export function mount(root) {
     return { ok: true, error: null };
   };
   const region = () => toastRegion(root);
+
+  // ask-kp11be-10: the test push; kp's toast tells how it went.
+  testPush.addEventListener("click", async () => {
+    testPush.disabled = true;
+    testPush.setAttribute("aria-busy", "true");
+    const r = await send(
+      "POST",
+      "/data/notifications/test-push",
+      undefined,
+      "the test push",
+    );
+    testPush.disabled = false;
+    testPush.removeAttribute("aria-busy");
+    if (!r.ok) {
+      toast(`The test push did not go out: ${r.error.why}`, {
+        region: region(),
+        live: "assertive",
+        sticky: true,
+      });
+      return;
+    }
+    const held = r.body?.snoozed
+      ? " Real notices are held right now (pushes are snoozed), so none reach the phone until the hold ends."
+      : r.body?.pushes_on === false
+        ? " Pushes are switched off, so real notices stay in the Inbox until you turn push on."
+        : "";
+    toast(`Test push sent. Look at your phone.${held}`, {
+      region: region(),
+      ms: held ? 10000 : 6000,
+    });
+  });
 
   // The snooze: a choice holds every push until its moment.
   snoozeEl.addEventListener("kp-snooze", async (event) => {

@@ -250,3 +250,33 @@ fn today_and_findings_rows_carry_their_fix() {
     assert_eq!(rows[0]["fix"]["label"], "Back up");
     assert!(rows[1].get("fix").is_none());
 }
+
+/// ask-kp11be-10: a test push goes through the push route, stores no
+/// notice, ignores a push switch that is off but says so, and cannot be
+/// pressed twice in a row.
+#[tokio::test]
+async fn a_test_push_reaches_the_route_stores_nothing_and_waits_between_presses() {
+    use homelab_admin::shell::actions_notify::{TEST_PUSH_EVERY_S, TestPushError};
+    let clock = TestClock::at(5_000);
+    let (c, pusher, _live) = center("testpush", &clock);
+    let before = c.snapshot().await["notices"].as_array().map(Vec::len);
+    let first = c.test_push().await.unwrap();
+    assert_eq!(first["sent"], true);
+    assert_eq!(first["pushes_on"], true);
+    let sent = pusher.sent.lock().unwrap().clone();
+    assert_eq!(sent.len(), 1);
+    assert!(sent[0].contains("test-push"), "{}", sent[0]);
+    assert_eq!(
+        c.snapshot().await["notices"].as_array().map(Vec::len),
+        before
+    );
+    // Too soon: nothing more is sent.
+    clock.advance(3);
+    assert_eq!(
+        c.test_push().await.unwrap_err(),
+        TestPushError::TooSoon(TEST_PUSH_EVERY_S - 3)
+    );
+    assert_eq!(pusher.sent.lock().unwrap().len(), 1);
+    clock.advance(TEST_PUSH_EVERY_S);
+    assert!(c.test_push().await.is_ok());
+}

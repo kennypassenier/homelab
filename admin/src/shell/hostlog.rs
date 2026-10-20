@@ -185,6 +185,7 @@ impl HostLog {
             label,
             done,
             total,
+            ..
         } = m
         {
             let push = {

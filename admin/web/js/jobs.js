@@ -18,11 +18,14 @@ import { formatClock, formatDateTime, humanDuration } from "./format.js";
  *   {from: "claude", by: string}} Origin
  * @typedef {"queued" | "running" | "done" | "failed" | "deferred" |
  *   "refused" | "unknown"} JobState
+ * @typedef {{label: string, done: number, total: number | null,
+ *   rate_bps: number | null}} JobBytes
+ *   ask-kp11be-5: bytes moved in the transfer the job is in (restic).
  * @typedef {{job: number, origin: Origin, stack: string, action: string,
  *   args: Record<string, unknown>, state: JobState, queued_at: number,
  *   started_at: number | null, finished_at: number | null, reqs: number[],
  *   message: string | null, cli: string | null, progress: Progress | null,
- *   restarts_dashboard: boolean, flow?: any}} Job
+ *   bytes?: JobBytes | null, restarts_dashboard: boolean, flow?: any}} Job
  *   `flow` (redesign-flows-6): the Update flow job's own rows and moves.
  * @typedef {{job: number, req: number, level: string, source: string,
  *   msg: string, ts: number}} LogLine
@@ -225,6 +228,42 @@ export function applyProgress(jobs, ev) {
         }
       : j,
   );
+}
+
+/**
+ * An `action_bytes` event laid on its job (ask-kp11be-5).
+ * @param {Job[]} jobs
+ * @param {{job: number, bytes: JobBytes}} ev
+ * @returns {Job[]}
+ */
+export function applyBytes(jobs, ev) {
+  return jobs.map((j) => (j.job === ev.job ? { ...j, bytes: ev.bytes } : j));
+}
+
+/**
+ * The byte counter of a running transfer as the job panel's second bar
+ * reads it: how far in percent (null while the total is unknown, the bar
+ * is then busy), and the words under it. `human` writes a byte count
+ * (`humanBytes`), passed in so this stays free of other modules.
+ * @param {JobBytes | null | undefined} b
+ * @param {(n: number) => string | null} human
+ * @returns {{percent: number | null, text: string} | null}
+ */
+export function bytesView(b, human) {
+  if (!b) return null;
+  const done = human(b.done) ?? "0 B";
+  const rate =
+    b.rate_bps != null && b.rate_bps > 0 ? `, ${human(b.rate_bps)}/s` : "";
+  if (!b.total || b.total <= 0)
+    return {
+      percent: null,
+      text: `${b.label}: ${done} so far${rate}; restic is still counting what there is to move`,
+    };
+  const percent = Math.min(100, Math.floor((b.done / b.total) * 100));
+  return {
+    percent,
+    text: `${b.label}: ${done} of ${human(b.total)} (${percent} %)${rate}`,
+  };
 }
 
 /**

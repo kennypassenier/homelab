@@ -1498,6 +1498,12 @@ pub enum ServerMsg {
         label: String,
         done: u64,
         total: Option<u64>,
+        /// ask-kp11be-5: the request whose operation moves the bytes, so
+        /// a dashboard can lay the counter on that job. None from a host
+        /// older than the field (the counter then only reaches the Log
+        /// page); an older reader ignores the field.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        req: Option<u64>,
     },
     /// Structured fleet snapshot (reply to GetState).
     State(Box<FleetState>),

@@ -9,6 +9,7 @@ import { routeError } from "./doctor.js";
 import {
   addLog,
   applyOutcome,
+  applyBytes,
   applyProgress,
   finished,
   jobsAwaitingOutcome,
@@ -254,6 +255,11 @@ export function startAct() {
     markFresh(ev.job);
     act.jobs = applyProgress(act.jobs, ev);
     act.progressAt.set(ev.job, now());
+    tell("jobs", ev.job);
+  });
+  listen("action_bytes", (ev) => {
+    markFresh(ev.job);
+    act.jobs = applyBytes(act.jobs, ev);
     tell("jobs", ev.job);
   });
   listen("action_log", (line) => {

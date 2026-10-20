@@ -8,7 +8,9 @@ import { act, actionLabel, onAct } from "./act.js";
 import { badge, labeledCliCommand, openDialog } from "./actui.js";
 import { fetchReport, h, progressBar, setProgress } from "./dom.js";
 import { formatDateTime, humanDuration } from "./format.js";
+import { humanBytes } from "./backupsview.js";
 import {
+  bytesView,
   elapsedS,
   estimateRange,
   finished,
@@ -92,11 +94,17 @@ export function mountJobPanel(jobId, opts = {}) {
   // and the line under it says why, never a 0 % that looks stuck.
   const progress = progressBar("How far the job is", null, "job-progress");
   const progressNote = h("p", { class: "measured job-progress__note" });
+  // ask-kp11be-5: a restic backup or restore also says how much data has
+  // moved: a second bar with the bytes done of the total and the rate.
+  const bytesBar = progressBar("How much data has moved", null, "job-bytes");
+  const bytesNote = h("p", { class: "measured job-progress__note" });
   const progressBox = h(
     "div",
     { class: "job-progress-box", hidden: "" },
     progress,
     progressNote,
+    bytesBar,
+    bytesNote,
   );
   const bar = h("figure", { class: "kp-stackbar job-bar" });
   const stepsHost = h("div", {
@@ -341,6 +349,14 @@ export function mountJobPanel(jobId, opts = {}) {
       v.percent == null
         ? "Working. There is no earlier run to estimate from yet, so the bar only shows that it is busy."
         : `${v.percent} % done, by ${p?.m ? "steps" : "the time earlier runs took"}.`;
+
+    // The data moved so far, while a transfer reports it.
+    const moved = bytesView(j.bytes, (n) => humanBytes(n));
+    bytesBar.hidden = bytesNote.hidden = moved == null;
+    if (moved) {
+      setProgress(bytesBar, moved.percent);
+      bytesNote.textContent = moved.text;
+    }
 
     // Where the time went: one bar, split by step.
     /** @type {{key: string, label: string, value: number, tone?: "destructive"}[]} */

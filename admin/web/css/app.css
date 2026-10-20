@@ -834,6 +834,9 @@ tr.unread td:first-child {
 .job-progress__note {
   margin: 0;
 }
+.job-progress-box [hidden] {
+  display: none;
+}
 .job-cols {
   display: grid;
   grid-template-columns: minmax(0, 3fr) minmax(16rem, 2fr);

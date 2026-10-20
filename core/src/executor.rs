@@ -102,6 +102,10 @@ impl CmdOutput {
     }
 }
 
+/// A per-line callback for [`Executor::run_streaming`]: returns true for a
+/// line it consumed.
+pub type LineFn<'a> = dyn for<'l> Fn(&'l str) -> bool + Send + Sync + 'a;
+
 /// All side effects. `write_file` MUST be atomic (tmp + rename) per AR4.
 #[async_trait]
 pub trait Executor: Send + Sync {
@@ -109,6 +113,19 @@ pub trait Executor: Send + Sync {
     /// caller decides what a failure means. Err is reserved for spawn
     /// failures and timeouts.
     async fn run(&self, cmd: &Cmd) -> Result<CmdOutput, CoreError>;
+
+    /// ask-kp11be-5: [`Executor::run`], but every stdout line is handed to
+    /// `on_line` while the command is still running. A line the callback
+    /// returns `true` for is consumed: it does not end up in the returned
+    /// `stdout` (restic's status lines would otherwise pile up in the
+    /// output and the transcript). The default runs the command first and
+    /// then replays its lines, so an executor that cannot stream (the mock,
+    /// a test double) still behaves — only without the live part.
+    async fn run_streaming(&self, cmd: &Cmd, on_line: &LineFn<'_>) -> Result<CmdOutput, CoreError> {
+        let mut out = self.run(cmd).await?;
+        out.stdout = keep_unconsumed(&out.stdout, on_line);
+        Ok(out)
+    }
 
     /// Atomically write a host-local file with the given mode.
     async fn write_file(&self, path: &str, content: &str, mode: u32) -> Result<(), CoreError>;
@@ -119,6 +136,18 @@ pub trait Executor: Send + Sync {
 
     /// Sleep — routed through the trait so tests run instantly.
     async fn sleep_ms(&self, ms: u64);
+}
+
+/// The lines of `stdout` that `on_line` did not consume, newline-ended.
+pub fn keep_unconsumed(stdout: &str, on_line: &LineFn<'_>) -> String {
+    let mut kept = String::new();
+    for l in stdout.lines() {
+        if !on_line(l) {
+            kept.push_str(l);
+            kept.push('\n');
+        }
+    }
+    kept
 }
 
 /// Decorator that emits every command as a `[run ]` transcript line through a
@@ -362,6 +391,23 @@ impl Executor for TracingExecutor<'_> {
         // as an argument reached the transcript, journal and bundle whole.
         self.line(format!("[run ] {}", mask_secrets(&cmd.shell_line())));
         let out = self.inner.run(cmd).await?;
+        if cmd.quiet {
+            self.line(format!(
+                "  (output withheld: {} bytes, secret)",
+                out.stdout.len()
+            ));
+            return Ok(out);
+        }
+        for l in out.stdout.lines().chain(out.stderr.lines()).take(20) {
+            if !l.trim().is_empty() {
+                self.line(format!("  {}", trace_line(l)));
+            }
+        }
+        Ok(out)
+    }
+    async fn run_streaming(&self, cmd: &Cmd, on_line: &LineFn<'_>) -> Result<CmdOutput, CoreError> {
+        self.line(format!("[run ] {}", mask_secrets(&cmd.shell_line())));
+        let out = self.inner.run_streaming(cmd, on_line).await?;
         if cmd.quiet {
             self.line(format!(
                 "  (output withheld: {} bytes, secret)",

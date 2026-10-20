@@ -5636,6 +5636,93 @@ impl Executor for RealExecutor {
         })
     }
 
+    /// ask-kp11be-5: the same process rules as `run` (own process group,
+    /// the group killed on a timeout), but stdout is read line by line
+    /// while the command runs, so restic's status lines reach the job
+    /// panel as they happen. What the callback consumes is not kept; what
+    /// is kept is capped, so a chatty command cannot grow without bound.
+    async fn run_streaming(
+        &self,
+        cmd: &Cmd,
+        on_line: &homelab_core::executor::LineFn<'_>,
+    ) -> Result<CmdOutput, CoreError> {
+        use tokio::io::{AsyncBufReadExt, AsyncReadExt};
+        /// The most stdout kept for the caller (4 MiB).
+        const KEEP_MAX: usize = 4 * 1024 * 1024;
+        let rendered = cmd.rendered();
+        tracing::trace!("run (streaming) {}", rendered);
+        let mut child = Command::new(&cmd.program)
+            .args(&cmd.args)
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .kill_on_drop(true)
+            .process_group(0)
+            .spawn()
+            .map_err(|e| CoreError::Other(format!("spawn {}: {}", rendered, e)))?;
+        let group = child.id();
+        let stdout = child.stdout.take();
+        let stderr = child.stderr.take();
+        let err_task = tokio::spawn(async move {
+            let mut buf = Vec::new();
+            if let Some(mut e) = stderr {
+                // Capped like the kept stdout: read what fits, drop the rest.
+                let _ = (&mut e).take(KEEP_MAX as u64).read_to_end(&mut buf).await;
+                let _ = tokio::io::copy(&mut e, &mut tokio::io::sink()).await;
+            }
+            buf
+        });
+        let work = async {
+            let mut kept = String::new();
+            if let Some(o) = stdout {
+                let mut rd = tokio::io::BufReader::new(o);
+                let mut raw = Vec::new();
+                loop {
+                    raw.clear();
+                    match rd.read_until(b'\n', &mut raw).await {
+                        Ok(0) | Err(_) => break,
+                        Ok(_) => {
+                            let line = String::from_utf8_lossy(&raw);
+                            let line = line.trim_end_matches(['\n', '\r']);
+                            if !on_line(line) && kept.len() + line.len() < KEEP_MAX {
+                                kept.push_str(line);
+                                kept.push('\n');
+                            }
+                        }
+                    }
+                }
+            }
+            let status = child.wait().await;
+            (kept, status)
+        };
+        match tokio::time::timeout(Duration::from_secs(cmd.timeout_s), work).await {
+            Ok((kept, status)) => {
+                let status =
+                    status.map_err(|e| CoreError::Other(format!("wait {}: {}", rendered, e)))?;
+                let stderr = err_task.await.unwrap_or_default();
+                Ok(CmdOutput {
+                    stdout: kept,
+                    stderr: String::from_utf8_lossy(&stderr).to_string(),
+                    code: status.code().unwrap_or(-1),
+                })
+            }
+            Err(_) => {
+                if let Some(pgid) = group.and_then(|p| i32::try_from(p).ok()) {
+                    // SAFETY: as in `run` — a signal to the group this call
+                    // created for the child it spawned.
+                    #[allow(unsafe_code)]
+                    unsafe {
+                        libc::killpg(pgid, libc::SIGKILL);
+                    }
+                }
+                Err(CoreError::Timeout {
+                    rendered,
+                    seconds: cmd.timeout_s,
+                })
+            }
+        }
+    }
+
     /// Atomic by contract (AR4): write a temp file, fsync, rename over.
     async fn write_file(&self, path: &str, content: &str, mode: u32) -> Result<(), CoreError> {
         use std::os::unix::fs::PermissionsExt;
@@ -5851,6 +5938,7 @@ impl Sink for BroadcastSink {
                 label,
                 done,
                 total,
+                req: self.req,
             },
             // fix-171 round 2: the op's own announced plan, before its
             // first step mark — a client's total comes from this, not from

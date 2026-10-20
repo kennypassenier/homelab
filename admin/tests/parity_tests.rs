@@ -173,6 +173,7 @@ fn parity_the_log_stream_carries_every_line_masked_and_filterable() {
             label: "restic".into(),
             done,
             total: Some(100),
+            req: None,
         });
     }
     let t = live.events("transfer");

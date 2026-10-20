@@ -120,6 +120,96 @@ pub(crate) fn restic(
     Cmd::new(refs[0], &refs[1..], timeout)
 }
 
+/// ask-kp11be-5: how often restic prints a status line while it works
+/// (`RESTIC_PROGRESS_FPS`, frames per second): one every 5 s. Restic's own
+/// default for a non-terminal is one a minute, too slow for a job panel's
+/// bar; more often only fills the connection with lines nobody reads.
+const RESTIC_PROGRESS_FPS: &str = "0.2";
+
+/// ask-kp11be-5: one status or summary line of `restic backup --json` or
+/// `restic restore --json`, as the bytes it reports.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ResticBytes {
+    pub done: u64,
+    pub total: Option<u64>,
+    /// A status line is progress only and is not kept in the command's
+    /// output; the summary line is kept (the empty-snapshot check reads it).
+    pub is_status: bool,
+}
+
+/// Read one line of restic's JSON output. `None` for anything that is not
+/// a status or summary line carrying bytes: a line this does not recognise
+/// is left exactly where it was.
+///
+/// * backup status: `bytes_done` of `total_bytes` (the total is absent
+///   while restic is still scanning, or 0)
+/// * restore status: `bytes_restored` of `total_bytes`
+/// * summary: backup `total_bytes_processed`, restore `bytes_restored`;
+///   the whole of it done
+pub fn restic_bytes(line: &str) -> Option<ResticBytes> {
+    let line = line.trim();
+    if !line.starts_with('{') || !line.contains("\"message_type\"") {
+        return None;
+    }
+    let v: serde_json::Value = serde_json::from_str(line).ok()?;
+    let num = |k: &str| v.get(k).and_then(|n| n.as_u64());
+    match v.get("message_type")?.as_str()? {
+        "status" => {
+            let done = num("bytes_done").or_else(|| num("bytes_restored"))?;
+            Some(ResticBytes {
+                done,
+                total: num("total_bytes").filter(|t| *t > 0),
+                is_status: true,
+            })
+        }
+        "summary" => {
+            let done = num("total_bytes_processed").or_else(|| num("bytes_restored"))?;
+            Some(ResticBytes {
+                done,
+                total: Some(done),
+                is_status: false,
+            })
+        }
+        _ => None,
+    }
+}
+
+/// Run a restic command that reports bytes (`--json`), telling the sink
+/// how far it is as it goes: `Bytes { op, label: <repository owner> }`.
+/// Fails like [`run_ok`] on a non-zero exit.
+async fn run_restic_bytes(
+    exec: &dyn Executor,
+    sink: &dyn crate::sink::Sink,
+    op: &str,
+    owner: &str,
+    cmd: Cmd,
+) -> Result<crate::executor::CmdOutput, CoreError> {
+    let mut cmd = cmd;
+    // Right after `env`, with the other variables.
+    cmd.args
+        .insert(0, format!("RESTIC_PROGRESS_FPS={RESTIC_PROGRESS_FPS}"));
+    let on_line = |line: &str| match restic_bytes(line) {
+        Some(b) => {
+            sink.emit(PipelineEvent::Bytes {
+                op: op.to_string(),
+                label: owner.to_string(),
+                done: b.done,
+                total: b.total,
+            });
+            b.is_status
+        }
+        None => false,
+    };
+    let out = exec.run_streaming(&cmd, &on_line).await?;
+    if out.code != 0 {
+        return Err(CoreError::Command {
+            rendered: cmd.rendered(),
+            detail: format!("rc={} :: {}", out.code, out.stderr.trim()),
+        });
+    }
+    Ok(out)
+}
+
 /// What `restic init` found (gap-24).
 #[derive(Debug, PartialEq, Eq)]
 pub enum InitOutcome {
@@ -806,16 +896,17 @@ pub(crate) async fn backup_impl<'a>(
                 return Ok(StepOutcome::Unchanged);
             }
             for (owner, paths) in &groups {
-                // --quiet as well as --json: without it restic emits a status line per
-                // update and the operation log becomes a wall of progress json.
-                // Quiet keeps the summary, which is the only line this needs.
+                // ask-kp11be-5: --json without --quiet, so restic reports
+                // its status (bytes done of total) every few seconds. Those
+                // lines go to the sink as byte counters and are dropped from
+                // the output (`run_restic_bytes`), so the operation log stays
+                // free of progress json; the summary is the line kept.
                 // fix-112: every repository of one stack's night carries the
                 // same tag, so a restore can take one night across all of
                 // them instead of each repository's own newest.
                 let trigger_tag = cfg.trigger.tag();
                 let mut args = vec![
                     "backup",
-                    "--quiet",
                     "--json",
                     "--tag",
                     &run_tag,
@@ -825,9 +916,12 @@ pub(crate) async fn backup_impl<'a>(
                 for p in paths {
                     args.push(p.as_str());
                 }
-                let out = run_ok(
+                let out = run_restic_bytes(
                     exec,
-                    &restic(
+                    ctx.sink,
+                    &format!("backup-{}", m.stack_name),
+                    owner,
+                    restic(
                         &cfg.restic_base,
                         owner,
                         &cfg.password_file,
@@ -1809,13 +1903,16 @@ pub async fn restore_app(
                             .find(|(o, _)| o == owner)
                             .map(|(_, id)| id.as_str())
                             .unwrap_or(snapshot);
-                        run_ok(
+                        run_restic_bytes(
                             exec,
-                            &restic(
+                            ctx.sink,
+                            &op,
+                            owner,
+                            restic(
                                 &cfg.restic_base,
                                 owner,
                                 &cfg.password_file,
-                                &["restore", id, "--target", "/"],
+                                &["restore", id, "--json", "--target", "/"],
                                 cfg.restore_timeout_s,
                             ),
                         )
@@ -2626,6 +2723,29 @@ pub fn resolve_snapshot_path(paths: &[String], typed: &str) -> Result<String, St
 #[cfg(test)]
 mod backup_status_tests {
     use super::*;
+
+    #[test]
+    fn restic_status_lines_read_as_bytes_and_stay_out_of_the_output() {
+        let backup = r#"{"message_type":"status","percent_done":0.4,"total_files":9,"files_done":3,"total_bytes":1000,"bytes_done":400}"#;
+        let b = restic_bytes(backup).unwrap();
+        assert_eq!((b.done, b.total, b.is_status), (400, Some(1000), true));
+        let restore = r#"{"message_type":"status","seconds_elapsed":5,"percent_done":0.5,"total_files":2,"files_restored":1,"total_bytes":80,"bytes_restored":40}"#;
+        let r = restic_bytes(restore).unwrap();
+        assert_eq!((r.done, r.total), (40, Some(80)));
+        // Still scanning: no total yet.
+        let scanning = r#"{"message_type":"status","total_bytes":0,"bytes_done":0}"#;
+        assert_eq!(restic_bytes(scanning).unwrap().total, None);
+    }
+
+    #[test]
+    fn restic_summary_is_bytes_but_is_kept_for_the_empty_check() {
+        let line =
+            r#"{"message_type":"summary","total_files_processed":2,"total_bytes_processed":512}"#;
+        let b = restic_bytes(line).unwrap();
+        assert_eq!((b.done, b.total, b.is_status), (512, Some(512), false));
+        assert!(restic_bytes("not json").is_none());
+        assert!(restic_bytes(r#"{"message_type":"error"}"#).is_none());
+    }
 
     #[test]
     fn empty_summary_is_empty_entries() {

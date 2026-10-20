@@ -127,6 +127,8 @@ export const ACT_EVENTS = /** @type {const} */ ([
   "action",
   "action_log",
   "action_progress",
+  // ask-kp11be-5: bytes moved so far in a restic backup or restore.
+  "action_bytes",
   "action_batch",
   "notification",
   "notifications_read",

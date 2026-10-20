@@ -181,3 +181,19 @@ fn feat_ops_6_without_history_it_counts_but_does_not_guess() {
         assert!(json.get(k).is_some(), "{k} in {json}");
     }
 }
+
+/// ask-kp11be-5: the byte counter's rate follows the recent samples and
+/// starts over for a new repository.
+#[test]
+fn bytes_rate_needs_two_samples_apart_and_restarts_per_repository() {
+    let mut t = Tracker::new(Vec::new());
+    let a = t.on_bytes("media", 0, None, 100);
+    assert_eq!((a.done, a.total, a.rate_bps), (0, None, None));
+    // Too soon to say.
+    assert_eq!(t.on_bytes("media", 1_000, Some(10_000), 101).rate_bps, None);
+    let b = t.on_bytes("media", 50_000, Some(100_000), 105);
+    assert_eq!(b.rate_bps, Some(10_000));
+    // A new repository starts measuring again.
+    let c = t.on_bytes("home", 10, Some(20), 106);
+    assert_eq!((c.label.as_str(), c.rate_bps), ("home", None));
+}

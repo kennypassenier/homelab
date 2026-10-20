@@ -589,6 +589,11 @@ pub struct JobView {
     /// feat-stacks-7: the same thing from a workstation.
     pub cli: Option<String>,
     pub progress: Option<Progress>,
+    /// ask-kp11be-5: bytes moved so far in the transfer the job is in
+    /// (restic backup and restore); None for a job with no byte counter or
+    /// a host older than the field.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub bytes: Option<actions_progress::JobBytes>,
     /// arch-self: this job restarts the dashboard; its end is read back
     /// after the restart.
     pub restarts_dashboard: bool,
@@ -1119,6 +1124,7 @@ impl Actions {
             message: None,
             cli: None,
             progress: None,
+            bytes: None,
             flow: None,
         };
         self.store(&view);
@@ -2243,6 +2249,27 @@ impl Actions {
     }
 
     fn line(&self, m: ServerMsg, id: u64, view: &mut JobView, tracker: &mut Tracker) {
+        // ask-kp11be-5: the host's byte counter of this job's operation. An
+        // older host sends it without a request id; it then belongs to no
+        // job and only the Log page shows it.
+        if let ServerMsg::Transfer {
+            label,
+            done,
+            total,
+            req: Some(r),
+            ..
+        } = &m
+        {
+            if *r == id {
+                let b = tracker.on_bytes(label, *done, *total, self.now().max(0) as u64);
+                view.bytes = Some(b.clone());
+                self.inner.publish.publish(
+                    "action_bytes",
+                    serde_json::json!({ "job": view.job, "req": id, "bytes": b }),
+                );
+            }
+            return;
+        }
         let ServerMsg::Log {
             level,
             source,

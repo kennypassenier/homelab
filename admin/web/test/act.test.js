@@ -28,7 +28,9 @@ import {
 import {
   addLog,
   applyOutcome,
+  applyBytes,
   applyProgress,
+  bytesView,
   batchView,
   jobPanel,
   jobRows,
@@ -433,7 +435,7 @@ test("the job panel reads step 3/35 with the time run and the time left", () => 
   // fix-189 (Kenny, 2026-10-02): a step total is the bar's one truth once
   // the host sends one; time history (which alone would say 41% here,
   // 120 / (120 + 170)) now only feeds "Expected remaining" above.
-  assert.equal(v.percent, 6); // (3 - 1) / 35
+  assert.equal(v?.percent, 6); // (3 - 1) / 35
   assert.equal(v.finished, false);
   assert.equal(v.badge.label, "running");
 });
@@ -521,7 +523,7 @@ test("the end of a job says what came of it", () => {
   const done = job({ state: "done", finished_at: 1210, progress: prog() });
   const v = jobPanel(done, { label: (a) => a, progressAt: null, now: 5000 });
   assert.equal(v.elapsed, "3 min 20 s");
-  assert.equal(v.percent, 100);
+  assert.equal(v?.percent, 100);
   assert.equal(v.remaining, "");
   assert.equal(v.outcome?.tone, "success");
   assert.equal(
@@ -658,8 +660,8 @@ test("a batch counts its jobs", () => {
     failed: 1,
     deferred: 0,
   });
-  assert.equal(v.text, "2 of 3 finished · 1 done · 1 failed");
-  assert.equal(v.percent, 67);
+  assert.equal(v?.text, "2 of 3 finished · 1 done · 1 failed");
+  assert.equal(v?.percent, 67);
   assert.equal(v.finished, false);
   assert.equal(v.rows[1].badge.tone, "bad");
 });
@@ -996,4 +998,22 @@ test("pressGate keeps a typed-name action off until the name is exact", () => {
   const refused = { ready: false, reason: "the host refuses" };
   assert.equal(pressGate(w, { confirm: "media" }, refused), refused);
   assert.equal(pressGate(actionForm(find("backup"), ctx), {}, ok), ok);
+});
+
+test("a restic byte counter lays on its job and reads as a bar with a rate", () => {
+  const human = (/** @type {number} */ n) => `${n} B`;
+  const jobs = applyBytes(/** @type {any} */ ([{ job: 3 }, { job: 4 }]), {
+    job: 3,
+    bytes: { label: "media", done: 50, total: 200, rate_bps: 10 },
+  });
+  assert.equal(jobs[1].bytes, undefined);
+  const v = bytesView(jobs[0].bytes, human);
+  assert.equal(v?.percent, 25);
+  assert.equal(v?.text, "media: 50 B of 200 B (25 %), 10 B/s");
+  const scanning = bytesView(
+    { label: "media", done: 5, total: null, rate_bps: null },
+    human,
+  );
+  assert.equal(scanning?.percent, null);
+  assert.equal(bytesView(null, human), null);
 });

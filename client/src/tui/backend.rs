@@ -433,6 +433,7 @@ async fn play_demo_deploy(evt_tx: &mpsc::Sender<BackendEvent>, stack: &str) {
                         label: format!("{}/docker-compose.yml", stack),
                         done: b,
                         total: Some(24576),
+                        req: None,
                     }))
                     .await;
                 tokio::time::sleep(std::time::Duration::from_millis(180)).await;

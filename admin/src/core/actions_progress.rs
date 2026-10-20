@@ -148,6 +148,73 @@ pub struct Progress {
     pub runs: usize,
 }
 
+/// ask-kp11be-5: how many bytes the operation has moved in its current
+/// transfer (a restic backup or restore of one repository), as the job
+/// panel's bar shows it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct JobBytes {
+    /// What is moving: the repository's owning app.
+    pub label: String,
+    pub done: u64,
+    /// None while restic is still scanning.
+    pub total: Option<u64>,
+    /// Bytes per second over the last stretch of samples; None until two
+    /// samples are far enough apart to say.
+    pub rate_bps: Option<u64>,
+}
+
+/// A rate needs this many seconds between two samples to mean anything.
+const RATE_MIN_S: u64 = 3;
+/// The rate's window slides after this long, so it follows the recent
+/// speed, not the average of a night.
+const RATE_WINDOW_S: u64 = 20;
+
+/// Turns the host's byte counters into [`JobBytes`] with a rate. Pure: the
+/// caller passes the time of each sample. Holds one anchor sample, so it
+/// grows with nothing.
+#[derive(Debug, Clone, Default)]
+pub struct BytesRate {
+    label: String,
+    anchor: Option<(u64, u64)>,
+    rate: Option<u64>,
+}
+
+impl BytesRate {
+    pub fn on_sample(
+        &mut self,
+        label: &str,
+        done: u64,
+        total: Option<u64>,
+        now_s: u64,
+    ) -> JobBytes {
+        // A new repository, or a counter that went backwards (a second
+        // pass): start measuring again.
+        if self.label != label || self.anchor.is_some_and(|(_, d)| done < d) {
+            self.label = label.to_string();
+            self.anchor = None;
+            self.rate = None;
+        }
+        match self.anchor {
+            None => self.anchor = Some((now_s, done)),
+            Some((at, was)) => {
+                let dt = now_s.saturating_sub(at);
+                if dt >= RATE_MIN_S {
+                    self.rate = Some((done - was) / dt);
+                    if dt >= RATE_WINDOW_S {
+                        self.anchor = Some((now_s, done));
+                    }
+                }
+            }
+        }
+        JobBytes {
+            label: label.to_string(),
+            done,
+            total,
+            rate_bps: self.rate,
+        }
+    }
+}
+
 /// Follows one operation's step marks.
 ///
 /// fix-171 round 2: `m` (the total) no longer comes from history at all —
@@ -176,9 +243,16 @@ pub struct Tracker {
     /// later `on_plan` (a further command's own announcement) must not
     /// add to it again.
     total_fixed: bool,
+    /// ask-kp11be-5: the byte counter's rate.
+    bytes: BytesRate,
 }
 
 impl Tracker {
+    /// ask-kp11be-5: a byte counter of this job's operation.
+    pub fn on_bytes(&mut self, label: &str, done: u64, total: Option<u64>, now_s: u64) -> JobBytes {
+        self.bytes.on_sample(label, done, total, now_s)
+    }
+
     pub fn new(history: Vec<HistoryEntry>) -> Self {
         Tracker {
             history,

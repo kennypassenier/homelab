@@ -349,6 +349,7 @@ export function mount(root, opts = {}) {
     class: "kp-countdown",
     "data-kp-countdown": "1:00:00",
     "data-kp-countdown-name": "Next run in",
+    "data-kp-countdown-controls": "none",
     id: "sched-countdown",
   });
   const heroTitle = h("b", { id: "sched-hero-title" });

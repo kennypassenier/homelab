@@ -899,11 +899,6 @@ tr.unread td:first-child {
   text-align: center;
   max-inline-size: 22rem;
 }
-/* The disc only reports the time left; nobody starts, pauses or resets
-   it. The component has no read-only mode yet (kp-gaps/homelab.md). */
-.job-disc .kp-timer-disc__controls {
-  display: none;
-}
 @container job-panel (max-width: 40rem) {
   .job-cols {
     grid-template-columns: minmax(0, 1fr);

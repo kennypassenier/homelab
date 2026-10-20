@@ -83,11 +83,6 @@
   align-content: start;
   min-inline-size: 0;
 }
-/* The countdown here shows the time to the next run; it is not a timer a
-   person sets, so its own buttons are off (kp-gaps/homelab.md). */
-.sch-hero .kp-countdown__controls {
-  display: none;
-}
 .sch-hero__what {
   display: grid;
   gap: var(--kp-space-3xs, 0.125rem);

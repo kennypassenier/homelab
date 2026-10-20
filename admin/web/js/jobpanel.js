@@ -365,7 +365,7 @@ export function mountJobPanel(jobId, opts = {}) {
     class: "kp-timer-disc job-disc",
     "data-kp-timer-disc": "1m",
     "data-kp-timer-disc-name": "Time left on the job",
-    "data-kp-timer-disc-disabled": "",
+    "data-kp-timer-disc-controls": "none",
   });
   const discText = h("p", {
     class: "measured job-disc__text",

@@ -11,12 +11,14 @@ import {
 
 /**
  * The palette's sections, in the order they are shown (FLOWS.md §1.2):
- * open Inbox items, then actions, then places, then themes.
+ * open Inbox items, then actions, then places, then the apps to open, then
+ * themes.
  */
 export const SECTIONS = /** @type {const} */ ([
   "Inbox",
   "Do",
   "Go to",
+  "Open app",
   "Theme",
 ]);
 

@@ -36,6 +36,7 @@ import {
 } from "./inboxlist.js";
 import { HELP_OPEN, helpPanel } from "./helptour.js";
 import { startInboxSources } from "./inboxsources.js";
+import { appCommands, readApps } from "./appslist.js";
 import { noMatch, rankPalette } from "./intent.js";
 import { finished, queueOrder, stepText } from "./jobs.js";
 import { mountJobPanel } from "./jobpanel.js";
@@ -102,6 +103,7 @@ registerCommands(
 );
 registerCommands("pages", pageCommands);
 registerCommands("stacks", stackCommands);
+registerCommands("apps", appCommands);
 registerCommands("themes", themeCommands(chooseTheme));
 
 /** The palette's dialog; its options are written for every query. */
@@ -669,6 +671,11 @@ export function mountChrome(where, ctx) {
   dialog.addEventListener(OPEN_EVENT, (e) => {
     if (!(/** @type {CustomEvent} */ (e).detail?.open)) return;
     refill();
+    // The "Open app" group is fed by the Apps page's list; on any other page
+    // the first opening reads it, and the rows fill in when it arrives.
+    void readApps().then((got) => {
+      if (got && dialog.hasAttribute("open")) refill();
+    });
   });
   dialog.addEventListener(RUN_EVENT, (e) => {
     const value = /** @type {CustomEvent} */ (e).detail?.value;

@@ -16,6 +16,7 @@
 // minute watch (`/data/watch`): the tile's own probe, or its stack's
 // container when the tile has none.
 
+import { shareApps } from "../appslist.js";
 import { fetchJson, h } from "../dom.js";
 import { formatDateTime } from "../format.js";
 import { declare, drivable } from "../drivable.js";
@@ -757,6 +758,7 @@ export function mount(root) {
       return;
     }
     tiles = r.body.report?.tiles ?? [];
+    shareApps(r.body.report?.tiles ?? []);
     paint();
     refreshOf(refreshEl)?.now();
   };

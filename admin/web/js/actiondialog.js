@@ -58,7 +58,16 @@ import { restoreHref } from "./restoreflow.js";
 import { current } from "./store.js";
 import { declare, dialogControl, drivable } from "./drivable.js";
 import { countOf } from "./ui.js";
+import { stage } from "./stage.js";
+import { attachCardStates, setCardState } from "/static/kp/js/card-state.js";
 import { clearError, showError } from "/static/kp/js/forms.js";
+import {
+  DATED_EVENT,
+  DATED_RETRY_EVENT,
+  attachDatedOptions,
+  setDatedOptions,
+  setDatedState,
+} from "/static/kp/js/dated-options.js";
 import {
   BEFORE_STEP_EVENT,
   FINISH_EVENT,
@@ -375,6 +384,10 @@ function drawActionDialog(form, values, sources, driven, locked = []) {
 
   // The review step's parts: the preview, the guard, the typed name.
   const previewBox = h("div", { class: "act-preview", "aria-live": "polite" });
+  const previewStage = stage(previewBox);
+  setCardState(previewStage, "loading", {
+    words: "Reading what this would do",
+  });
   const guardBox = h("div", { class: "act-guard" });
   const restartsBox = h(
     "div",
@@ -418,7 +431,7 @@ function drawActionDialog(form, values, sources, driven, locked = []) {
         ...(form.intro
           ? []
           : [h("p", { class: "act-what" }, capital(form.what), ".")]),
-        previewBox,
+        previewStage,
         guardBox,
         ...(forceWrap ? [forceWrap] : []),
         restartsBox,
@@ -465,33 +478,52 @@ function drawActionDialog(form, values, sources, driven, locked = []) {
   // the picker only changes what is drawn around it.
   const snapshotInput = inputs.get("snapshot");
   const snapshotWrap = wraps.get("snapshot");
+  /** @type {(() => Promise<void>) | null} */
+  let startSnapshots = null;
   if (snapshotInput instanceof HTMLInputElement && snapshotWrap) {
     const help = snapshotWrap.querySelector(".kp-field__help");
+    // kp's dated picker: one option per snapshot, newest first with its
+    // "Latest" badge, the date and how long ago, the kind, size and short id
+    // in a column. Its value is the snapshot's short id; the field keeps its
+    // own contract (empty means the latest), so the newest writes "".
     const picker = h("div", {
-      class: "act-snapshot-picker",
+      class: "kp-dated",
+      "data-kp-dated": "",
+      "data-kp-name": `act-snapshot-${form.id}`,
       "data-field": "snapshot-picker",
+      "aria-label": "Snapshot to restore",
     });
+    const gapNote = h(
+      "p",
+      { class: "measured act-snapshot-gap", hidden: "" },
+      'Kind, size and file count are recorded for backups taken from 3.70.5 on; older snapshots say "not recorded".',
+    );
     snapshotInput.hidden = true;
     snapshotWrap.insertBefore(picker, help);
+    snapshotWrap.insertBefore(gapNote, help);
+    /** @type {string} */
+    let latestId = "";
+    picker.addEventListener(DATED_EVENT, (e) => {
+      const chosen = String(/** @type {CustomEvent} */ (e).detail.value ?? "");
+      snapshotInput.value = chosen === latestId ? "" : chosen;
+      snapshotInput.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    picker.addEventListener(DATED_RETRY_EVENT, () => void renderSnapshots());
     let seq = 0;
     const renderSnapshots = async () => {
       const mySeq = ++seq;
-      picker.replaceChildren(
-        h("p", { class: "measured" }, "Reading this app's snapshots…"),
-      );
+      gapNote.hidden = true;
+      setDatedState(picker, "loading");
       const r = await fetchJson(
         `/data/backups/${encodeURIComponent(form.stack)}`,
         "this stack's backup snapshots",
       );
       if (mySeq !== seq) return;
       if (!r.ok) {
-        picker.replaceChildren(
-          h(
-            "p",
-            { class: "kp-alert kp-alert--destructive", role: "alert" },
-            `Could not read the snapshot list — ${r.error.fix ? `${r.error.why} — ${r.error.fix}` : r.error.why}.`,
-          ),
-        );
+        setDatedState(picker, "error", {
+          title: "The snapshot list did not read",
+          text: r.error.fix ? `${r.error.why} — ${r.error.fix}` : r.error.why,
+        });
         snapshotInput.hidden = false;
         return;
       }
@@ -499,85 +531,46 @@ function drawActionDialog(form, values, sources, driven, locked = []) {
       const appValue = typeof values.app === "string" ? values.app : "";
       const owner = resolveSnapshotOwner(repos, appValue);
       if (!owner) {
-        picker.replaceChildren(
-          h(
-            "p",
-            { class: "measured" },
-            appValue
-              ? `No repository named "${appValue}" was read.`
-              : "Choose an app above to see its snapshots, or leave Snapshot empty for the latest of every app.",
-          ),
-        );
+        setDatedState(picker, "empty", {
+          reason: appValue
+            ? `No repository named "${appValue}" was read`
+            : "Choose an app above to see its snapshots, or leave Snapshot empty for the latest of every app",
+          action: null,
+        });
         snapshotInput.hidden = false;
         return;
       }
       const snaps = owner.snapshots ?? [];
       if (snaps.length === 0) {
-        picker.replaceChildren(
-          h("p", { class: "measured" }, `${owner.owner} has no snapshots yet.`),
-        );
+        setDatedState(picker, "empty", {
+          reason: `${owner.owner} has no snapshots yet`,
+          action: null,
+        });
         return;
       }
       const now = Math.floor(Date.now() / 1000);
       const rows = snapshotPickerRows(snaps, now, snapshotInput.value);
-      const group = `act-snapshot-${form.id}-${appValue || "all"}`;
-      picker.replaceChildren(
-        ...rows.map((row, i) => {
-          const id = `${snapshotInput.id}-opt-${i}`;
-          const radio = h("input", {
-            type: "radio",
-            name: group,
-            id,
-            value: row.value,
-          });
-          radio.checked = row.selected;
-          radio.addEventListener("change", () => {
-            snapshotInput.value = row.value;
-            snapshotInput.dispatchEvent(new Event("input", { bubbles: true }));
-          });
-          return h(
-            "label",
-            { class: "act-snapshot-row", for: id },
-            radio,
-            h(
-              "span",
-              { class: "act-snapshot-row__when" },
-              row.when,
-              h("span", { class: "measured" }, ` · ${row.ago}`),
-            ),
-            // fix-223: every row has the same cells in the same columns
-            // (rule 6), whatever the host recorded for that snapshot.
-            h(
-              "span",
-              { class: "act-snapshot-row__badge" },
-              ...(row.latest
-                ? [h("span", { class: "kp-badge" }, "latest")]
-                : []),
-            ),
-            h(
-              "span",
-              { class: "act-snapshot-row__meta measured" },
-              [
-                row.kind ?? "kind not recorded",
-                row.size ?? "size not recorded",
-                ...(row.files ? [row.files] : []),
-              ].join(" · "),
-            ),
-            h("span", { class: "act-snapshot-row__id mono" }, row.shortId),
-          );
-        }),
-        ...(rows.some((r) => r.size == null || r.kind == null)
-          ? [
-              h(
-                "p",
-                { class: "measured act-snapshot-gap" },
-                'Kind, size and file count are recorded for backups taken from 3.70.5 on; older snapshots say "not recorded".',
-              ),
-            ]
-          : []),
+      latestId = rows.find((row) => row.latest)?.shortId ?? "";
+      const timeOf = new Map(snaps.map((x) => [x.short_id, x.time]));
+      setDatedOptions(
+        picker,
+        rows.map((row) => ({
+          value: row.shortId,
+          when: (timeOf.get(row.shortId) ?? 0) * 1000,
+          meta: [
+            row.kind ?? "kind not recorded",
+            row.size ?? "size not recorded",
+            ...(row.files ? [row.files] : []),
+            row.shortId,
+          ].join(" · "),
+        })),
+        rows.find((row) => row.selected)?.shortId ?? null,
+      );
+      gapNote.hidden = !rows.some(
+        (row) => row.size == null || row.kind == null,
       );
     };
-    void renderSnapshots();
+    startSnapshots = renderSnapshots;
     // A different app re-reads this app's own snapshots instead of the
     // one the dialog opened on (fix-216: "Change" on a locked app field
     // still lands here).
@@ -675,11 +668,16 @@ function drawActionDialog(form, values, sources, driven, locked = []) {
   d.dialog.dataset.form = form.id;
   if (driven) d.dialog.dataset.driven = "";
   const detachWizard = attachWizards(d.dialog, { focusStep: false });
+  const detachDated = attachDatedOptions(d.dialog);
+  const detachStates = attachCardStates(d.dialog);
+  void startSnapshots?.();
   const handle = wizard(wiz);
   /** @type {() => void} */
   let stopPanel = () => {};
   d.closed.then(() => {
     detachWizard();
+    detachDated();
+    detachStates();
     stopPanel();
   });
 
@@ -719,9 +717,10 @@ function drawActionDialog(form, values, sources, driven, locked = []) {
   let previewSeq = 0;
   const preview = async () => {
     const seq = ++previewSeq;
-    previewBox.replaceChildren(
-      h("p", { class: "measured" }, "Reading what this would do…"),
-    );
+    previewBox.replaceChildren();
+    setCardState(previewStage, "loading", {
+      words: "Reading what this would do",
+    });
     const r = await send(
       "POST",
       form.previewPath,
@@ -729,6 +728,7 @@ function drawActionDialog(form, values, sources, driven, locked = []) {
       `the preview of ${form.title}`,
     );
     if (seq !== previewSeq) return;
+    setCardState(previewStage, "ready");
     if (!r.ok) {
       guard = null;
       // redesign-final-h2: one plain sentence, the primary held back.

@@ -558,42 +558,8 @@ p:has(> .measured:only-child):first-child {
     grid-area: change;
   }
 }
-/* fix-216: the restore snapshot picker — one row per snapshot, newest
-   first, each keeping the same columns (date+age, latest badge, size,
-   files, short id) across every row so the list reads as a table, not a
-   ragged stack (rule 6). */
-.act-snapshot-picker {
-  display: grid;
-  gap: 4px;
-  margin-block: 6px 2px;
-}
-.act-snapshot-row {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr) 4.5rem minmax(0, 16rem) 5.5rem;
-  align-items: baseline;
-  column-gap: 8px;
-  padding: 6px 8px;
-  border: 1px solid var(--border, currentColor);
-  border-radius: var(--radius, 6px);
-  cursor: pointer;
-}
-.act-snapshot-row:has(input:checked) {
-  border-color: var(--primary, currentColor);
-  background: var(--accent, transparent);
-}
-.act-snapshot-row__id {
-  color: var(--muted-foreground, currentColor);
-  font-size: var(--kp-text-sm, 0.8125rem);
-}
-@media (max-width: 30rem) {
-  .act-snapshot-row {
-    grid-template-columns: auto minmax(0, 1fr) auto;
-  }
-  .act-snapshot-row__meta,
-  .act-snapshot-row__id {
-    grid-column: 2 / -1;
-  }
-}
+/* fix-216: the restore snapshot picker is kp's dated picker (the dialog
+   draws it); only the note under it is ours. */
 .act-snapshot-gap {
   margin-block-start: 4px;
 }

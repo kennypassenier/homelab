@@ -8,6 +8,7 @@ import { declare, drivable } from "./drivable.js";
 import { showAlarm } from "/static/kp/js/alarm.js";
 import { attachDialogs, openAtTop, toast } from "/static/kp/js/overlays.js";
 import { attachCommands } from "/static/kp/js/command.js";
+import { buildTypeConfirm } from "/static/kp/js/components.js";
 
 let dialogIds = 0;
 
@@ -197,6 +198,19 @@ export function fieldEl(f, value, choices = []) {
       help,
     );
     return { wrap, input };
+  }
+  // A name typed to confirm is kp's own block: the rule, the field and the
+  // match line in one footprint. Its input takes the field's id, so a Live
+  // view step and the label find it as before (gap 123: no `id` option).
+  if (f.kind === "typed" && f.expect) {
+    const { block, input } = buildTypeConfirm(document, { name: f.expect });
+    const label = block.querySelector("label");
+    input.id = f.id;
+    input.name = f.name;
+    if (label) label.htmlFor = f.id;
+    input.value = typeof value === "string" ? value : "";
+    block.dataset.field = f.name;
+    return { wrap: block, input };
   }
   /** @type {HTMLInputElement | HTMLSelectElement} */
   let input;

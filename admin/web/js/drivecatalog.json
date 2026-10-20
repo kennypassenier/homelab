@@ -4691,6 +4691,24 @@
       "twins": false
     },
     {
+      "id": "update-major-gate-notes",
+      "page": "update",
+      "what": "open a major version's release notes from its acknowledge gate, in a new tab (the tick waits for it)",
+      "opens": "view",
+      "row": "<pin:stack:app/service>",
+      "href": "/update",
+      "was": [],
+      "shows": "under the list, once a major version is ticked",
+      "reach": [
+        {
+          "do": "click",
+          "control": "update-pick",
+          "row": "*"
+        }
+      ],
+      "twins": false
+    },
+    {
       "id": "update-major-notes",
       "page": "update",
       "what": "a major version's release notes, in a new tab",
@@ -4710,7 +4728,7 @@
     {
       "id": "update-major-read",
       "page": "update",
-      "what": "tick “I read the release notes of …” for a major version (it can be ticked once the notes were opened, or after 4 seconds)",
+      "what": "tick “I read the release notes of …” for a major version (it can be ticked once the notes link was opened; a version with no link, after 4 seconds)",
       "opens": "view",
       "row": "<pin:stack:app/service>",
       "href": "/update",

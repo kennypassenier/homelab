@@ -3246,6 +3246,18 @@
       "twins": false
     },
     {
+      "id": "rename-passkey",
+      "page": "passkeys",
+      "what": "rename one passkey (the name field opens in the row)",
+      "opens": "run",
+      "row": "<passkey label>",
+      "href": "/settings?section=sign-in",
+      "was": [],
+      "shows": "once a passkey is registered",
+      "reach": [],
+      "twins": false
+    },
+    {
       "id": "repo-choice",
       "page": "settings",
       "what": "resolve unpushed commits: push them, rebase and push, or drop them",

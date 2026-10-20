@@ -13,6 +13,7 @@
 import { send } from "./act.js";
 import { openDialog, refusalCallout, notify } from "./actui.js";
 import { fetchJson, h } from "./dom.js";
+import { routeError } from "./doctor.js";
 import { declare, declareField, drivable } from "./drivable.js";
 import { driven, register } from "./drivehooks.js";
 import { listen } from "./store.js";
@@ -33,7 +34,7 @@ import { setQr } from "/static/kp/js/qr.js";
 
 /**
  * @typedef {{id: string, label: string, created_at: string,
- *   last_used_at: string | null}} PasskeyView
+ *   last_used_at: string | null, current?: boolean}} PasskeyView
  * @typedef {{https: boolean, public_url: string | null,
  *   passkeys: PasskeyView[]}} PasskeysData
  */
@@ -52,6 +53,14 @@ const DELETE = declare({
   opens: "run",
   row: "<passkey label>",
   what: "delete one passkey after a confirmation",
+  shows: "once a passkey is registered",
+});
+const RENAME = declare({
+  id: "rename-passkey",
+  page: "passkeys",
+  opens: "run",
+  row: "<passkey label>",
+  what: "rename one passkey (the name field opens in the row)",
   shows: "once a passkey is registered",
 });
 const LABEL_FIELD = declareField({
@@ -119,6 +128,38 @@ export const msOf = (iso) => {
 };
 
 /**
+ * Rename one passkey (`PATCH`, which act.js's `send` does not offer).
+ * @param {string} id
+ * @param {string} name
+ * @returns {Promise<{ok: true} | {ok: false, why: string}>}
+ */
+async function renamePasskey(id, name) {
+  const what = "rename the passkey";
+  try {
+    const r = await fetch(`/api/kit/passkeys/${encodeURIComponent(id)}`, {
+      method: "PATCH",
+      headers: {
+        accept: "application/json",
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({ name }),
+    });
+    if (r.ok) return { ok: true };
+    const text = await r.text().catch(() => "");
+    /** @type {unknown} */
+    let body = null;
+    try {
+      body = text ? JSON.parse(text) : null;
+    } catch {
+      body = null;
+    }
+    return { ok: false, why: routeError(what, r.status, body, text).why };
+  } catch {
+    return { ok: false, why: routeError(what, 0, null).why };
+  }
+}
+
+/**
  * The passkeys as kp's list takes them.
  * @param {PasskeyView[]} list
  * @returns {import("/static/kp/js/passkeys.js").PasskeyRow[]}
@@ -130,6 +171,7 @@ export function passkeyRows(list) {
     kind: /** @type {const} */ ("passkey"),
     createdAt: msOf(p.created_at) ?? undefined,
     lastUsedAt: p.last_used_at ? msOf(p.last_used_at) : null,
+    current: p.current === true,
   }));
 }
 
@@ -284,7 +326,7 @@ export function mountSignin(box, report) {
       protectLast: "off",
       confirm: "dialog",
       neverUsedAfter: 90,
-      markCurrent: false,
+      markCurrent: true,
       remove: async (row) => {
         const r = await send(
           "DELETE",
@@ -295,9 +337,12 @@ export function mountSignin(box, report) {
         if (!r.ok) throw new Error(r.error.why);
         reload();
       },
-      // The kit cannot rename a passkey yet (kp-gaps/homelab.md): say so.
-      rename: async () => {
-        throw new Error("Renaming a passkey is not supported by the host yet.");
+      // PATCH /api/kit/passkeys/{id} (chassis-rs 3.9.0) answers the updated
+      // view; a failure throws so kp keeps the row's field open with the why.
+      rename: async (row, label) => {
+        const r = await renamePasskey(row.key, label);
+        if (!r.ok) throw new Error(r.why);
+        reload();
       },
       ...extra,
     });
@@ -312,9 +357,12 @@ export function mountSignin(box, report) {
   const markRows = () => {
     for (const li of list.querySelectorAll("[data-kp-passkey]")) {
       const label = li.querySelector(".kp-passkeys__label")?.textContent ?? "";
-      const btn = li.querySelector('[data-kp-passkeys-act="remove"]');
-      if (btn && !btn.hasAttribute("data-drive"))
-        drivable(/** @type {HTMLElement} */ (btn), DELETE, label);
+      const del = li.querySelector('[data-kp-passkeys-act="remove"]');
+      if (del && !del.hasAttribute("data-drive"))
+        drivable(/** @type {HTMLElement} */ (del), DELETE, label);
+      const ren = li.querySelector('[data-kp-passkeys-act="rename"]');
+      if (ren && !ren.hasAttribute("data-drive"))
+        drivable(/** @type {HTMLElement} */ (ren), RENAME, label);
     }
   };
   new MutationObserver(markRows).observe(list, {

@@ -17,6 +17,8 @@
 // `fwSummary` (fwview.js, re-exported here) is the one-stack summary the
 // stack hub's Settings tab draws.
 
+import { registerShortcuts } from "/static/kp/js/shortcuts.js";
+import { GROUP_FIREWALL, unlessDialog } from "../shortcuts.js";
 import { agoEl, setAgo } from "../ago.js";
 import { bindTableUrl, ensureStyle, fetchJson, h } from "../dom.js";
 import { declare, declareField, drivable } from "../drivable.js";
@@ -2048,21 +2050,25 @@ export function mount(root) {
     el.addEventListener(CARD_RETRY_EVENT, () => retry());
   stTable.addEventListener("kp-datatable-retry", () => retry());
 
-  /** @param {KeyboardEvent} e */
-  const onKey = (e) => {
-    if (e.key !== "Escape") return;
-    const a = document.activeElement;
-    if (a && /^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName)) return;
-    if (document.querySelector("dialog[open]")) return;
-    if (S.lit.size || S.totals.size) {
-      S.lit.clear();
-      S.totals.clear();
-      applyTotals();
-      paintAll();
-    }
-  };
-  document.addEventListener("keydown", onKey);
-  cleanups.push(() => document.removeEventListener("keydown", onKey));
+  cleanups.push(
+    registerShortcuts("page:firewall", [
+      {
+        keys: "Escape",
+        what: "Clear the lit stacks and totals",
+        group: GROUP_FIREWALL,
+        when: () => S.lit.size > 0 || S.totals.size > 0,
+        reason: "Nothing is lit",
+        run: unlessDialog(() => {
+          if (!S.lit.size && !S.totals.size) return false;
+          S.lit.clear();
+          S.totals.clear();
+          applyTotals();
+          paintAll();
+          return undefined;
+        }),
+      },
+    ]),
+  );
 
   // loading -----------------------------------------------------------------
   const setLoading = () => {

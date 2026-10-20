@@ -103,6 +103,8 @@ import {
 } from "/static/kp/js/card-state.js";
 import { attachFootprints } from "/static/kp/js/footprint.js";
 import { attachHoverCards } from "/static/kp/js/hovercard.js";
+import { registerShortcuts } from "/static/kp/js/shortcuts.js";
+import { GROUP_HOST, unlessDialog } from "../shortcuts.js";
 import { gridRow, formGrid } from "../gridrow.js";
 import { setParams } from "../urlstate.js";
 
@@ -1848,29 +1850,18 @@ export function mount(root, ctx) {
     paintLine();
   };
 
-  // `/` searches the containers, `r` reads everything now (kp's refresh), Esc shows every
-  // container again (never while typing, never with a modifier).
-  /** @param {KeyboardEvent} e */
-  const keys = (e) => {
-    const t = /** @type {HTMLElement | null} */ (e.target);
-    if (
-      e.ctrlKey ||
-      e.metaKey ||
-      e.altKey ||
-      t?.closest("input, textarea, select, [contenteditable], dialog")
-    )
-      return;
-    if (e.key === "/") {
-      e.preventDefault();
-      /** @type {HTMLInputElement | null} */ (
-        gTableEl.querySelector("[data-kp-datatable-search]")
-      )?.focus();
-    } else if (e.key === "Escape") {
-      if (document.querySelector("dialog[open]")) return;
-      gFilter.reset();
-    }
-  };
-  document.addEventListener("keydown", keys);
+  // `/` (the dashboard's search key) searches the containers; Esc shows every
+  // container again. kp's engine keeps both out of fields and dialogs.
+  const stopKeys = registerShortcuts("page:host", [
+    {
+      keys: "Escape",
+      what: "Show every container again",
+      group: GROUP_HOST,
+      run: unlessDialog(() => {
+        gFilter.reset();
+      }),
+    },
+  ]);
 
   const unsub = subscribe(() => {
     render();
@@ -1900,7 +1891,7 @@ export function mount(root, ctx) {
   return () => {
     abort.abort();
     unsub();
-    document.removeEventListener("keydown", keys);
+    stopKeys();
     stops.forEach((s) => s());
     for (const s of panels.values()) s();
     root.classList.remove("hk-page", "nx-ops");

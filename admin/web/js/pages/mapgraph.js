@@ -16,6 +16,8 @@
 // only a resize, the traffic switch and the data itself redraw.
 
 import { h } from "../dom.js";
+import { registerShortcuts } from "/static/kp/js/shortcuts.js";
+import { GROUP_MAP, unlessDialog } from "../shortcuts.js";
 import { declare, drivable } from "../drivable.js";
 import { bends, hues, isStack, layout, radius } from "../mapview.js";
 
@@ -253,19 +255,21 @@ export function mapGraph(topo, opts) {
     clear();
     kindsChanged?.();
   });
-  const onKey = (/** @type {KeyboardEvent} */ e) => {
-    if (e.key !== "Escape") return;
-    if (
-      /** @type {Element | null} */ (e.target)?.closest?.(
-        "dialog, input, textarea, select",
-      )
-    )
-      return;
-    if (pinned.size === 0 && hiddenKinds.size === 0) return;
-    clear();
-    kindsChanged?.();
-  };
-  document.addEventListener("keydown", onKey);
+  const stopKeys = registerShortcuts("page:map", [
+    {
+      keys: "Escape",
+      what: "Unpin the stacks and show every kind again",
+      group: GROUP_MAP,
+      when: () => pinned.size > 0 || hiddenKinds.size > 0,
+      reason: "Nothing is pinned or hidden",
+      run: unlessDialog(() => {
+        if (pinned.size === 0 && hiddenKinds.size === 0) return false;
+        clear();
+        kindsChanged?.();
+        return undefined;
+      }),
+    },
+  ]);
   const ro =
     typeof ResizeObserver === "function"
       ? // Only a new width redraws: the box grows taller when the side
@@ -298,7 +302,7 @@ export function mapGraph(topo, opts) {
     selected: () => [...pinned],
     stop: () => {
       ro?.disconnect();
-      document.removeEventListener("keydown", onKey);
+      stopKeys();
     },
   };
 }

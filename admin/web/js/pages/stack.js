@@ -136,6 +136,8 @@ import { formGrid, gridRow } from "../gridrow.js";
 import { watchTabOverflow } from "/static/kp/js/overlays.js";
 import { attachToolbars } from "/static/kp/js/toolbar.js";
 import { setTabCount } from "/static/kp/js/tabbar.js";
+import { registerShortcuts } from "/static/kp/js/shortcuts.js";
+import { GROUP_STACK, unlessDialog } from "../shortcuts.js";
 import { FEED_RETRY_EVENT, attachFeeds, setFeed } from "/static/kp/js/feed.js";
 import { mount as mountSecrets } from "./secrets.js";
 import {
@@ -786,29 +788,44 @@ export function mount(root, params) {
   void readEdit().catch(() => {});
   paintHead();
 
-  // ── keys: b u d . (not while typing, not inside a chord or a dialog) ──
-  let lastKey = { key: "", at: 0 };
-  /** @param {KeyboardEvent} e */
-  const onKey = (e) => {
-    const prev = lastKey;
-    lastKey = { key: e.key, at: Date.now() };
-    if (e.ctrlKey || e.metaKey || e.altKey || e.defaultPrevented) return;
-    const t = /** @type {HTMLElement | null} */ (e.target);
-    if (t?.closest("input, textarea, select, [contenteditable]")) return;
-    if (document.querySelector("dialog[open]")) return;
-    if (prev.key === "g" && Date.now() - prev.at < 1500) return;
-    /** @type {Record<string, HTMLElement>} */
-    const map = { b: backupBtn, u: updateBtn, d: deployBtn };
-    if (map[e.key]) {
-      e.preventDefault();
-      map[e.key].click();
-    } else if (e.key === ".") {
-      e.preventDefault();
-      menu.toggle();
-    }
-  };
-  document.addEventListener("keydown", onKey);
-  stops.push(() => document.removeEventListener("keydown", onKey));
+  // ── keys: b u d . (kp's engine: not while typing, not over a dialog, the
+  // chord "g b" is its own; the sheet shows them dimmed off a stack's page) ──
+  const press = (/** @type {HTMLElement} */ btn) =>
+    unlessDialog(() => {
+      if (btn.hasAttribute("disabled")) return false;
+      btn.click();
+      return undefined;
+    });
+  stops.push(
+    registerShortcuts(`page:stack:${name}`, [
+      {
+        keys: "b",
+        what: "Back up this stack",
+        group: GROUP_STACK,
+        run: press(backupBtn),
+      },
+      {
+        keys: "u",
+        what: "Update this stack",
+        group: GROUP_STACK,
+        run: press(updateBtn),
+      },
+      {
+        keys: "d",
+        what: "Deploy this stack",
+        group: GROUP_STACK,
+        run: press(deployBtn),
+      },
+      {
+        keys: ".",
+        what: "Open the more-actions menu",
+        group: GROUP_STACK,
+        run: unlessDialog(() => {
+          menu.toggle();
+        }),
+      },
+    ]),
+  );
 
   /** @type {Record<string, (p: HTMLElement) => () => void>} */
   const panels = {
@@ -1991,17 +2008,21 @@ function logsTab(panel, c) {
   const allOn = (g) =>
     getFacetValues(g).length ===
     g.querySelectorAll(".kp-facet:not([data-kp-facet-all])").length;
-  /** @param {KeyboardEvent} e */
-  const esc = (e) => {
-    if (e.key !== "Escape" || document.querySelector("dialog[open]")) return;
-    const narrowed = !allOn(appsGroup) || !allOn(levelsGroup);
-    setFacetValues(appsGroup, null);
-    setFacetValues(levelsGroup, null);
-    only.app = null;
-    only.lvl = null;
-    if (narrowed) feed();
-  };
-  document.addEventListener("keydown", esc);
+  const stopEsc = registerShortcuts("page:stack-logs", [
+    {
+      keys: "Escape",
+      what: "Show every app and level again",
+      group: GROUP_STACK,
+      run: unlessDialog(() => {
+        const narrowed = !allOn(appsGroup) || !allOn(levelsGroup);
+        setFacetValues(appsGroup, null);
+        setFacetValues(levelsGroup, null);
+        only.app = null;
+        only.lvl = null;
+        if (narrowed) feed();
+      }),
+    },
+  ]);
   const stopChange = c.onChange(paintSide);
   paintFoot();
   void load(false).catch(() => {});
@@ -2011,7 +2032,7 @@ function logsTab(panel, c) {
     watcher.disconnect();
     req.abort();
     stopChange();
-    document.removeEventListener("keydown", esc);
+    stopEsc();
     for (const d of detach) d();
   };
 }
@@ -2958,16 +2979,23 @@ function historyTab(panel, c) {
         : `Nothing was done with ${name} in the last ${HISTORY_DAYS} days.`,
     });
   };
-  /** @param {KeyboardEvent} e */
-  const esc = (e) => {
-    if (e.key !== "Escape" || document.querySelector("dialog[open]")) return;
-    if (!who.size) return;
-    who.clear();
-    for (const b of chips) b.setAttribute("aria-pressed", "false");
-    writeUrl();
-    paint();
-  };
-  document.addEventListener("keydown", esc);
+  const stopEsc = registerShortcuts("page:stack-history", [
+    {
+      keys: "Escape",
+      what: "Show everyone's changes again",
+      group: GROUP_STACK,
+      when: () => who.size > 0,
+      reason: "Nobody is picked",
+      run: unlessDialog(() => {
+        if (!who.size) return false;
+        who.clear();
+        for (const b of chips) b.setAttribute("aria-pressed", "false");
+        writeUrl();
+        paint();
+        return undefined;
+      }),
+    },
+  ]);
   const load = async () => {
     const since = nowS() - HISTORY_DAYS * 86400;
     const [hr, ir] = await Promise.all([
@@ -3045,7 +3073,7 @@ function historyTab(panel, c) {
     detachCards();
     detachFeed();
     detachTb();
-    document.removeEventListener("keydown", esc);
+    stopEsc();
   };
 }
 

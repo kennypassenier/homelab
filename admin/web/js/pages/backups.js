@@ -159,6 +159,8 @@ import {
   setWeekState,
 } from "/static/kp/js/week.js";
 import { drawnSelect } from "/static/kp/js/combobox.js";
+import { registerShortcuts } from "/static/kp/js/shortcuts.js";
+import { GROUP_BACKUPS, unlessDialog } from "../shortcuts.js";
 
 // review M5: every page field Live view may set is declared (drivable.js
 // `declareField`); the client and the dashboard refuse any other.
@@ -2232,23 +2234,24 @@ export function mount(root) {
     }),
   );
 
-  // `/` focuses the filter (DESIGN_LANGUAGE §8); Esc unpins the night when
-  // nothing else has it (a dialog, a field).
-  /** @param {KeyboardEvent} e */
-  const onKey = (e) => {
-    if (e.defaultPrevented && e.key !== "/") return;
-    const t = /** @type {HTMLElement | null} */ (document.activeElement);
-    const inField = !!t && /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName);
-    if (document.querySelector("dialog[open]")) return;
-    if (e.key === "/" && !inField && !e.ctrlKey && !e.metaKey) {
-      e.preventDefault();
-      /** @type {HTMLInputElement | null} */ (
-        shell.wrap.querySelector("[data-kp-datatable-search]")
-      )?.focus();
-    } else if (e.key === "Escape" && !inField && S.night) pin(null);
-  };
-  document.addEventListener("keydown", onKey);
-  cleanups.push(() => document.removeEventListener("keydown", onKey));
+  // `/` (the dashboard's search key) focuses the filter; Esc unpins the night
+  // when nothing else has it (a dialog, a field: kp's engine leaves those).
+  cleanups.push(
+    registerShortcuts("page:backups", [
+      {
+        keys: "Escape",
+        what: "Unpin the chosen night",
+        group: GROUP_BACKUPS,
+        when: () => S.night != null,
+        reason: "No night is pinned",
+        run: unlessDialog(() => {
+          if (!S.night) return false;
+          pin(null);
+          return undefined;
+        }),
+      },
+    ]),
+  );
 
   ret.el.addEventListener("toggle", () => {
     if (/** @type {HTMLDetailsElement} */ (ret.el).open) paintRetired();

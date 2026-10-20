@@ -60,6 +60,12 @@ export const GROUP_ANYWHERE = "Anywhere";
 export const GROUP_STACK = "On a stack's page";
 export const GROUP_CONSOLE = "On the Console page";
 export const GROUP_SECRETS = "On the Secrets page";
+export const GROUP_BACKUPS = "On the Backups page";
+export const GROUP_HOST = "On the Host page";
+export const GROUP_FIREWALL = "On the Firewall page";
+export const GROUP_SCHEDULES = "On the Schedules page";
+export const GROUP_MAP = "On the Map page";
+export const GROUP_ACTIVITY = "On the Activity page";
 
 /**
  * The address "g" + a letter goes to.
@@ -102,6 +108,23 @@ export function altDigit(e) {
   const m = /^(?:Digit|Numpad)([1-9])$/.exec(e.code);
   return m ? Number(m[1]) : null;
 }
+
+/**
+ * Whether no dialog is open. A page's key does nothing over a dialog: the
+ * dialog's own keys (Esc closes it) come first.
+ * @returns {boolean}
+ */
+export const noDialog = () => document.querySelector("dialog[open]") === null;
+
+/**
+ * Make a page key stand back while a dialog is open: the engine leaves the
+ * key alone (`false`) and the dialog keeps it.
+ * @template {unknown} T
+ * @param {(event: KeyboardEvent) => T} run
+ * @returns {(event: KeyboardEvent) => T | false}
+ */
+export const unlessDialog = (run) => (event) =>
+  noDialog() ? run(event) : false;
 
 /**
  * A key that belongs to one page: the page says what it does while it is

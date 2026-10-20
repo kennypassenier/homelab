@@ -30,7 +30,13 @@ import {
   stackKind,
   stackLine,
 } from "../secretsview.js";
-import { onPageKey } from "../shortcuts.js";
+import { registerShortcuts } from "/static/kp/js/shortcuts.js";
+import {
+  GROUP_SECRETS,
+  noDialog,
+  onPageKey,
+  unlessDialog,
+} from "../shortcuts.js";
 import { current, listen, subscribe } from "../store.js";
 import { esc } from "../settingsform.js";
 import { liveStatus, pageHeader, toast } from "../ui.js";
@@ -1025,21 +1031,29 @@ export function mount(root, opts = {}) {
     }),
   );
 
+  // Esc hides every revealed secret and closes the change form. kp's engine
+  // leaves a field alone, so inside a field the page's root hears it: there
+  // Esc only closes the change form.
+  stops.push(
+    registerShortcuts("page:secrets", [
+      {
+        keys: "Escape",
+        what: "Hide every secret and close the change form",
+        group: GROUP_SECRETS,
+        run: unlessDialog(() => {
+          hideAll();
+          if (S.change) closeChange();
+        }),
+      },
+    ]),
+  );
   /** @param {KeyboardEvent} e */
-  const onKey = (e) => {
-    if (document.querySelector("dialog[open]")) return;
-    const tag =
-      /** @type {HTMLElement | null} */ (document.activeElement)?.tagName ?? "";
-    if (/INPUT|TEXTAREA|SELECT/.test(tag)) {
-      if (e.key === "Escape" && S.change) closeChange();
-      return;
-    }
-    if (e.key === "Escape") {
-      hideAll();
-      if (S.change) closeChange();
-    }
+  const onFieldEsc = (e) => {
+    if (e.key !== "Escape" || !S.change || !noDialog()) return;
+    const t = /** @type {HTMLElement | null} */ (e.target);
+    if (t?.closest("input, textarea, select")) closeChange();
   };
-  document.addEventListener("keydown", onKey);
+  root.addEventListener("keydown", onFieldEsc);
   const off = subscribe(() => {
     if (!S.summary) return;
     if (one == null && !chosen && current().fleet) {
@@ -1064,7 +1078,7 @@ export function mount(root, opts = {}) {
   return () => {
     abort.abort();
     hideAll();
-    document.removeEventListener("keydown", onKey);
+    root.removeEventListener("keydown", onFieldEsc);
     off();
     offJobs();
     for (const s of stops) s();

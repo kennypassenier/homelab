@@ -57,6 +57,8 @@ import {
   toastRegion,
 } from "../ui.js";
 import { ACTION_TILE, attachActionTiles } from "/static/kp/js/action-tiles.js";
+import { registerShortcuts } from "/static/kp/js/shortcuts.js";
+import { GROUP_SCHEDULES, noDialog, unlessDialog } from "../shortcuts.js";
 import { attachCardStates, setCardState } from "/static/kp/js/card-state.js";
 import { openConfirmation } from "/static/kp/js/components.js";
 import {
@@ -1673,43 +1675,55 @@ export function mount(root, opts = {}) {
   matrixEl.addEventListener("kp-uses-retry", () => first());
   ganttEl.addEventListener("kp-gantt-retry", () => first());
 
-  // ── keys: N new, Space toggles the focused row, E edits it ──
-  let lastG = 0;
+  // ── keys: N new, E edits the focused row, Space turns it on or off ──
+  /** The schedule whose row holds the focus, or null. */
+  const focusedView = () => {
+    const tr = /** @type {HTMLElement | null} */ (
+      document.activeElement?.closest?.("tr[data-id]") ?? null
+    );
+    return tr && root.contains(tr) ? viewOf(tr.dataset.id ?? "") : null;
+  };
+  const rowReason = "Focus a schedule's row first";
+  const stopKeys = registerShortcuts("page:schedules", [
+    {
+      keys: "n",
+      what: "New schedule",
+      group: GROUP_SCHEDULES,
+      run: unlessDialog(() => void openForm(NEW_KEY)),
+    },
+    {
+      keys: "e",
+      what: "Edit the focused schedule",
+      group: GROUP_SCHEDULES,
+      when: () => focusedView() != null,
+      reason: rowReason,
+      run: unlessDialog(() => {
+        const v = focusedView();
+        if (!v) return false;
+        void openForm(v.schedule.id);
+        return undefined;
+      }),
+    },
+  ]);
+  // Space is the one key kp's engine cannot take (its key names are split on
+  // spaces; kp-gaps/homelab.md), so it stays a small listener of its own.
   /** @param {KeyboardEvent} e */
-  const onKey = (e) => {
-    if (e.ctrlKey || e.metaKey || e.altKey || e.defaultPrevented) return;
-    const t = /** @type {HTMLElement | null} */ (e.target);
+  const onSpace = (e) => {
     if (
-      t?.closest?.("input, select, textarea, [contenteditable]") ||
-      document.querySelector("dialog[open]")
+      e.key !== " " ||
+      e.ctrlKey ||
+      e.metaKey ||
+      e.altKey ||
+      e.defaultPrevented
     )
       return;
-    if (e.key === "g") {
-      lastG = Date.now();
-      return;
-    }
-    // "g n" is the shortcut to Notifications, not a new schedule.
-    if (Date.now() - lastG < 1500) return;
-    if (e.key === "n" || e.key === "N") {
-      e.preventDefault();
-      void openForm(NEW_KEY);
-      return;
-    }
-    const tr = /** @type {HTMLElement | null} */ (
-      t?.closest?.("tr[data-id]") ?? null
-    );
-    if (!tr || !root.contains(tr)) return;
-    const v = viewOf(tr.dataset.id ?? "");
+    if (!noDialog()) return;
+    const v = focusedView();
     if (!v) return;
-    if (e.key === " ") {
-      e.preventDefault();
-      void setOn(v.schedule, !v.schedule.enabled);
-    } else if (e.key === "e" || e.key === "E") {
-      e.preventDefault();
-      void openForm(v.schedule.id);
-    }
+    e.preventDefault();
+    void setOn(v.schedule, !v.schedule.enabled);
   };
-  document.addEventListener("keydown", onKey);
+  document.addEventListener("keydown", onSpace);
 
   // ── the whole page, from what the dashboard holds ──
   let lastSig = "";
@@ -1772,7 +1786,8 @@ export function mount(root, opts = {}) {
     offJobs();
     offStore();
     window.clearTimeout(heroTimer);
-    document.removeEventListener("keydown", onKey);
+    document.removeEventListener("keydown", onSpace);
+    stopKeys();
     form?.destroy();
     for (const d of detach) d();
     root.classList.remove("sch-root", "nx-ops");

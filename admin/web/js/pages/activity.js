@@ -120,6 +120,8 @@ import { attachToolbars } from "/static/kp/js/toolbar.js";
 import { attachSegmented } from "/static/kp/js/segmented.js";
 import { FEED_RETRY_EVENT, attachFeeds, setFeed } from "/static/kp/js/feed.js";
 import { leave } from "/static/kp/js/motion.js";
+import { registerShortcuts } from "/static/kp/js/shortcuts.js";
+import { GROUP_ACTIVITY, unlessDialog } from "../shortcuts.js";
 
 // Live view (invariant 39): every control on this page that opens a dialog
 // or runs something. "Run it again" reaches its dialog as a catalog form.
@@ -1998,42 +2000,51 @@ function mountNow(body, x) {
   const heatQuery = window.matchMedia("(max-width: 700px)");
   heatQuery.addEventListener("change", paintHeat);
 
-  /** @param {KeyboardEvent} e */
-  const onKey = (e) => {
-    if (e.ctrlKey || e.metaKey || e.altKey) return;
-    if (document.querySelector("dialog[open]")) return;
-    const a = document.activeElement;
-    if (/INPUT|TEXTAREA|SELECT/.test(a?.tagName ?? "")) return;
-    if (e.key === "/") {
-      e.preventDefault();
-      /** @type {HTMLElement | null} */ (
-        t.wrap.querySelector("[data-kp-datatable-search]")
-      )?.focus();
-    } else if (e.key === "f" || e.key === "F") {
-      const at = columnOf("Outcome");
-      const on = dt?.view().filters[at];
-      dt?.filter(
-        at,
-        Array.isArray(on) && on.includes("Failed") ? null : ["Failed"],
-      );
-    } else if (e.key === "j" || e.key === "k") {
+  // `/` is the dashboard's search key. F toggles the Failed filter, j / k
+  // walk the feed's rows (the buttons that open them), Esc clears a narrowing.
+  const walk = (/** @type {1 | -1} */ step) =>
+    unlessDialog(() => {
       const list = /** @type {HTMLElement[]} */ ([
         ...t.tbody.querySelectorAll(
           "tr[data-kp-row-key] .kp-datatable__expand",
         ),
       ]);
-      const i = list.indexOf(/** @type {HTMLElement} */ (a));
-      const n =
-        list[
-          Math.max(0, Math.min(list.length - 1, i + (e.key === "j" ? 1 : -1)))
-        ];
+      const i = list.indexOf(
+        /** @type {HTMLElement} */ (document.activeElement),
+      );
+      const n = list[Math.max(0, Math.min(list.length - 1, i + step))];
       n?.focus();
       n?.scrollIntoView({ block: "nearest" });
-    } else if (e.key === "Escape" && narrowed()) {
-      narrow.el.dispatchEvent(new CustomEvent("kp-toolbar-clear"));
-    }
-  };
-  document.addEventListener("keydown", onKey);
+    });
+  const stopKeys = registerShortcuts("page:activity", [
+    {
+      keys: "f",
+      what: "Show only the failed runs, or all again",
+      group: GROUP_ACTIVITY,
+      run: unlessDialog(() => {
+        const at = columnOf("Outcome");
+        const on = dt?.view().filters[at];
+        dt?.filter(
+          at,
+          Array.isArray(on) && on.includes("Failed") ? null : ["Failed"],
+        );
+      }),
+    },
+    { keys: "j", what: "Next run", group: GROUP_ACTIVITY, run: walk(1) },
+    { keys: "k", what: "Previous run", group: GROUP_ACTIVITY, run: walk(-1) },
+    {
+      keys: "Escape",
+      what: "Clear the narrowing",
+      group: GROUP_ACTIVITY,
+      when: () => narrowed(),
+      reason: "Nothing is narrowed",
+      run: unlessDialog(() => {
+        if (!narrowed()) return false;
+        narrow.el.dispatchEvent(new CustomEvent("kp-toolbar-clear"));
+        return undefined;
+      }),
+    },
+  ]);
 
   paintAll();
   void loadHistory();
@@ -2049,7 +2060,7 @@ function mountNow(body, x) {
     heatQuery.removeEventListener("change", paintHeat);
     for (const off of unbinds) off();
     for (const off of detachKp) off();
-    document.removeEventListener("keydown", onKey);
+    stopKeys();
   };
 }
 

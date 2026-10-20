@@ -332,65 +332,6 @@
   text-transform: uppercase;
   letter-spacing: 0.06em;
   color: var(--muted-foreground);
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-}
-.sh-side__all {
-  all: unset;
-  cursor: pointer;
-  text-transform: none;
-  letter-spacing: 0;
-  color: var(--primary);
-}
-.sh-side__all:focus-visible {
-  outline: 2px solid var(--ring);
-}
-.sh-side__opts {
-  display: grid;
-  gap: 2px;
-}
-.sh-side__opts button {
-  all: unset;
-  box-sizing: border-box;
-  cursor: pointer;
-  display: grid;
-  grid-template-columns: 14px minmax(0, 1fr) auto;
-  gap: 8px;
-  align-items: center;
-  padding: 5px 8px;
-  border-radius: 6px;
-  font-size: var(--kp-text-sm);
-}
-.sh-side__opts button::before {
-  content: "";
-  inline-size: 12px;
-  block-size: 12px;
-  border-radius: 3px;
-  border: 1.5px solid var(--border);
-  box-sizing: border-box;
-}
-.sh-side__opts button[aria-pressed="true"]::before {
-  background: var(--primary);
-  border-color: var(--primary);
-}
-.sh-side__opts button[aria-pressed="false"] {
-  color: var(--muted-foreground);
-}
-.sh-side__opts button:hover {
-  background: var(--muted);
-}
-.sh-side__opts button:focus-visible {
-  outline: 2px solid var(--ring);
-}
-.sh-side__opts span {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.sh-side__opts small {
-  color: var(--muted-foreground);
-  font-variant-numeric: tabular-nums;
 }
 @media (max-width: 60rem) {
   .sh-side {
@@ -407,31 +348,23 @@
 .sh-logcard {
   min-inline-size: 0;
 }
-.sh-follow {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-}
-.sh-count-text {
-  font-variant-numeric: tabular-nums;
-}
-/* The kp log is the component; this fixes its height (a scroller that does
-   not move the card as lines come) and lets the states span its grid. */
-.sh-log {
-  block-size: 26rem;
-  overflow: auto;
-  align-content: start;
-}
-.sh-log:focus-visible {
-  outline: 2px solid var(--ring);
-}
-.sh-log > :not(.kp-log__line) {
-  grid-column: 1 / -1;
+/* kp's log viewer keeps one height in every state (loading, empty, failed,
+   lines), so the card never moves as lines come. */
+.sh-viewer {
+  --kp-logviewer-height: 26rem;
+  min-inline-size: 0;
 }
 @media (max-width: 48rem) {
-  .sh-log {
-    block-size: 22rem;
+  .sh-viewer {
+    --kp-logviewer-height: 22rem;
   }
+}
+.sh-logcontrols {
+  margin-block-end: var(--kp-space-sm, 0.5rem);
+}
+.sh-read {
+  color: var(--muted-foreground);
+  font-size: var(--kp-text-sm, 0.8125rem);
 }
 
 /* ---------- tables (kp datatable, no search bar) ---------- */

@@ -286,75 +286,6 @@
   letter-spacing: 0.06em;
   color: var(--muted-foreground);
 }
-.hl-opts {
-  display: grid;
-  gap: 2px;
-}
-.hl-opt {
-  display: grid;
-  /* the count column is one fixed width, so every count ends and starts on
-     the same edges */
-  grid-template-columns: auto auto minmax(0, 1fr) 5ch;
-  gap: 8px;
-  align-items: center;
-  padding: 5px 8px;
-  border-radius: 6px;
-  font-size: var(--kp-text-sm);
-  cursor: pointer;
-}
-.hl-opt:hover {
-  background: color-mix(in oklab, var(--muted) 60%, transparent);
-}
-.hl-opt small {
-  text-align: end;
-  color: var(--muted-foreground);
-  font-variant-numeric: tabular-nums;
-}
-.hl-opt--off {
-  opacity: 0.55;
-}
-.hl-opt__name {
-  min-inline-size: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.hl-only {
-  all: unset;
-  cursor: pointer;
-  font-size: var(--kp-text-xs);
-  color: var(--primary);
-  visibility: hidden;
-}
-.hl-opt:hover .hl-only,
-.hl-opt:focus-within .hl-only {
-  visibility: visible;
-}
-.hl-only:focus-visible {
-  outline: 2px solid var(--ring);
-}
-.hl-sw {
-  display: inline-block;
-  inline-size: 12px;
-  block-size: 12px;
-  border-radius: 3px;
-  background: var(--muted-foreground);
-  flex: none;
-}
-.hl-dot {
-  inline-size: 8px;
-  block-size: 8px;
-  border-radius: 50%;
-}
-.hl-dot--info {
-  background: var(--chart-1, var(--primary));
-}
-.hl-dot--warn {
-  background: var(--warning-foreground);
-}
-.hl-dot--bad {
-  background: var(--destructive);
-}
 .hl-hint {
   margin: 0;
   font-size: var(--kp-text-xs);
@@ -374,7 +305,8 @@
 
 .hl-term {
   display: grid;
-  grid-template-rows: auto minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr);
+  align-content: start;
   border: 1px solid var(--border);
   border-radius: var(--nx-radius);
   overflow: hidden;
@@ -384,40 +316,49 @@
 .nx-card .hl-term {
   border-radius: calc(var(--nx-radius) * 0.8);
 }
-.hl-bar {
-  padding: 10px var(--nx-pad);
-  border-block-end: 1px solid var(--border);
+/* The lines are kp's log viewer; it keeps one height in every state. */
+.hl-viewer {
+  --kp-logviewer-height: min(34rem, 60vh);
+  inline-size: auto;
+  min-inline-size: 0;
+  margin: var(--kp-space-sm, 0.5rem) var(--nx-pad);
 }
-.hl-count {
-  font-variant-numeric: tabular-nums;
+/* The chosen line's details: one slot under the lines, a fixed height
+   so choosing a line moves nothing; the facts and the actions share two
+   tracks. */
+.hl-detail {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: var(--kp-space-md, 1rem);
+  align-items: center;
+  min-block-size: 9rem;
+  padding: var(--kp-space-sm, 0.5rem) var(--nx-pad);
+  border-block-start: 1px solid var(--border);
+  font-size: var(--kp-text-sm);
+}
+.hl-detail__note {
+  grid-column: 1 / -1;
+  margin: 0;
+  color: var(--muted-foreground);
+}
+.hl-detail__kv {
+  margin: 0;
+}
+.hl-detail__acts {
+  display: grid;
+  grid-auto-flow: column;
+  gap: var(--kp-space-sm, 0.5rem);
 }
 .hl-hints {
-  display: inline-flex;
+  display: flex;
+  flex-wrap: wrap;
   gap: 4px;
   align-items: center;
-}
-.hl-outwrap {
-  position: relative;
-  min-block-size: 0;
-}
-/* The lines scroll inside this fixed box; the page never grows with them. */
-.hl-out {
-  font-family: var(--font-mono, ui-monospace, monospace);
-  font-size: 0.8125rem;
-  line-height: 1.55;
-  padding: 8px 0;
-  block-size: min(36rem, 62vh);
-  overflow: auto;
-  background: color-mix(in oklab, var(--muted) 35%, var(--card));
-}
-.hl-out:focus-visible {
-  outline: 2px solid var(--ring);
-  outline-offset: -2px;
-}
-.hl-out > .hl-lines > .nx-empty,
-.hl-out > .hl-lines > .kp-alert {
-  margin: 16px var(--nx-pad);
-  font-family: var(--theme-font, inherit);
+  margin: 0;
+  padding: var(--kp-space-xs, 0.25rem) var(--nx-pad);
+  border-block-start: 1px solid var(--border);
+  font-size: var(--kp-text-xs);
+  color: var(--muted-foreground);
 }
 .hl-xfer {
   display: grid;
@@ -428,91 +369,6 @@
   border-block-end: 1px solid var(--border);
   font-size: var(--kp-text-sm);
 }
-/* The lines are kp's log grid (time, source, level, message); the line is
-   `display: contents`, so hover and the open plate paint its cells. The
-   message cell is the button that opens the detail. */
-.hl-lines {
-  border: 0;
-  border-radius: 0;
-  background: transparent;
-  padding-inline: var(--nx-pad);
-  align-content: start;
-}
-.hl-lines > :not(.kp-log__line, .hl-sk, .hl-more) {
-  grid-column: 1 / -1;
-}
-.hl-lines .kp-log__line:hover > * {
-  background: color-mix(in oklab, var(--muted) 70%, transparent);
-}
-.hl-msg {
-  cursor: pointer;
-}
-.hl-msg:focus-visible {
-  outline: 2px solid var(--ring);
-  outline-offset: -2px;
-}
-.hl-msg em {
-  font-style: normal;
-  color: var(--muted-foreground);
-}
-.hl-msg mark {
-  background: color-mix(in oklab, var(--warning) 80%, transparent);
-  color: inherit;
-  border-radius: 2px;
-}
-.hl-lines .kp-log__source {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  min-inline-size: 0;
-}
-.hl-sk {
-  display: contents;
-}
-.hl-sk .kp-skeleton {
-  display: block;
-  block-size: 0.9em;
-  align-self: center;
-}
-.hl-lines .kp-log__line.is-new > * {
-  animation: hl-flash 900ms ease-out;
-}
-@keyframes hl-flash {
-  from {
-    background: color-mix(in oklab, var(--info) 70%, transparent);
-  }
-}
-@media (prefers-reduced-motion: reduce) {
-  .hl-lines .kp-log__line.is-new > * {
-    animation: none;
-  }
-}
-.hl-more {
-  display: grid;
-  gap: 6px;
-  grid-column: 1 / -1;
-  margin: 2px 0 6px;
-  padding: 8px 10px;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  background: var(--card);
-  font-family: var(--theme-font, inherit);
-  font-size: var(--kp-text-sm);
-}
-.hl-more__acts {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-}
-.hl-newpill {
-  position: absolute;
-  inset-block-end: 10px;
-  inset-inline-start: 50%;
-  transform: translateX(-50%);
-}
-.hl-newpill[hidden] {
-  display: none;
-}
 @media (max-width: 64rem) {
   .hl {
     grid-template-columns: minmax(0, 1fr);
@@ -520,16 +376,6 @@
   .hl-side {
     position: static;
     grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-  .hl-opts {
-    grid-auto-flow: column;
-    grid-auto-columns: max-content;
-    overflow-x: auto;
-    scrollbar-width: thin;
-  }
-  .hl-opt {
-    border: 1px solid var(--border);
-    white-space: nowrap;
   }
   .hl-sidefoot {
     grid-column: 1 / -1;
@@ -539,9 +385,8 @@
   .hl-side {
     grid-template-columns: minmax(0, 1fr);
   }
-  /* On a phone a line's message gets a row of its own. */
-  .hl-lines .hl-msg {
-    grid-column: 1 / -1;
+  .hl-detail {
+    grid-template-columns: minmax(0, 1fr);
   }
   .hl-xfer {
     grid-template-columns: minmax(0, 1fr) auto;
@@ -722,7 +567,6 @@
 /* feat-kpadopt-2 (kp-themes 11.0.0, app-homelab-backups demo): the log's
    levels and the picture of the window stand on form-grid tracks; the
    console is kp's, in its own pane under the lines. */
-.hl-levelsrow,
 .hl-density {
   margin-block: var(--kp-space-xs, 0.25rem);
   padding-inline: var(--nx-pad, 1rem);

@@ -52,25 +52,6 @@ export function lineShown(l, f) {
 }
 
 /**
- * Turn one source on or off (a plain click; several may be off). An
- * "only" filter becomes "everything else off" first, so the click means
- * what it shows.
- * @param {LogFilter} f
- * @param {string} source
- * @param {string[]} sources every source known
- * @returns {LogFilter}
- */
-export function toggleSource(f, source, sources) {
-  const off =
-    f.only != null
-      ? new Set(sources.filter((s) => s !== f.only))
-      : new Set(f.off);
-  if (off.has(source)) off.delete(source);
-  else off.add(source);
-  return { ...f, off, only: null };
-}
-
-/**
  * Every source the side column lists: the host's own first, then the
  * fleet's stacks and any other source a line named, sorted.
  * @param {string[]} fleet
@@ -159,14 +140,6 @@ export const logFilterToParams = (f) => ({
 });
 
 /**
- * The words of the count in the toolbar's right zone.
- * @param {number} shown
- * @param {number} total
- */
-export const countText = (shown, total) =>
-  `${shown} of ${total} ${total === 1 ? "line" : "lines"}`;
-
-/**
  * The host's own source ("HOST") reads as "the host"; a stack keeps its
  * name.
  * @param {string} s
@@ -190,25 +163,6 @@ export function mergeLines(a, b, keep) {
   for (const l of b) by.set(l.seq, l);
   const all = [...by.values()].sort((x, y) => x.seq - y.seq);
   return all.length > keep ? all.slice(all.length - keep) : all;
-}
-
-/**
- * What a key does on the explorer: "/" to the search box, Space pauses
- * or resumes, End back to the tail. Nothing while typing, and Space and
- * End leave a focused button or link alone (anchored: MAIN or LABEL are
- * not buttons; senior review, finding 12).
- * @param {string} key
- * @param {string} tag the focused element's tag name
- * @param {string | null} role its role attribute
- * @returns {"search" | "pause" | "tail" | null}
- */
-export function keyAction(key, tag, role) {
-  const typing = /^(INPUT|TEXTAREA|SELECT)$/.test(tag);
-  if (key === "/") return typing ? null : "search";
-  if (typing || /^(BUTTON|A)$/.test(tag) || role === "button") return null;
-  if (key === " ") return "pause";
-  if (key === "End") return "tail";
-  return null;
 }
 
 // ── feat-kpadopt-2 (kp-themes 11.0.0, the approved app-homelab-backups

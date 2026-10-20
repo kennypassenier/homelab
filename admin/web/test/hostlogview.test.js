@@ -6,15 +6,12 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   counts,
-  countText,
-  keyAction,
   lineShown,
   logFilterFromParams,
   logFilterToParams,
   mergeLines,
   narrowed,
   sourceList,
-  toggleSource,
 } from "../js/hostlogview.js";
 
 /** @returns {import("../js/parity.js").HostLine} */
@@ -49,19 +46,14 @@ const ALL = () => ({
   q: "",
 });
 
-test("redesign-console: a plain click turns one source on or off, several may be off", () => {
+test("redesign-console: sources turned off one by one, or one alone", () => {
   const srcs = sourceList(["notes", "gateway"], ["HOST", "gateway"]);
   assert.deepEqual(srcs, ["HOST", "gateway", "notes"], "the host first");
-  let f = toggleSource(ALL(), "gateway", srcs);
-  assert.deepEqual(shown(f), [1, 3]);
-  f = toggleSource(f, "HOST", srcs);
-  assert.deepEqual(shown(f), [3]);
-  f = toggleSource(f, "gateway", srcs);
-  assert.deepEqual(shown(f), [2, 3, 4]);
-  // "only" one source, then a click on another adds it back beside it.
-  const only = { ...ALL(), only: "notes" };
-  assert.deepEqual(shown(only), [3]);
-  assert.deepEqual(shown(toggleSource(only, "HOST", srcs)), [1, 3]);
+  // The facet rows hand over the sources that are off; several may be.
+  assert.deepEqual(shown({ ...ALL(), off: new Set(["gateway"]) }), [1, 3]);
+  assert.deepEqual(shown({ ...ALL(), off: new Set(["gateway", "HOST"]) }), [3]);
+  // "only" one source.
+  assert.deepEqual(shown({ ...ALL(), only: "notes" }), [3]);
 });
 
 test("redesign-console: level and text narrow the lines", () => {
@@ -89,8 +81,6 @@ test("redesign-console: the side column's counts are exact", () => {
   assert.equal(c.bySource.get("gateway"), 2);
   assert.equal(c.bySource.get("HOST"), 1);
   assert.deepEqual(c.byLevel, { debug: 1, info: 2, warning: 1, critical: 1 });
-  assert.equal(countText(2, 5), "2 of 5 lines");
-  assert.equal(countText(1, 1), "1 of 1 line");
 });
 
 test("redesign-console: the filter lives in the address, the old /log?source= included", () => {
@@ -151,19 +141,4 @@ test("redesign-console: Info and up hides debug lines", () => {
       counts(LINES).byLevel.critical,
     4,
   );
-});
-
-// Senior review finding 12: the page keys ignore a focused button or link
-// only (the unanchored regex also matched MAIN, LABEL and ASIDE).
-test("redesign-console: Space and End act unless a control has focus", () => {
-  assert.equal(keyAction(" ", "MAIN", null), "pause");
-  assert.equal(keyAction(" ", "LABEL", null), "pause");
-  assert.equal(keyAction("End", "DIV", null), "tail");
-  assert.equal(keyAction(" ", "BUTTON", null), null);
-  assert.equal(keyAction(" ", "A", null), null);
-  assert.equal(keyAction(" ", "DIV", "button"), null);
-  assert.equal(keyAction("/", "DIV", null), "search");
-  assert.equal(keyAction("/", "INPUT", null), null);
-  assert.equal(keyAction(" ", "TEXTAREA", null), null);
-  assert.equal(keyAction("x", "DIV", null), null);
 });

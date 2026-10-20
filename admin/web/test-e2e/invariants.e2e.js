@@ -5349,7 +5349,7 @@ test("invariants: Activity is one page with Now and history, Planned and Host lo
         ["/activity", "Now and history", "#history .ac-row"],
         ["/jobs", "Now and history", "#running"],
         ["/timeline", "Now and history", "#timeline .kp-gantt"],
-        ["/log", "Host log", ".hl-side .hl-opt"],
+        ["/log", "Host log", ".hl-side .kp-facet"],
         // The kit (redesign-kit-1) drew the header with ui.js pageHeader;
         // .sch-ph is gone. Hosted, it is a section (redesign-final-h5).
         ["/schedules", "Planned", ".sch-head--hosted h2"],
@@ -5564,7 +5564,7 @@ test("invariants: the host log puts its filters in a side column and its toolbar
       for (const path of ["/console", "/activity?view=host-log"]) {
         await page.goto(`${BASE}${path}`);
         await page
-          .locator(".hl-out .kp-log__line[data-seq] .kp-log__message")
+          .locator(".hl-viewer .kp-log__line[data-id] .kp-log__message")
           .first()
           .waitFor({
             timeout: 10000,
@@ -5572,19 +5572,22 @@ test("invariants: the host log puts its filters in a side column and its toolbar
         const r = await page.evaluate(() => {
           const box = (/** @type {Element | null} */ e) =>
             e?.getBoundingClientRect() ?? null;
-          const bar = document.querySelector(".hl-bar");
+          const bar = document.querySelector(".hl-viewer .kp-logviewer__bar");
           return {
             bar: box(bar),
-            search: box(bar?.querySelector(".nx-tb__search") ?? null),
-            state: box(bar?.querySelector(".nx-tb__state") ?? null),
-            count: (bar?.querySelector(".hl-count")?.textContent ?? "").trim(),
+            search: box(bar?.querySelector(".kp-logviewer__search") ?? null),
+            state: box(bar?.querySelector(".kp-logviewer__tools") ?? null),
+            count: (
+              document.querySelector(".hl-viewer .kp-logviewer__count")
+                ?.textContent ?? ""
+            ).trim(),
             side: box(document.querySelector(".hl-side")),
-            out: box(document.querySelector(".hl-out")),
+            out: box(document.querySelector(".hl-viewer .kp-logviewer__log")),
             groups: [...document.querySelectorAll(".hl-side h3")].map((h) =>
               (h.textContent ?? "").trim(),
             ),
             counts: [
-              ...document.querySelectorAll(".hl-side .hl-opt small"),
+              ...document.querySelectorAll(".hl-side .kp-facet__count"),
             ].map((s) => (s.textContent ?? "").trim()),
             overflow: document.documentElement.scrollWidth - window.innerWidth,
           };
@@ -5594,11 +5597,11 @@ test("invariants: the host log puts its filters in a side column and its toolbar
           bad.push(`${at}: a zone is missing`);
           continue;
         }
-        if (r.groups.join("|") !== "Source")
+        if (r.groups.join("|") !== "Source|Level")
           bad.push(`${at}: side column groups ${r.groups}`);
-        if (r.counts.some((c) => !/^\d+$/.test(c)))
+        if (r.counts.some((c) => !/^\d[\d,.\s\u00a0\u202f]*$/.test(c)))
           bad.push(`${at}: counts ${r.counts}`);
-        if (!/^\d+ of \d+ lines?$/.test(r.count))
+        if (!/^(\d+ lines?|\d+ of \d+ lines shown)$/.test(r.count))
           bad.push(`${at}: the count reads "${r.count}"`);
         if (r.overflow > 0) bad.push(`${at}: scrolls ${r.overflow}px sideways`);
         if (width > 1200) {
@@ -5606,25 +5609,21 @@ test("invariants: the host log puts its filters in a side column and its toolbar
             bad.push(`${at}: the side column is not beside the lines`);
           if (r.search.left - r.bar.left > 40)
             bad.push(`${at}: the search is not at the left`);
-          if (r.search.width > 22 * 16 + 1)
-            bad.push(`${at}: the search stretches to ${r.search.width}px`);
-          if (r.bar.right - r.state.right > 40)
-            bad.push(`${at}: the count and follow are not at the right edge`);
-          if (Math.abs(r.search.top - r.state.top) > 12)
-            bad.push(`${at}: search and state are not on one row`);
+          if (r.search.top < r.bar.top - 1 || r.state.top < r.search.top - 1)
+            bad.push(`${at}: the find box is not above the tools`);
         } else if (!(r.side.bottom <= r.out.top))
           bad.push(`${at}: on a phone the filters are not above the lines`);
       }
       // A source turns off with a plain click, and the lines follow.
       await page.goto(`${BASE}/console`);
       await page
-        .locator(".hl-out .kp-log__line[data-seq] .kp-log__message")
+        .locator(".hl-viewer .kp-log__line[data-id] .kp-log__message")
         .first()
         .waitFor({
           timeout: 10000,
         });
       const lines = () =>
-        page.locator(".hl-out .kp-log__line[data-seq]").count();
+        page.locator(".hl-viewer .kp-log__line[data-id]").count();
       const n0 = await lines();
       await page
         .locator(
@@ -5656,13 +5655,14 @@ test("invariants: Console shows the host's lines with the shell bar under them, 
     await page.goto(`${BASE}/shell?vmid=104`);
     assert.equal(new URL(page.url()).pathname, "/console");
     const first = page
-      .locator(".hl-out .kp-log__line[data-seq] .kp-log__message")
+      .locator(".hl-viewer .kp-log__line[data-id] .kp-log__message")
       .first();
     await first.waitFor({ timeout: 10000 });
     const r = await page.evaluate(() => ({
       h1: (document.querySelector("#page h1")?.textContent ?? "").trim(),
       out:
-        document.querySelector(".hl-out")?.getBoundingClientRect().bottom ?? 0,
+        document.querySelector(".hl-viewer")?.getBoundingClientRect().bottom ??
+        0,
       shell:
         document.querySelector(".con-pane")?.getBoundingClientRect().top ?? 0,
       inTerm: !!document.querySelector(".hl-term .con-pane #shell-line"),
@@ -5677,8 +5677,11 @@ test("invariants: Console shows the host's lines with the shell bar under them, 
     );
     assert.deepEqual(r.actions, ["Pause", "Download", "Run a command"]);
     await first.click();
-    await page.locator(".hl-more").waitFor({ timeout: 2000 });
-    assert.equal(await first.getAttribute("aria-expanded"), "true");
+    await page.locator(".hl-detail__acts").waitFor({ timeout: 2000 });
+    assert.equal(
+      await page.locator(".hl-viewer .kp-log__line[data-kp-current]").count(),
+      1,
+    );
     await page
       .locator(".nx-head-actions .kp-button", { hasText: "Pause" })
       .click();
@@ -5767,17 +5770,20 @@ test("invariants: review-activity: the host log merges early live lines with its
     await pushLines(page, [hostLine(9_000_000, "HOST", "early live line")]);
     release();
     await page
-      .locator(".hl-out .kp-log__line[data-seq] .kp-log__message")
+      .locator(".hl-viewer .kp-log__line[data-id] .kp-log__message")
       .first()
       .waitFor({
         timeout: 10000,
       });
     await page.waitForTimeout(300);
     const r = await page.evaluate(() => ({
-      count: (document.querySelector(".hl-count")?.textContent ?? "").trim(),
-      early: !!document.querySelector('.kp-log__line[data-seq="9000000"]'),
+      count: (
+        document.querySelector(".hl-viewer .kp-logviewer__count")
+          ?.textContent ?? ""
+      ).trim(),
+      early: !!document.querySelector('.kp-log__line[data-id="9000000"]'),
     }));
-    const total = Number(/of (\d+)/.exec(r.count)?.[1] ?? 0);
+    const total = Number(/(\d+) lines?/.exec(r.count)?.[1] ?? 0);
     assert.ok(r.early, "the early live line is missing");
     assert.ok(
       total >= snap,
@@ -5808,10 +5814,10 @@ test("invariants: review-activity: the host log merges early live lines with its
   }
 });
 
-// Findings 12, 14, 16: Space opens a focused line like Enter, "Copied"
-// turns back into "Copy line", and the side column's hint and reset use
+// Findings 12, 14, 16: an arrow key chooses a line, Copy line flashes
+// and comes back, and the side column's hint and reset use
 // the demo's words.
-test("invariants: review-activity: a host line opens with Space, Copy line comes back, and the hint reads as the demo", async () => {
+test("invariants: review-activity: a host line is chosen with the arrow keys, Copy line flashes, and the hint reads as the demo", async () => {
   const browser = await launch();
   try {
     const context = await browser.newContext({
@@ -5820,7 +5826,7 @@ test("invariants: review-activity: a host line opens with Space, Copy line comes
     const page = await freshPage(context);
     await page.goto(`${BASE}/console`);
     const first = page
-      .locator(".hl-out .kp-log__line[data-seq] .kp-log__message")
+      .locator(".hl-viewer .kp-log__line[data-id] .kp-log__message")
       .first();
     await first.waitFor({ timeout: 10000 });
     const hint = async () =>
@@ -5854,44 +5860,31 @@ test("invariants: review-activity: a host line opens with Space, Copy line comes
         '.hl-side input[data-drive="console-source"][data-drive-row="HOST"]',
       )
       .click();
-    const row = page
-      .locator(".hl-out .kp-log__line[data-seq] .kp-log__message")
-      .first();
-    await row.focus();
-    // redesign-final-52: focusing the first line scrolls a long log away
-    // from its bottom, which stops following by itself; Space must not
-    // change that state, whatever it was.
-    const following = () =>
-      page.evaluate(
-        () =>
-          /** @type {HTMLElement} */ (document.querySelector(".con-body"))
-            ?.dataset.following,
-      );
-    const before = await following();
-    await page.keyboard.press(" ");
-    assert.equal(await row.getAttribute("aria-expanded"), "true");
+    // A line is chosen with the arrow keys on the log (Space is kp's
+    // pause); its details stand under the lines.
+    await page.locator(".hl-viewer .kp-logviewer__log").focus();
+    await page.keyboard.press("ArrowDown");
+    await page.locator(".hl-detail__acts").waitFor({ timeout: 2000 });
     assert.equal(
-      await following(),
-      before,
-      "Space on a line paused the log instead of opening it",
+      await page.locator(".hl-viewer .kp-log__line[data-kp-current]").count(),
+      1,
     );
-    const copy = page.locator(".hl-more button", { hasText: /Copy line/ });
-    await copy.click();
-    await page.waitForFunction(
+    // Copy line flashes its answer and comes back to its own words.
+    const flashed = page.evaluate(
       () =>
-        [...document.querySelectorAll(".hl-more button")].some((b) =>
-          /^(Copied|Press Ctrl C)$/.test((b.textContent ?? "").trim()),
-        ),
-      null,
-      { timeout: 2000 },
+        new Promise((resolve) => {
+          const seen = [];
+          document.addEventListener("kp-flash", (e) => {
+            seen.push(/** @type {CustomEvent} */ (e).detail.state);
+            if (seen.includes("rest") && seen.length > 1) resolve(seen);
+          });
+        }),
     );
-    await page.waitForFunction(
-      () =>
-        [...document.querySelectorAll(".hl-more button")].some(
-          (b) => (b.textContent ?? "").trim() === "Copy line",
-        ),
-      null,
-      { timeout: 4000 },
+    await page.locator(".hl-detail button", { hasText: /Copy line/ }).click();
+    const states = /** @type {string[]} */ (await flashed);
+    assert.ok(
+      states.some((x) => x === "success" || x === "refused"),
+      `Copy line flashed ${states}`,
     );
   } finally {
     await browser.close();
@@ -5913,7 +5906,7 @@ test("invariants: review-activity: Console's header and shell bar are the demo's
       await page.route("**/data/host-settings*", (r) => r.abort());
       await page.goto(`${BASE}/console`);
       await page
-        .locator(".hl-out .kp-log__line[data-seq] .kp-log__message")
+        .locator(".hl-viewer .kp-log__line[data-id] .kp-log__message")
         .first()
         .waitFor({
           timeout: 10000,
@@ -6019,7 +6012,7 @@ test("invariants: review-activity: History's By names owners, the Host log group
     // The Host log: Pause and Download in the card's head, hints once.
     await page.goto(`${BASE}/activity?view=host-log`);
     await page
-      .locator(".hl-out .kp-log__line[data-seq] .kp-log__message")
+      .locator(".hl-viewer .kp-log__line[data-id] .kp-log__message")
       .first()
       .waitFor({ timeout: 10000 });
     const hl = await page.evaluate(() => {
@@ -6029,7 +6022,7 @@ test("invariants: review-activity: History's By names owners, the Host log group
         .map((b) => (b.textContent ?? "").trim());
       return {
         outside,
-        inBar: !!document.querySelector(".hl-bar .hl-follow"),
+        inBar: !!document.querySelector(".hl-viewer .kp-logviewer__follow"),
         keys: document.querySelector(".kp-keys, .ac-keys")?.textContent ?? "",
         desc: card?.textContent ?? "",
       };
@@ -7629,9 +7622,9 @@ test("invariants: stack hub — Logs' side column turns an app or a level on and
     await page.goto(`${BASE}/stacks/gateway/logs`);
     // A `.kp-log__line` has no box of its own (display: contents): wait on
     // its message cell, count the lines.
-    const lines = page.locator(".sh-log .kp-log__line");
+    const lines = page.locator(".sh-viewer .kp-log__line");
     await page
-      .locator(".sh-log .kp-log__message")
+      .locator(".sh-viewer .kp-log__message")
       .first()
       .waitFor({ timeout: 10000 });
     const total = await lines.count();
@@ -7644,23 +7637,30 @@ test("invariants: stack hub — Logs' side column turns an app or a level on and
       '[data-drive="stack-log-filter"][data-drive-row="gateway/levels/e"]',
     );
     await errors.click({ timeout: 5000 });
-    assert.equal(await errors.getAttribute("aria-pressed"), "false");
-    assert.equal(await page.locator('.sh-log [data-lvl="e"]').count(), 0);
+    assert.equal(await errors.isChecked(), false);
+    assert.equal(
+      await page
+        .locator('.sh-viewer .kp-log__line[data-kp-severity="error"]')
+        .count(),
+      0,
+    );
     const traefik = page.locator(
       '[data-drive="stack-log-filter"][data-drive-row="gateway/apps/traefik"]',
     );
     await traefik.click({ timeout: 5000 });
-    assert.equal(await page.locator('.sh-log [data-src="traefik"]').count(), 0);
-    assert.match(
-      (await page.locator(".sh-count-text").textContent()) ?? "",
-      new RegExp(`of ${total} lines`),
+    assert.equal(
+      await page
+        .locator('.sh-viewer .kp-log__source[data-kp-source="traefik"]')
+        .count(),
+      0,
     );
+    assert.ok((await lines.count()) < total, "the filters hid nothing");
     await page
       .locator("body")
       .click({ position: { x: 5, y: 900 }, timeout: 5000 });
     await page.keyboard.press("Escape");
     assert.equal(await lines.count(), total);
-    assert.equal(await errors.getAttribute("aria-pressed"), "true");
+    assert.equal(await errors.isChecked(), true);
   } finally {
     await browser.close();
   }

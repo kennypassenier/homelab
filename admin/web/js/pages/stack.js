@@ -108,14 +108,31 @@ import { stackEntries, stackIncidents, stackChecks } from "../stacktabs.js";
 import { current, retryStream, subscribe } from "../store.js";
 import { setParams } from "../urlstate.js";
 import { attachDataTables } from "/static/kp/js/datatable.js";
-import { attachLogs } from "/static/kp/js/log.js";
+import { sourceColour } from "/static/kp/js/log.js";
+import {
+  FACET_EVENT,
+  attachFacets,
+  getFacetValues,
+  setFacetCounts,
+  setFacetItems,
+  setFacetValues,
+} from "/static/kp/js/facets.js";
+import {
+  LOGVIEWER_EVENT,
+  LOGVIEWER_RETRY_EVENT,
+  appendLogLines,
+  attachLogViewers,
+  setLogViewer,
+} from "/static/kp/js/logviewer.js";
+import { FOLLOW_EVENT } from "/static/kp/js/newpill.js";
+import { facetGroup } from "../logfacets.js";
+import { formGrid, gridRow } from "../gridrow.js";
 import { watchTabOverflow } from "/static/kp/js/overlays.js";
 import { mount as mountSecrets } from "./secrets.js";
 import {
   countOf,
   chip,
   dot,
-  emptyState,
   ensureStyle,
   keyRow,
   liveStatus,
@@ -132,6 +149,12 @@ import {
 const HISTORY_DAYS = 30;
 /** How many lines one Logs read asks Loki for. */
 const LOG_LIMIT = 1000;
+/** The swatch of a level group's facet row. @type {Record<string, string>} */
+const LEVEL_SWATCH = {
+  i: "var(--chart-1, var(--primary))",
+  w: "var(--warning-foreground)",
+  e: "var(--destructive)",
+};
 
 // ── Live view (fix-239, invariant 39): every page control of the hub,
 // found from anywhere through its `at` (the stack's own tab, from the row).
@@ -1549,10 +1572,11 @@ function whenText(unix) {
 
 /**
  * Logs (the hub demo): a side column of the apps (with counts) and the
- * levels, one toolbar (Lines containing at its own width, the window, the
- * count and Follow on the right), the lines, and a foot that says where
- * they came from. The host's own log of what it did to this stack lives in
- * Activity ▸ Host log, which the description says.
+ * levels (kp's facet lists), the time window, kp's log viewer (find, wrap,
+ * time, Copy, Download, the "N new lines" pill, its own loading, empty and
+ * failed states), and a foot that says where the lines came from. The
+ * host's own log of what it did to this stack lives in Activity ▸ Host
+ * log, which the description says.
  * @param {HTMLElement} panel
  * @param {Ctx} c
  */
@@ -1572,56 +1596,40 @@ function logsTab(panel, c) {
   /** @type {import("../doctor.js").RouteError | null} */
   let failed = null;
   let loading = true;
-
-  const side = sideFilters({
-    label: "Log filters",
-    parts: [
-      { key: "apps", label: "Apps", values: [] },
-      {
-        key: "levels",
-        label: "Level",
-        values: LEVELS.map((l) => ({ value: l.value, label: l.label })),
-      },
-    ],
-    hint: "Each click turns one on or off. Esc shows everything again.",
-    onChange: () => {
-      only.app = null;
-      only.lvl = null;
-      writeUrl();
-      paint();
-    },
-    mark: (b, part, value) =>
-      drivable(b, LOG_FILTER, `${name}/${part}/${value}`),
-  });
   // `?app=` (an Apps row's Logs) shows that one app; `?lvl=e` the errors —
   // until the first click in the side column.
   const only = { app: q0.get("app"), lvl: q0.get("lvl") };
-  if (only.lvl) side.only("levels", only.lvl);
+  /** The rows made so far, so a row that is there keeps its state. @type {Set<string>} */
+  const made = new Set();
 
-  const count = h(
-    "span",
-    { class: "sh-count-text", role: "status" },
-    "reading…",
+  const appsGroup = facetGroup(
+    "Apps",
+    "Every app",
+    "No app has printed a line in this window.",
   );
-  const followIn = /** @type {HTMLInputElement} */ (
-    h("input", {
-      type: "checkbox",
-      class: "kp-switch__input",
-      role: "switch",
-      "aria-label": "Follow the newest lines",
-    })
+  const levelsGroup = facetGroup("Level", "Every level", "No levels.");
+  const side = h(
+    "aside",
+    { class: "sh-side__panel", "aria-label": "Log filters" },
+    h(
+      "div",
+      { class: "sh-side__part" },
+      h("p", { class: "sh-side__label" }, "Apps"),
+      appsGroup,
+    ),
+    h(
+      "div",
+      { class: "sh-side__part" },
+      h("p", { class: "sh-side__label" }, "Level"),
+      levelsGroup,
+    ),
+    h(
+      "p",
+      { class: "sh-hint" },
+      "Each click turns one on or off; “only” shows just that one. Esc shows everything again.",
+    ),
   );
-  followIn.checked = st.follow;
-  const followSw = h(
-    "label",
-    {
-      class: "kp-switch sh-follow",
-      title: "Read the newest lines every 5 s and keep the view at the bottom",
-    },
-    followIn,
-    h("span", null, "Follow"),
-  );
-  drivable(followIn, LOG_FOLLOW, name);
+
   const win = segSwitch({
     label: "Time window",
     items: [...LOG_WINDOWS],
@@ -1633,41 +1641,30 @@ function logsTab(panel, c) {
     },
     mark: (b, v) => drivable(b, LOG_WINDOW, `${name}/${v}`),
   });
-  /** @type {ReturnType<typeof setTimeout> | null} */
-  let typing = null;
-  const tb = toolbar({
-    search: {
-      placeholder: "Lines containing",
-      value: st.q,
-      onInput: (v) => {
-        st.q = v.trim();
-        if (typing) clearTimeout(typing);
-        typing = setTimeout(() => {
-          writeUrl();
-          void load(false).catch(() => {});
-        }, 400);
-      },
-    },
-    groups: [
-      h(
-        "div",
-        { class: "nx-tb__group", role: "group", "aria-label": "Window" },
-        h("b", null, "Window"),
-        win.el,
-      ),
+  const readNote = h("span", { class: "sh-read", role: "status" }, "");
+  const controls = formGrid(
+    [
+      gridRow({
+        label: "Window",
+        control: win.el,
+        value: readNote,
+        wide: false,
+      }),
     ],
-    state: [count, followSw],
-  });
-  if (tb.search) drivable(tb.search, LOG_SEARCH, name);
-  // The kp log component (gap-kplog-1); `.sh-log` only fixes its height.
-  const pre = h("div", {
-    class: "kp-log sh-log",
-    role: "log",
-    tabindex: "0",
+    "sh-logcontrols",
+  );
+
+  const viewer = h("div", {
+    class: "kp-logviewer sh-viewer",
+    "data-kp-logviewer": "",
+    "data-kp-log-max": "2000",
+    "data-kp-log-tools": "search,follow,wrap,time,copy,download",
+    "data-kp-log-filename": `${name}-logs`,
+    "data-kp-log-search-only": "on",
+    "data-kp-log-follow": st.follow ? "live" : "paused",
+    "data-kp-state": "loading",
     "aria-label": `Log lines of ${name}`,
   });
-  pre.append(skeletonLines(12, "Asking Loki for the lines"));
-  countOf(count, pre, ".kp-log__line");
   const footLeft = h("span", null, "Loki");
   const footRight = h("span", null, "");
   const card = h(
@@ -1689,11 +1686,63 @@ function logsTab(panel, c) {
         ".",
       ),
     ),
-    tb.el,
-    pre,
+    controls,
+    viewer,
     h("div", { class: "sh-foot" }, footLeft, footRight),
   );
-  panel.replaceChildren(h("div", { class: "sh-side" }, side.el, card));
+  panel.replaceChildren(h("div", { class: "sh-side" }, side, card));
+  const detach = [attachFacets(panel), attachLogViewers(panel)];
+  const logEl = /** @type {HTMLElement} */ (
+    viewer.querySelector(".kp-logviewer__log")
+  );
+  setLogViewer(viewer, { search: st.q, searchOnly: true, state: "loading" });
+
+  // The Live view marks on what kp draws.
+  const stampDrive = () => {
+    /** Runs `mark` on the element while it has no Live view mark. @param {Element | null} el @param {(e: HTMLElement) => void} mark */
+    const onFresh = (el, mark) => {
+      if (el instanceof HTMLElement && !el.dataset.drive) mark(el);
+    };
+    for (const [group, part] of /** @type {const} */ ([
+      [appsGroup, "apps"],
+      [levelsGroup, "levels"],
+    ])) {
+      for (const row of group.querySelectorAll(
+        ".kp-facet:not([data-kp-facet-all])",
+      ))
+        onFresh(row.querySelector(".kp-facet__check"), (e) =>
+          drivable(
+            e,
+            LOG_FILTER,
+            `${name}/${part}/${/** @type {HTMLElement} */ (row).dataset.value}`,
+          ),
+        );
+      onFresh(
+        group.querySelector("[data-kp-facet-all] .kp-facet__check"),
+        (e) => drivable(e, LOG_FILTER, `${name}/${part}/all`),
+      );
+    }
+    onFresh(viewer.querySelector(".kp-logviewer__find"), (e) =>
+      drivable(e, LOG_SEARCH, name),
+    );
+    onFresh(viewer.querySelector("[data-kp-follow-toggle]"), (e) =>
+      drivable(e, LOG_FOLLOW, name),
+    );
+    onFresh(viewer.querySelector("[data-kp-logviewer-retry]"), (e) =>
+      drivable(e, LOG_RETRY, name),
+    );
+  };
+  let stampQueued = false;
+  const watcher = new MutationObserver(() => {
+    if (stampQueued) return;
+    stampQueued = true;
+    requestAnimationFrame(() => {
+      stampQueued = false;
+      stampDrive();
+    });
+  });
+  watcher.observe(viewer, { childList: true, subtree: true });
+  watcher.observe(side, { childList: true, subtree: true });
 
   const writeUrl = () => {
     const search = setParams(location.search, {
@@ -1706,102 +1755,150 @@ function logsTab(panel, c) {
     history.replaceState(history.state, "", location.pathname + search);
   };
 
-  const paint = () => {
+  /** The viewer's word for a level group. @type {Record<string, string>} */
+  const WORD = { i: "info", w: "warning", e: "error" };
+  /**
+   * Lines as the viewer keeps them: one id per line, also for the same
+   * words at the same millisecond, so a poll that returns the window again
+   * adds nothing twice.
+   * @param {import("../logs.js").LogLine[]} list
+   */
+  const kpLines = (list) => {
+    /** @type {Map<string, number>} */
+    const dupes = new Map();
+    return list.map((l) => {
+      const key = `${l.ts_ms}|${l.source}|${l.stream}|${l.line}`;
+      const n = (dupes.get(key) ?? 0) + 1;
+      dupes.set(key, n);
+      return {
+        id: `${key}|${n}`,
+        ts: l.ts_ms,
+        source: l.source || "—",
+        level: WORD[levelGroup(l.level)],
+        message: l.line,
+      };
+    });
+  };
+  const on = () => ({
+    apps: new Set(getFacetValues(appsGroup)),
+    levels: new Set(getFacetValues(levelsGroup)),
+  });
+  /** The lines the filters let into the viewer, oldest first. @param {import("../logs.js").LogLine[]} from */
+  const passing = (from) => {
+    const { apps, levels } = on();
+    return [...from]
+      .sort((a, b) => a.ts_ms - b.ts_ms)
+      .filter(
+        (l) => apps.has(l.source || "—") && levels.has(levelGroup(l.level)),
+      );
+  };
+
+  const paintSide = () => {
+    if (loading) {
+      for (const g of [appsGroup, levelsGroup])
+        g.setAttribute("aria-busy", "true");
+      return;
+    }
     /** @type {string[]} */
     const apps = S.s?.apps?.map((a) => a.name) ?? S.edit?.manifest?.apps ?? [];
     const sources = logSources(apps, lines);
-    side.setValues(
-      "apps",
-      sources.map((s) => ({ value: s, label: s })),
+    const v = logView(lines, new Set(), new Set());
+    setFacetItems(
+      appsGroup,
+      sources.map((s) => ({
+        value: s,
+        label: s,
+        count: v.sources[s] ?? 0,
+        swatch: sourceColour(s),
+        pattern: s,
+        ...(made.has(`a:${s}`) ? {} : { checked: !only.app || only.app === s }),
+      })),
     );
-    if (only.app) side.only("apps", only.app);
-    const v = logView(lines, side.off("apps"), side.off("levels"));
-    side.setCounts("apps", v.sources);
-    side.setCounts("levels", v.levels);
-    if (failed) {
-      pre.replaceChildren(
-        h(
-          "div",
-          { class: "kp-alert kp-alert--destructive", role: "alert" },
-          h("strong", null, "Loki did not answer"),
-          h("p", null, `${failed.why}${failed.fix ? ` — ${failed.fix}` : ""}`),
-          retryButton(),
-        ),
-      );
-      count.textContent = "no lines";
-      return;
-    }
-    if (loading) return;
-    const atBottom =
-      pre.scrollHeight - pre.scrollTop - pre.clientHeight < 24 || st.follow;
-    if (v.total === 0)
-      pre.replaceChildren(
-        emptyState({
-          title: "No lines in this window",
-          text: st.q
-            ? `Loki holds no line containing “${st.q}” in the last ${winLabel(st.since)}; widen the window or clear the search.`
-            : `Loki holds no lines of ${name} in the last ${winLabel(st.since)}; widen the window.`,
-        }),
-      );
-    else
-      pre.replaceChildren(
-        ...v.shown.map((l) => {
-          const g = levelGroup(l.level);
-          const source = l.source || "—";
-          return h(
-            "p",
-            {
-              class: "kp-log__line",
-              "data-kp-severity":
-                g === "e" ? "error" : g === "w" ? "warning" : "info",
-              "data-src": l.source,
-              "data-lvl": g,
-            },
-            h(
-              "time",
-              { class: "kp-log__time" },
-              lineTime(l.ts_ms).split(" ")[1],
-            ),
-            h(
-              "span",
-              { class: "kp-log__source", "data-kp-source": source },
-              source,
-            ),
-            h(
-              "span",
-              { class: "kp-log__level" },
-              g === "e" ? "error" : g === "w" ? "warn" : "info",
-            ),
-            h("span", { class: "kp-log__message" }, l.line),
-          );
-        }),
-      );
-    attachLogs(pre);
-    if (atBottom) pre.scrollTop = pre.scrollHeight;
-    count.textContent =
-      v.shown.length === v.total
-        ? `${v.total} ${v.total === 1 ? "line" : "lines"}`
-        : `${v.shown.length} of ${v.total} lines`;
-    footLeft.textContent = `Loki, read ${humanDuration(nowS() - readAt)} ago${logql ? ` · ${logql}` : ""}`;
+    for (const s of sources) made.add(`a:${s}`);
+    setFacetItems(
+      levelsGroup,
+      LEVELS.map((l) => ({
+        value: l.value,
+        label: l.label,
+        count: v.levels[l.value] ?? 0,
+        swatch: LEVEL_SWATCH[l.value],
+        ...(made.has(`l:${l.value}`)
+          ? {}
+          : { checked: !only.lvl || only.lvl === l.value }),
+      })),
+    );
+    for (const l of LEVELS) made.add(`l:${l.value}`);
+    setFacetCounts(appsGroup, v.sources, { all: v.total });
+    setFacetCounts(levelsGroup, v.levels, { all: v.total });
+  };
+
+  /** @param {number} s */
+  const winLabel = (s) =>
+    ({ 900: "15 minutes", 3600: "hour", 86400: "24 hours", 604800: "7 days" })[
+      /** @type {900} */ (s)
+    ] ?? "window";
+
+  const paintFoot = () => {
+    footLeft.textContent = failed
+      ? `Loki did not answer: ${failed.why}${failed.fix ? ` — ${failed.fix}` : ""}`
+      : readAt
+        ? `Loki, read ${humanDuration(nowS() - readAt)} ago${logql ? ` · ${logql}` : ""}`
+        : "Asking Loki for the lines";
     footRight.textContent = st.follow
       ? "Following the newest line"
-      : "Paused: turn Follow on for new lines";
+      : "Paused: new lines wait below a marker";
+    readNote.textContent = failed
+      ? "Loki did not answer"
+      : loading
+        ? "Asking Loki for the lines"
+        : readAt
+          ? `Read ${humanDuration(nowS() - readAt)} ago, every 5 s`
+          : "";
   };
-  const retryButton = () => {
-    const b = h(
-      "button",
-      { type: "button", class: "kp-button kp-button--sm" },
-      "Try again",
+
+  /** What the viewer is handed after a filter, a window or a read. */
+  const feed = () => {
+    viewer.setAttribute(
+      "data-kp-log-hint",
+      st.q
+        ? `Loki holds no line containing “${st.q}” in the last ${winLabel(Number(st.since))}; widen the window or clear the search.`
+        : `Loki holds no lines of ${name} in the last ${winLabel(Number(st.since))}; widen the window.`,
     );
-    drivable(b, LOG_RETRY, name);
-    b.addEventListener("click", () => void load(false).catch(() => {}));
-    return b;
+    setLogViewer(viewer, {
+      lines: loading || failed ? [] : kpLines(passing(lines)),
+      state: loading ? "loading" : failed ? "error" : "ready",
+    });
+    paintFoot();
   };
-  /** @param {string} v */
-  const winLabel = (v) =>
-    ({ 900: "15 minutes", 3600: "hour", 86400: "24 hours", 604800: "7 days" })[
-      /** @type {900} */ (Number(v))
-    ] ?? "window";
+
+  /** @param {Event} e */
+  const filterChanged = (e) => {
+    only.app = null;
+    only.lvl = null;
+    // Nothing ticked reads as everything, as the buttons did.
+    const g = /** @type {HTMLElement} */ (e.currentTarget);
+    if (!getFacetValues(g).length) setFacetValues(g, null);
+    feed();
+  };
+  appsGroup.addEventListener(FACET_EVENT, filterChanged);
+  levelsGroup.addEventListener(FACET_EVENT, filterChanged);
+  viewer.addEventListener(LOGVIEWER_EVENT, () => {
+    // The viewer's own find is the text filter; the address remembers it.
+    const q = viewer.getAttribute("data-kp-log-search") ?? "";
+    if (q === st.q) return;
+    st.q = q;
+    writeUrl();
+  });
+  viewer.addEventListener(LOGVIEWER_RETRY_EVENT, () => {
+    void load(false).catch(() => {});
+  });
+  logEl.addEventListener(FOLLOW_EVENT, (e) => {
+    const now = /** @type {CustomEvent} */ (e).detail.following !== false;
+    if (now === st.follow) return;
+    st.follow = now;
+    writeUrl();
+    paintFoot();
+  });
 
   let req = new AbortController();
   c.signal.addEventListener("abort", () => req.abort());
@@ -1812,11 +1909,12 @@ function logsTab(panel, c) {
     if (!quiet) {
       loading = true;
       failed = null;
-      pre.replaceChildren(skeletonLines(12, "Asking Loki for the lines"));
-      count.textContent = "reading…";
+      lines = [];
+      paintSide();
+      feed();
     }
     const r = await fetchJson(
-      logsUrl(name, { since: st.since, app: "", q: st.q }, LOG_LIMIT),
+      logsUrl(name, { since: st.since, app: "", q: "" }, LOG_LIMIT),
       "the logs",
       req.signal,
     ).catch(() => null);
@@ -1824,44 +1922,51 @@ function logsTab(panel, c) {
     loading = false;
     if (!r.ok) {
       failed = r.error;
-      paint();
+      paintSide();
+      feed();
       return;
     }
+    const wasFailed = failed !== null;
     failed = null;
     lines = r.body.lines ?? [];
     logql = r.body.logql ?? "";
     readAt = r.body.measured_at ?? nowS();
-    paint();
+    paintSide();
+    // A poll hands over only what is new: the viewer keeps a line once and
+    // the pill counts what came while the reader was away.
+    if (quiet && !wasFailed) {
+      appendLogLines(viewer, kpLines(passing(lines)));
+      paintFoot();
+    } else feed();
   };
-  /** @type {ReturnType<typeof setInterval> | null} */
-  let timer = null;
-  const follow = () => {
-    if (timer) clearInterval(timer);
-    timer = st.follow
-      ? setInterval(() => void load(true).catch(() => {}), 5000)
-      : null;
-  };
-  followIn.addEventListener("change", () => {
-    st.follow = followIn.checked;
-    writeUrl();
-    follow();
-    paint();
-  });
+  const timer = setInterval(() => void load(true).catch(() => {}), 5000);
+  const tick = setInterval(paintFoot, 1000);
+  /** @param {Element} g */
+  const allOn = (g) =>
+    getFacetValues(g).length ===
+    g.querySelectorAll(".kp-facet:not([data-kp-facet-all])").length;
   /** @param {KeyboardEvent} e */
   const esc = (e) => {
     if (e.key !== "Escape" || document.querySelector("dialog[open]")) return;
-    if (side.reset()) paint();
+    const narrowed = !allOn(appsGroup) || !allOn(levelsGroup);
+    setFacetValues(appsGroup, null);
+    setFacetValues(levelsGroup, null);
+    only.app = null;
+    only.lvl = null;
+    if (narrowed) feed();
   };
   document.addEventListener("keydown", esc);
-  const stopChange = c.onChange(paint);
-  follow();
+  const stopChange = c.onChange(paintSide);
+  paintFoot();
   void load(false).catch(() => {});
   return () => {
-    if (timer) clearInterval(timer);
-    if (typing) clearTimeout(typing);
+    clearInterval(timer);
+    clearInterval(tick);
+    watcher.disconnect();
     req.abort();
     stopChange();
     document.removeEventListener("keydown", esc);
+    for (const d of detach) d();
   };
 }
 
@@ -3279,145 +3384,6 @@ function hubHeader(spec) {
           return e;
         }),
       ),
-  };
-}
-
-/**
- * The side filter column of a log explorer (DESIGN_LANGUAGE §12, the hub
- * demo's Logs): one part per dimension, each value a toggle row with its
- * count, every value on at first. A plain click turns one on or off (no
- * modifier keys, Kenny 2026-10-03); "All" turns a dimension's values back
- * on; `reset()` (Esc) all of them.
- * @param {{label: string, parts: {key: string, label: string,
- *   values: {value: string, label: string}[]}[], hint: string,
- *   onChange: () => void,
- *   mark?: (b: HTMLElement, part: string, value: string) => void}} spec
- */
-function sideFilters(spec) {
-  /** @type {Map<string, Set<string>>} values turned OFF, per part */
-  const off = new Map(spec.parts.map((p) => [p.key, new Set()]));
-  /** @type {Map<string, HTMLElement>} */
-  const holders = new Map();
-  /** @type {Map<string, {value: string, label: string}[]>} */
-  const values = new Map(spec.parts.map((p) => [p.key, p.values]));
-  /** @type {Map<string, Map<string, HTMLElement>>} */
-  const counts = new Map();
-  /** @param {string} key */
-  const paint = (key) => {
-    const holder = holders.get(key);
-    const o = off.get(key) ?? new Set();
-    if (!holder) return;
-    /** @type {Map<string, HTMLElement>} */
-    const cs = new Map();
-    holder.replaceChildren(
-      ...(values.get(key) ?? []).map((v) => {
-        const n = h("small", null);
-        cs.set(v.value, n);
-        const b = h(
-          "button",
-          {
-            type: "button",
-            "aria-pressed": String(!o.has(v.value)),
-            "data-value": v.value,
-            title: `Show or hide ${v.label}; each click turns it on or off`,
-            onclick: () => {
-              if (o.has(v.value)) o.delete(v.value);
-              else o.add(v.value);
-              b.setAttribute("aria-pressed", String(!o.has(v.value)));
-              spec.onChange();
-            },
-          },
-          h("span", null, v.label),
-          n,
-        );
-        spec.mark?.(b, key, v.value);
-        return b;
-      }),
-    );
-    counts.set(key, cs);
-  };
-  const parts = spec.parts.map((p) => {
-    const holder = h("div", {
-      class: "sh-side__opts",
-      role: "group",
-      "aria-label": `${p.label}: click to show or hide`,
-    });
-    holders.set(p.key, holder);
-    const all = h(
-      "button",
-      {
-        type: "button",
-        class: "sh-side__all",
-        title: `Show every ${p.label.toLowerCase()} again`,
-        onclick: () => {
-          off.get(p.key)?.clear();
-          paint(p.key);
-          spec.onChange();
-        },
-      },
-      "All",
-    );
-    spec.mark?.(all, p.key, "all");
-    paint(p.key);
-    return h(
-      "div",
-      { class: "sh-side__part" },
-      h("p", { class: "sh-side__label" }, h("span", null, p.label), all),
-      holder,
-    );
-  });
-  const e = h(
-    "aside",
-    { class: "sh-side__panel", "aria-label": spec.label },
-    parts,
-    h("p", { class: "sh-hint" }, spec.hint),
-  );
-  return {
-    el: e,
-    /** @param {string} key */
-    off: (key) => new Set(off.get(key) ?? []),
-    /** @param {string} key @param {{value: string, label: string}[]} next */
-    setValues: (key, next) => {
-      const now = values.get(key) ?? [];
-      if (
-        now.length === next.length &&
-        now.every((v, i) => v.value === next[i].value)
-      )
-        return;
-      values.set(key, next);
-      paint(key);
-    },
-    /**
-     * Show only `keep` of a part (a deep link: one app's Logs, the
-     * errors): every other value of it turned off.
-     * @param {string} key @param {string} keep
-     */
-    only: (key, keep) => {
-      const o = off.get(key);
-      if (!o) return;
-      const next = (values.get(key) ?? [])
-        .map((v) => v.value)
-        .filter((v) => v !== keep);
-      if (next.length === o.size && next.every((v) => o.has(v))) return;
-      o.clear();
-      for (const v of next) o.add(v);
-      paint(key);
-    },
-    /** @param {string} key @param {Record<string, number>} n */
-    setCounts: (key, n) => {
-      for (const [v, c] of counts.get(key) ?? [])
-        c.textContent = String(n[v] ?? 0);
-    },
-    /** @returns {boolean} whether anything was off */
-    reset: () => {
-      let any = false;
-      for (const [k, o] of off) {
-        if (o.size) any = true;
-        o.clear();
-        paint(k);
-      }
-      return any;
-    },
   };
 }
 

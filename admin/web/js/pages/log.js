@@ -5,13 +5,13 @@
 // shows it as its Host log view (`/activity?view=host-log`; the old `/log`
 // redirects there).
 //
-// A log explorer, so the filters are a side column (DESIGN_LANGUAGE §12):
-// Source (each a plain-click toggle with its count, "only" beside it) and
-// Level. The toolbar above the lines keeps its three zones (fix for
-// Kenny's "alle items lijken gewoon links aligned naast elkaar gezet"):
-// "Lines containing" at its own width on the left, the count, the follow
-// switch and the key hints against the right edge. The lines scroll inside
-// their own region; the page never grows with them.
+// feat-kpadopt-2 (kp-themes 11.1.1): the lines are kp's log viewer
+// (`logviewer.js`: find, wrap, time column, Copy, the ring buffer, the
+// "N new lines" pill and the loading, empty and failed states), the
+// filters are two kp facet groups (Source, Level) and Copy line flashes its
+// answer (`flash.js`). The page owns which lines the viewer is handed (the
+// facets and the five-minute pick narrow them), the details of the chosen
+// line under the lines, and the Live view marks.
 
 import { act } from "../act.js";
 import { ownerOf } from "../activityview.js";
@@ -21,12 +21,9 @@ import {
   LEVELS,
   defaultLevels,
   BUCKET_S,
-  bucketStart,
   counts,
-  countText,
   densityBuckets,
   inRange,
-  keyAction,
   lineShown,
   logFilterFromParams,
   logFilterToParams,
@@ -35,23 +32,35 @@ import {
   sourceLabel,
   sourceList,
   sourceOn,
-  toggleSource,
 } from "../hostlogview.js";
 import { logLine } from "../jobs.js";
-import { logText, saveLogLevels } from "../logs.js";
+import { levelBucket, saveLogLevels } from "../logs.js";
 import { openJobDialog } from "../jobpanel.js";
 import { transferView } from "../parity.js";
 import { current, listen, subscribe } from "../store.js";
-import { countOf, emptyState, kbd, stackMark, toolbar } from "../ui.js";
+import { kbd } from "../ui.js";
 import { setParams } from "../urlstate.js";
-import { attachLogs } from "/static/kp/js/log.js";
+import { facetGroup } from "../logfacets.js";
 import { gridRow, formGrid } from "../gridrow.js";
 import { formatClock, formatDateTime } from "../format.js";
+import { sourceColour } from "/static/kp/js/log.js";
 import {
-  TOGGLE_CHANGED_EVENT,
-  attachToggles,
-  toggle as toggleOf,
-} from "/static/kp/js/toggle.js";
+  LOGVIEWER_EVENT,
+  LOGVIEWER_RETRY_EVENT,
+  appendLogLines,
+  attachLogViewers,
+  logViewerText,
+  setLogViewer,
+} from "/static/kp/js/logviewer.js";
+import { FOLLOW_EVENT, newPill } from "/static/kp/js/newpill.js";
+import {
+  FACET_EVENT,
+  attachFacets,
+  setFacetCounts,
+  setFacetItems,
+  setFacetValues,
+} from "/static/kp/js/facets.js";
+import { runFlashButton } from "/static/kp/js/flash.js";
 import {
   SEGMENTED_EVENT,
   attachSegmented,
@@ -67,23 +76,32 @@ import {
   HEAT_ROW_EVENT,
   attachHeats,
   setHeat,
-  setHeatPick,
   setHeatRows,
 } from "/static/kp/js/heat.js";
 import { attachHoverCards } from "/static/kp/js/hovercard.js";
 import { attachFootprints } from "/static/kp/js/footprint.js";
+import { attachDisabledReasons } from "/static/kp/js/reason.js";
 
 /** Lines kept in the page, as the server's ring. */
 const KEEP = 2000;
 
 // feat-logs-1: Copy for the whole host log, declared here because Activity's
-// Host log and Console both draw this explorer.
+// Host log and Console both draw this explorer. It is the viewer's own Copy
+// (the lines the filters show).
 const COPY_ALL = declare({
   id: "host-log-copy-all",
   page: "log",
   opens: "run",
   what: "copy every line of the host log to the clipboard",
 });
+
+/** The swatch of a level's facet row. @type {Record<string, string>} */
+const LEVEL_SWATCH = {
+  debug: "var(--muted-foreground)",
+  info: "var(--chart-1, var(--primary))",
+  warning: "var(--warning-foreground)",
+  critical: "var(--destructive)",
+};
 
 /**
  * @typedef {{follow: string, source: string, only: string, level: string,
@@ -101,7 +119,7 @@ const COPY_ALL = declare({
  * @param {ExplorerOpts} opts
  * @returns {{cleanup: () => void, setFollow: (on: boolean) => void,
  *   following: () => boolean, download: () => void,
- *   addBlock: (el: HTMLElement) => void, focusSearch: () => void}}
+ *   focusSearch: () => void}}
  */
 export function mountHostLog(root, opts) {
   const params = new URLSearchParams(location.search);
@@ -117,156 +135,78 @@ export function mountHostLog(root, opts) {
   let loaded = false;
   /** @type {string | null} */
   let failure = null;
-  let follow = true;
-  let unseen = 0;
-  /** @type {number | null} */
+  /** The line whose details are open. @type {number | null} */
   let open = null;
   /** The five minutes (start, unix seconds) the lines are narrowed to. @type {number | null} */
   let range = null;
   /** The picture over the lines: sources by time (opens first) or the strip. @type {"grid" | "strip"} */
   let picture = "grid";
 
-  const side = h("aside", {
-    class: "hl-side",
-    "aria-label": "Which lines",
-  });
-  const countEl = h("span", { class: "hl-count", role: "status" });
-  const followBtn = drivable(
-    h("button", {
-      type: "button",
-      class: "kp-button kp-button--ghost kp-button--sm hl-follow",
-      title: "Stop following: new lines wait below a marker (Space)",
-    }),
-    opts.drive.follow,
+  // ── the filters: kp facets, one group per dimension ────────────────────
+  const sourceGroup = facetGroup(
+    "Source",
+    "Everything",
+    "No source has printed a line yet.",
   );
-  followBtn.addEventListener("click", () => setFollow(!follow));
-  const copyAll = drivable(
+  const levelGroup = facetGroup("Level", "Every level", "No levels.");
+  /** The rows already made, so a row that is there keeps its state. @type {Set<string>} */
+  const rowsMade = new Set();
+  const side = h("aside", { class: "hl-side", "aria-label": "Which lines" });
+  const reset = drivable(
     h(
       "button",
-      {
-        type: "button",
-        class: "kp-button kp-button--ghost kp-button--sm hl-copyall",
-        title: "Copy every line the page holds to the clipboard",
-      },
-      "Copy",
+      { type: "button", class: "kp-button kp-button--ghost kp-button--sm" },
+      "Reset the filters",
     ),
-    COPY_ALL,
+    opts.drive.reset,
   );
-  copyAll.addEventListener("click", () => {
-    void navigator.clipboard
-      ?.writeText(logText(lines))
-      .then(() => (copyAll.textContent = "Copied"))
-      .catch(() => (copyAll.textContent = "Press Ctrl C"))
-      .finally(() =>
-        setTimeout(() => {
-          if (copyAll.isConnected) copyAll.textContent = "Copy";
-        }, 1500),
-      );
+  // The demo's words: the hint while nothing is narrowed, the reset
+  // while something is (senior review, finding 16).
+  const hint = h("p", { class: "hl-hint" }, "Hover a source for “only”.");
+  side.replaceChildren(
+    h("div", { class: "hl-group" }, h("h3", null, "Source"), sourceGroup),
+    h("div", { class: "hl-group" }, h("h3", null, "Level"), levelGroup),
+    h("div", { class: "hl-sidefoot" }, reset, hint),
+  );
+
+  // ── the lines: kp's log viewer ─────────────────────────────────────────
+  const tools = ["search", "wrap", "time", "copy"];
+  if (opts.followInBar) tools.push("follow");
+  const viewer = h("div", {
+    class: "kp-logviewer hl-viewer",
+    "data-kp-logviewer": "",
+    "data-kp-log-max": String(KEEP),
+    "data-kp-log-tools": tools.join(","),
+    "data-kp-log-filename": "host-log",
+    "data-kp-log-search-only": "on",
+    "data-kp-log-hint":
+      "The host has printed nothing since the dashboard started; its lines appear here as it works.",
+    "data-kp-state": "loading",
+    "aria-label": opts.label,
+    id: "host-log",
+  });
+  const transfers = h("div", { class: "hl-xfers" });
+  // The chosen line's details stand under the lines in one fixed slot, so
+  // choosing one moves nothing.
+  const detail = h("div", {
+    class: "hl-detail",
+    role: "region",
+    "aria-label": "The chosen line",
+    "aria-live": "polite",
   });
   const hints = h(
-    "span",
+    "p",
     { class: "hl-hints" },
+    kbd("↑"),
+    kbd("↓"),
+    " choose a line · ",
     kbd("Space"),
     " pause · ",
     kbd("End"),
-    " tail",
+    " tail · ",
+    kbd("/"),
+    " search",
   );
-  const tb = toolbar({
-    search: {
-      placeholder: "Lines containing…",
-      label: "Lines containing",
-      value: f.q,
-      onInput: (q) => {
-        f = { ...f, q };
-        changed();
-      },
-    },
-    groups: [],
-    state: [countEl, copyAll, ...(opts.followInBar ? [followBtn] : []), hints],
-  });
-  tb.el.classList.add("hl-bar");
-  if (tb.search) drivable(tb.search, opts.drive.search);
-  const transfers = h("div", { class: "hl-xfers" });
-  // The kp log component: its grid holds the lines (gap-kplog-1).
-  const list = h("div", { class: "kp-log hl-lines", "data-kp-arrive": "none" });
-  // redesign-final (exact counts): "N of M lines" is the lines drawn.
-  countOf(countEl, list, ".kp-log__line");
-  const blocks = h("div", { class: "hl-blocks" });
-  const newPill = h("button", {
-    type: "button",
-    class: "kp-button kp-button--sm kp-button--primary hl-newpill",
-    hidden: "",
-  });
-  drivable(newPill, opts.drive.newLines);
-  newPill.addEventListener("click", () => setFollow(true));
-  const out = h(
-    "div",
-    {
-      class: "hl-out",
-      role: "log",
-      "aria-live": "polite",
-      "aria-label": opts.label,
-      tabindex: "0",
-      id: "host-log",
-    },
-    transfers,
-    list,
-    blocks,
-  );
-  // ── the levels as chips, exact counts (feat-kp11demo-7) ───────────────
-  const levelBtn = (/** @type {string} */ value, /** @type {string} */ label) =>
-    drivable(
-      h(
-        "button",
-        {
-          class: "kp-button",
-          type: "button",
-          "data-kp-toggle": "",
-          "data-kp-look": "chip",
-          "data-kp-toggle-value": value,
-          "data-kp-count": "0",
-          "aria-pressed": String(f.levels.has(value)),
-          title: `Show or hide the ${label.toLowerCase()} lines; several levels can be on`,
-        },
-        label,
-      ),
-      opts.drive.level,
-      value,
-    );
-  const levelsEl = h(
-    "div",
-    {
-      class: "kp-toggles hl-levels",
-      role: "group",
-      "aria-label": "Level",
-      "data-kp-toggle-group": "level",
-    },
-    ...LEVELS.map((lv) => levelBtn(lv.value, lv.label)),
-  );
-  const levelRead = h("span", { class: "hl-levelread", role: "status" });
-  /** @param {Record<string, number>} byLevel */
-  const paintLevels = (byLevel) => {
-    for (const b of /** @type {HTMLElement[]} */ ([
-      ...levelsEl.querySelectorAll("button"),
-    ])) {
-      const v = b.getAttribute("data-kp-toggle-value") ?? "";
-      b.setAttribute("data-kp-count", String(byLevel[v] ?? 0));
-      toggleOf(b)?.setCount(byLevel[v] ?? 0);
-      b.setAttribute("aria-pressed", String(f.levels.has(v)));
-    }
-    levelRead.textContent = loaded
-      ? `${Object.values(byLevel)
-          .reduce((a, n) => a + n, 0)
-          .toLocaleString("en-GB")} lines in the window`
-      : "";
-  };
-  levelsEl.addEventListener(TOGGLE_CHANGED_EVENT, (e) => {
-    const keys = /** @type {CustomEvent} */ (e).detail.pressedKeys ?? [];
-    const levels = new Set(keys.length ? keys : LEVELS.map((x) => x.value));
-    f = { ...f, levels };
-    saveLogLevels(levels);
-    changed();
-  });
 
   // ── where in the window did it happen (feat-kp11demo-7) ───────────────
   const pictureSeg = h(
@@ -339,17 +279,407 @@ export function mountHostLog(root, opts) {
     ],
     "hl-density",
   );
-  const levelsRow = formGrid(
-    [
-      gridRow({
-        label: "Levels",
-        control: levelsEl,
-        value: levelRead,
-        wide: false,
-      }),
-    ],
-    "hl-levelsrow",
+
+  const term = h(
+    "section",
+    { class: "hl-term", "aria-label": opts.label },
+    transfers,
+    density,
+    viewer,
+    detail,
+    hints,
+    ...(opts.foot ? [opts.foot] : []),
   );
+  root.replaceChildren(h("div", { class: "hl" }, side, term));
+  const detachKp = [
+    attachFacets(root),
+    attachLogViewers(root),
+    attachSegmented(root),
+    attachUptimes(root),
+    attachHeats(root),
+    attachHoverCards(root),
+    attachDisabledReasons(root),
+    // the heat grid and the strip keep their loaded height in every state
+    attachFootprints(root),
+  ];
+  const logEl = /** @type {HTMLElement} */ (
+    viewer.querySelector(".kp-logviewer__log")
+  );
+  setLogViewer(viewer, { search: f.q, searchOnly: true, state: "loading" });
+
+  const fleetNames = () => (current().fleet?.stacks ?? []).map((s) => s.name);
+  const allSources = () => sourceList(fleetNames(), seen);
+
+  const toUrl = () =>
+    history.replaceState(
+      history.state,
+      "",
+      location.pathname + setParams(location.search, logFilterToParams(f)),
+    );
+
+  /** Whether the filters let a line into the viewer. @param {import("../parity.js").HostLine} l */
+  const visible = (l) => lineShown(l, { ...f, q: "" }) && inRange(l, range);
+
+  /** A host line as the viewer keeps it. @param {import("../parity.js").HostLine} l */
+  const kpLine = (l) => ({
+    id: String(l.seq),
+    ts: l.ts * 1000,
+    source: sourceLabel(l.source),
+    level: levelBucket(l.level),
+    message: l.msg,
+  });
+
+  // ── the Live view marks on what kp draws ──────────────────────────────
+  const stampDrive = () => {
+    /** Runs `mark` on the element while it has no Live view mark. @param {Element | null} el @param {(e: HTMLElement) => void} mark */
+    const onFresh = (el, mark) => {
+      if (el instanceof HTMLElement && !el.dataset.drive) mark(el);
+    };
+    for (const row of sourceGroup.querySelectorAll(
+      ".kp-facet:not([data-kp-facet-all])",
+    )) {
+      const v = /** @type {HTMLElement} */ (row).dataset.value ?? "";
+      onFresh(row.querySelector(".kp-facet__check"), (e) =>
+        drivable(e, opts.drive.source, v),
+      );
+      onFresh(row.querySelector(".kp-facet__only"), (e) =>
+        drivable(e, opts.drive.only, v),
+      );
+    }
+    onFresh(
+      sourceGroup.querySelector("[data-kp-facet-all] .kp-facet__check"),
+      (e) => drivable(e, opts.drive.everything),
+    );
+    for (const row of levelGroup.querySelectorAll(
+      ".kp-facet:not([data-kp-facet-all])",
+    ))
+      onFresh(row.querySelector(".kp-facet__check"), (e) =>
+        drivable(
+          e,
+          opts.drive.level,
+          /** @type {HTMLElement} */ (row).dataset.value ?? "",
+        ),
+      );
+    onFresh(viewer.querySelector(".kp-logviewer__find"), (e) =>
+      drivable(e, opts.drive.search),
+    );
+    onFresh(viewer.querySelector("[data-kp-logviewer-copy]"), (e) =>
+      drivable(e, COPY_ALL),
+    );
+    onFresh(viewer.querySelector("[data-kp-follow-toggle]"), (e) =>
+      drivable(e, opts.drive.follow),
+    );
+    onFresh(viewer.querySelector("[data-kp-logviewer-retry]"), (e) =>
+      drivable(e, opts.drive.retry),
+    );
+    onFresh(viewer.querySelector(".kp-newpill"), (e) =>
+      drivable(e, opts.drive.newLines),
+    );
+    for (const row of logEl.querySelectorAll(".kp-log__line:not([data-drive])"))
+      onFresh(row, (e) => drivable(e, opts.drive.line, e.dataset.id ?? ""));
+  };
+  let stampQueued = false;
+  const queueStamp = () => {
+    if (stampQueued) return;
+    stampQueued = true;
+    requestAnimationFrame(() => {
+      stampQueued = false;
+      stampDrive();
+    });
+  };
+  const watcher = new MutationObserver(queueStamp);
+  watcher.observe(root, { childList: true, subtree: true });
+
+  // ── the filters ───────────────────────────────────────────────────────
+  /** Bring the facet rows in step with the filter (after a reset or a heat row). */
+  const syncFacets = () => {
+    setFacetValues(
+      sourceGroup,
+      allSources().filter((s) => sourceOn(s, f)),
+    );
+    setFacetValues(levelGroup, [...f.levels]);
+  };
+
+  const paintSide = () => {
+    if (!loaded) {
+      for (const g of [sourceGroup, levelGroup])
+        g.setAttribute("aria-busy", "true");
+      return;
+    }
+    const c = counts(lines);
+    const srcs = allSources();
+    setFacetItems(
+      sourceGroup,
+      srcs.map((s) => ({
+        value: s,
+        label: sourceLabel(s),
+        count: c.bySource.get(s) ?? 0,
+        swatch: sourceColour(sourceLabel(s)),
+        pattern: s === "HOST" ? "" : s,
+        ...(rowsMade.has(`s:${s}`) ? {} : { checked: sourceOn(s, f) }),
+      })),
+    );
+    for (const s of srcs) rowsMade.add(`s:${s}`);
+    setFacetItems(
+      levelGroup,
+      LEVELS.map((lv) => ({
+        value: lv.value,
+        label: lv.label,
+        count: c.byLevel[lv.value] ?? 0,
+        swatch: LEVEL_SWATCH[lv.value],
+        ...(rowsMade.has(`l:${lv.value}`)
+          ? {}
+          : { checked: f.levels.has(lv.value) }),
+      })),
+    );
+    for (const lv of LEVELS) rowsMade.add(`l:${lv.value}`);
+    setFacetCounts(
+      sourceGroup,
+      Object.fromEntries(srcs.map((s) => [s, c.bySource.get(s) ?? 0])),
+      { all: lines.length },
+    );
+    setFacetCounts(
+      levelGroup,
+      Object.fromEntries(LEVELS.map((lv) => [lv.value, c.byLevel[lv.value]])),
+      { all: lines.length },
+    );
+    const n = narrowed(f) || range != null;
+    reset.hidden = !n;
+    hint.hidden = n;
+    queueStamp();
+  };
+
+  sourceGroup.addEventListener(FACET_EVENT, (e) => {
+    const values = new Set(/** @type {CustomEvent} */ (e).detail.values);
+    f = {
+      ...f,
+      only: null,
+      off: new Set(allSources().filter((s) => !values.has(s))),
+    };
+    changed();
+  });
+  levelGroup.addEventListener(FACET_EVENT, (e) => {
+    const values = /** @type {string[]} */ (
+      /** @type {CustomEvent} */ (e).detail.values
+    );
+    // Nothing ticked reads as every level, as the chips did.
+    if (!values.length) setFacetValues(levelGroup, null);
+    const levels = new Set(values.length ? values : LEVELS.map((x) => x.value));
+    f = { ...f, levels };
+    saveLogLevels(levels);
+    changed();
+  });
+  reset.addEventListener("click", () => {
+    f = { off: new Set(), only: null, levels: defaultLevels(), q: "" };
+    saveLogLevels(f.levels);
+    range = null;
+    setLogViewer(viewer, { search: "" });
+    syncFacets();
+    changed();
+  });
+
+  // ── the chosen line ───────────────────────────────────────────────────
+  const markCurrent = () => {
+    for (const r of logEl.querySelectorAll(".kp-log__line[data-kp-current]"))
+      if (/** @type {HTMLElement} */ (r).dataset.id !== String(open))
+        r.removeAttribute("data-kp-current");
+    if (open != null)
+      logEl
+        .querySelector(`.kp-log__line[data-id="${open}"]`)
+        ?.setAttribute("data-kp-current", "");
+  };
+
+  const paintDetail = () => {
+    if (failure) {
+      detail.replaceChildren(
+        h(
+          "p",
+          { class: "hl-detail__note", role: "alert" },
+          `The host's lines could not be read: ${failure}`,
+        ),
+      );
+      return;
+    }
+    const l = open == null ? null : lines.find((x) => x.seq === open);
+    if (!l) {
+      open = null;
+      detail.replaceChildren(
+        h(
+          "p",
+          { class: "hl-detail__note" },
+          loaded
+            ? "Press a line to see when it was written, who started it and the request it belongs to."
+            : "",
+        ),
+      );
+      return;
+    }
+    const x = logLine(/** @type {any} */ ({ ...l, job: 0 }));
+    const job =
+      l.req == null
+        ? null
+        : act.jobs.find((j) => j.reqs?.includes(l.req ?? -1));
+    const onlyBtn = drivable(
+      h(
+        "button",
+        { type: "button", class: "kp-button kp-button--sm" },
+        `Only ${sourceLabel(l.source)}`,
+      ),
+      opts.drive.onlyLine,
+    );
+    onlyBtn.addEventListener("click", () => {
+      f = { ...f, only: l.source, off: new Set() };
+      open = null;
+      syncFacets();
+      changed();
+    });
+    const copy = drivable(
+      h(
+        "button",
+        {
+          type: "button",
+          class: "kp-button kp-button--sm kp-button--ghost",
+          title: "Copy this line to the clipboard",
+          "data-kp-flash-words": "Copied,Press Ctrl C",
+        },
+        "Copy line",
+      ),
+      opts.drive.copy,
+    );
+    copy.addEventListener("click", () => {
+      void runFlashButton(copy, async () => {
+        try {
+          await navigator.clipboard.writeText(
+            `${x.time} ${x.level} ${l.source} ${l.msg}`,
+          );
+          return "Copied";
+        } catch {
+          return { error: "Press Ctrl C", word: "Press Ctrl C" };
+        }
+      });
+    });
+    const jobBtn = job
+      ? drivable(
+          h(
+            "button",
+            {
+              type: "button",
+              class: "kp-button kp-button--sm kp-button--ghost",
+              title: "Open the job this line belongs to",
+            },
+            "Open the job",
+          ),
+          opts.drive.openJob,
+          String(job.job),
+        )
+      : null;
+    jobBtn?.addEventListener("click", () => openJobDialog(job?.job ?? 0));
+    const kv = (/** @type {string} */ k, /** @type {string} */ v, cls = "") =>
+      h(
+        "div",
+        { class: "kp-kv__row" },
+        h("dt", null, k),
+        h("dd", { class: cls }, v),
+      );
+    detail.replaceChildren(
+      h(
+        "dl",
+        { class: "kp-kv hl-detail__kv" },
+        kv("When", formatDateTime(l.ts)),
+        kv(
+          "Started by",
+          l.by
+            ? l.by === "admin"
+              ? "Kenny, from this dashboard"
+              : `${ownerOf(l.by)} (the token “${l.by}”)`
+            : "the host (the nightly round or its own work)",
+        ),
+        kv(
+          "Line",
+          `#${l.seq}${l.req != null ? ` · request ${l.req}` : ""}`,
+          "mono",
+        ),
+      ),
+      h(
+        "div",
+        { class: "hl-detail__acts" },
+        onlyBtn,
+        ...(jobBtn ? [jobBtn] : []),
+        copy,
+      ),
+    );
+  };
+
+  /** @param {number | null} seq */
+  const choose = (seq) => {
+    open = seq;
+    markCurrent();
+    paintDetail();
+  };
+
+  viewer.addEventListener("click", (e) => {
+    const row =
+      e.target instanceof Element
+        ? e.target.closest(".kp-log__line[data-id]")
+        : null;
+    if (!row || !logEl.contains(row)) return;
+    // Selecting text to copy it is not choosing the line.
+    if (getSelection()?.toString()) return;
+    const seq = Number(/** @type {HTMLElement} */ (row).dataset.id);
+    choose(seq === open ? null : seq);
+  });
+  logEl.addEventListener("keydown", (e) => {
+    if (e.target !== logEl || e.ctrlKey || e.metaKey || e.altKey) return;
+    if (e.key === "Escape" && open != null) {
+      e.preventDefault();
+      choose(null);
+      return;
+    }
+    if (e.key !== "ArrowDown" && e.key !== "ArrowUp") return;
+    const rows = /** @type {HTMLElement[]} */ ([
+      ...logEl.querySelectorAll(".kp-log__line[data-id]:not([hidden])"),
+    ]);
+    if (!rows.length) return;
+    e.preventDefault();
+    const at = rows.findIndex((r) => r.dataset.id === String(open));
+    const next =
+      e.key === "ArrowDown"
+        ? rows[at < 0 ? 0 : Math.min(at + 1, rows.length - 1)]
+        : rows[at < 0 ? rows.length - 1 : Math.max(at - 1, 0)];
+    // Looking back stops the following; the pill counts what comes meanwhile.
+    if (e.key === "ArrowUp") newPill(logEl)?.pause();
+    choose(Number(next.dataset.id));
+    next.scrollIntoView({ block: "nearest" });
+  });
+  viewer.addEventListener(LOGVIEWER_EVENT, () => {
+    // The viewer's own find is the text filter; the address remembers it.
+    const q = viewer.getAttribute("data-kp-log-search") ?? "";
+    if (q !== f.q) {
+      f = { ...f, q };
+      toUrl();
+      paintSide();
+    }
+    markCurrent();
+    queueStamp();
+  });
+  viewer.addEventListener(LOGVIEWER_RETRY_EVENT, () => void read());
+
+  // ── what is handed to the viewer ──────────────────────────────────────
+  /** @returns {"loading" | "error" | "ready"} */
+  const viewState = () => (!loaded ? "loading" : failure ? "error" : "ready");
+
+  const feed = () => {
+    setLogViewer(viewer, {
+      lines: loaded && !failure ? lines.filter(visible).map(kpLine) : [],
+      state: viewState(),
+    });
+    markCurrent();
+    paintDetail();
+    paintDensity();
+    queueStamp();
+  };
+
+  // ── the picture of the window ─────────────────────────────────────────
   const qualify = (/** @type {number} */ ts) => formatDateTime(ts);
   let lastStrip = "";
   let lastHeat = "";
@@ -455,8 +785,8 @@ export function mountHostLog(root, opts) {
     const key = Number(/** @type {CustomEvent} */ (e).detail.key);
     const b = densityBuckets(lines).find((x) => x.start === key);
     if (!b || b.first == null) return;
-    const el = list.querySelector(`.kp-log__line[data-seq="${b.first}"]`);
-    setFollow(false);
+    const el = logEl.querySelector(`.kp-log__line[data-id="${b.first}"]`);
+    newPill(logEl)?.pause();
     el?.scrollIntoView({ block: "start" });
     pictureRead.textContent = el
       ? `Jumped to ${formatClock(b.start)}, line ${b.first}.`
@@ -468,7 +798,8 @@ export function mountHostLog(root, opts) {
     pictureRead.textContent = d.picked
       ? `Showing the lines of ${formatClock(Number(d.colKey))} to ${formatClock(Number(d.colKey) + BUCKET_S)} only.`
       : "Press a cell to look at those five minutes.";
-    paintLines();
+    paintSide();
+    feed();
   });
   gridEl.addEventListener(HEAT_ROW_EVENT, (e) => {
     const off = new Set(/** @type {CustomEvent} */ (e).detail.keys);
@@ -477,6 +808,7 @@ export function mountHostLog(root, opts) {
       off: new Set(allSources().filter((x) => off.has(x))),
       only: null,
     };
+    syncFacets();
     changed();
   });
   pictureSeg.addEventListener(SEGMENTED_EVENT, (e) => {
@@ -486,439 +818,6 @@ export function mountHostLog(root, opts) {
         : "grid";
     paintDensity();
   });
-  void bucketStart;
-
-  const term = h(
-    "section",
-    { class: "hl-term", "aria-label": opts.label },
-    tb.el,
-    levelsRow,
-    density,
-    h("div", { class: "hl-outwrap" }, out, newPill),
-    ...(opts.foot ? [opts.foot] : []),
-  );
-  root.replaceChildren(h("div", { class: "hl" }, side, term));
-  const detachKp = [
-    attachToggles(root),
-    attachSegmented(root),
-    attachUptimes(root),
-    attachHeats(root),
-    attachHoverCards(root),
-    // the heat grid and the strip keep their loaded height in every state
-    attachFootprints(root),
-  ];
-
-  const fleetNames = () => (current().fleet?.stacks ?? []).map((s) => s.name);
-  const allSources = () => sourceList(fleetNames(), seen);
-
-  const toUrl = () =>
-    history.replaceState(
-      history.state,
-      "",
-      location.pathname + setParams(location.search, logFilterToParams(f)),
-    );
-
-  /** @param {string} s */
-  const swatch = (s) =>
-    s === "HOST" || !fleetNames().includes(s)
-      ? h("span", { class: "hl-sw", "aria-hidden": "true" })
-      : stackMark(s, 12);
-
-  // The side column is built once and updated in place (senior review,
-  // finding 3): rebuilding it for every arriving line took keyboard focus
-  // away and made the "only" link flicker. A source seen for the first
-  // time gets its row inserted at its place; nothing else moves.
-  const everythingIn = /** @type {HTMLInputElement} */ (
-    drivable(h("input", { type: "checkbox" }), opts.drive.everything)
-  );
-  everythingIn.addEventListener("change", () => {
-    f = { ...f, off: new Set(), only: null };
-    changed();
-  });
-  const everythingCount = h("small");
-  const srcOpts = h(
-    "div",
-    { class: "hl-opts" },
-    h(
-      "label",
-      { class: "hl-opt", title: "Show every source again" },
-      everythingIn,
-      h("span"),
-      h("span", null, "Everything"),
-      everythingCount,
-    ),
-  );
-  /** @type {Map<string, {label: HTMLElement, input: HTMLInputElement,
-   *   count: HTMLElement}>} */
-  const srcRows = new Map();
-  /** @param {string} s */
-  const sourceRow = (s) => {
-    const input = /** @type {HTMLInputElement} */ (
-      drivable(
-        h("input", {
-          type: "checkbox",
-          "aria-label": `Show ${sourceLabel(s)}`,
-        }),
-        opts.drive.source,
-        s,
-      )
-    );
-    input.addEventListener("change", () => {
-      f = toggleSource(f, s, allSources());
-      changed();
-    });
-    const only = drivable(
-      h(
-        "button",
-        {
-          type: "button",
-          class: "hl-only",
-          title: `Show only ${sourceLabel(s)}`,
-        },
-        "only",
-      ),
-      opts.drive.only,
-      s,
-    );
-    only.addEventListener("click", (e) => {
-      e.preventDefault();
-      f = { ...f, only: s, off: new Set() };
-      changed();
-    });
-    const count = h("small");
-    const label = h(
-      "label",
-      {
-        class: "hl-opt",
-        title: `Show or hide ${s === "HOST" ? "the host's own" : `${s}'s`} lines; each click turns it on or off`,
-      },
-      input,
-      swatch(s),
-      h("span", { class: "hl-opt__name" }, sourceLabel(s), " ", only),
-      count,
-    );
-    return { label, input, count };
-  };
-  const reset = drivable(
-    h(
-      "button",
-      { type: "button", class: "kp-button kp-button--ghost kp-button--sm" },
-      "Reset the filters",
-    ),
-    opts.drive.reset,
-  );
-  reset.addEventListener("click", () => {
-    f = { off: new Set(), only: null, levels: defaultLevels(), q: "" };
-    saveLogLevels(f.levels);
-    if (tb.search) tb.search.value = "";
-    changed();
-  });
-  // The demo's words: the hint while nothing is narrowed, the reset
-  // while something is (senior review, finding 16).
-  const hint = h("p", { class: "hl-hint" }, "Hover a source for “only”.");
-  side.replaceChildren(
-    h("div", { class: "hl-group" }, h("h3", null, "Source"), srcOpts),
-    h("div", { class: "hl-sidefoot" }, reset, hint),
-  );
-
-  const paintSide = () => {
-    const c = counts(lines);
-    const srcs = allSources();
-    srcs.forEach((s, i) => {
-      if (srcRows.has(s)) return;
-      const row = sourceRow(s);
-      srcRows.set(s, row);
-      // After the "Everything" row, before the next source already drawn.
-      const next = srcs.slice(i + 1).find((n) => srcRows.has(n) && n !== s);
-      srcOpts.insertBefore(
-        row.label,
-        next ? (srcRows.get(next)?.label ?? null) : null,
-      );
-    });
-    everythingIn.checked = f.only == null && f.off.size === 0;
-    everythingCount.textContent = String(lines.length);
-    for (const [s, row] of srcRows) {
-      const on = sourceOn(s, f);
-      row.input.checked = on;
-      row.label.classList.toggle("hl-opt--off", !on);
-      row.count.textContent = String(c.bySource.get(s) ?? 0);
-    }
-    paintLevels(c.byLevel);
-    const n = narrowed(f);
-    reset.hidden = !n;
-    hint.hidden = n;
-  };
-
-  /** @param {import("../parity.js").HostLine} l */
-  const lineEls = (l, fresh = false) => {
-    const x = logLine(/** @type {any} */ ({ ...l, job: 0 }));
-    const isOpen = open === l.seq;
-    // The line is `display: contents` (kp's grid), so the button is its
-    // message cell; a click anywhere on the line still reaches the line.
-    const message = drivable(
-      h(
-        "span",
-        {
-          class: "kp-log__message hl-msg",
-          role: "button",
-          tabindex: "0",
-          "aria-expanded": String(isOpen),
-          title: "Click for when, who and the request it belongs to",
-        },
-        ...mark(l.msg),
-        l.by
-          ? h(
-              "em",
-              null,
-              `  · ${l.by === "admin" ? "this dashboard" : ownerOf(l.by)}`,
-            )
-          : "",
-      ),
-      opts.drive.line,
-      String(l.seq),
-    );
-    const row = h(
-      "p",
-      {
-        class: `kp-log__line${fresh ? " is-new" : ""}`,
-        "data-kp-severity": x.severity,
-        ...(isOpen ? { "data-kp-current": "" } : {}),
-        "data-seq": String(l.seq),
-      },
-      h("time", { class: "kp-log__time" }, x.time),
-      h(
-        "span",
-        { class: "kp-log__source", "data-kp-source": l.source },
-        swatch(l.source),
-        sourceLabel(l.source),
-      ),
-      h("span", { class: "kp-log__level" }, x.level),
-      message,
-    );
-    const toggle = () => {
-      open = isOpen ? null : l.seq;
-      paintLines();
-      // The repainted row keeps focus, so the next key reaches it.
-      /** @type {HTMLElement | null} */ (
-        list.querySelector(`.kp-log__line[data-seq="${l.seq}"] [role=button]`)
-      )?.focus({ preventScroll: true });
-    };
-    row.addEventListener("click", toggle);
-    message.addEventListener("keydown", (e) => {
-      // A role=button row answers Space like Enter (finding 12).
-      if (e.target === message && (e.key === "Enter" || e.key === " ")) {
-        e.preventDefault();
-        toggle();
-      }
-    });
-    if (!isOpen) return [row];
-    const job =
-      l.req == null
-        ? null
-        : act.jobs.find((j) => j.reqs?.includes(l.req ?? -1));
-    const onlyBtn = h(
-      "button",
-      { type: "button", class: "kp-button kp-button--sm" },
-      `Only ${sourceLabel(l.source)}`,
-    );
-    drivable(onlyBtn, opts.drive.onlyLine);
-    onlyBtn.addEventListener("click", (e) => {
-      e.stopPropagation();
-      f = { ...f, only: l.source, off: new Set() };
-      open = null;
-      changed();
-    });
-    const copy = drivable(
-      h(
-        "button",
-        {
-          type: "button",
-          class: "kp-button kp-button--sm kp-button--ghost",
-          title: "Copy this line to the clipboard",
-        },
-        "Copy line",
-      ),
-      opts.drive.copy,
-    );
-    copy.addEventListener("click", (e) => {
-      e.stopPropagation();
-      void navigator.clipboard
-        ?.writeText(`${x.time} ${x.level} ${l.source} ${l.msg}`)
-        .then(() => (copy.textContent = "Copied"))
-        .catch(() => (copy.textContent = "Press Ctrl C"))
-        // Back to its own name after a moment (finding 14).
-        .finally(() =>
-          setTimeout(() => {
-            if (copy.isConnected) copy.textContent = "Copy line";
-          }, 1500),
-        );
-    });
-    const more = h(
-      "div",
-      { class: "hl-more" },
-      h(
-        "dl",
-        { class: "kp-kv" },
-        h(
-          "div",
-          { class: "kp-kv__row" },
-          h("dt", null, "When"),
-          h("dd", null, formatDateTime(l.ts)),
-        ),
-        h(
-          "div",
-          { class: "kp-kv__row" },
-          h("dt", null, "Started by"),
-          h(
-            "dd",
-            null,
-            l.by
-              ? l.by === "admin"
-                ? "Kenny, from this dashboard"
-                : `${ownerOf(l.by)} (the token “${l.by}”)`
-              : "the host (the nightly round or its own work)",
-          ),
-        ),
-        h(
-          "div",
-          { class: "kp-kv__row" },
-          h("dt", null, "Line"),
-          h(
-            "dd",
-            { class: "mono" },
-            `#${l.seq}${l.req != null ? ` · request ${l.req}` : ""}`,
-          ),
-        ),
-      ),
-      h(
-        "div",
-        { class: "hl-more__acts" },
-        onlyBtn,
-        ...(job
-          ? [
-              (() => {
-                const b = drivable(
-                  h(
-                    "button",
-                    {
-                      type: "button",
-                      class: "kp-button kp-button--sm kp-button--ghost",
-                      title: "Open the job this line belongs to",
-                    },
-                    "Open the job",
-                  ),
-                  opts.drive.openJob,
-                  String(job.job),
-                );
-                b.addEventListener("click", (e) => {
-                  e.stopPropagation();
-                  openJobDialog(job.job);
-                });
-                return b;
-              })(),
-            ]
-          : []),
-        copy,
-      ),
-    );
-    return [row, more];
-  };
-
-  /** @param {string} text @returns {(string | Node)[]} */
-  const mark = (text) => {
-    const q = f.q.trim().toLowerCase();
-    if (!q) return [text];
-    const i = text.toLowerCase().indexOf(q);
-    if (i < 0) return [text];
-    return [
-      text.slice(0, i),
-      h("mark", null, text.slice(i, i + q.length)),
-      text.slice(i + q.length),
-    ];
-  };
-
-  const shownLines = () =>
-    lines.filter((l) => lineShown(l, f) && inRange(l, range));
-
-  const paintCount = () => {
-    countEl.textContent = loaded
-      ? countText(shownLines().length, lines.length)
-      : "Reading the lines…";
-    followBtn.textContent = follow ? "Pause" : "Resume";
-    followBtn.title = follow
-      ? "Stop following: new lines wait below a marker (Space)"
-      : "Follow the newest lines again (Space)";
-    followBtn.setAttribute("aria-pressed", String(!follow));
-    newPill.hidden = follow || unseen === 0;
-    newPill.textContent = `${unseen} new ${unseen === 1 ? "line" : "lines"} · back to the tail`;
-    root.dataset.following = String(follow);
-  };
-
-  const toTail = () => {
-    out.scrollTop = out.scrollHeight;
-  };
-
-  const paintLines = () => {
-    if (!loaded) {
-      list.replaceChildren(
-        ...Array.from({ length: 12 }, () =>
-          h(
-            "div",
-            { class: "hl-sk", "data-kp-state": "loading" },
-            ...[5, 6, 3, 80].map((w, i) =>
-              h("span", {
-                class: "kp-skeleton",
-                style: `inline-size:${w}${i === 3 ? "%" : "rem"}`,
-              }),
-            ),
-          ),
-        ),
-      );
-    } else if (failure) {
-      const again = h(
-        "button",
-        { type: "button", class: "kp-button kp-button--sm" },
-        "Try again",
-      );
-      drivable(again, opts.drive.retry);
-      again.addEventListener("click", () => void read());
-      list.replaceChildren(
-        h(
-          "div",
-          { class: "kp-alert kp-alert--destructive hl-error", role: "alert" },
-          h(
-            "span",
-            { class: "kp-alert__body" },
-            `The host's lines could not be read: ${failure}`,
-          ),
-          again,
-        ),
-      );
-    } else {
-      const v = shownLines();
-      list.replaceChildren(
-        ...(v.length
-          ? v.flatMap((l) => lineEls(l))
-          : [
-              emptyState(
-                lines.length
-                  ? {
-                      title: "No line matches",
-                      text: "Lines that match the filter appear here as they arrive.",
-                    }
-                  : {
-                      title: "No lines yet",
-                      text: "The host has printed nothing since the dashboard started; its lines appear here as it works.",
-                    },
-              ),
-            ]),
-      );
-    }
-    attachLogs(list);
-    paintCount();
-    paintDensity();
-    if (follow) toTail();
-  };
 
   let sideQueued = false;
   const queueSide = () => {
@@ -934,27 +833,24 @@ export function mountHostLog(root, opts) {
   const changed = () => {
     toUrl();
     paintSide();
-    paintLines();
+    feed();
   };
 
-  /** @param {boolean} on @param {boolean} [quiet] */
-  const setFollow = (on, quiet = false) => {
-    follow = on;
-    if (on) {
-      unseen = 0;
-      toTail();
-    }
-    paintCount();
+  // ── following: the viewer's pill and Pause are kp's (newpill.js) ──────
+  /** @type {boolean | null} */
+  let lastFollowing = null;
+  logEl.addEventListener(FOLLOW_EVENT, (e) => {
+    const on = /** @type {CustomEvent} */ (e).detail.following !== false;
+    root.dataset.following = String(on);
+    if (on === lastFollowing) return;
+    lastFollowing = on;
     opts.onFollow?.(on);
-    if (!quiet && on) toTail();
-  };
-
-  /** The seq of the line holding focus in this log, or null. */
-  const focusedSeq = () => {
-    const at = document.activeElement?.closest?.(".kp-log__line[data-seq]");
-    return at && list.contains(at)
-      ? Number(/** @type {HTMLElement} */ (at).dataset.seq)
-      : null;
+  });
+  /** @param {boolean} on */
+  const setFollow = (on) => {
+    const pill = newPill(logEl);
+    if (on) pill?.resume();
+    else pill?.pause();
   };
 
   /** @param {import("../parity.js").HostLine} l */
@@ -970,38 +866,15 @@ export function mountHostLog(root, opts) {
     lastSeq = l.seq;
     lines.push(l);
     if (lines.length > KEEP) {
-      // The ring drops its oldest lines, but never the open one or the one
-      // holding focus: a repaint (Space on that line) must still find it,
-      // or Space opens a different line and the focus falls to the page.
-      const held = new Set([open, focusedSeq()]);
+      // The ring drops its oldest lines, but never the chosen one.
       const cut = lines.length - KEEP;
-      lines = lines.filter((x, i) => i >= cut || held.has(x.seq));
+      lines = lines.filter((x, i) => i >= cut || x.seq === open);
     }
     seen.add(l.source);
     queueSide();
-    if (!loaded || !lineShown(l, f) || !inRange(l, range)) {
-      paintCount();
-      return;
-    }
-    if (!follow) unseen += 1;
-    if (list.querySelector(".nx-empty")) list.replaceChildren();
-    const els = lineEls(l, true);
-    list.append(...els);
-    // Only the new line: the colour of a source is written per element.
-    for (const el of els) attachLogs(el);
-    // The oldest line is dropped to keep the page at the server's ring, but
-    // never the one holding focus: losing it would send the next Space to
-    // the page's pause shortcut instead of the line.
-    let oldest = list.firstElementChild;
-    while (oldest && list.childElementCount > KEEP) {
-      const next = oldest.nextElementSibling;
-      const seq = Number(/** @type {HTMLElement} */ (oldest).dataset.seq);
-      if (!oldest.contains(document.activeElement) && seq !== open)
-        oldest.remove();
-      oldest = next;
-    }
-    if (follow) toTail();
-    paintCount();
+    if (failure || !visible(l)) return;
+    // A poll or a push may hand a line twice: the viewer keeps it once.
+    appendLogLines(viewer, [kpLine(l)]);
   };
 
   /** @type {Map<string, any>} */
@@ -1023,42 +896,12 @@ export function mountHostLog(root, opts) {
     );
   };
 
-  // Scrolling up is the TUI's SCROLL mode: following stops until the tail.
-  out.addEventListener("scroll", () => {
-    const atTail = out.scrollHeight - out.scrollTop - out.clientHeight < 24;
-    if (atTail && !follow) setFollow(true, true);
-    else if (!atTail && follow && loaded) {
-      follow = false;
-      paintCount();
-      opts.onFollow?.(false);
-    }
-  });
-
-  /** @param {KeyboardEvent} e */
-  const onKey = (e) => {
-    if (e.ctrlKey || e.metaKey || e.altKey) return;
-    // A line row already answered this key (Space or Enter opens it).
-    if (e.defaultPrevented) return;
-    if (document.querySelector("dialog[open]")) return;
-    const a = document.activeElement;
-    const what = keyAction(
-      e.key,
-      a?.tagName ?? "",
-      a?.getAttribute("role") ?? null,
-    );
-    if (!what) return;
-    e.preventDefault();
-    if (what === "search") tb.search?.focus();
-    else if (what === "pause") setFollow(!follow);
-    else setFollow(true);
-  };
-  document.addEventListener("keydown", onKey);
-
   const abort = new AbortController();
   const read = async () => {
     loaded = false;
     failure = null;
-    paintLines();
+    paintSide();
+    feed();
     const r = await fetchJson(
       "/data/host-log",
       "the host's lines",
@@ -1075,7 +918,8 @@ export function mountHostLog(root, opts) {
     early = [];
     if (!r.ok) {
       failure = r.error.why;
-      paintLines();
+      paintSide();
+      feed();
       return;
     }
     for (const s of r.body.sources ?? []) seen.add(s);
@@ -1084,7 +928,7 @@ export function mountHostLog(root, opts) {
     for (const t of r.body.transfers ?? []) live.set(`${t.op}|${t.label}`, t);
     paintTransfers();
     paintSide();
-    paintLines();
+    feed();
   };
 
   const offLine = listen("host_log", (l) => add(l));
@@ -1094,19 +938,13 @@ export function mountHostLog(root, opts) {
   });
   const unsub = subscribe(queueSide);
   paintSide();
-  paintLines();
+  feed();
   void read();
   const timer = setInterval(paintTransfers, 5000);
 
   const download = () => {
-    const text = shownLines()
-      .map((l) => {
-        const x = logLine(/** @type {any} */ ({ ...l, job: 0 }));
-        return `${new Date(l.ts * 1000).toISOString()}  ${x.level.toUpperCase().padEnd(5)}  ${l.source.padEnd(12)}  ${l.msg}`;
-      })
-      .join("\n");
     const url = URL.createObjectURL(
-      new Blob([`${text}\n`], { type: "text/plain" }),
+      new Blob([`${logViewerText(viewer)}\n`], { type: "text/plain" }),
     );
     const a = h("a", { href: url, download: "host-log.txt" });
     document.body.append(a);
@@ -1123,16 +961,15 @@ export function mountHostLog(root, opts) {
       offTransfer();
       unsub();
       clearInterval(timer);
-      document.removeEventListener("keydown", onKey);
+      watcher.disconnect();
       for (const d of detachKp) d();
     },
     setFollow,
-    following: () => follow,
+    following: () => newPill(logEl)?.following() ?? true,
     download,
-    addBlock: (el) => {
-      blocks.append(el);
-      setFollow(true);
-    },
-    focusSearch: () => tb.search?.focus(),
+    focusSearch: () =>
+      /** @type {HTMLElement | null} */ (
+        viewer.querySelector(".kp-logviewer__find")
+      )?.focus(),
   };
 }

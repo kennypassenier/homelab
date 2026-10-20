@@ -48,7 +48,8 @@ import {
 } from "../inboxcards.js";
 import { feedToday, feedUpdates, readChecks } from "../inboxsources.js";
 import { current, subscribe } from "../store.js";
-import { countOf, explainNote, pageHeader, skeletonLines } from "../ui.js";
+import { countOf, pageHeader, skeletonLines } from "../ui.js";
+import { ALERT_DISMISS_EVENT } from "/static/kp/js/overlays.js";
 import { legacyUpdateHref, updateHref } from "../updateflow.js";
 import { attachCardStates } from "/static/kp/js/card-state.js";
 import { attachRowKeys, removeRow, setRowBusy } from "/static/kp/js/actions.js";
@@ -214,10 +215,49 @@ export function mount(root) {
   // checked time with Check again (needsyou.css).
   head.el.classList.add("inbox-head");
 
-  const note = explainNote("homelab-inbox-explained", [
-    h("b", null, "This one list replaces"),
-    " the bell, Health's Today / Doctor / Checks blocks, the question strip under the bar and the stale-image table on the Map. They all still feed it; a row links back to its source.",
-  ]);
+  // A dismissible explanation: kp's info alert; once closed it stays closed
+  // in this browser (kp's alert has no memory of its own).
+  const NOTE_KEY = "homelab-inbox-explained";
+  /** @type {{el: HTMLElement, close: HTMLElement} | null} */
+  let note = null;
+  try {
+    if (localStorage.getItem(NOTE_KEY)) note = null;
+    else note = explainNote();
+  } catch {
+    note = explainNote();
+  }
+  function explainNote() {
+    const close = h(
+      "button",
+      {
+        type: "button",
+        class: "kp-alert__close kp-icon-button",
+        "aria-label": "Hide this explanation",
+        title: "Hide this explanation for good",
+      },
+      "✕",
+    );
+    const el = h(
+      "div",
+      { class: "kp-alert kp-alert--info", role: "note" },
+      h("span", { class: "kp-alert__icon", "aria-hidden": "true" }, "ⓘ"),
+      h(
+        "div",
+        { class: "kp-alert__body" },
+        h("b", null, "This one list replaces"),
+        " the bell, Health's Today / Doctor / Checks blocks, the question strip under the bar and the stale-image table on the Map. They all still feed it; a row links back to its source.",
+      ),
+      close,
+    );
+    el.addEventListener(ALERT_DISMISS_EVENT, () => {
+      try {
+        localStorage.setItem(NOTE_KEY, "1");
+      } catch {
+        /* fine: it comes back next time */
+      }
+    });
+    return { el, close };
+  }
   if (note) drivable(note.close, EXPLAIN);
 
   // ---- the list's card ----------------------------------------------------

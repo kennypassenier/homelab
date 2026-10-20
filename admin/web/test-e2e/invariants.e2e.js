@@ -2698,7 +2698,7 @@ test("invariants: Ctrl K finds an action by intent, in any word order, and Enter
     const title = await page.locator("#page h1").innerText();
     assert.match(title, /^Update kp-soft/, `the flow that opened: ${title}`);
     assert.equal(
-      await page.locator("#page .kp-wizard__steps li").count(),
+      await page.locator("#page .uf-steps .kp-steplist__item").count(),
       6,
       "the Update flow shows its six steps",
     );
@@ -3579,7 +3579,9 @@ test("invariants: the Update flow runs See, Impact, Back up, Update, Verify and 
     await page.waitForURL(/\/update\?/, { timeout: 5000 });
     const now = () =>
       page
-        .locator("#page .kp-wizard__steps li[data-state=current]")
+        .locator(
+          "#page .uf-steps .kp-steplist__item[data-state=current] .kp-steplist__title",
+        )
         .innerText();
     assert.equal(await now(), "See");
     await page
@@ -4282,7 +4284,7 @@ test("invariants: the batch Update… opens the one Update flow for the ticked s
       (q.get("only") ?? "").split(",").sort(),
       [names[0], names[1]].sort(),
     );
-    await page.locator("#page .kp-wizard__steps").waitFor({ timeout: 10000 });
+    await page.locator("#page .uf-steps").waitFor({ timeout: 10000 });
     assert.match(
       await page.locator("#page .nx-crumbs").innerText(),
       /Stacks/,
@@ -7891,7 +7893,7 @@ test("invariants: stack hub review — Update and the u key open the stack's Upd
         await page.keyboard.press("u");
       }
       await page.waitForURL("**/update?stack=gateway**", { timeout: 5000 });
-      await page.locator("#page .kp-wizard__steps").waitFor({ timeout: 10000 });
+      await page.locator("#page .uf-steps").waitFor({ timeout: 10000 });
       assert.match(
         await page.locator("#page h1").innerText(),
         /Update gateway/,
@@ -7924,7 +7926,7 @@ test("invariants: redesign-openpoints-2: an app's Update… in the stack hub ope
     const u = new URL(page.url());
     assert.equal(u.searchParams.get("stack"), "gateway");
     assert.equal(u.searchParams.get("app"), app, "the flow names the app");
-    await page.locator("#page .kp-wizard__steps").waitFor({ timeout: 10000 });
+    await page.locator("#page .uf-steps").waitFor({ timeout: 10000 });
     await page
       .locator('#page [data-drive="update-pick"]')
       .first()
@@ -8430,10 +8432,10 @@ test("invariants: the Update flow has its own address, the old one redirects, an
     await page.waitForURL(/\/update\?stack=kp-soft$/, { timeout: 5000 });
     const current = () =>
       page.locator(".kp-nav__link[aria-current=page]").innerText();
-    await page.locator("#page .kp-wizard__steps").waitFor({ timeout: 10000 });
+    await page.locator("#page .uf-steps").waitFor({ timeout: 10000 });
     assert.equal((await current()).trim(), "Stacks");
     await page.goto(`${BASE}/update?all=1`);
-    await page.locator("#page .kp-wizard__steps").waitFor({ timeout: 10000 });
+    await page.locator("#page .uf-steps").waitFor({ timeout: 10000 });
     assert.match((await current()).trim(), /^Inbox/);
     // The page is capped at the demo's width.
     const w = await page

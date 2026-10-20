@@ -43,14 +43,12 @@ import { openPinRollback } from "../pinupdate.js";
 import { planView } from "../plan.js";
 import { current } from "../store.js";
 import {
-  checkList,
   doneMark,
   emptyState,
   pageHeader,
   section,
   segSwitch,
   skeletonLines,
-  stepper,
 } from "../ui.js";
 import {
   firstChosen,
@@ -73,7 +71,11 @@ import { attachDataTables } from "/static/kp/js/datatable.js";
 import { attachIdmarks } from "/static/kp/js/idmark.js";
 import { setPipeline, attachPipelines } from "/static/kp/js/pipeline.js";
 import { bindSelection } from "../selectbind.js";
-import { attachSteplists, buildSteplist } from "/static/kp/js/steplist.js";
+import {
+  attachSteplists,
+  buildSteplist,
+  setStep,
+} from "/static/kp/js/steplist.js";
 import {
   attachVersionDeltas,
   releaseUrl as kpReleaseUrl,
@@ -270,7 +272,24 @@ export function mount(root, scope) {
     desc: "Moving an app to a newer version, in six visible steps. Nothing runs until step 2's button; after that you may leave this page — the job keeps going and the bar shows it.",
     crumbs,
   });
-  const steps = stepper(STEPS.map((s) => s));
+  // kp's step list in its journey look: the steps reached are done, the one
+  // the flow stands at is current.
+  const steps = {
+    el: buildSteplist(
+      STEPS.map((title, i) => ({ id: String(i + 1), title })),
+      { label: "Steps" },
+    ),
+    /** @param {number} n */
+    set: (n) => {
+      STEPS.forEach((_, i) =>
+        setStep(steps.el, String(i + 1), {
+          state: i + 1 < n ? "done" : i + 1 === n ? "current" : "pending",
+        }),
+      );
+    },
+  };
+  steps.el.classList.add("kp-steplist--journey", "uf-steps");
+  attachSteplists(steps.el);
   const back = fromStacks
     ? "/stacks"
     : scope.all

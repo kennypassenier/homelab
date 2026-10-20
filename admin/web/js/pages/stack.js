@@ -108,6 +108,7 @@ import { stackEntries, stackIncidents, stackChecks } from "../stacktabs.js";
 import { current, retryStream, subscribe } from "../store.js";
 import { setParams } from "../urlstate.js";
 import { attachDataTables } from "/static/kp/js/datatable.js";
+import { setIdmark } from "/static/kp/js/idmark.js";
 import { sourceColour } from "/static/kp/js/log.js";
 import {
   FACET_EVENT,
@@ -142,7 +143,6 @@ import {
   section,
   segSwitch,
   skeletonLines,
-  stackMark,
 } from "../ui.js";
 
 /** How far back the History tab reads. */
@@ -3356,8 +3356,10 @@ function hubHeader(spec) {
     spec.primary,
     spec.more,
   );
-  const mark = stackMark(spec.name, 40);
-  mark.classList.add("sh-head__mark", "kp-page-header__lead");
+  const mark = h("span", {
+    class: "kp-idmark kp-idmark--lg sh-head__mark kp-page-header__lead",
+  });
+  setIdmark(mark, spec.name);
   // redesign-final X1: the freshness right after the title and its state.
   const row = h(
     "div",

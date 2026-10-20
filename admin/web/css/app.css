@@ -2128,25 +2128,6 @@ details.nx-card--fold[open] > summary::before {
   gap: 6px;
 }
 
-/* -- the per-stack identity mark (DESIGN_LANGUAGE §11, graphics.html):
-      generated per name, so its hue is the one colour not from a token -- */
-.nx-mark {
-  flex: none;
-  vertical-align: middle;
-}
-.nx-mark__ground {
-  fill: oklch(0.62 0.15 var(--mark-hue));
-}
-.nx-mark__cell {
-  fill: oklch(0.97 0.03 var(--mark-hue));
-  opacity: 0.92;
-}
-.nx-stackname {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-}
-
 /* -- the severity dot (Apply's items) and the System landing's cards -- */
 .nx-sev {
   inline-size: 10px;
@@ -2310,77 +2291,6 @@ details.nx-card--fold[open] > summary::before {
 }
 .nx-done__mark--bad {
   color: var(--nx-bad, var(--destructive));
-}
-
-/* the live step list (the demo flows.css .fx-check) */
-.nx-check {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: grid;
-  gap: var(--kp-space-sm);
-}
-.nx-check li {
-  display: grid;
-  grid-template-columns: 22px minmax(0, 1fr) auto;
-  gap: var(--kp-space-sm);
-  align-items: center;
-  padding: var(--kp-space-sm) var(--kp-space-md);
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  background: var(--card);
-}
-.nx-check__st {
-  inline-size: 18px;
-  block-size: 18px;
-  box-sizing: border-box;
-  border-radius: 50%;
-  border: 2px solid var(--border);
-  display: grid;
-  place-items: center;
-  font-size: 11px;
-  font-weight: 700;
-  line-height: 1;
-}
-/* the running step shows kp-themes' spinner (ui.js checkList), which each
-   theme draws its own way; the ring around it goes */
-.nx-check li[data-s="run"] .nx-check__st {
-  border: 0;
-}
-.nx-check li[data-s="run"] .kp-spinner {
-  --kp-spinner-size: 18px;
-}
-.nx-check li[data-s="ok"] .nx-check__st {
-  border-color: var(--nx-ok, var(--success));
-  background: var(--nx-ok, var(--success));
-  color: var(--card);
-}
-.nx-check li[data-s="ok"] .nx-check__st::after {
-  content: "✓";
-}
-.nx-check li[data-s="bad"] .nx-check__st {
-  border-color: var(--nx-bad, var(--destructive));
-  background: var(--nx-bad, var(--destructive));
-  color: var(--card);
-}
-.nx-check li[data-s="bad"] .nx-check__st::after {
-  content: "!";
-}
-.nx-check li[data-s="skip"] {
-  opacity: 0.6;
-}
-.nx-check li[data-s="skip"] .nx-check__st {
-  border-style: dashed;
-}
-.nx-check li small {
-  display: block;
-  color: var(--muted-foreground);
-  font-size: var(--kp-text-sm);
-}
-.nx-check li time {
-  font-size: var(--kp-text-xs);
-  color: var(--muted-foreground);
-  font-variant-numeric: tabular-nums;
 }
 
 /* the page header's sub-title part and its meta row (pageHeader `sub`,

@@ -833,33 +833,3 @@ test("kpa-7: the live status is kp-themes' status dot beside kp's ticking line",
   assert.equal(l.el.dataset.state, "down");
   assert.equal(l.el.hasAttribute("aria-busy"), false);
 });
-
-test("kpa-19: the stepper is kp's wizard steps, the note a kp info alert that remembers its dismissal", () => {
-  const st = ui.stepper(["Pick", "Check", "Run"]);
-  assert.equal(st.el.className, "kp-wizard__steps");
-  st.set(2);
-  const li = st.el.querySelectorAll("li");
-  assert.deepEqual(
-    [...li].map((x) => /** @type {any} */ (x).dataset.state),
-    ["done", "current", undefined],
-  );
-  assert.equal(li[1].getAttribute("aria-current"), "step");
-  assert.equal(li[0].hasAttribute("aria-current"), false);
-  const rows = ui.checkList([
-    { title: "A", desc: "a", state: "run" },
-    { title: "B", desc: "b", state: "ok" },
-  ]);
-  assert.ok(
-    rows.querySelector('li[data-s="run"] .nx-check__st > .kp-spinner'),
-    "the running step spins with kp's spinner",
-  );
-  assert.equal(rows.querySelector('li[data-s="ok"] .kp-spinner'), null);
-  localStorage.removeItem("kit-note");
-  const n = ui.explainNote("kit-note", ["Words"]);
-  assert.ok(n);
-  assert.match(n.el.className, /\bkp-alert\b.*\bkp-alert--info\b/);
-  assert.match(n.close.className, /\bkp-alert__close\b/);
-  n.el.dispatchEvent(new CustomEvent("kp-alert-dismiss", { bubbles: true }));
-  assert.equal(localStorage.getItem("kit-note"), "1");
-  assert.equal(ui.explainNote("kit-note", ["Words"]), null, "gone for good");
-});

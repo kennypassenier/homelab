@@ -31,16 +31,13 @@
 //                headings like the stack hub's More ▾), both kp-themes'
 //                menu button
 //   drawer       a side panel, kp-themes' `dialog.kp-drawer`
-//   chip / dot / meter / swatch / stackMark   small marks
+//   chip / dot / meter / swatch   small marks
 //                (kp-badge, kp-health, kp-meter)
 //   failBox / skeletonLines / emptyState   the error, loading and empty states
 //                in the block's own footprint
 //   kbd / keyRow   keyboard: a key, the shortcut line
 //   sparkline    a 28 px trend line for a tile or a table row
-//   stepper / checkList / explainNote / doneMark   a flow's steps (kp's
-//                wizard steps), its live step list, a dismissible "this
-//                replaces" note (kp-alert) and the big done tick (the
-//                Update flow, the Inbox)
+//   doneMark     the big done tick (the Update flow, the Inbox)
 //   art          the small empty and all-clear line drawings of
 //                graphics.html, for emptyState's `art`
 //
@@ -61,10 +58,7 @@ import { agoEl, setAgo } from "./ago.js";
 import { h, setLive } from "./dom.js";
 import { dialogControl, drivable } from "./drivable.js";
 import { attachDataTables } from "/static/kp/js/datatable.js";
-import {
-  ALERT_DISMISS_EVENT,
-  toast as kpToast,
-} from "/static/kp/js/overlays.js";
+import { toast as kpToast } from "/static/kp/js/overlays.js";
 import { setAttention } from "/static/kp/js/attention.js";
 import { statePlate } from "/static/kp/js/state-plate.js";
 import {
@@ -772,91 +766,10 @@ export function emptyState(spec) {
   return plate;
 }
 
-/**
- * FNV-1a over a name: the seed of its identity mark.
- * @param {string} s
- */
-export function nameHash(s) {
-  let x = 2166136261;
-  for (const c of s) x = Math.imul(x ^ c.charCodeAt(0), 16777619);
-  return x >>> 0;
-}
-
-/**
- * A stack's identity mark as data: its hue and the filled cells of a 5×5
- * pattern mirrored around the middle column (graphics.html, approved):
- * deterministic, so the same stack looks the same everywhere.
- * @param {string} name
- * @returns {{hue: number, cells: [number, number][]}}
- */
-export function markCells(name) {
-  const hsh = nameHash(name);
-  /** @type {[number, number][]} */
-  const cells = [];
-  for (let y = 0; y < 5; y++)
-    for (let x = 0; x < 3; x++)
-      if ((hsh >>> (y * 3 + x + 4)) & 1) {
-        cells.push([x, y]);
-        if (x < 2) cells.push([4 - x, y]);
-      }
-  return { hue: hsh % 360, cells };
-}
-
 const SVG = "http://www.w3.org/2000/svg";
 
 /** @param {Element} e */
 const isSvg = (e) => e.namespaceURI === SVG;
-
-/**
- * The per-stack identity mark (DESIGN_LANGUAGE §11): an SVG square in the
- * stack's own hue with its mirrored pattern; decorative, so hidden from a
- * screen reader (the name always stands beside it).
- * @param {string} name
- * @param {number} [size] px
- * @returns {SVGSVGElement}
- */
-export function stackMark(name, size = 20) {
-  const { hue, cells } = markCells(name);
-  const svg = document.createElementNS(SVG, "svg");
-  svg.setAttribute("class", "nx-mark");
-  svg.setAttribute("viewBox", "0 0 100 100");
-  svg.setAttribute("width", String(size));
-  svg.setAttribute("height", String(size));
-  svg.setAttribute("aria-hidden", "true");
-  svg.dataset.stack = name;
-  svg.style.setProperty("--mark-hue", String(hue));
-  svg.style.borderRadius = `${size / 4.4}px`;
-  const bg = document.createElementNS(SVG, "rect");
-  bg.setAttribute("class", "nx-mark__ground");
-  bg.setAttribute("width", "100");
-  bg.setAttribute("height", "100");
-  svg.append(bg);
-  const u = 100 / 7;
-  for (const [x, y] of cells) {
-    const r = document.createElementNS(SVG, "rect");
-    r.setAttribute("class", "nx-mark__cell");
-    r.setAttribute("x", String((x + 1) * u));
-    r.setAttribute("y", String((y + 1) * u));
-    r.setAttribute("width", String(u));
-    r.setAttribute("height", String(u));
-    svg.append(r);
-  }
-  return svg;
-}
-
-/**
- * A stack's name with its mark in front, for a table cell or a header.
- * @param {string} name
- * @param {{href?: string, size?: number}} [opts]
- */
-export function stackName(name, opts = {}) {
-  return h(
-    "span",
-    { class: "nx-stackname" },
-    stackMark(name, opts.size ?? 20),
-    opts.href ? h("a", { href: opts.href }, name) : h("span", null, name),
-  );
-}
 
 /**
  * A 28 px sparkline (DESIGN_LANGUAGE §9.2), drawn in `--chart-1` unless
@@ -1872,124 +1785,9 @@ export const art = {
 };
 
 /**
- * A flow's stepper: kp-themes' wizard steps (`.kp-wizard__steps`), a
- * numbered circle per step, the done ones ticked, the current one filled
- * and bold (`aria-current="step"`).
- * @param {string[]} labels
- * @returns {{el: HTMLElement, set: (step: number) => void}}
- */
-export function stepper(labels) {
-  const items = labels.map((l) => h("li", null, l));
-  const e = h(
-    "ol",
-    { class: "kp-wizard__steps", "aria-label": "Steps" },
-    ...items,
-  );
-  return {
-    el: e,
-    set: (step) =>
-      items.forEach((li, i) => {
-        const s = i + 1 < step ? "done" : i + 1 === step ? "current" : "";
-        if (s) li.dataset.state = s;
-        else delete li.dataset.state;
-        if (s === "current") li.setAttribute("aria-current", "step");
-        else li.removeAttribute("aria-current");
-      }),
-  };
-}
-
-/**
  * @typedef {{title: string, desc: string, state: "wait" | "run" | "ok" |
  *   "bad" | "skip", time?: string, note?: string}} CheckRow
  */
-
-/**
- * A live list of steps (flows/update.html `.fx-check`): a status ring
- * (waiting, ticked, failed, skipped; the running step shows kp-themes'
- * spinner, which each theme draws its own way), the step and its one-line
- * description, and how long it took.
- * @param {CheckRow[]} rows
- */
-export function checkList(rows) {
-  return h(
-    "ul",
-    { class: "nx-check", "aria-label": "Progress" },
-    ...rows.map((r) =>
-      h(
-        "li",
-        { "data-s": r.state },
-        h(
-          "span",
-          {
-            class: "nx-check__st",
-            "aria-label":
-              r.state === "ok"
-                ? "done"
-                : r.state === "run"
-                  ? "running"
-                  : r.state === "bad"
-                    ? "failed"
-                    : r.state === "skip"
-                      ? "skipped"
-                      : "waiting",
-          },
-          r.state === "run"
-            ? h("span", { class: "kp-spinner", "aria-hidden": "true" })
-            : null,
-        ),
-        h(
-          "span",
-          null,
-          r.title,
-          h("small", null, r.note ? `${r.desc} · ${r.note}` : r.desc),
-        ),
-        h("time", null, r.time ?? ""),
-      ),
-    ),
-  );
-}
-
-/**
- * A dismissible explanation (FLOWS.md §1.5 "ⓘ This replaces…") as a
- * kp-themes info alert; its ✕ is kp's `.kp-alert__close` (main.js attaches
- * `attachDismissals`, which hides it the theme's way and says
- * `kp-alert-dismiss`), and it is gone for good in this browser once closed.
- * @param {string} key the browser's memory of the dismissal
- * @param {(Node | string)[]} words
- * @returns {{el: HTMLElement, close: HTMLElement} | null} null once dismissed
- */
-export function explainNote(key, words) {
-  try {
-    if (localStorage.getItem(key)) return null;
-  } catch {
-    /* no storage: always shown */
-  }
-  const close = h(
-    "button",
-    {
-      type: "button",
-      class: "kp-alert__close kp-icon-button",
-      "aria-label": "Hide this explanation",
-      title: "Hide this explanation for good",
-    },
-    "✕",
-  );
-  const el = h(
-    "div",
-    { class: "kp-alert kp-alert--info", role: "note" },
-    h("span", { class: "kp-alert__icon", "aria-hidden": "true" }, "ⓘ"),
-    h("div", { class: "kp-alert__body" }, ...words),
-    close,
-  );
-  el.addEventListener(ALERT_DISMISS_EVENT, () => {
-    try {
-      localStorage.setItem(key, "1");
-    } catch {
-      /* fine: it comes back next time */
-    }
-  });
-  return { el, close };
-}
 
 /** The big tick of a finished flow or an empty Inbox. */
 export function doneMark(tone = "ok") {

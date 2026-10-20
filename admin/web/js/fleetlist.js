@@ -207,7 +207,8 @@ export function fleetList(ctx) {
   /** @type {"table" | "cards"} */
   /**
    * The last 24 h of each running stack's CPU for the cards' trend row, read
-   * from /data/charts per stack (three at a time) and kept for five minutes.
+   * for the whole fleet in one request (/data/fleet-cpu) and kept for five
+   * minutes.
    * @type {Map<string, number[]>}
    */
   const trends = new Map();
@@ -1052,17 +1053,11 @@ export function fleetList(ctx) {
       return;
     trendsReading = true;
     trendsAt = Date.now();
-    const queue = [...names];
-    const worker = async () => {
-      for (let n = queue.shift(); n; n = queue.shift()) {
-        const r = await fetchJson(
-          `/data/charts?stack=${encodeURIComponent(n)}&range=24h`,
-          `${n}'s charts`,
-        ).catch(() => null);
-        trends.set(n, r?.ok ? cpuDay(r.body) : []);
-      }
-    };
-    await Promise.all([worker(), worker(), worker()]);
+    const r = await fetchJson(
+      "/data/fleet-cpu",
+      "the stacks' CPU trends",
+    ).catch(() => null);
+    for (const n of names) trends.set(n, r?.ok ? cpuDay(r.body, n) : []);
     trendsReading = false;
     if (view === "cards") paint();
   };

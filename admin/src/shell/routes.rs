@@ -533,6 +533,58 @@ async fn capacity(State(c): State<ReadCtx>) -> Response {
     Json(serde_json::json!({ "panels": out, "measured_at": now_s() })).into_response()
 }
 
+/// The Stacks cards' trend row: the last 24 hours of every stack's CPU in
+/// one request (one Prometheus range query across the fleet), as
+/// `{stacks: {name: [[t, v], …]}, from, to, step}`. A stack Prometheus has no
+/// reading for is simply absent from `stacks`.
+async fn fleet_cpu(State(c): State<ReadCtx>) -> Response {
+    let Some(prom) = &c.prometheus else {
+        return refused(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "the stacks' CPU trends",
+            "no Prometheus is configured for this dashboard",
+            "set admin.prometheus_url (or HOMELAB_ADMIN_PROMETHEUS_URL) to Prometheus's address",
+        );
+    };
+    const DAY: u64 = 86_400;
+    const STEP: u64 = 1_800;
+    let end = now_s();
+    let start = end.saturating_sub(DAY);
+    let names = fleet_stack_names(&c).await;
+    let mut stacks = serde_json::Map::new();
+    if !names.is_empty() {
+        let p = homelab_core::charts::fleet_cpu_query(&names);
+        match prom
+            .range(&p.query, start, end, STEP, p.legend.as_deref())
+            .await
+        {
+            Ok(series) => {
+                for s in series {
+                    if let Some(label) = s["label"].as_str().filter(|l| !l.is_empty()) {
+                        stacks.insert(label.to_string(), s["points"].clone());
+                    }
+                }
+            }
+            Err(e) => {
+                return refused(
+                    StatusCode::BAD_GATEWAY,
+                    "the stacks' CPU trends",
+                    &e,
+                    "check that Prometheus answers queries from this dashboard",
+                );
+            }
+        }
+    }
+    Json(serde_json::json!({
+        "stacks": stacks,
+        "from": start,
+        "to": end,
+        "step": STEP,
+        "measured_at": end,
+    }))
+    .into_response()
+}
+
 /// feat-overview-12 (disk-growth prediction): every stack's root disk, and
 /// every filesystem of the hypervisor, fitted over `range` (default 7d) and
 /// warned about within `within_days` (default
@@ -722,6 +774,7 @@ pub fn read_router(ctx: ReadCtx) -> Router {
         .route("/data/capacity", get(capacity))
         .route("/data/disk-growth", get(disk_growth))
         .route("/data/fleet-traffic", get(fleet_traffic))
+        .route("/data/fleet-cpu", get(fleet_cpu))
         .with_state(ctx)
 }
 

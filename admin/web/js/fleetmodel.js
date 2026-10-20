@@ -92,21 +92,18 @@ export function ramMeter(r, gb) {
 }
 
 /**
- * The last 24 h of a stack's CPU out of `/data/charts?stack=&range=24h`, for
- * an entity card's trend row: the "CPU (whole container)" series, averaged
- * into at most `points` buckets, oldest first. Empty when the panel is
- * missing or Prometheus failed it.
+ * The last 24 h of one stack's CPU out of `/data/fleet-cpu` (one read for
+ * every stack), for an entity card's trend row: its readings, averaged into
+ * at most `points` buckets, oldest first. Empty when the answer holds no
+ * line for the stack.
  * @param {any} body
+ * @param {string} name
  * @param {number} [points]
  * @returns {number[]}
  */
-export function cpuDay(body, points = 48) {
-  const p = (body?.panels ?? []).find((/** @type {any} */ x) =>
-    /^cpu \(whole container\)/i.test(x?.panel?.title ?? ""),
-  );
-  if (!p || p.error) return [];
+export function cpuDay(body, name, points = 48) {
   /** @type {number[]} */
-  const v = (p.series?.[0]?.points ?? [])
+  const v = (body?.stacks?.[name] ?? [])
     .map((/** @type {any} */ pt) => pt?.[1])
     .filter(
       (/** @type {unknown} */ x) => typeof x === "number" && Number.isFinite(x),

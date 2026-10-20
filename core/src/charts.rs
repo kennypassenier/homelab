@@ -187,6 +187,28 @@ pub fn fleet_capacity_panels(stacks: &[String]) -> Vec<Panel> {
     ]
 }
 
+/// The CPU of every stack at once as a time series (one series per stack,
+/// the `stack` label names it): the same figure as [`stack_panels`]' "CPU
+/// (whole container)", read for the whole fleet in one query so the
+/// Stacks cards' 24 h trend row costs one call, not one per stack.
+pub fn fleet_cpu_query(stacks: &[String]) -> Panel {
+    let list = stacks
+        .iter()
+        .map(|s| s.replace('"', ""))
+        .collect::<Vec<_>>()
+        .join("|");
+    p(
+        "CPU used",
+        "How busy each stack's own CPU allowance was over the window, side \
+         by side across the whole fleet.",
+        format!(
+            "100 * avg by (stack) (rate(node_cpu_seconds_total{{stack=~\"{list}\",mode!=\"idle\"}}[5m]))"
+        ),
+        Unit::Percent,
+        Some("stack"),
+    )
+}
+
 /// feat-overview-12 (disk-growth prediction): percent-used history for the
 /// root filesystem of every stack at once, over `range` — the series
 /// [`crate::diskgrowth::fit`] reads. One regex query across the fleet, like

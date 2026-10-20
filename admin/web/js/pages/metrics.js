@@ -290,6 +290,7 @@ export function mount(root, ctx) {
     class: "kp-range mk-field",
     "data-kp-range": range,
     "data-kp-range-presets": RANGES.join(" "),
+    "data-kp-range-custom": "off",
     id: "mk-range",
     "aria-label": "Time range",
   });

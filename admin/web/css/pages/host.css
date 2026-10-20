@@ -477,9 +477,6 @@ main.shell.hk-page > [hidden] {
 .hk-page #host-lat {
   min-block-size: 3rem;
 }
-.hk-page .kp-stackbar {
-  --kp-stackbar-legend-min: 24rem;
-}
 @media (max-width: 48rem) {
   .hk-page .hk-dt td[data-label="Memory"] .kp-bar-cell {
     --kp-bar-cell-value: auto;

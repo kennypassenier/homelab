@@ -597,6 +597,7 @@ export function mount(root) {
     class: "kp-range",
     "data-kp-range": S.range,
     "data-kp-range-presets": "7d 30d 90d",
+    "data-kp-range-custom": "off",
     "aria-label": "Nights to show",
   });
   const earlier = drivable(

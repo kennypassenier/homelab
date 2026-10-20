@@ -876,7 +876,6 @@ tr.unread td:first-child {
   font-variant-numeric: tabular-nums;
 }
 .job-bar {
-  --kp-stackbar-legend-min: 22rem;
   margin: 0;
 }
 .job-cols {

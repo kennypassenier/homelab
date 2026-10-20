@@ -67,13 +67,6 @@ main.mk-page > .mk-failed:empty {
   font-size: var(--kp-text-sm);
   color: var(--muted-foreground);
 }
-/* The window is kp's range; its Custom… needs a start and an end the
-   dashboard's data route does not take yet (ask-kp11be-1), so only the
-   presets are offered. */
-#mk-range .kp-range__custom,
-#mk-range .kp-range__panel {
-  display: none;
-}
 /* An option of the machine picker: its name first (what a tag reads), its
    colour mark before it, its detail after. */
 .kp-combobox__option:has(> .mk-opt__name) {

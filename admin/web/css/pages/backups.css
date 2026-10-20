@@ -334,13 +334,6 @@
   min-block-size: 6rem;
 }
 
-/* The range has presets only: the history read takes no custom bounds
-   (kp-gaps/homelab.md, the Custom… button of kp-range). */
-.bk-page .kp-range__custom,
-.bk-page .kp-range__panel {
-  display: none;
-}
-
 /* Every Restore… (the group's and the row's) is one width, so the column of
    buttons is one column. */
 .bk-table button[data-kp-action="restore"] {

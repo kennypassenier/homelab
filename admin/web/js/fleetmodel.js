@@ -92,12 +92,45 @@ export function ramMeter(r, gb) {
 }
 
 /**
+ * The last 24 h of a stack's CPU out of `/data/charts?stack=&range=24h`, for
+ * an entity card's trend row: the "CPU (whole container)" series, averaged
+ * into at most `points` buckets, oldest first. Empty when the panel is
+ * missing or Prometheus failed it.
+ * @param {any} body
+ * @param {number} [points]
+ * @returns {number[]}
+ */
+export function cpuDay(body, points = 48) {
+  const p = (body?.panels ?? []).find((/** @type {any} */ x) =>
+    /^cpu \(whole container\)/i.test(x?.panel?.title ?? ""),
+  );
+  if (!p || p.error) return [];
+  /** @type {number[]} */
+  const v = (p.series?.[0]?.points ?? [])
+    .map((/** @type {any} */ pt) => pt?.[1])
+    .filter(
+      (/** @type {unknown} */ x) => typeof x === "number" && Number.isFinite(x),
+    );
+  if (v.length <= points) return v;
+  const out = [];
+  for (let i = 0; i < points; i += 1) {
+    const a = Math.floor((i * v.length) / points);
+    const b = Math.max(a + 1, Math.floor(((i + 1) * v.length) / points));
+    const w = v.slice(a, b);
+    out.push(w.reduce((t, x) => t + x, 0) / w.length);
+  }
+  return out;
+}
+
+/**
  * One stack as a kp entity card.
  * @param {Row} r
  * @param {(mb: number | null | undefined) => string} gb
+ * @param {number[] | undefined} [trend] the last 24 h of CPU, oldest first;
+ *   undefined while it is being read (no row yet), `[]` when it could not be
  * @returns {import("/static/kp/js/entity-card.js").EntityData}
  */
-export function entityOf(r, gb) {
+export function entityOf(r, gb, trend) {
   const parked = r.state.label === "parked";
   /** @type {{id: string, label: string, disabled?: string}[]} */
   const actions = [
@@ -143,6 +176,15 @@ export function entityOf(r, gb) {
       ...(flagTone(f.tone) ? { tone: flagTone(f.tone) } : {}),
     })),
     meters: [ramMeter(r, gb)],
+    ...(trend && !parked
+      ? {
+          trend,
+          trendLabel: "CPU 24 h",
+          ...(r.cpuPct != null
+            ? { trendText: `${Math.round(r.cpuPct * 10) / 10} %` }
+            : {}),
+        }
+      : {}),
     actions,
   };
 }

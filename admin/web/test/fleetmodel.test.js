@@ -4,6 +4,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
+  cpuDay,
   entityOf,
   hungryRows,
   needsAttention,
@@ -106,4 +107,21 @@ test("feat-kp11demo-12: the nights grid has one column per night, a paused row f
     true,
   );
   assert.equal(g.summary.cells.length, 5);
+});
+
+test("kpadopt-2: a card's trend row is the stack's 24 h CPU, thinned to 48 readings, and absent while unread", () => {
+  const points = Array.from({ length: 288 }, (_, i) => [i * 300, i % 10]);
+  const body = {
+    panels: [
+      { panel: { title: "CPU (whole container)" }, series: [{ points }] },
+    ],
+  };
+  assert.equal(cpuDay(body).length, 48);
+  assert.deepEqual(cpuDay({ panels: [] }), []);
+  const r = row("loki", { cpuPct: 12.34 });
+  assert.equal(entityOf(r, (mb) => String(mb)).trend, undefined);
+  const card = entityOf(r, (mb) => String(mb), [1, 2, 3]);
+  assert.deepEqual(card.trend, [1, 2, 3]);
+  assert.equal(card.trendLabel, "CPU 24 h");
+  assert.equal(card.trendText, "12.3 %");
 });

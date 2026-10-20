@@ -11,6 +11,7 @@ import { openAction, openBatch, reopenBatch } from "./actiondialog.js";
 import { send } from "./act.js";
 import {
   LIVE,
+  fetchJson,
   h,
   labelCells,
   selectCell,
@@ -21,6 +22,7 @@ import { declare, drivable, viaForm } from "./drivable.js";
 import { driven } from "./drivehooks.js";
 import { gb } from "./fleet.js";
 import {
+  cpuDay,
   STATE_GROUPS,
   STATE_WORDS,
   entityOf,
@@ -203,6 +205,14 @@ const plural = (n, one) => `${n} ${n === 1 ? one : `${one}s`}`;
 export function fleetList(ctx) {
   const q0 = new URLSearchParams(location.search);
   /** @type {"table" | "cards"} */
+  /**
+   * The last 24 h of each running stack's CPU for the cards' trend row, read
+   * from /data/charts per stack (three at a time) and kept for five minutes.
+   * @type {Map<string, number[]>}
+   */
+  const trends = new Map();
+  let trendsAt = 0;
+  let trendsReading = false;
   let view =
     (q0.get("view") ?? remembered(VIEW_KEY, "table")) === "cards"
       ? "cards"
@@ -1010,11 +1020,13 @@ export function fleetList(ctx) {
         message: "Show All to see every stack again.",
         actionLabel: "Show all",
       });
-    else
+    else {
+      void readTrends();
       setEntityGrid(
         grid,
-        list.map((r) => entityOf(r, gb)),
+        list.map((r) => entityOf(r, gb, trends.get(r.name))),
       );
+    }
     const plateBtn = grid.querySelector(".kp-stateplate button");
     if (
       plateBtn instanceof HTMLElement &&
@@ -1032,6 +1044,28 @@ export function fleetList(ctx) {
     shows.counts(counts);
   }
 
+  const readTrends = async () => {
+    const names = rows
+      .filter((r) => r.state.label !== "parked")
+      .map((r) => r.name);
+    if (trendsReading || !names.length || Date.now() - trendsAt < 300_000)
+      return;
+    trendsReading = true;
+    trendsAt = Date.now();
+    const queue = [...names];
+    const worker = async () => {
+      for (let n = queue.shift(); n; n = queue.shift()) {
+        const r = await fetchJson(
+          `/data/charts?stack=${encodeURIComponent(n)}&range=24h`,
+          `${n}'s charts`,
+        ).catch(() => null);
+        trends.set(n, r?.ok ? cpuDay(r.body) : []);
+      }
+    };
+    await Promise.all([worker(), worker(), worker()]);
+    trendsReading = false;
+    if (view === "cards") paint();
+  };
   /** Everything the page knows changed. */
   const set = (/** @type {{rows: Row[], calendar: any}} */ m) => {
     rows = m.rows;

@@ -307,3 +307,8 @@
   font-variant-numeric: tabular-nums;
   font-size: var(--kp-text-lg, 1.25rem);
 }
+/* A major version's release notes, plain text in kp's code block, inside its gate. */
+.uf-notes {
+  margin-block: var(--kp-space-sm, 0.5rem) 0;
+  min-inline-size: 0;
+}

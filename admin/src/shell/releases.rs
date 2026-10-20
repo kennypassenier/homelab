@@ -22,6 +22,7 @@ use tokio::sync::Mutex as AsyncMutex;
 use homelab_core::ops::native::{ReleaseListItem, list_releases};
 
 use super::host_link::{Shared, now_s};
+use crate::core::releasenotes::{self, Notes};
 
 type BoxFut<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
 
@@ -35,6 +36,11 @@ pub const WATCH_EVERY: Duration = Duration::from_secs(3600);
 /// opening the "release tag" dropdown twice in a row (a stray unit change,
 /// a reopened dialog) asks GitHub once.
 pub const LIST_CACHE_S: Duration = Duration::from_secs(60);
+/// ask-kp11be-6: how long a release's notes are kept (a release is
+/// immutable in practice) and how many releases at most, so neither GitHub's
+/// anonymous rate limit nor memory is spent on a flow reopened often.
+pub const NOTES_CACHE_S: Duration = Duration::from_secs(3600);
+pub const NOTES_CACHE_MAX: usize = 64;
 
 /// Where releases come from; a test gives a fake.
 pub trait Releases: Send + Sync + 'static {
@@ -49,6 +55,15 @@ pub trait Releases: Send + Sync + 'static {
     /// `SHA256SUMS.minisig` (fix-29) — what the "release tag" dropdown is
     /// built from.
     fn list<'a>(&'a self, repo: &'a str) -> BoxFut<'a, Result<Vec<ReleaseListItem>, String>>;
+    /// ask-kp11be-6: the notes of `repo`'s release `tag`, cleaned
+    /// (`core::releasenotes`); None when that tag has no GitHub release.
+    fn notes<'a>(
+        &'a self,
+        _repo: &'a str,
+        _tag: &'a str,
+    ) -> BoxFut<'a, Result<Option<Notes>, String>> {
+        Box::pin(async { Err("this dashboard reads no release notes".to_string()) })
+    }
 }
 
 /// redesign-host-4: a verified host binary and the proof it carried — the
@@ -65,6 +80,9 @@ pub struct GitHub {
     client: reqwest::Client,
     /// dashboard-latest: `repo` → (read at, the list), see `LIST_CACHE_S`.
     list_cache: AsyncMutex<HashMap<String, (Instant, Vec<ReleaseListItem>)>>,
+    /// ask-kp11be-6: `repo@tag` → (read at, notes), capped at
+    /// [`NOTES_CACHE_MAX`], oldest out first.
+    notes_cache: AsyncMutex<HashMap<String, (Instant, Option<Notes>)>>,
 }
 
 impl Default for GitHub {
@@ -83,6 +101,7 @@ impl GitHub {
         GitHub {
             client,
             list_cache: AsyncMutex::new(HashMap::new()),
+            notes_cache: AsyncMutex::new(HashMap::new()),
         }
     }
 
@@ -147,6 +166,47 @@ impl Releases for GitHub {
                 binary_b64,
                 proof: sig.map(|sig| homelab_proto::ReleaseProof { sums, sig }),
             })
+        })
+    }
+
+    fn notes<'a>(
+        &'a self,
+        repo: &'a str,
+        tag: &'a str,
+    ) -> BoxFut<'a, Result<Option<Notes>, String>> {
+        Box::pin(async move {
+            if !releasenotes::valid_repo(repo) || !crate::core::actions::valid_tag(tag) {
+                return Err(format!("{repo}@{tag} is not a release"));
+            }
+            let key = format!("{repo}@{tag}");
+            {
+                let cache = self.notes_cache.lock().await;
+                if let Some((at, n)) = cache.get(&key)
+                    && at.elapsed() < NOTES_CACHE_S
+                {
+                    return Ok(n.clone());
+                }
+            }
+            let url = format!("https://api.github.com/repos/{repo}/releases/tags/{tag}");
+            let notes = match self.get(&url).await? {
+                None => None,
+                Some(body) => Some(releasenotes::from_github(
+                    &String::from_utf8_lossy(&body),
+                    repo,
+                    tag,
+                )?),
+            };
+            let mut cache = self.notes_cache.lock().await;
+            if cache.len() >= NOTES_CACHE_MAX
+                && let Some(oldest) = cache
+                    .iter()
+                    .min_by_key(|(_, (at, _))| *at)
+                    .map(|(k, _)| k.clone())
+            {
+                cache.remove(&oldest);
+            }
+            cache.insert(key, (Instant::now(), notes.clone()));
+            Ok(notes)
         })
     }
 

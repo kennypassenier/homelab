@@ -2372,6 +2372,35 @@ impl Actions {
     }
 }
 
+impl Actions {
+    /// ask-kp11be-6: a release's notes for the Update flow's gate.
+    pub async fn release_notes(
+        &self,
+        repo: &str,
+        tag: &str,
+    ) -> Result<crate::core::releasenotes::Notes, Refusal> {
+        let what = format!("the release notes of {tag}");
+        if !crate::core::releasenotes::valid_repo(repo) || !crate::core::actions::valid_tag(tag) {
+            return Err(Refusal::new(
+                what,
+                "that is not a GitHub repository and release tag",
+                "open the release page from the link instead",
+            ));
+        }
+        self.releases()?
+            .notes(repo, tag)
+            .await
+            .map_err(|why| Refusal::new(what.clone(), why, "try again in a moment"))?
+            .ok_or_else(|| {
+                Refusal::new(
+                    what,
+                    format!("{repo} has no GitHub release for {tag}"),
+                    "the project may only tag it; open its page from the link",
+                )
+            })
+    }
+}
+
 enum Stop {
     Refused(Refusal),
     Link(String),
@@ -2724,6 +2753,20 @@ async fn releases(
 }
 
 #[derive(Deserialize)]
+struct NotesQuery {
+    repo: String,
+    tag: String,
+}
+
+/// ask-kp11be-6: `/data/release-notes?repo=owner/name&tag=v1.2.3`.
+async fn release_notes(State(a): State<Actions>, Query(q): Query<NotesQuery>) -> Response {
+    match a.release_notes(&q.repo, &q.tag).await {
+        Ok(n) => Json(n).into_response(),
+        Err(r) => refusal(StatusCode::BAD_GATEWAY, r),
+    }
+}
+
+#[derive(Deserialize)]
 struct OutcomeQuery {
     op: String,
     since: i64,
@@ -2775,6 +2818,7 @@ pub fn router(actions: Actions) -> Router {
         .route("/data/actions/{stack}/{action}/preview", post(preview))
         .route("/data/actions/outcome", get(outcome))
         .route("/data/update-flows", get(update_flows))
+        .route("/data/release-notes", get(release_notes))
         .with_state(actions)
 }
 

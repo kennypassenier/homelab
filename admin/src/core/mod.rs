@@ -24,6 +24,7 @@ pub mod logs;
 pub mod newstack;
 pub mod notify;
 pub mod presetedit;
+pub mod releasenotes;
 pub mod releaseoptions;
 pub mod schedule;
 pub mod secrets;

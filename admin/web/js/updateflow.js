@@ -538,3 +538,25 @@ export const scopeMatches = (items, scope) =>
   scope.all
     ? !scope.only || items.some((i) => scope.only?.includes(i.stack))
     : items.some((i) => i.stack === scope.stack);
+
+/**
+ * The repository and tag a release-notes link names, for
+ * `/data/release-notes` (the dashboard fetches and cleans the notes, the
+ * browser never asks GitHub): `https://github.com/owner/name/releases/tag/v1`.
+ * @param {string | null | undefined} url
+ * @returns {string | null} the query string, or null for any other link
+ */
+export function notesQuery(url) {
+  const m =
+    /^https:\/\/github\.com\/([\w.-]+\/[\w.-]+)\/releases\/tag\/([^/?#]+)$/.exec(
+      url ?? "",
+    );
+  if (!m) return null;
+  let tag = m[2];
+  try {
+    tag = decodeURIComponent(tag);
+  } catch {
+    return null;
+  }
+  return `repo=${encodeURIComponent(m[1])}&tag=${encodeURIComponent(tag)}`;
+}

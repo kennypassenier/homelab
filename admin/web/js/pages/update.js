@@ -55,6 +55,7 @@ import {
   lastDeployS,
   logVerdict,
   movesOf,
+  notesQuery,
   restartWords,
   safetyNet,
   scopeMatches,
@@ -64,6 +65,7 @@ import {
   whoNotices,
 } from "../updateflow.js";
 import { attachAckGates } from "/static/kp/js/ack-gate.js";
+import { attachCodes, setCode } from "/static/kp/js/code.js";
 import { attachDataTables } from "/static/kp/js/datatable.js";
 import { attachIdmarks } from "/static/kp/js/idmark.js";
 import { setPipeline, attachPipelines } from "/static/kp/js/pipeline.js";
@@ -795,6 +797,66 @@ export function mount(root, scope) {
     if (!chosenItems().length) return;
     void toImpact().catch(() => {});
   });
+  /**
+   * ask-kp11be-6: a major version's release notes, fetched and cleaned by
+   * the dashboard and drawn as plain text in kp's code block (there is no
+   * markdown view in kp, gap line 113). The link above stays: the tick still
+   * waits for it to be opened.
+   * @param {import("../updateflow.js").Item} m
+   */
+  const noteBlock = (m) => {
+    const el = h("figure", { class: "kp-code uf-notes", "data-kp-code": "" });
+    const title = `Release notes of ${m.to}`;
+    setCode(el, {
+      title,
+      language: "Markdown",
+      state: "loading",
+      loadingWords: `Reading the release notes of ${m.to}…`,
+    });
+    void (async () => {
+      const r = await fetchJson(
+        `/data/release-notes?${notesQuery(m.notes)}`,
+        "the release notes",
+        abort.signal,
+      );
+      if (abort.signal.aborted) return;
+      if (!r.ok) {
+        setCode(el, {
+          title,
+          state: "error",
+          message: `${r.error.what}: ${r.error.why}`,
+        });
+        return;
+      }
+      const n = r.body;
+      if (!n.body) {
+        setCode(el, {
+          title,
+          state: "empty",
+          message: `${n.name || m.to} has no release notes written. Open the release page from the link.`,
+        });
+        return;
+      }
+      setCode(el, {
+        title: n.name ? `${title}: ${n.name}` : title,
+        language: "Markdown",
+        text: n.body,
+        wrap: true,
+        maxLines: 14,
+        copy: true,
+        open: "dialog",
+        ...(n.truncated
+          ? {
+              truncated: {
+                shown: String(n.body.length),
+                total: String(n.total),
+              },
+            }
+          : {}),
+      });
+    })().catch(() => {});
+    return el;
+  };
   /** One kp acknowledge gate per ticked major version, kept in step with the ticks. */
   const syncGates = () => {
     const majors = chosenItems().filter((i) => i.major);
@@ -835,9 +897,11 @@ export function mount(root, scope) {
             ),
             "It can change settings or move data.",
           ),
+          ...(notesQuery(m.notes) ? [noteBlock(m)] : []),
         ),
       );
     }
+    attachCodes(gates);
     attachAckGates(gates);
     for (const box of /** @type {NodeListOf<HTMLInputElement>} */ (
       gates.querySelectorAll("[data-kp-ack] input[type=checkbox]")

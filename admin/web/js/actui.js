@@ -1,4 +1,4 @@
-// DOM pieces milestone act shares: the kp copy line (feat-stacks-7), a
+// DOM pieces milestone act shares: the kp command block (feat-stacks-7), a
 // callout for a route's `{what, why, fix}`, the Alarm for a hard refusal,
 // a toast, a form field drawn from its description (actionforms.js), and a
 // kp dialog opened from code.
@@ -7,52 +7,45 @@ import { h, stateBadge } from "./dom.js";
 import { declare, drivable } from "./drivable.js";
 import { showAlarm } from "/static/kp/js/alarm.js";
 import { attachDialogs, openAtTop, toast } from "/static/kp/js/overlays.js";
-import { attachPatterns } from "/static/kp/js/patterns.js";
+import { attachCommands } from "/static/kp/js/command.js";
 
-let copyIds = 0;
+let dialogIds = 0;
 
 /**
- * A command line with a kp copy button (feat-stacks-7).
+ * A CLI command as kp's command block: the terminal it runs in (the
+ * workstation's WSL shell), the line behind its prompt, and the package's own
+ * Copy button that confirms.
  * @param {string} text
- * @param {string} [label] what the button copies, for a screen reader
+ * @param {{wrap?: "wrap" | "scroll"}} [opts] scroll: one line that scrolls
+ *   sideways (a row of a list)
  */
-export function copyLine(text, label = "Copy the CLI command") {
-  copyIds += 1;
-  const id = `copy-${copyIds}`;
-  const wrap = h(
-    "span",
-    { class: "kp-copyable cli-line" },
-    h("code", { class: "kp-copyable__value mono", id }, text),
-    h(
-      "button",
-      {
-        type: "button",
-        class: "kp-button kp-button--ghost kp-copyable__button",
-        "data-kp-copy": id,
-        "aria-label": label,
-      },
-      "Copy",
-    ),
+export function cliCommand(text, opts = {}) {
+  const el = h(
+    "div",
+    {
+      class: "kp-command cli-line",
+      "data-kp-command": "wsl",
+      ...(opts.wrap === "scroll" ? { "data-kp-command-wrap": "scroll" } : {}),
+    },
+    h("pre", { class: "kp-command__code" }, h("code", null, text)),
   );
-  attachPatterns(wrap);
-  return wrap;
+  attachCommands(el);
+  return el;
 }
 
 /**
- * A copy line with its own lead-in label on the same row (Kenny,
- * 2026-10-01: "The same from a workstation:" used to sit on a row of its
- * own above the line it describes). Wraps only when the row itself runs
- * out of width.
+ * A command with its own lead-in label on the same row (Kenny, 2026-10-01:
+ * "The same from a workstation:" used to sit on a row of its own above the
+ * line it describes). Wraps only when the row itself runs out of width.
  * @param {string} label the lead-in text, e.g. "The same from a workstation:"
  * @param {string} text the command line to copy
- * @param {string} [srLabel] what the button copies, for a screen reader
  */
-export function labeledCopyLine(label, text, srLabel) {
+export function labeledCliCommand(label, text) {
   return h(
     "div",
     { class: "cli-row" },
     h("span", { class: "measured cli-row__label" }, label),
-    copyLine(text, srLabel),
+    cliCommand(text),
   );
 }
 
@@ -296,7 +289,7 @@ export function openDialog(spec) {
   const title = /** @type {HTMLElement} */ (
     dialog.querySelector(".kp-dialog__title")
   );
-  title.id = `${spec.id ?? "act-dialog"}-title-${++copyIds}`;
+  title.id = `${spec.id ?? "act-dialog"}-title-${++dialogIds}`;
   dialog.setAttribute("aria-labelledby", title.id);
   document.body.append(dialog);
   const detach = attachDialogs(dialog);

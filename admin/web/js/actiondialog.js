@@ -27,9 +27,9 @@ import {
 } from "./actionforms.js";
 import {
   badge,
-  copyLine,
+  cliCommand,
   fieldEl,
-  labeledCopyLine,
+  labeledCliCommand,
   notify,
   openDialog,
   refusalAlarm,
@@ -749,7 +749,7 @@ function drawActionDialog(form, values, sources, driven, locked = []) {
             h(
               "div",
               { class: "act-cli act-cli--quiet" },
-              labeledCopyLine("The same from a workstation:", p.cli),
+              labeledCliCommand("The same from a workstation:", p.cli),
             ),
           ]
         : []),
@@ -1211,8 +1211,7 @@ export async function openBatch(action, stacks) {
           ),
         );
       else {
-        if (r.body.cli)
-          parts.push(copyLine(r.body.cli, `Copy the CLI command for ${s}`));
+        if (r.body.cli) parts.push(cliCommand(r.body.cli, { wrap: "scroll" }));
         else
           parts.push(
             h(

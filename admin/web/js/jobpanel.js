@@ -5,7 +5,7 @@
 // from jobPanel() in jobs.js; this module only puts it on the page.
 
 import { act, actionLabel, onAct } from "./act.js";
-import { badge, labeledCopyLine, openDialog } from "./actui.js";
+import { badge, labeledCliCommand, openDialog } from "./actui.js";
 import { fetchReport, h } from "./dom.js";
 import { formatDateTime, humanDuration } from "./format.js";
 import {
@@ -471,7 +471,7 @@ export function mountJobPanel(jobId, opts = {}) {
       cliShown = wantCli;
       cli.replaceChildren(
         ...(wantCli
-          ? [labeledCopyLine("The same from a workstation:", wantCli)]
+          ? [labeledCliCommand("The same from a workstation:", wantCli)]
           : []),
       );
     }

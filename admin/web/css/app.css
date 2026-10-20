@@ -611,21 +611,11 @@ p:has(> .measured:only-child):first-child {
   display: grid;
   gap: 2px;
 }
-/* feat-stacks-7: a CLI line wraps rather than widening the page. */
+/* feat-stacks-7: a CLI command is kp's command block; it wraps rather than
+   widening the page. */
 .cli-line {
-  /* inline-flex, not flex: a flex box is block-level and used to drop to
-     its own line after any preceding inline text (a batch row's stack
-     name) even when there was room beside it. */
-  display: inline-flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 4px 8px;
-  max-inline-size: 100%;
-}
-.cli-line .kp-copyable__value {
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
   min-inline-size: 0;
+  max-inline-size: 100%;
 }
 /* feat-ops-6: the running-job panel. */
 /* A job started from the action dialog shows this same panel (`compact:
@@ -719,13 +709,8 @@ p:has(> .measured:only-child):first-child {
   overflow-wrap: anywhere;
 }
 .batch-preview .cli-line {
-  display: contents;
-}
-.batch-preview .cli-line .kp-copyable__value {
+  grid-column: 2 / -1;
   min-inline-size: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 .batch-preview__bar {
   block-size: 1.75rem;

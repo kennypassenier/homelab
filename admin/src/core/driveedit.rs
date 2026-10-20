@@ -157,6 +157,8 @@ pub struct EditSpec {
     pub retention_tier: Vec<EditFieldDef>,
     /// feat-stacks-11: one app's `latch_secrets` checkbox.
     pub latch_secret: EditFieldDef,
+    /// gap 74 (13c7353a): one native unit's place in the restart order.
+    pub latch_order: EditFieldDef,
     pub latch_file: Vec<EditFieldDef>,
     /// feat-checks-1: the checks form's row dialogs and its scalar fields
     /// (which app, the busy check, the link).
@@ -1159,6 +1161,56 @@ pub fn latch_secret_field(app: &str) -> Field {
     f
 }
 
+/// The Latch card's restart order as a form field (gap 74): `unit`'s place,
+/// 1 restarts first, among `count` native units. Mirrors the card's reorder
+/// list (editpanels.js `restartOrderGroup`), whose Earlier / Later buttons a
+/// headless step cannot press.
+pub fn latch_order_field(unit: &str, place: usize, count: usize) -> Field {
+    let mut f = es().latch_order.filled(&[("unit", unit)]);
+    f.choices = Some(
+        (1..=count)
+            .map(|n| Choice {
+                value: n.to_string(),
+                label: n.to_string(),
+            })
+            .collect(),
+    );
+    f.current = Some(json!(place.to_string()));
+    f
+}
+
+/// The native units in the order the form's places give, or the problem:
+/// two units on one place. `None` for a form with no order fields.
+pub fn latch_order_of(
+    fields: &[Field],
+    values: &Values,
+) -> Option<Result<Vec<String>, BTreeMap<String, String>>> {
+    let places: Vec<(&Field, String, usize)> = fields
+        .iter()
+        .filter_map(|f| {
+            let unit = f.name.strip_prefix("latch-order:")?;
+            let place = text_of(values.get(&f.name)).trim().parse::<usize>().ok()?;
+            Some((f, unit.to_string(), place))
+        })
+        .collect();
+    if places.is_empty() {
+        return None;
+    }
+    let mut seen = BTreeSet::new();
+    let mut errors = BTreeMap::new();
+    for (f, _, place) in &places {
+        if !seen.insert(*place) {
+            errors.insert(f.name.clone(), say("order_dup", &[]));
+        }
+    }
+    if !errors.is_empty() {
+        return Some(Err(errors));
+    }
+    let mut sorted = places;
+    sorted.sort_by_key(|(_, _, place)| *place);
+    Some(Ok(sorted.into_iter().map(|(_, unit, _)| unit).collect()))
+}
+
 /// `latchBody`: only the parts touched.
 pub fn latch_body(fields: &[Field], values: &Values, model: &Value, data: &Value) -> Value {
     let mut out = Map::new();
@@ -1189,6 +1241,13 @@ pub fn latch_body(fields: &[Field], values: &Values, model: &Value, data: &Value
     let now_files = with_origin(&data["latch"]["latch_files"]);
     if model["latch_files"] != now_files {
         out.insert("files".into(), model["latch_files"].clone());
+    }
+    // The restart order, only when it is not the file's own (a duplicate
+    // place is refused before this runs).
+    if let Some(Ok(order)) = latch_order_of(fields, values)
+        && order != strings(&data["natives"])
+    {
+        out.insert("order".into(), json!(order));
     }
     Value::Object(out)
 }
@@ -2823,7 +2882,7 @@ pub fn open(
                     // `latch` lives on the manifest (`m`) too, the same
                     // fix as storage/data_mounts/log_files above.
                     let secrets = strings(&m["latch"]["latch_secrets"]);
-                    let fields: Vec<Field> = apps
+                    let mut fields: Vec<Field> = apps
                         .iter()
                         .map(|a| {
                             let mut f = latch_secret_field(a);
@@ -2831,6 +2890,16 @@ pub fn open(
                             f
                         })
                         .collect();
+                    // gap 74: two or more native units have a restart order.
+                    let natives = strings(&m["natives"]);
+                    if natives.len() > 1 {
+                        fields.extend(
+                            natives
+                                .iter()
+                                .enumerate()
+                                .map(|(i, u)| latch_order_field(u, i + 1, natives.len())),
+                        );
+                    }
                     es_.model = Some(json!({
                         "latch_files": with_origin(&m["latch"]["latch_files"]),
                     }));
@@ -4724,6 +4793,9 @@ pub fn press(
                     b
                 }
                 EditKind::Latch => {
+                    if let Some(Err(errors)) = latch_order_of(&fields, &form.values) {
+                        return hold(form, "next", errors);
+                    }
                     let e = edit(form);
                     let model = e.model.clone().unwrap_or(Value::Null);
                     let data = e.data.clone();

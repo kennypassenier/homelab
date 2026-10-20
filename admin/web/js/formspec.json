@@ -366,6 +366,7 @@
       "pattern": "\"{text}\" is not a valid {lower}.",
       "subject": "A commit needs a subject.",
       "unchanged": "Nothing is changed yet.",
+      "order_dup": "Give every native unit its own place in the restart order.",
       "raw_unchanged": "The file is as it was.",
       "name_taken": "There is a stack called {name} already.",
       "vmid_taken": "CT {vmid} exists already.",
@@ -1211,6 +1212,14 @@
       "kind": "check",
       "label": "{app}",
       "help": "{app}'s .env comes from latch instead of a plaintext file."
+    },
+    "latch_order": {
+      "name": "latch-order:{unit}",
+      "id": "latch-order-{unit}",
+      "kind": "choice",
+      "label": "{unit}: restarts at place",
+      "help": "The order a deploy goes through this stack's native units, and so the order a changed secret file restarts them in; place 1 restarts first. Give every unit its own place.",
+      "required": true
     },
     "latch_file": [
       {

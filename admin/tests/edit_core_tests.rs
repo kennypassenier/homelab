@@ -868,3 +868,35 @@ fn fix_guards_8_the_advice_for_an_old_host_names_a_route_it_supports() {
     let gate = &gate[..gate.find("\n}\n").unwrap()];
     assert!(gate.contains("OLD_HOST_SETTINGS_ADVICE"), "{gate}");
 }
+
+/// Gap 74, headless: the Latch form's restart-order places become the
+/// stack's `natives` order, and two units on one place are refused.
+#[test]
+fn the_latch_form_orders_the_native_units_by_place() {
+    use homelab_admin::core::driveedit::{latch_body, latch_order_field, latch_order_of};
+    use serde_json::json;
+    let fields = vec![
+        latch_order_field("postgres", 1, 2),
+        latch_order_field("redis", 2, 2),
+    ];
+    let mut values: BTreeMap<String, serde_json::Value> = fields
+        .iter()
+        .map(|f| (f.name.clone(), f.current.clone().unwrap()))
+        .collect();
+    let manifest = json!({ "natives": ["postgres", "redis"], "latch": {} });
+    let model = json!({ "latch_files": [] });
+    // Untouched: no order in the body.
+    let body = latch_body(&fields, &values, &model, &manifest);
+    assert!(body.get("order").is_none());
+    // Swapped: the new order.
+    values.insert("latch-order:postgres".into(), json!("2"));
+    values.insert("latch-order:redis".into(), json!("1"));
+    let body = latch_body(&fields, &values, &model, &manifest);
+    assert_eq!(body["order"], json!(["redis", "postgres"]));
+    // Both on place 1: refused, naming both fields.
+    values.insert("latch-order:postgres".into(), json!("1"));
+    let Some(Err(errors)) = latch_order_of(&fields, &values) else {
+        panic!("a duplicate place must be refused");
+    };
+    assert_eq!(errors.len(), 1);
+}

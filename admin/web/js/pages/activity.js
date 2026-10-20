@@ -86,7 +86,11 @@ import {
 } from "../ui.js";
 import { openJobDialog } from "../jobpanel.js";
 import { stage } from "../stage.js";
-import { attachCardStates, setCardState } from "/static/kp/js/card-state.js";
+import {
+  CARD_RETRY_EVENT,
+  attachCardStates,
+  setCardState,
+} from "/static/kp/js/card-state.js";
 import { jobLogViewer } from "../joblog.js";
 import { setParams } from "../urlstate.js";
 import { tabRow } from "../dom.js";
@@ -670,6 +674,10 @@ function mountNow(body, x) {
   drivable(allJobs, ALL_JOBS);
   const runStage = stage(runList);
   setCardState(runStage, "loading", { words: "Reading the jobs" });
+  runStage.addEventListener(CARD_RETRY_EVENT, () => {
+    setCardState(runStage, "loading", { words: "Reading the jobs" });
+    void loadJobs();
+  });
   running.body.append(
     runStage,
     h(
@@ -1198,7 +1206,12 @@ function mountNow(body, x) {
     if (!run.length) {
       const idle = () => {
         if (runningJobs().length) return;
-        if (act.jobsRead)
+        if (act.failed.jobs)
+          setCardState(runStage, "error", {
+            title: "The jobs did not read",
+            text: `${act.failed.jobs.why}${act.failed.jobs.fix ? ` — ${act.failed.jobs.fix}` : ""}`,
+          });
+        else if (act.jobsRead)
           setCardState(runStage, "empty", {
             title: "Nothing is running",
             text: "A job you start from any stack's page shows here live, step by step; the running pill in the bar follows it too.",

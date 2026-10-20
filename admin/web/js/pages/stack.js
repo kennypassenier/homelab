@@ -31,7 +31,6 @@ import { openAction } from "../actiondialog.js";
 import { onAnswered } from "../answer.js";
 import { checkRows } from "../checks.js";
 import {
-  errorBox,
   fetchJson,
   fetchReport,
   h,
@@ -75,6 +74,12 @@ import {
   setCardState,
 } from "/static/kp/js/card-state.js";
 import { setDeplist } from "/static/kp/js/deplist.js";
+import {
+  VERSION_SORT,
+  attachVersionDeltas,
+  releaseUrl,
+  versionLevel,
+} from "/static/kp/js/version-delta.js";
 import { setCode } from "/static/kp/js/code.js";
 import { HEAT_PICK_EVENT, setHeat, setHeatLegend } from "/static/kp/js/heat.js";
 import { UPTIME_PICK_EVENT, setUptime } from "/static/kp/js/uptime.js";
@@ -2314,26 +2319,28 @@ function appsTab(panel, c) {
             ),
             h(
               "td",
-              { "data-kp-sort-value": r.newer?.latest ?? "" },
-              r.newer
-                ? [
-                    h(
-                      "span",
-                      { class: "kp-badge kp-badge--info" },
-                      r.newer.latest,
-                    ),
-                    r.newer.major
-                      ? h(
-                          "span",
-                          {
-                            class: "kp-badge kp-badge--warning",
-                            title:
-                              "The first number changes: read the release notes first",
-                          },
-                          "major",
+              {
+                "data-kp-sort-value": r.newer
+                  ? String(
+                      VERSION_SORT[
+                        versionLevel(
+                          r.newer.pinned || r.version,
+                          r.newer.latest,
+                          {},
                         )
-                      : null,
-                  ]
+                      ],
+                    )
+                  : "0",
+              },
+              r.newer
+                ? h("span", {
+                    class: "kp-badge kp-badge--version",
+                    "data-kp-version-from": r.newer.pinned || r.version,
+                    "data-kp-version-to": r.newer.latest,
+                    "data-kp-version-app": r.name,
+                    "data-kp-version-href":
+                      releaseUrl(r.newer.upstream, r.newer.latest) ?? "",
+                  })
                 : stale == null
                   ? "checking…"
                   : "up to date",
@@ -2396,6 +2403,7 @@ function appsTab(panel, c) {
         ];
       }),
     );
+    attachVersionDeltas(block.tbody);
     for (const el of /** @type {NodeListOf<HTMLElement>} */ (
       block.tbody.querySelectorAll("[data-hb-log]")
     )) {
@@ -3483,11 +3491,13 @@ function hubHeader(spec) {
  */
 function updatesCard(stack, signal) {
   ensureStyle("/css/pages/update.css");
-  const list = h(
-    "div",
-    { class: "undo-updates__list" },
-    h("p", { class: "measured" }, "Reading the updates of the last 7 days…"),
-  );
+  const list = h("div", { class: "undo-updates__list" });
+  const listStage = stage(list);
+  setCardState(listStage, "loading", {
+    words: "Reading the updates of the last 7 days",
+  });
+  const detachStates = attachCardStates(listStage);
+  signal.addEventListener("abort", detachStates, { once: true });
   const card = section({
     id: "undo-updates",
     title: "Updates you can undo",
@@ -3495,7 +3505,7 @@ function updatesCard(stack, signal) {
     level: "h3",
     cls: "undo-updates",
   });
-  card.body.append(list);
+  card.body.append(listStage);
   void (async () => {
     const r = await fetchJson(
       `/data/update-flows?stack=${encodeURIComponent(stack)}`,
@@ -3504,7 +3514,11 @@ function updatesCard(stack, signal) {
     );
     if (signal.aborted) return;
     if (!r.ok) {
-      list.replaceChildren(errorBox(r.error));
+      setCardState(listStage, "error", {
+        title: "The updates of the last 7 days did not read",
+        text: r.error.why,
+        retry: false,
+      });
       return;
     }
     const rows = (r.body.updates ?? []).flatMap((/** @type {any} */ u) =>
@@ -3529,7 +3543,12 @@ function updatesCard(stack, signal) {
             "div",
             { class: "undo-updates__row" },
             h("strong", null, m.key),
-            h("span", null, `${m.from_version} → ${m.to_version}`),
+            h("span", {
+              class: "kp-badge kp-badge--version",
+              "data-kp-version-from": m.from_version,
+              "data-kp-version-to": m.to_version,
+              "data-kp-version-app": m.key.split("/")[1] ?? m.key,
+            }),
             h(
               "span",
               { class: "measured" },
@@ -3539,17 +3558,16 @@ function updatesCard(stack, signal) {
           );
         }),
     );
-    list.replaceChildren(
-      ...(rows.length
-        ? rows
-        : [
-            h(
-              "p",
-              { class: "measured" },
-              "No app of this stack was updated in the last 7 days.",
-            ),
-          ]),
-    );
+    if (!rows.length) {
+      setCardState(listStage, "empty", {
+        title: "Nothing to undo",
+        text: "No app of this stack was updated in the last 7 days.",
+      });
+      return;
+    }
+    list.replaceChildren(...rows);
+    attachVersionDeltas(list);
+    setCardState(listStage, "ready");
   })().catch(() => {});
   return card.el;
 }

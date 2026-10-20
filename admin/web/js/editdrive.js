@@ -631,7 +631,10 @@ async function rollback(first) {
     row: () => null,
     sync: async (f) => {
       await waitFor(
-        () => handle("rollback")?.dialog.querySelector("table, .missing"),
+        () =>
+          handle("rollback")?.dialog.querySelector(
+            "table, .kp-dated, .missing",
+          ),
         5000,
       );
       chosen.commit = String(f.values.commit ?? "");

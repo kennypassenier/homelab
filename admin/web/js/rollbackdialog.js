@@ -2,36 +2,56 @@
 // GET /data/actions/{stack}/rollback-options: the commits that touched its
 // files (deploy one of them: deploy-commit) and its native units (put the
 // kept previous binary back: rollback-native). What the host cannot tell
-// is said plainly. Each choice opens the same action dialog as a button.
+// is said plainly. A commit is picked in kp's dated picker and deployed with
+// one button; a unit has its own button. Each opens the same action dialog
+// as the action's button does.
 
 import { openAction } from "./actiondialog.js";
-import { openDialog, refusalCallout } from "./actui.js";
+import { openDialog } from "./actui.js";
 import { fetchJson, h, tableBlock, td } from "./dom.js";
 import { register } from "./drivehooks.js";
-import { formatDateTime } from "./format.js";
 import { rollbackView } from "./rollback.js";
+import { stage } from "./stage.js";
 import { sortKeys } from "./sortkeys.js";
+import { attachCardStates, setCardState } from "/static/kp/js/card-state.js";
+import { attachDataTables, compare } from "/static/kp/js/datatable.js";
 import {
-  attachDataTables,
-  compare,
-  dataTable,
-} from "/static/kp/js/datatable.js";
+  attachDatedOptions,
+  datedOptions,
+  datedValue,
+  setDatedOptions,
+} from "/static/kp/js/dated-options.js";
 
 /**
  * @param {string} stack
  */
 export async function openRollback(stack) {
-  const status = h(
-    "p",
-    { class: "measured" },
-    "Reading what this stack can go back to…",
+  const content = h("div", { class: "rollback" });
+  const waiting = stage(content);
+  setCardState(waiting, "loading", {
+    words: "Reading what this stack can go back to",
+  });
+  const detachStates = attachCardStates(waiting);
+  const commitPicker = h("div", {
+    class: "kp-dated",
+    "data-kp-dated": "",
+    id: "rollback-commit",
+    "aria-label": "Commit to deploy",
+  });
+  const deployChosen = h(
+    "button",
+    {
+      type: "button",
+      class: "kp-button kp-button--primary",
+      "data-commit": "",
+    },
+    "Deploy the chosen commit",
   );
-  const content = h("div", { class: "rollback" }, status);
   const d = openDialog({
     title: `Roll back · ${stack}`,
     description:
       "Go back to an earlier version of the stack's files, or put a native service's previous binary back.",
-    body: [content],
+    body: [waiting],
     id: "rollback-dialog",
     wide: true,
   });
@@ -39,68 +59,40 @@ export async function openRollback(stack) {
   const unregister = register("rollback", {
     dialog: d.dialog,
     closed: d.closed,
-    rowButton: (/** @type {string} */ kind, /** @type {string} */ value) =>
-      /** @type {HTMLElement | null} */ (
-        content.querySelector(
-          `button[data-${kind === "unit" ? "unit" : "commit"}="${CSS.escape(value)}"]`,
-        )
-      ),
+    // A commit is chosen in the picker; the one button deploys the choice.
+    rowButton: (/** @type {string} */ kind, /** @type {string} */ value) => {
+      if (kind !== "unit") {
+        datedOptions(commitPicker)?.select(value);
+        return deployChosen;
+      }
+      return /** @type {HTMLElement | null} */ (
+        content.querySelector(`button[data-unit="${CSS.escape(value)}"]`)
+      );
+    },
     close: () => d.close(),
   });
   d.closed.then(unregister);
+  d.closed.then(detachStates);
   const r = await fetchJson(
     `/data/actions/${encodeURIComponent(stack)}/rollback-options`,
     "the roll-back options",
   );
   if (!r.ok) {
-    content.replaceChildren(
-      refusalCallout(r.error, "destructive", "Could not read"),
-    );
+    setCardState(waiting, "error", {
+      title: "Could not read what this stack can go back to",
+      text: r.error.why,
+      retry: false,
+    });
     return;
   }
   const v = rollbackView(r.body);
   const keys = sortKeys();
-  const commits = tableBlock({
-    remember: "rollback-commits",
-    caption: `Commits that touched stacks/${stack}`,
-    search: "Search commits",
-    nothing: "No commits to go back to.",
-    columns: [
-      { label: "When", sort: "time" },
-      { label: "Commit", sort: "text" },
-      { label: "Subject", sort: "text", cls: "wide" },
-      { label: "Now", sort: "text", filter: "choice" },
-      { label: "Deploy", sort: "text" },
-    ],
+  deployChosen.addEventListener("click", () => {
+    const commit = datedValue(commitPicker);
+    if (!commit) return;
+    d.close();
+    void openAction(stack, "deploy-commit", { preset: { commit } });
   });
-  commits.tbody.append(
-    ...v.commits.map((c) => {
-      const b = h(
-        "button",
-        {
-          type: "button",
-          class: "kp-button kp-button--sm",
-          "data-commit": c.commit,
-        },
-        "Deploy this",
-      );
-      b.addEventListener("click", () => {
-        d.close();
-        void openAction(stack, "deploy-commit", {
-          preset: { commit: c.commit },
-        });
-      });
-      return h(
-        "tr",
-        { "data-kp-row-key": c.commit },
-        td(keys.note("time", formatDateTime(c.at), c.at)),
-        td(c.short, "mono"),
-        td(c.subject),
-        td(c.applied),
-        h("td", null, b),
-      );
-    }),
-  );
   const units = tableBlock({
     remember: "rollback-units",
     caption: "Native units",
@@ -137,9 +129,13 @@ export async function openRollback(stack) {
         ]
       : []),
     h("h3", null, "Deploy an earlier commit"),
-    ...(v.commits.length
-      ? [commits.wrap]
-      : [h("p", { class: "measured" }, "No commits to go back to.")]),
+    h(
+      "p",
+      { class: "measured" },
+      `Commits that touched stacks/${stack}, the newest first. Pick the moment to go back to, then deploy it.`,
+    ),
+    commitPicker,
+    h("div", { class: "kp-dialog__actions" }, deployChosen),
     h("h3", null, "Native services"),
     ...(v.units.length
       ? [units.wrap]
@@ -158,6 +154,26 @@ export async function openRollback(stack) {
       : []),
   );
   const detach = attachDataTables(content, { compare: keys.compare(compare) });
-  dataTable(commits.wrap)?.refresh();
-  d.closed.then(detach);
+  const detachDated = attachDatedOptions(content);
+  setDatedOptions(
+    commitPicker,
+    v.commits.map((c) => ({
+      value: c.commit,
+      label: c.subject,
+      when: c.at * 1000,
+      meta: c.applied ? `${c.short} · deployed now` : c.short,
+    })),
+  );
+  if (!v.commits.length)
+    datedOptions(commitPicker)?.setState("empty", {
+      reason: v.noWorkingCopy
+        ? "No working copy yet"
+        : "No commits to go back to",
+    });
+  deployChosen.disabled = !v.commits.length;
+  setCardState(waiting, "ready");
+  d.closed.then(() => {
+    detach();
+    detachDated();
+  });
 }

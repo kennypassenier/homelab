@@ -117,6 +117,8 @@ import {
 import { attachSteplists } from "/static/kp/js/steplist.js";
 import { attachTicks, tickTo } from "/static/kp/js/tick.js";
 import { attachToolbars } from "/static/kp/js/toolbar.js";
+import { attachSegmented } from "/static/kp/js/segmented.js";
+import { FEED_RETRY_EVENT, attachFeeds, setFeed } from "/static/kp/js/feed.js";
 import { leave } from "/static/kp/js/motion.js";
 
 // Live view (invariant 39): every control on this page that opens a dialog
@@ -259,6 +261,13 @@ const MARK = declare({
   what: "open a timeline bar's operation in History",
   // A failed operation is a bar and a mark: both open the same row.
   twins: true,
+});
+const LOOK = declare({
+  id: "activity-history-look",
+  page: "activity",
+  opens: "view",
+  row: "<table|feed>",
+  what: "show the History as a table (search, filters, rows that open to their steps) or as a feed (a mark, who and when, day by day)",
 });
 const ADD_FILTER = declare({
   id: "activity-add-filter",
@@ -771,12 +780,68 @@ function mountNow(body, x) {
   t.wrap.setAttribute("data-kp-expand-single", "");
   t.wrap.setAttribute("data-kp-filter-mode", "add");
   t.wrap.classList.add("ac-history");
+  // The Feed look: the same rows as kp's activity feed. The table keeps
+  // the search, the filters and the steps; the feed follows the picks made
+  // on the timeline and the grid.
+  const feedEl = h("div", {
+    class: "kp-feed",
+    "data-kp-feed": "",
+    "data-kp-feed-unit": "operation,operations",
+    "data-kp-feed-head": "off",
+    "aria-label": "History as a feed",
+    hidden: "",
+  });
+  const lookKey = "homelab.activity.history-look";
+  const look0 = localStorage.getItem(lookKey) === "feed" ? "feed" : "table";
+  const lookItem = (/** @type {string} */ value, /** @type {string} */ label) =>
+    drivable(
+      h(
+        "button",
+        {
+          type: "button",
+          class: "kp-segmented__item",
+          "data-value": value,
+          role: "radio",
+          "aria-checked": String(value === look0),
+          title:
+            value === "table"
+              ? "Search, filter and open a row to see its steps"
+              : "A mark, who and when, a heading per day",
+        },
+        h("span", { class: "kp-segmented__label" }, label),
+      ),
+      LOOK,
+      value,
+    );
+  const lookSwitch = h(
+    "div",
+    {
+      class: "kp-segmented",
+      "data-kp-segmented": "single",
+      role: "radiogroup",
+      "aria-label": "History look",
+    },
+    lookItem("table", "Table"),
+    lookItem("feed", "Feed"),
+  );
+  const applyLook = (/** @type {string} */ value) => {
+    t.wrap.hidden = value === "feed";
+    feedEl.hidden = value !== "feed";
+  };
+  applyLook(look0);
+  lookSwitch.addEventListener("kp-segmented-change", (e) => {
+    const value = /** @type {CustomEvent} */ (e).detail?.value;
+    if (value !== "table" && value !== "feed") return;
+    localStorage.setItem(lookKey, value);
+    applyLook(value);
+  });
   const historyCard = section({
     title: "History: every operation, grouped by day",
     desc: "Lists every operation in the order it happened, a heading per day, so you can find one by stack, kind or outcome and open it to see its steps.",
     id: "history",
+    tools: [lookSwitch],
   });
-  historyCard.body.append(stale$, t.wrap);
+  historyCard.body.append(stale$, t.wrap, feedEl);
 
   // ── every job (folded) ────────────────────────────────────────────────
   const jobsCard = section({
@@ -1230,6 +1295,8 @@ function mountNow(body, x) {
   // ── kp parts the page carries ─────────────────────────────────────────
   const detachKp = [
     attachCardStates(running.body),
+    attachSegmented(historyCard.el),
+    attachFeeds(feedEl),
     attachToolbars(timeline.body),
     attachTicks(timeline.body),
     attachGantts(timeline.body, {
@@ -1304,6 +1371,7 @@ function mountNow(body, x) {
   /** The rounds the timeline draws as one bar: its id → the rows. @type {Map<string, import("../activityview.js").FeedRow[]>} */
   let tlRounds = new Map();
   const retryRead = () => void loadHistory();
+  feedEl.addEventListener(FEED_RETRY_EVENT, retryRead);
   const paintTimeline = () => {
     cover(tlCover, null);
     if (!historyRead) {
@@ -1690,12 +1758,19 @@ function mountNow(body, x) {
     syncNarrow();
     if (!historyRead) {
       t.loading({ words: "Reading the history…" });
+      setFeed(feedEl, { state: "loading" });
       return;
     }
     if (historyError) {
       t.failed(
         historyFail ?? { what: "the history", why: historyError, fix: "" },
       );
+      setFeed(feedEl, {
+        state: "error",
+        error: historyFail
+          ? `${historyFail.why}${historyFail.fix ? `: ${historyFail.fix}` : ""}`
+          : historyError,
+      });
       return;
     }
     stale$.hidden = !stale;
@@ -1711,6 +1786,39 @@ function mountNow(body, x) {
       );
     }
     const shown = visibleRows();
+    setFeed(feedEl, {
+      state: shown.length ? "ready" : "empty",
+      rows: shown.map((r) => ({
+        key: r.key,
+        title: r.what,
+        at: r.start * 1000,
+        state:
+          r.state === "running"
+            ? "running"
+            : r.state === "failed"
+              ? "failed"
+              : r.state === "deferred"
+                ? "warn"
+                : r.state === "round"
+                  ? "info"
+                  : "ok",
+        actor: {
+          name: r.actor.text,
+          kind:
+            r.actor.kind === "claude"
+              ? "agent"
+              : r.actor.kind === "person"
+                ? "person"
+                : "schedule",
+        },
+        detail:
+          r.error ?? (r.took != null ? `took ${humanDuration(r.took)}` : ""),
+        more: r.error ? [r.error] : undefined,
+      })),
+      emptyText: rows.length
+        ? "Nothing is left of the picks made on the timeline and the grid: drop one to see more."
+        : `Nothing ran in the last ${days === 1 ? "day" : `${days} days`}.`,
+    });
     const next = JSON.stringify([
       dayStart(now()),
       shown.map((r) => [r.key, r.state, r.took]),

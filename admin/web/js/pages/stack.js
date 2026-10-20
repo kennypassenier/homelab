@@ -135,6 +135,8 @@ import { facetGroup } from "../logfacets.js";
 import { formGrid, gridRow } from "../gridrow.js";
 import { watchTabOverflow } from "/static/kp/js/overlays.js";
 import { attachToolbars } from "/static/kp/js/toolbar.js";
+import { setTabCount } from "/static/kp/js/tabbar.js";
+import { FEED_RETRY_EVENT, attachFeeds, setFeed } from "/static/kp/js/feed.js";
 import { mount as mountSecrets } from "./secrets.js";
 import {
   countOf,
@@ -648,10 +650,24 @@ export function mount(root, params) {
         `${name}/${STACK_TABS[i].tab}`,
       ),
     );
-  const appsCount = h("span", { class: "sh-count", hidden: true });
-  tabs
-    .querySelector(`a[href="${CSS.escape(stackHref(name, "apps"))}"]`)
-    ?.append(appsCount);
+  /** The tab count of one tab (kp setTabCount: exact digits, nothing before it is counted). */
+  const tabCount = (
+    /** @type {string} */ tab,
+    /** @type {number | null | "loading" | "error"} */ n,
+    /** @type {{tone?: import("/static/kp/js/tabbar.js").TabCountTone | null, unit?: string | null, showUnit?: boolean, title?: string}} */ o = {},
+  ) => {
+    const a = tabs.querySelector(
+      `a[href="${CSS.escape(stackHref(name, tab))}"]`,
+    );
+    if (!a) return;
+    setTabCount(a, n, {
+      tone: o.tone ?? null,
+      unit: o.unit ?? null,
+      showUnit: o.showUnit ?? false,
+    });
+    if (o.title) a.setAttribute("title", o.title);
+  };
+  tabCount("apps", "loading");
   const panel = h("div", {
     class: "kp-tabs__panel sh-panel",
     role: "tabpanel",
@@ -682,6 +698,29 @@ export function mount(root, params) {
     ),
   );
 
+  /** @type {{logs: number | null, history: number | null}} */
+  const counts = { logs: null, history: null };
+  const paintCounts = () => {
+    tabCount("logs", counts.logs, {
+      tone: counts.logs ? "error" : null,
+      unit: "error,errors",
+      showUnit: true,
+      title:
+        counts.logs == null
+          ? undefined
+          : `${counts.logs} errors in the logs of the last hour`,
+    });
+    tabCount("history", counts.history, {
+      tone: counts.history ? "warning" : null,
+      unit: "incident,incidents",
+      showUnit: true,
+      title:
+        counts.history == null
+          ? undefined
+          : `${counts.history} failed operations with an incident bundle`,
+    });
+  };
+
   // ── shared readings ───────────────────────────────────────────────────
   const paintHead = () => {
     const f = current().fleet;
@@ -698,8 +737,8 @@ export function mount(root, params) {
     bindAction(backupBtn, acts.backup);
     bindAction(updateBtn, acts.update);
     const n = S.s?.apps_total ?? S.edit?.manifest?.apps?.length ?? null;
-    appsCount.hidden = n == null;
-    appsCount.textContent = n == null ? "" : String(n);
+    tabCount("apps", n, { unit: "app,apps" });
+    paintCounts();
     // The tab title carries the state (DESIGN_LANGUAGE §9.4).
     if (f) {
       const tab = STACK_TABS.find((t) => t.tab === params.tab);
@@ -802,6 +841,14 @@ export function mount(root, params) {
       return () => bus.removeEventListener("section", g);
     },
     reloadEdit: () => void readEdit().catch(() => {}),
+    /**
+     * A tab reports a number it counted; the tab row shows it.
+     * @param {"logs" | "history"} key @param {number | null} n
+     */
+    setCount: (key, n) => {
+      counts[key] = n;
+      paintCounts();
+    },
   };
   stops.push(panels[params.tab](panel));
   return () => {
@@ -816,7 +863,8 @@ export function mount(root, params) {
  *   go: (tab: string, section?: string) => void, compare: () => void,
  *   onChange: (f: () => void) => () => void,
  *   onSection: (f: (s: string) => void) => () => void,
- *   reloadEdit: () => void}} Ctx
+ *   reloadEdit: () => void,
+ *   setCount: (key: "logs" | "history", n: number | null) => void}} Ctx
  */
 
 /** Now, unix seconds. */
@@ -997,9 +1045,9 @@ function overviewTab(panel, c) {
   deps.body.append(depsStage);
   deps.el.classList.add("sh-span-6");
 
-  const feedList = h("ul", { class: "sh-feed" });
-  const feedStage = stage(feedList);
-  setCardState(feedStage, "loading", { words: "Reading the history" });
+  const feedEl = historyFeedEl("none");
+  setFeed(feedEl, { state: "loading" });
+  stops.push(attachFeeds(feedEl));
   const recent = section({
     title: "Recent history",
     desc: "What happened to this stack and who did it, newest first.",
@@ -1012,7 +1060,7 @@ function overviewTab(panel, c) {
       ),
     ],
   });
-  recent.body.append(feedStage);
+  recent.body.append(feedEl);
   recent.el.classList.add("sh-span-6");
 
   // checks.yml, folded: the editor Live view's `checks` form lands on.
@@ -1236,14 +1284,13 @@ function overviewTab(panel, c) {
       }
     }
     if (history) {
-      const rows = historyFeed(history).slice(0, 4);
-      feedList.replaceChildren(...rows.map((r) => feedRow(r)));
-      if (rows.length) setCardState(feedStage, "ready");
-      else
-        setCardState(feedStage, "empty", {
-          title: "Nothing was done",
-          text: `Nothing was done with ${name} in the last ${HISTORY_DAYS} days.`,
-        });
+      const rows = historyFeed(history);
+      setFeed(feedEl, {
+        state: rows.length ? "ready" : "empty",
+        rows: feedRows(rows.slice(0, 4)),
+        total: Math.min(4, rows.length),
+        emptyText: `Nothing was done with ${name} in the last ${HISTORY_DAYS} days.`,
+      });
     }
   };
   stops.push(c.onChange(paint));
@@ -1303,6 +1350,7 @@ function overviewTab(panel, c) {
           c.signal,
         );
         errors = r.ok ? errorCount(r.body.lines ?? []) : null;
+        c.setCount("logs", errors ?? null);
         paint();
       })(),
       (async () => {
@@ -1509,34 +1557,51 @@ function problemAction(c, p) {
 }
 
 /**
- * One row of a history feed: the outcome's dot, what happened with who
- * started it as a chip, its detail under it, and when.
- * @param {ReturnType<typeof historyFeed>[number]} r
+ * The history rows as kp feed rows: the outcome's mark, what happened, who
+ * started it as the actor chip, the detail and when.
+ * @param {ReturnType<typeof historyFeed>} rows
+ * @returns {import("/static/kp/js/feed.js").FeedRow[]}
  */
-function feedRow(r) {
-  return h(
-    "li",
-    { "data-who": r.who.key },
-    dot(r.tone),
-    h(
-      "span",
-      { class: "sh-feed__what" },
-      h("b", null, r.what),
-      chip(r.who.label, {
-        tone: /** @type {any} */ (r.who.key === "claude" ? "claude" : ""),
-      }),
-      h("span", { class: "sh-feed__detail" }, r.detail),
-    ),
-    h(
-      "time",
-      {
-        datetime: new Date(r.start * 1000).toISOString(),
-        // The full moment with its year (a `now` of 0 is never this year).
-        title: shortWhen(r.start, 0),
+function feedRows(rows) {
+  /** @type {Map<string, number>} */
+  const seen = new Map();
+  return rows.map((r) => {
+    const base = `${r.start}-${r.what}`;
+    const n = seen.get(base) ?? 0;
+    seen.set(base, n + 1);
+    return {
+      key: n ? `${base}-${n}` : base,
+      title: r.what,
+      at: r.start * 1000,
+      state: r.tone === "bad" ? "failed" : r.tone === "warn" ? "warn" : "ok",
+      actor: {
+        name: r.who.label,
+        kind:
+          r.who.key === "you"
+            ? "person"
+            : r.who.key === "claude"
+              ? "agent"
+              : "schedule",
       },
-      whenText(r.start),
-    ),
-  );
+      detail: r.detail,
+    };
+  });
+}
+
+/**
+ * A kp activity feed for a stack's history (the Overview's four rows, the
+ * History tab's 30 days).
+ * @param {"day" | "none"} group
+ */
+function historyFeedEl(group) {
+  return h("div", {
+    class: "kp-feed",
+    "data-kp-feed": "",
+    "data-kp-feed-unit": "operation,operations",
+    "data-kp-feed-group": group,
+    "data-kp-feed-head": "off",
+    "aria-label": "History of this stack",
+  });
 }
 
 /** "1 h ago" for today, else "30 Sep 12:14" (the demo's). @param {number} unix */
@@ -2829,9 +2894,9 @@ function historyTab(panel, c) {
     h("div", { class: "kp-toolbar__state" }, count),
   );
   drivable(searchBox, HISTORY_SEARCH, name);
-  const list = h("ul", { class: "sh-feed sh-feed--full" });
-  const listStage = stage(list);
-  setCardState(listStage, "loading", { words: "Reading the history" });
+  const list = historyFeedEl("day");
+  setFeed(list, { state: "loading" });
+  const detachFeed = attachFeeds(list);
   const card = h(
     "section",
     { class: "kp-card nx-card", "aria-labelledby": "hist-h" },
@@ -2846,7 +2911,7 @@ function historyTab(panel, c) {
       ),
     ),
     tb,
-    listStage,
+    list,
   );
   const detachTb = attachToolbars(tb);
   const incList = h("ul", { class: "sh-feed" });
@@ -2874,9 +2939,9 @@ function historyTab(panel, c) {
   };
   const paint = () => {
     if (failed) {
-      setCardState(listStage, "error", {
-        title: "The history did not read",
-        text: `${failed.why}${failed.fix ? ` — ${failed.fix}` : ""}`,
+      setFeed(list, {
+        state: "error",
+        error: `${failed.why}${failed.fix ? ` — ${failed.fix}` : ""}`,
       });
       count.textContent = "";
       return;
@@ -2884,16 +2949,14 @@ function historyTab(panel, c) {
     if (!rows) return;
     const shown = filterFeed(rows, who, q);
     count.textContent = `${shown.length === rows.length ? rows.length : `${shown.length} of ${rows.length}`} ${rows.length === 1 ? "operation" : "operations"}, ${HISTORY_DAYS} days`;
-    countOf(count, list, ":scope > li[data-who]");
-    list.replaceChildren(...shown.map((r) => feedRow(r)));
-    if (shown.length) setCardState(listStage, "ready");
-    else
-      setCardState(listStage, "empty", {
-        title: rows.length ? "Nothing matches" : "Nothing was done",
-        text: rows.length
-          ? "Clear the search or turn a chip off."
-          : `Nothing was done with ${name} in the last ${HISTORY_DAYS} days.`,
-      });
+    countOf(count, list, ".kp-feed__row");
+    setFeed(list, {
+      state: shown.length ? "ready" : "empty",
+      rows: feedRows(shown),
+      emptyText: rows.length
+        ? "Nothing matches: clear the search or turn a chip off."
+        : `Nothing was done with ${name} in the last ${HISTORY_DAYS} days.`,
+    });
   };
   /** @param {KeyboardEvent} e */
   const esc = (e) => {
@@ -2920,6 +2983,7 @@ function historyTab(panel, c) {
       const names = incidentRows(
         stackIncidents(ir.report?.incidents ?? [], name),
       );
+      c.setCount("history", names.length);
       incList.replaceChildren(
         ...(names.length
           ? names.map((x) => {
@@ -2967,11 +3031,11 @@ function historyTab(panel, c) {
   const reload = () => void load().catch(() => {});
   const detachCards = attachCardStates(panel);
   const retry = () => {
-    setCardState(listStage, "loading", { words: "Reading the history" });
+    setFeed(list, { state: "loading" });
     setCardState(incStage, "loading", { words: "Reading the incidents" });
     reload();
   };
-  listStage.addEventListener(CARD_RETRY_EVENT, retry);
+  list.addEventListener(FEED_RETRY_EVENT, retry);
   incStage.addEventListener(CARD_RETRY_EVENT, retry);
   const stopAnswers = onAnswered(reload);
   reload();
@@ -2979,6 +3043,7 @@ function historyTab(panel, c) {
     stopAnswers();
     updatesAbort.abort();
     detachCards();
+    detachFeed();
     detachTb();
     document.removeEventListener("keydown", esc);
   };

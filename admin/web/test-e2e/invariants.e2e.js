@@ -7559,10 +7559,7 @@ test("invariants: stack hub — seven tabs; Overview has five KPI tiles, Is it h
     await page
       .locator('#healthy .kp-statusrow[data-kp-status-id="apps"]')
       .waitFor({ timeout: 10000 });
-    await page
-      .locator(".sh-feed li[data-who]")
-      .first()
-      .waitFor({ timeout: 10000 });
+    await page.locator(".kp-feed__row").first().waitFor({ timeout: 10000 });
     const r = await page.evaluate(() => ({
       tabs: [...document.querySelectorAll(".sh-tabs .kp-tab")].map((t) =>
         (t.firstChild?.textContent ?? "").trim(),
@@ -7574,9 +7571,14 @@ test("invariants: stack hub — seven tabs; Overview has five KPI tiles, Is it h
       checks: [...document.querySelectorAll("#healthy .kp-statusrow")].map(
         (l) => l.getAttribute("data-kp-status-id"),
       ),
-      who: [...document.querySelectorAll(".sh-feed li[data-who]")].map((l) =>
-        l.getAttribute("data-who"),
-      ),
+      who: [...document.querySelectorAll(".kp-feed__row")].map((l) => {
+        const t = l.querySelector(".kp-feed__actor-name")?.textContent ?? "";
+        return /claude/i.test(t)
+          ? "claude"
+          : /nightly/i.test(t)
+            ? "night"
+            : "you";
+      }),
       // The kp problems list of what needs you names the missing env.
       noEnv: /no sealed env/.test(
         document.querySelector("#needs")?.textContent ?? "",
@@ -7679,7 +7681,7 @@ test("invariants: stack hub — History's Started by chips filter with a plain c
     });
     const page = await freshPage(context);
     await page.goto(`${BASE}/stacks/kp-soft/history`);
-    const rows = page.locator(".sh-feed--full li[data-who]");
+    const rows = page.locator(".kp-feed__row");
     await rows.first().waitFor({ timeout: 10000 });
     const all = await rows.count();
     await page
@@ -7688,7 +7690,14 @@ test("invariants: stack hub — History's Started by chips filter with a plain c
       )
       .click({ timeout: 5000 });
     const who = await rows.evaluateAll((ls) =>
-      ls.map((l) => l.getAttribute("data-who")),
+      ls.map((l) => {
+        const t = l.querySelector(".kp-feed__actor-name")?.textContent ?? "";
+        return /claude/i.test(t)
+          ? "claude"
+          : /nightly/i.test(t)
+            ? "night"
+            : "you";
+      }),
     );
     assert.ok(who.length > 0 && who.every((w) => w === "claude"), who.join());
     await page
@@ -7697,7 +7706,14 @@ test("invariants: stack hub — History's Started by chips filter with a plain c
       )
       .click({ timeout: 5000 });
     const two = await rows.evaluateAll((ls) =>
-      ls.map((l) => l.getAttribute("data-who")),
+      ls.map((l) => {
+        const t = l.querySelector(".kp-feed__actor-name")?.textContent ?? "";
+        return /claude/i.test(t)
+          ? "claude"
+          : /nightly/i.test(t)
+            ? "night"
+            : "you";
+      }),
     );
     assert.ok(two.includes("night") && two.includes("claude"));
     assert.ok(!two.includes("you"));
@@ -8122,7 +8138,7 @@ test("invariants: stack hub review — History says Kenny in chip and rows, date
     });
     const page = await freshPage(context);
     await page.goto(`${BASE}/stacks/kp-soft/history`);
-    const rows = page.locator(".sh-feed--full li[data-who]");
+    const rows = page.locator(".kp-feed__row");
     await rows.first().waitFor({ timeout: 10000 });
     assert.equal(
       (
@@ -8134,18 +8150,16 @@ test("invariants: stack hub review — History says Kenny in chip and rows, date
       )?.trim(),
       "Kenny",
     );
-    const you = await page
-      .locator('.sh-feed--full li[data-who="you"] .kp-badge')
-      .allTextContents();
+    const you = (
+      await page.locator(".kp-feed__actor-name").allTextContents()
+    ).filter((t) => !/claude|nightly/i.test(t));
     assert.ok(
       // A CLI session reads "Kenny · CLI on wsl", as Activity names it.
       you.length > 0 &&
         you.every((t) => /^Kenny( · CLI on \S+)?$/.test(t.trim())),
       you.join(),
     );
-    const times = await page
-      .locator(".sh-feed--full li time")
-      .allTextContents();
+    const times = await page.locator(".kp-feed__when").allTextContents();
     for (const t of times)
       assert.match(
         t.trim(),
@@ -8153,9 +8167,7 @@ test("invariants: stack hub review — History says Kenny in chip and rows, date
         `a date reads ${t}`,
       );
     await page.goto(`${BASE}/stacks/notes/history`);
-    const empty = page.locator(
-      ".sh-stack .sh-feed:not(.sh-feed--full) .sh-feed__empty",
-    );
+    const empty = page.locator(".sh-stack .sh-feed .sh-feed__empty");
     await empty.waitFor({ timeout: 10000 });
     assert.equal(
       (await empty.textContent())?.trim(),

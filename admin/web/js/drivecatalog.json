@@ -164,6 +164,18 @@
       "twins": false
     },
     {
+      "id": "activity-history-look",
+      "page": "activity",
+      "what": "show the History as a table (search, filters, rows that open to their steps) or as a feed (a mark, who and when, day by day)",
+      "opens": "view",
+      "row": "<table|feed>",
+      "href": "/activity",
+      "was": [],
+      "shows": null,
+      "reach": [],
+      "twins": false
+    },
+    {
       "id": "activity-job-bar",
       "page": "activity",
       "what": "open a job from the Jobs timeline, live, in a dialog",

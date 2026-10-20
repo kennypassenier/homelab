@@ -99,16 +99,6 @@
   margin: 0;
   border-block-end: 0;
 }
-.sh-count {
-  margin-inline-start: 6px;
-  font-size: var(--kp-text-xs);
-  background: var(--muted);
-  color: var(--muted-foreground);
-  border-radius: 999px;
-  padding: 0 7px;
-  line-height: 1.6;
-  font-variant-numeric: tabular-nums;
-}
 .sh-tabbar ~ .kp-keys {
   /* the shortcuts stand on their own line under the tabs, not squeezed
      beside them */

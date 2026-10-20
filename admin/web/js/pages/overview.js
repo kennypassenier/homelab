@@ -47,7 +47,16 @@ const tileKpi = ({ meter, dot, tone, ...t }) => ({
   ...t,
   tone: tone === "ok" ? "" : tone,
   ctxMeter:
-    meter == null ? null : { pct: meter, tone: tone === "ok" ? "" : tone },
+    meter == null
+      ? null
+      : {
+          pct: meter,
+          tone: tone === "ok" ? "" : tone,
+          // The disk turns amber at 80 %: the tick shows where.
+          ...(t.key === "disk"
+            ? { mark: 80, markTitle: "Warns from 80 % full" }
+            : {}),
+        },
   ctxTone: dot ?? null,
 });
 /** @typedef {import("../stacksview.js").Row} Row */

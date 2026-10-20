@@ -9562,7 +9562,7 @@ test("invariants: redesign-final-low-sort: a plain click on a second header adds
       viewport: { width: 1894, height: 1000 },
     });
     const page = await freshPage(context);
-    // The Host page's Containers table (ui.js sortableTable).
+    // The Host page's Containers table.
     await page.goto(`${BASE}/host`);
     const th = (/** @type {string} */ k) =>
       page.locator(

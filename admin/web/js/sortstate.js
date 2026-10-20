@@ -1,7 +1,6 @@
 // A table's sort as data (DESIGN_LANGUAGE §12; Kenny's rule: tables sort
 // on several keys and remember their sort per table): the pure half, so
-// the node tests read it without a DOM. ui.js re-exports it with the
-// header block (`sortHead`) and `sortableTable` built on it.
+// the node tests read it without a DOM.
 
 /**
  * One key of a sort: the column's key and its direction (1 ascending,

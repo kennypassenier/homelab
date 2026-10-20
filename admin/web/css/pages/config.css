@@ -4,7 +4,7 @@
    cfg-aa93.css). kp-themes tokens only, everything under `.cf-page` with
    the `cf-` prefix so it never collides with the foundation's `nx-`
    classes. The blocks themselves (header, chips, dots, the segmented
-   switch, the hover card, skeletons, the failure band) are ui.js's and
+   switch, skeletons, the failure band) are ui.js's and
    app.css's since the 3.71.0 integration; this sheet keeps what the
    pages draw by hand. */
 
@@ -271,14 +271,6 @@ button.cf-chip,
 }
 
 /* ---------- segmented choice ---------- */
-
-/* ---------- the floating detail card ---------- */
-.nx-tip .cf-tip__row {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: 8px;
-  align-items: center;
-}
 
 @media (prefers-reduced-motion: reduce) {
   .cf-page * {

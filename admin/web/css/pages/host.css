@@ -167,10 +167,6 @@ main.shell.hk-page > [hidden] {
 .hk-tbl tr[hidden] {
   display: none;
 }
-/* a container's memory: ui.js shareBar (a kp meter and its figure) */
-.hk-tbl .nx-share {
-  min-width: 200px;
-}
 .hk-name {
   display: grid;
   gap: 1px;

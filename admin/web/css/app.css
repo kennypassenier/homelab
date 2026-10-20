@@ -2290,12 +2290,6 @@ details.nx-card--fold[open] > summary::before {
   display: block;
   block-size: 1em;
 }
-.nx-skeleton--table {
-  grid-template-columns: repeat(var(--cols, 4), minmax(0, 1fr));
-}
-.nx-skeleton-block {
-  inline-size: 100%;
-}
 .nx-empty {
   display: grid;
   justify-items: center;
@@ -2417,18 +2411,6 @@ details.nx-card--fold[open] > summary::before {
   display: inline-block;
   background: var(--c, var(--chart-1));
 }
-/* a row's share of a whole (ui.js `shareBar`): bar, then its number */
-.nx-share {
-  display: grid;
-  grid-template-columns: minmax(3rem, 1fr) auto;
-  gap: var(--kp-space-sm);
-  align-items: center;
-}
-
-.nx-share__num {
-  font-variant-numeric: tabular-nums;
-  font-size: var(--kp-text-sm);
-}
 /* a block's error state (ui.js `failBox`), in the block's own footprint */
 .nx-fail .kp-alert__body {
   display: grid;
@@ -2438,16 +2420,9 @@ details.nx-card--fold[open] > summary::before {
 .nx-fail p {
   margin: 0;
 }
-/* one alert for every read a page lost (ui.js `failBand`), and the
-   blocks' muted line under it (`failNote`) */
+/* one alert for every read a page lost (ui.js `failBand`) */
 .nx-failband[hidden] {
   display: none;
-}
-.nx-failnote {
-  margin: 0;
-  padding: var(--kp-space-md) 0;
-  color: var(--muted-foreground);
-  font-size: var(--kp-text-sm);
 }
 /* a search's match inside a text (ui.js `highlight`): one element */
 .nx-hl {
@@ -2633,48 +2608,6 @@ details.nx-card--fold[open] > summary::before {
   display: none;
 }
 
-/* sortable headers: a plain table's (sortableTable), a kept order's
-   (sortHead) */
-th.nx-sortable {
-  cursor: pointer;
-  user-select: none;
-}
-th.nx-sortable::after {
-  content: " " attr(data-mark);
-  opacity: 0.35;
-  font-size: 0.9em;
-}
-th.nx-sortable:is([aria-sort="ascending"], [aria-sort="descending"])::after {
-  opacity: 1;
-}
-th.nx-sortable:hover {
-  color: var(--foreground);
-}
-th.nx-sortable:focus-visible {
-  outline: 2px solid var(--ring);
-  outline-offset: -2px;
-}
-.nx-sort {
-  all: unset;
-  cursor: pointer;
-  display: inline-flex;
-  gap: var(--kp-space-xs);
-  align-items: center;
-}
-.nx-sort:focus-visible {
-  outline: 2px solid var(--ring);
-  outline-offset: 2px;
-  border-radius: 3px;
-}
-.nx-sort__mark {
-  opacity: 0.45;
-}
-th[aria-sort="ascending"] .nx-sort__mark,
-th[aria-sort="descending"] .nx-sort__mark {
-  opacity: 1;
-  color: var(--primary);
-}
-
 /* an active filter as a chip with its × */
 .nx-filterchip {
   display: inline-flex;
@@ -2701,33 +2634,6 @@ th[aria-sort="descending"] .nx-sort__mark {
 }
 .nx-filterchip button:focus-visible {
   outline: 2px solid var(--ring);
-}
-
-/* the hover card */
-.nx-tip {
-  /* kp-themes' tooltip look (.kp-popover.kp-tooltip: border, plate, radius
-     and the theme's own entrance); this card is placed by ui.js hoverCard */
-  position: fixed;
-  inset: auto;
-  margin: 0;
-  z-index: 50;
-  pointer-events: none;
-  max-inline-size: 24rem;
-  display: grid;
-  gap: var(--kp-space-xs);
-  padding: var(--kp-space-sm) var(--kp-space-md);
-}
-.nx-tip[hidden] {
-  display: none;
-}
-.nx-tip b {
-  font-weight: 600;
-}
-
-.nx-tip__hint {
-  font-size: var(--kp-text-xs);
-  color: var(--muted-foreground);
-  margin-block-start: 2px;
 }
 
 /* toasts, inside #page so Live view reaches their Undo */
@@ -3075,24 +2981,6 @@ th[aria-sort="descending"] .nx-sort__mark {
     grid-column: 2;
     grid-row: 1 / span 2;
   }
-}
-/* redesign-final Low: a sortable table's sort line (ui.js sortableTable):
-   what it is sorted by and Reset sort while it is sorted, as kp-themes
-   draws its own datatables' sort line. */
-.nx-sortline[hidden] {
-  display: none;
-}
-.nx-sortline {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  align-items: center;
-  gap: var(--kp-space-sm);
-  min-block-size: 2rem;
-  font-size: var(--kp-text-sm);
-  color: var(--muted-foreground);
-}
-.nx-sortline__said {
-  min-inline-size: 0;
 }
 .refusal .refusal-fix {
   display: block;

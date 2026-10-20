@@ -24,12 +24,8 @@
 //   section      a card: heading + one sentence + tools, optionally
 //                collapsible and mounted only when first opened, with a
 //                foot line (source left, "read 4 s ago" right)
-//   sortHead / sortableTable / nextSort / applySort / rememberedSort
-//                sorting on several keys, remembered per table, for the
-//                three tables that are not a kp datatable (Host's two, the
-//                Backups repositories: their rows are filtered, grouped or
-//                opened by the page itself); every other table is a kp
-//                datatable (dataTable / dom.js tableBlock)
+//   (tables)     every table is a kp datatable (dataTable / dom.js
+//                tableBlock); sorting lives in sortstate.js
 //   toast        kp-themes' toast in a region inside #page, so Live view
 //                can press its Undo
 //   rowMenu / moreMenu   a row's menu on a button already in the row and a
@@ -37,12 +33,11 @@
 //                headings like the stack hub's More ▾), both kp-themes'
 //                menu button
 //   drawer       a side panel, kp-themes' `dialog.kp-drawer`
-//   hoverCard    one floating detail card for hover and keyboard focus
-//   chip / dot / meter / shareBar / swatch / stackMark   small marks
+//   chip / dot / meter / swatch / stackMark   small marks
 //                (kp-badge, kp-health, kp-meter)
-//   failBox / skeleton… / emptyState   the error, loading and empty states
+//   failBox / skeletonLines / emptyState   the error, loading and empty states
 //                in the block's own footprint
-//   rowKeys / kbd / keyRow   keyboard: list rows, a key, the shortcut line
+//   kbd / keyRow   keyboard: a key, the shortcut line
 //   sparkline    a 28 px trend line for a tile or a table row
 //   stepper / checkList / explainNote / doneMark   a flow's steps (kp's
 //                wizard steps), its live step list, a dismissible "this
@@ -98,18 +93,6 @@ import {
   valueOf,
 } from "/static/kp/js/segmented.js";
 import { setKeys } from "/static/kp/js/keys.js";
-import { RESET_SORT } from "./tableresets.js";
-import { applySort, keepSort, nextSort, rememberedSort } from "./sortstate.js";
-
-export {
-  applySort,
-  compareValues,
-  keepSort,
-  nextSort,
-  rememberedSort,
-} from "./sortstate.js";
-
-/** @typedef {import("./sortstate.js").SortKey} SortKey */
 
 /**
  * The Live view control a clickable block is: a declared id (drivable.js),
@@ -867,42 +850,6 @@ export function skeletonLines(lines = 3, label = "Loading") {
 }
 
 /**
- * A table's skeleton: `rows` rows of `cols` cells, the table's own grid.
- * @param {number} rows
- * @param {number} cols
- * @param {string} [label]
- */
-export function skeletonTable(rows, cols, label = "Loading") {
-  return h(
-    "div",
-    {
-      class: "nx-skeleton nx-skeleton--table",
-      role: "status",
-      "data-kp-state": "loading",
-      "aria-label": label,
-      style: `--cols: ${cols}`,
-    },
-    ...Array.from({ length: rows * cols }, () =>
-      h("span", { class: "kp-skeleton" }),
-    ),
-  );
-}
-
-/**
- * A block-sized skeleton (a chart, a calendar) of a fixed height.
- * @param {string} height a CSS length, the final content's height
- * @param {string} [label]
- */
-export const skeletonBlock = (height, label = "Loading") =>
-  h("div", {
-    class: "kp-skeleton kp-skeleton--block nx-skeleton-block",
-    role: "status",
-    "data-kp-state": "loading",
-    "aria-label": label,
-    style: `block-size: ${height}`,
-  });
-
-/**
  * An empty state that teaches (FLOWS.md §1.5, DESIGN_LANGUAGE §7): one
  * sentence saying why it is empty and what fills it, plus the action that
  * fills it.
@@ -1243,200 +1190,6 @@ function segmentedGroup(label, mode, cls) {
 }
 
 /**
- * What a cell sorts by: its `data-sort` or its text, numbers as numbers.
- * @param {string} v
- * @returns {number | string}
- */
-export function sortValue(v) {
-  const n = Number(v);
-  return v !== "" && Number.isFinite(n) ? n : v.toLowerCase();
-}
-
-/** The mark a sorted column shows: ↑ / ↓, numbered when several keys sort. */
-export const sortMark = (
-  /** @type {SortKey[]} */ sort,
-  /** @type {string} */ key,
-) => {
-  const i = sort.findIndex((s) => s.key === key);
-  if (i < 0) return "↕";
-  return `${sort[i].dir > 0 ? "↑" : "↓"}${sort.length > 1 ? i + 1 : ""}`;
-};
-
-/** What every sortable header says it does (Kenny: no Shift). */
-export const SORT_HINT =
-  "Click to sort by this column; click another to sort by it next · click again to reverse, a third time to take it out · Reset sort clears every key";
-
-/**
- * @typedef {{label: string, key: string, sort: SortKey[],
- *   onSort: (next: SortKey[]) => void, drive: Drive, remember?: string,
- *   cls?: string}} SortHeadSpec
- *   `sort`: the table's sort now; `onSort` gets the next one (plain click:
- *   each column clicked is a further key: ascending → descending → out); `remember`: the table's name, to keep the sort for
- *   the next visit (`rememberedSort` reads it back); `drive`: the Live view
- *   control the header's button is.
- */
-
-/**
- * A sortable column header (DESIGN_LANGUAGE §12; Kenny: multi-sort,
- * remembered per table): a `th` with `aria-sort` holding a button and the
- * column's mark (↕, or ↑ / ↓ numbered when several keys sort).
- * @param {SortHeadSpec} spec
- * @returns {HTMLTableCellElement}
- */
-export function sortHead(spec) {
-  const s = spec.sort.find((x) => x.key === spec.key);
-  const btn = h(
-    "button",
-    {
-      type: "button",
-      class: "nx-sort",
-      title: SORT_HINT,
-      onclick: () => {
-        const next = nextSort(spec.sort, spec.key);
-        if (spec.remember) keepSort(spec.remember, next);
-        spec.onSort(next);
-      },
-    },
-    spec.label,
-    h(
-      "span",
-      { class: "nx-sort__mark", "aria-hidden": "true" },
-      sortMark(spec.sort, spec.key),
-    ),
-  );
-  drive(btn, spec.drive);
-  return h(
-    "th",
-    {
-      scope: "col",
-      class: spec.cls ?? null,
-      "aria-sort": s ? (s.dir > 0 ? "ascending" : "descending") : "none",
-    },
-    btn,
-  );
-}
-
-/**
- * The key a plain table's column sorts under: its `data-key`, else its
- * header text in lower-case words ("Memory" → "memory").
- * @param {HTMLTableCellElement} th
- */
-const columnKey = (th) =>
-  th.dataset.key ??
-  (th.textContent ?? "")
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-|-$/g, "");
-
-/**
- * Makes a plain table's headers sort it (DESIGN_LANGUAGE §12) with the
- * same rule as `sortHead`: a click adds that column as a further key
- * (ascending, descending, out again), Enter / Space do the same; `aria-sort` and the header's mark say which.
- * A cell's `data-sort` overrides its text. Each header is the Live view
- * control `drive.id` on its column's row; with `remember` the table keeps
- * its sort for the next visit. Returns `apply()`, which sorts the body
- * again after the page refilled it.
- * `line` is the table's sort line (what it is sorted by and Reset sort,
- * the Live view control `table-reset-sort`), shown while the table is
- * sorted; the page puts it above the table.
- * @param {HTMLTableElement} table
- * @param {{drive: {id: string}, remember?: string}} opts
- * @returns {{apply: () => void, sort: () => SortKey[], line: HTMLElement}}
- */
-export function sortableTable(table, opts) {
-  if (!opts?.drive?.id)
-    throw new Error("a sortable table's headers need their Live view control");
-  const head = table.tHead?.rows[0];
-  /** @type {SortKey[]} */
-  let sort = opts.remember ? rememberedSort(opts.remember) : [];
-  const ths = head ? [...head.cells] : [];
-  const keyed = ths
-    .map((th, ci) => ({ th, ci, key: columnKey(th) }))
-    .filter((x) => x.key);
-  const said = h("span", { class: "nx-sortline__said", "aria-live": "polite" });
-  const reset = /** @type {HTMLButtonElement} */ (
-    drivable(
-      h(
-        "button",
-        {
-          type: "button",
-          class: "kp-button kp-button--ghost kp-button--sm",
-          title: "Clear every sort key this table was given",
-        },
-        "Reset sort",
-      ),
-      RESET_SORT,
-      opts.remember ?? "table",
-    )
-  );
-  reset.addEventListener("click", () => {
-    sort = [];
-    if (opts.remember) keepSort(opts.remember, sort);
-    apply();
-  });
-  const line = h("div", { class: "nx-sortline" }, said, reset);
-  const apply = () => {
-    const label = (/** @type {string} */ k) =>
-      keyed.find((x) => x.key === k)?.th.textContent?.trim() ?? k;
-    said.textContent = sort.length
-      ? `Sorted by ${sort.map((x) => `${label(x.key)} ${x.dir > 0 ? "↑" : "↓"}`).join(", then ")}`
-      : "";
-    // Unsorted, the line stays out of sight (fix-236: no "Not sorted."
-    // noise between the filters and the rows).
-    line.hidden = sort.length === 0;
-    for (const { th, key } of keyed) {
-      const i = sort.findIndex((s) => s.key === key);
-      if (i < 0) th.setAttribute("aria-sort", "none");
-      else
-        th.setAttribute(
-          "aria-sort",
-          sort[i].dir > 0 ? "ascending" : "descending",
-        );
-      th.dataset.mark = sortMark(sort, key);
-    }
-    const body = table.tBodies[0];
-    if (!body) return;
-    const rows = [...body.rows];
-    rows.forEach((r, i) => {
-      if (r.dataset.order == null) r.dataset.order = String(i);
-    });
-    const col = new Map(keyed.map((x) => [x.key, x.ci]));
-    const sorted = applySort(
-      [...rows].sort(
-        (a, b) => Number(a.dataset.order) - Number(b.dataset.order),
-      ),
-      sort,
-      (r, key) => {
-        const c = r.cells[col.get(key) ?? -1];
-        return sortValue(c?.dataset.sort ?? c?.textContent?.trim() ?? "");
-      },
-    );
-    body.append(...sorted);
-  };
-  for (const { th, key } of keyed) {
-    th.classList.add("nx-sortable");
-    th.tabIndex = 0;
-    th.title = SORT_HINT;
-    drive(th, { id: opts.drive.id, row: key });
-    const go = () => {
-      sort = nextSort(sort, key);
-      if (opts.remember) keepSort(opts.remember, sort);
-      apply();
-    };
-    th.addEventListener("click", () => go());
-    th.addEventListener("keydown", (e) => {
-      if (e.key === "Enter" || e.key === " ") {
-        e.preventDefault();
-        go();
-      }
-    });
-  }
-  apply();
-  return { apply, sort: () => [...sort], line };
-}
-
-/**
  * An active-filter chip: what is on, × turns it off (the Live view
  * control `drive`).
  * @param {string} label
@@ -1456,86 +1209,6 @@ export function filterChip(label, onClear, d) {
   x.addEventListener("click", onClear);
   drive(x, d);
   return h("span", { class: "nx-filterchip" }, label, x);
-}
-
-/**
- * Where a floating card goes: centred under its element, above it when
- * there is no room below, never past the screen's edges (8 px margin).
- * @param {{left: number, top: number, bottom: number, width: number}} r
- *   the element's box
- * @param {number} w the card's width
- * @param {number} ht the card's height
- * @param {{w: number, h: number}} view the viewport
- * @returns {{left: number, top: number}}
- */
-export function tipPlace(r, w, ht, view) {
-  const left = Math.min(
-    Math.max(8, r.left + r.width / 2 - w / 2),
-    view.w - w - 8,
-  );
-  let top = r.bottom + 8;
-  if (top + ht > view.h - 8) top = r.top - ht - 8;
-  return { left: Math.round(left), top: Math.round(top) };
-}
-
-/**
- * One floating detail card for hover AND keyboard focus (DESIGN_LANGUAGE
- * §10). It sits under (or above) its element, never under the pointer, so
- * it never blocks the next hover. One per page; `stop()` removes it.
- * `cls` adds a page's own class to it (it lives on <body>).
- * @param {{cls?: string}} [opts]
- */
-export function hoverCard(opts = {}) {
-  // kp-themes' tooltip look (`.kp-popover.kp-tooltip`, painted by every
-  // register); the placement is ours: one shared card, filled on demand
-  // for whatever the pointer or the focus is on (kp's `attachTooltips`
-  // wants a tooltip element inside every anchor, found once at attach).
-  const tip = h("div", {
-    class: `kp-popover kp-tooltip nx-tip${opts.cls ? ` ${opts.cls}` : ""}`,
-    role: "tooltip",
-  });
-  tip.hidden = true;
-  document.body.append(tip);
-  const hide = () => {
-    tip.hidden = true;
-  };
-  /**
-   * @param {HTMLElement} target
-   * @param {() => import("./dom.js").Child[] | null} fill
-   */
-  const attach = (target, fill) => {
-    const show = () => {
-      const c = fill();
-      if (!c || !target.isConnected) return;
-      tip.replaceChildren(...h("div", null, c).childNodes);
-      tip.hidden = false;
-      const p = tipPlace(
-        target.getBoundingClientRect(),
-        tip.offsetWidth,
-        tip.offsetHeight,
-        { w: innerWidth, h: innerHeight },
-      );
-      tip.style.left = `${p.left}px`;
-      tip.style.top = `${p.top}px`;
-    };
-    target.addEventListener("pointerenter", show);
-    target.addEventListener("pointerleave", hide);
-    target.addEventListener("focus", show);
-    target.addEventListener("blur", hide);
-  };
-  return { el: tip, attach, hide, stop: () => tip.remove() };
-}
-
-/** @type {ReturnType<typeof hoverCard> | null} */
-let pageCard = null;
-
-/**
- * The one hover card a page shares (made on first use, made again after a
- * page swap removed it): `pageTip().attach(target, fill)`, `.hide()`.
- */
-export function pageTip() {
-  if (!pageCard?.el.isConnected) pageCard = hoverCard();
-  return pageCard;
 }
 
 /**
@@ -2015,25 +1688,6 @@ export function meter(m, cls = "kp-meter") {
 }
 
 /**
- * One row's share of a whole as a bar with its number beside it ("41 %",
- * "2.1 GB"): a kp meter in `colour` (a stack's) or the primary colour.
- * @param {number | null} pct
- * @param {string} text the number the bar stands for, always shown
- * @param {string} [colour]
- */
-export function shareBar(pct, text, colour) {
-  const bar = meter({ pct }).el;
-  const e = h(
-    "span",
-    { class: "nx-share" },
-    bar,
-    h("span", { class: "nx-share__num" }, text),
-  );
-  if (colour) e.style.setProperty("--kp-meter-fill", colour);
-  return e;
-}
-
-/**
  * The error state of a block (DESIGN_LANGUAGE §7: loading, empty, error
  * and filled take the same footprint): what could not be read, why, the
  * fix, and Try again (the Live view control `retry.drive`).
@@ -2060,53 +1714,6 @@ export function failBox(err, retry = null) {
     drive(again, retry.drive);
   }
   return plate;
-}
-
-/**
- * Keyboard navigation over a list's rows (DESIGN_LANGUAGE §10): j / ↓ and
- * k / ↑ move the focus to the next or previous visible row matching
- * `selector` inside `root`, Home / End to the first or last, Enter opens
- * it; never while typing in a field or with a modifier. Returns the
- * function that stops listening.
- * @param {HTMLElement} root
- * @param {string} selector the rows (focusable: give them tabindex)
- * @param {(row: HTMLElement) => void} [onEnter]
- * @returns {() => void}
- */
-export function rowKeys(root, selector, onEnter) {
-  /** @param {KeyboardEvent} e */
-  const key = (e) => {
-    const t = /** @type {HTMLElement | null} */ (e.target);
-    if (e.ctrlKey || e.metaKey || e.altKey) return;
-    if (t?.closest("input, textarea, select, [contenteditable]")) return;
-    // redesign-config-12: a button or a link that is not itself a row
-    // keeps j / k / Enter to itself.
-    if (t && typingTarget(t.tagName) && !t.matches(selector)) return;
-    const rows = /** @type {HTMLElement[]} */ ([
-      ...root.querySelectorAll(selector),
-    ]).filter((r) => !r.hidden && r.offsetParent !== null);
-    if (!rows.length) return;
-    const at = rows.findIndex((r) => r === t || r.contains(t));
-    const to =
-      e.key === "j" || e.key === "ArrowDown"
-        ? Math.min(rows.length - 1, at + 1)
-        : e.key === "k" || e.key === "ArrowUp"
-          ? Math.max(0, at < 0 ? 0 : at - 1)
-          : e.key === "Home"
-            ? 0
-            : e.key === "End"
-              ? rows.length - 1
-              : null;
-    if (to != null) {
-      e.preventDefault();
-      rows[to].focus();
-    } else if (e.key === "Enter" && at >= 0 && rows[at] === t && onEnter) {
-      e.preventDefault();
-      onEnter(rows[at]);
-    }
-  };
-  root.addEventListener("keydown", key);
-  return () => root.removeEventListener("keydown", key);
 }
 
 /**
@@ -2301,15 +1908,9 @@ export function highlight(text, q) {
 }
 
 /**
- * A block's muted line while the page's one failure band says why.
- * @param {string} text
- */
-export const failNote = (text) => h("p", { class: "nx-failnote" }, text);
-
-/**
  * One alert for every read a page lost at once (redesign-config-11): the
  * cause once, under the header, with ONE Try again (the Live view control
- * `drive`); the blocks only say they are empty (`failNote`). Hidden while
+ * `drive`); the blocks only say they are empty. Hidden while
  * nothing failed.
  * @param {{drive: Drive}} spec
  */

@@ -1,18 +1,10 @@
 // redesign-kit-1 (3.71.0): the pure halves of the building blocks the
 // Backups, Host, Schedules and Secrets pages brought into the shared
-// ui.js — the segmented toggle group, the sortable table,
-// the hover card placement, the toast's replace rule and the
+// ui.js — the segmented toggle group, the toast's replace rule and the
 // stack colours.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import {
-  chartColour,
-  hueColour,
-  sortValue,
-  tipPlace,
-  toastsToDrop,
-  toggleValue,
-} from "../js/ui.js";
+import { chartColour, hueColour, toastsToDrop, toggleValue } from "../js/ui.js";
 
 test("redesign-kit-1: a toggle group click turns one value on or off; every value on is All", () => {
   let on = new Set();
@@ -27,35 +19,6 @@ test("redesign-kit-1: a toggle group click turns one value on or off; every valu
   const before = new Set(["a"]);
   toggleValue(before, "b", 3);
   assert.deepEqual([...before], ["a"], "the old set is left alone");
-});
-
-test("redesign-kit-1: a sortable header's cells sort numbers as numbers", () => {
-  assert.equal(sortValue("120"), 120);
-  assert.equal(sortValue("Gateway"), "gateway");
-  assert.equal(sortValue(""), "");
-  assert.ok(Number(sortValue("9")) < Number(sortValue("10")));
-});
-
-test("redesign-kit-1: the hover card sits under its element, above it at the foot, inside the screen", () => {
-  const view = { w: 1000, h: 800 };
-  assert.deepEqual(
-    tipPlace({ left: 400, top: 100, bottom: 120, width: 20 }, 200, 80, view),
-    { left: 310, top: 128 },
-  );
-  // No room below: above the element.
-  assert.deepEqual(
-    tipPlace({ left: 400, top: 700, bottom: 720, width: 20 }, 200, 80, view),
-    { left: 310, top: 612 },
-  );
-  // Never past the left or right edge.
-  assert.equal(
-    tipPlace({ left: 0, top: 0, bottom: 10, width: 10 }, 200, 50, view).left,
-    8,
-  );
-  assert.equal(
-    tipPlace({ left: 990, top: 0, bottom: 10, width: 10 }, 200, 50, view).left,
-    792,
-  );
 });
 
 test("redesign-kit-1: a new toast replaces the plain ones, never one still offering Undo", () => {

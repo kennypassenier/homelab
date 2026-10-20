@@ -7,7 +7,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { install, press, pointerDown, shiftClick } from "./support/minidom.mjs";
+import { install } from "./support/minidom.mjs";
 
 const doc = install();
 const ui = await import("../js/ui.js");
@@ -202,26 +202,9 @@ test("redesign-kit-7: segSwitch moves without a change event; sort state is mult
   assert.deepEqual(rememberedSort("kit-bad", [{ key: "a", dir: 1 }]), [
     { key: "a", dir: 1 },
   ]);
-
-  /** @type {unknown[]} */
-  const got = [];
-  const th = ui.sortHead({
-    label: "Size",
-    key: "size",
-    sort: [{ key: "size", dir: 1 }],
-    onSort: (next) => got.push(next),
-    remember: "kit-head",
-    drive: { id: "kit-test-sort", row: "size" },
-  });
-  assert.equal(th.getAttribute("aria-sort"), "ascending");
-  const btn = /** @type {any} */ (th.querySelector("button"));
-  assert.equal(btn.dataset.drive, "kit-test-sort");
-  btn.click();
-  assert.deepEqual(got, [[{ key: "size", dir: -1 }]]);
-  assert.deepEqual(rememberedSort("kit-head"), [{ key: "size", dir: -1 }]);
 });
 
-test("redesign-kit-7: chip, dot, meter, shareBar, failBox, rowKeys, drawer and keyRow are shared blocks", () => {
+test("redesign-kit-7: chip, dot, meter, failBox, drawer and keyRow are shared blocks", () => {
   // kp-themes' badge, status dot and meter (kpa-3, kpa-4).
   const c = ui.chip("!", { tone: "warn", label: "unreadable" });
   assert.equal(c.className, "kp-badge kp-badge--warning");
@@ -262,15 +245,6 @@ test("redesign-kit-7: chip, dot, meter, shareBar, failBox, rowKeys, drawer and k
   assert.ok(m.el.querySelector(".kp-meter__mark"), "the tick is kp's mark");
   m.set({ pct: null });
   assert.equal(m.el.hasAttribute("aria-valuenow"), false, "not measured");
-  const sb = ui.shareBar(41, "41 %", "var(--chart-2)");
-  assert.equal(sb.querySelector(".nx-share__num")?.textContent, "41 %");
-  assert.equal(
-    /** @type {any} */ (sb.querySelector(".kp-meter"))?.style.getPropertyValue(
-      "--kp-value",
-    ),
-    "0.41",
-  );
-  assert.equal(sb.style.getPropertyValue("--kp-meter-fill"), "var(--chart-2)");
 
   let retried = 0;
   const f = ui.failBox(
@@ -286,31 +260,6 @@ test("redesign-kit-7: chip, dot, meter, shareBar, failBox, rowKeys, drawer and k
   assert.match(f.textContent ?? "", /Fix: check the host/);
   /** @type {any} */ (f.querySelector("button")).click();
   assert.equal(retried, 1);
-
-  const list = /** @type {any} */ (doc.createElement("ul"));
-  for (const n of ["a", "b", "c"]) {
-    const li = doc.createElement("li");
-    li.setAttribute("tabindex", "0");
-    li.dataset.n = n;
-    list.append(li);
-  }
-  doc.body.append(list);
-  /** @type {string[]} */
-  const opened = [];
-  const stop = ui.rowKeys(list, "li", (r) => opened.push(r.dataset.n ?? ""));
-  const [a, , cc] = list.querySelectorAll("li");
-  a.focus();
-  press(a, "j");
-  assert.equal(doc.activeElement.dataset.n, "b");
-  press(doc.activeElement, "End");
-  assert.equal(doc.activeElement, cc);
-  press(cc, "k");
-  press(doc.activeElement, "Enter");
-  assert.deepEqual(opened, ["b"]);
-  stop();
-  press(doc.activeElement, "j");
-  assert.equal(doc.activeElement.dataset.n, "b", "stop() stops listening");
-  list.remove();
 
   let closed = 0;
   const d = ui.drawer({
@@ -341,60 +290,6 @@ test("redesign-kit-7: chip, dot, meter, shareBar, failBox, rowKeys, drawer and k
   ]);
   assert.equal(keys.querySelectorAll("kbd").length, 3);
   assert.equal(ui.keysLine, ui.keyRow, "one block, two names");
-});
-
-test("redesign-kit-8: a sortable plain table's headers are Live view controls and sort on several keys, remembered", () => {
-  assert.throws(
-    () =>
-      ui.sortableTable(
-        /** @type {any} */ (doc.createElement("table")),
-        /** @type {any} */ ({}),
-      ),
-    /Live view/,
-  );
-  const t = /** @type {any} */ (
-    dom.h(
-      "table",
-      null,
-      dom.h(
-        "thead",
-        null,
-        dom.h("tr", null, dom.h("th", null, "Name"), dom.h("th", null, "Size")),
-      ),
-      dom.h(
-        "tbody",
-        null,
-        ...[
-          ["b", "2"],
-          ["a", "2"],
-          ["c", "1"],
-        ].map(([n, s]) =>
-          dom.h("tr", null, dom.h("td", null, n), dom.h("td", null, s)),
-        ),
-      ),
-    )
-  );
-  ui.sortableTable(t, {
-    drive: { id: "kit-test-table" },
-    remember: "kit-table",
-  });
-  const [name, size] = t.tHead.rows[0].cells;
-  assert.deepEqual(
-    [name.dataset.drive, name.dataset.driveRow],
-    ["kit-test-table", "name"],
-  );
-  assert.equal(size.dataset.driveRow, "size");
-  size.click();
-  shiftClick(name);
-  const order = () =>
-    t.tBodies[0].children.map((/** @type {any} */ r) => r.textContent);
-  assert.deepEqual(order(), ["c1", "a2", "b2"]);
-  assert.equal(size.dataset.mark, "↑1");
-  assert.equal(name.dataset.mark, "↑2");
-  assert.deepEqual(sortstate.rememberedSort("kit-table"), [
-    { key: "size", dir: 1 },
-    { key: "name", dir: 1 },
-  ]);
 });
 
 test("redesign-kit-9: one element factory: h skips empty attributes, wires on… handlers and flattens children; el and on are gone", () => {
@@ -995,11 +890,4 @@ test("kpa-19: the stepper is kp's wizard steps, the note a kp info alert that re
   n.el.dispatchEvent(new CustomEvent("kp-alert-dismiss", { bubbles: true }));
   assert.equal(localStorage.getItem("kit-note"), "1");
   assert.equal(ui.explainNote("kit-note", ["Words"]), null, "gone for good");
-});
-
-test("kpa-9: the hover card wears kp-themes' tooltip look; placement is ours", () => {
-  const card = ui.hoverCard();
-  assert.match(card.el.className, /\bkp-popover\b.*\bkp-tooltip\b/);
-  assert.equal(card.el.getAttribute("role"), "tooltip");
-  card.stop();
 });

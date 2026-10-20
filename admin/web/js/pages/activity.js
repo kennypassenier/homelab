@@ -788,6 +788,7 @@ function mountNow(body, x) {
     "data-kp-feed": "",
     "data-kp-feed-unit": "operation,operations",
     "data-kp-feed-head": "off",
+    "data-kp-feed-max": "48rem",
     "aria-label": "History as a feed",
     hidden: "",
   });

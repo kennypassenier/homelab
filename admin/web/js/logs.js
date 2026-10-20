@@ -9,31 +9,6 @@ import { formatDateTime } from "./format.js";
  *   line: string}} LogLine
  */
 
-/** The windows a person picks from, seconds. */
-export const SINCE = /** @type {const} */ ([
-  { value: "900", label: "15 min" },
-  { value: "3600", label: "1 hour" },
-  { value: "21600", label: "6 hours" },
-  { value: "86400", label: "24 hours" },
-  { value: "604800", label: "7 days" },
-]);
-
-/** The value of the app choice that means the stack's system journal. */
-export const JOURNAL = "journal";
-
-/**
- * The page's log settings from its query string.
- * @param {URLSearchParams} params
- */
-export function logSettings(params) {
-  /** @type {string} */
-  const since =
-    SINCE.find((s) => s.value === params.get("since"))?.value ?? "3600";
-  const app = params.get("app") ?? "";
-  const q = params.get("q") ?? "";
-  return { since, app, q, follow: params.get("follow") === "1" };
-}
-
 /**
  * The route to ask.
  * @param {string} stack
@@ -85,19 +60,6 @@ export function canonicalLevel(level) {
 }
 
 /**
- * A level as a badge tone.
- * @param {string} level
- * @returns {"ok" | "warn" | "bad" | ""}
- */
-export function levelTone(level) {
-  const l = canonicalLevel(level);
-  if (l === "error" || l === "critical") return "bad";
-  if (l === "warn") return "warn";
-  if (l === "") return "";
-  return "ok";
-}
-
-/**
  * The time of a line to the second: "Sat 3 Oct, 14:43:05" (redesign-final
  * X4: one date format, with seconds since a log line needs them).
  * @param {number} ms unix milliseconds
@@ -105,37 +67,6 @@ export function levelTone(level) {
  */
 export function lineTime(ms, opts = {}) {
   return formatDateTime(ms / 1000, { ...opts, seconds: true });
-}
-
-/**
- * The app choices: every app the stack runs, and its journal.
- * @param {string[]} apps
- */
-export function appChoices(apps) {
-  return [
-    { value: "", label: "Every app and the journal" },
-    ...[...apps].sort().map((a) => ({ value: a, label: a })),
-    { value: JOURNAL, label: "System journal" },
-  ];
-}
-
-/**
- * The table's rows, newest first.
- * @param {LogLine[]} lines
- * @param {import("./format.js").TimeOptions} [opts]
- */
-export function logRows(lines, opts) {
-  return [...lines]
-    .sort((a, b) => b.ts_ms - a.ts_ms)
-    .map((l) => ({
-      ms: l.ts_ms,
-      time: lineTime(l.ts_ms, opts),
-      source: l.source || "—",
-      level: canonicalLevel(l.level) || "—",
-      tone: levelTone(l.level),
-      stream: l.stream,
-      line: l.line,
-    }));
 }
 
 // ── feat-logs-1: the level filter and the copy text every log shares ────
@@ -219,23 +150,6 @@ export function saveLogLevels(levels, store = globalThis.localStorage) {
  * @param {ReadonlySet<string>} chosen
  */
 export const levelShown = (level, chosen) => chosen.has(levelBucket(level));
-
-/**
- * One log line as plain text: `12/10/2026 14:03:07  info  stack  message`,
- * the time in 24 h local time (rule 52).
- * @param {{ts: number, level?: string, source?: string, msg: string}} l
- * @param {import("./format.js").TimeOptions} [opts]
- */
-export function logLineText(l, opts) {
-  const when = formatDateTime(l.ts, { ...opts, seconds: true });
-  return `${when}  ${(l.level || "info").toLowerCase()}  ${l.source || "host"}  ${l.msg}`;
-}
-
-/**
- * Lines as the text Copy puts on the clipboard.
- * @param {{ts: number, level?: string, source?: string, msg: string}[]} lines
- */
-export const logText = (lines) => lines.map((l) => logLineText(l)).join("\n");
 
 /**
  * The lines `GET /data/actions/jobs/{job}/log` answered, whatever shape

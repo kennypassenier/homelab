@@ -1946,7 +1946,9 @@ test("invariants: a running job's log scrolls inside its dialog and never makes 
       .click({ timeout: 5000 });
     await page.waitForTimeout(300);
     await page.locator("#action-dialog #act-run").click();
-    const log = page.locator("#action-dialog .job-log").first();
+    const log = page
+      .locator("#action-dialog .jl-viewer .kp-logviewer__log")
+      .first();
     await log.waitFor({ timeout: 5000 });
     const dialog = page.locator("#action-dialog");
     // kp-themes 10: the dialog glides from its confirm form to the running
@@ -5504,7 +5506,9 @@ test("invariants: a running job's log in Activity scrolls inside its box and nev
         .forEach((d) => /** @type {HTMLDialogElement} */ (d).close()),
     );
     await page.goto(`${BASE}/activity?view=running`);
-    const log = page.locator("#running .ac-job__log").first();
+    const log = page
+      .locator("#running .ac-job__log .kp-logviewer__log")
+      .first();
     await log.waitFor({ state: "attached", timeout: 5000 });
     const card = page.locator("#running");
     const before = await card.boundingBox();
@@ -5512,12 +5516,11 @@ test("invariants: a running job's log in Activity scrolls inside its box and nev
     // Injected and measured inside one task (reading a box lays it out), so
     // the job's next poll cannot redraw the log with its real lines between.
     const grown = await log.evaluate((el) => {
-      el.hidden = false;
-      el.textContent += Array.from(
-        { length: 400 },
-        (_, i) =>
-          `12:00:${String(i % 60).padStart(2, "0")}  step ${i} of a long deploy`,
-      ).join("\n");
+      for (let i = 0; i < 400; i += 1) {
+        const line = document.createElement("div");
+        line.textContent = `12:00:${String(i % 60).padStart(2, "0")}  step ${i} of a long deploy`;
+        el.append(line);
+      }
       return {
         height: el.closest("#running")?.getBoundingClientRect().height ?? 0,
         scrolls: el.scrollHeight > el.clientHeight + 1,
@@ -5537,7 +5540,7 @@ test("invariants: a running job's log in Activity scrolls inside its box and nev
       .locator("#running .ac-job button", { hasText: "Open the log" })
       .first()
       .click();
-    await page.locator("dialog#job-dialog[open] .job-log").waitFor({
+    await page.locator("dialog#job-dialog[open] .jl-viewer").waitFor({
       state: "attached",
       timeout: 3000,
     });

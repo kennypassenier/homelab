@@ -37,7 +37,7 @@ import { declare, drivable } from "../drivable.js";
 import { diffBlocks } from "../editui.js";
 import { formatDateTime, humanDuration } from "../format.js";
 import { inboxNow } from "../inboxlist.js";
-import { logLineEl } from "../jobpanel.js";
+import { jobLogViewer } from "../joblog.js";
 import { feedUpdates } from "../inboxsources.js";
 import { openPinRollback } from "../pinupdate.js";
 import { planView } from "../plan.js";
@@ -68,7 +68,6 @@ import {
   updatesBody,
   whoNotices,
 } from "../updateflow.js";
-import { attachLogs } from "/static/kp/js/log.js";
 import { attachAckGates } from "/static/kp/js/ack-gate.js";
 import { attachDataTables } from "/static/kp/js/datatable.js";
 import { attachIdmarks } from "/static/kp/js/idmark.js";
@@ -563,16 +562,16 @@ export function mount(root, scope) {
     stepsBox,
   );
   const detachRun = [attachPipelines(runList), attachSteplists(runList)];
-  // The kp log component, the same lines the job panel draws (gap-kplog-1).
-  const log = h("div", {
-    class: "kp-log uf-log",
-    role: "log",
-    "aria-live": "polite",
-    "aria-label": "What the host did",
-    // A log streams: a line is appended, never news of its own.
-    "data-kp-arrive": "none",
+  // kp's log viewer, the same builder as the job panel's (feat-kpadopt-2).
+  const jobLog = jobLogViewer(0, {
+    whole: false,
+    tools: "search,wrap,time,level,copy",
+    label: "What the host did",
+    height: "12rem",
+    hint: "No lines yet. Lines appear here as the host works.",
   });
-  runCard.body.append(runList, log);
+  jobLog.element.classList.add("uf-log");
+  runCard.body.append(runList, jobLog.element);
 
   // ---- 6 · Done --------------------------------------------------------
   const doneCard = h("section", {
@@ -1233,10 +1232,7 @@ export function mount(root, scope) {
       );
       attachSteplists(stepsBox);
     }
-    log.replaceChildren(
-      ...(act.logs.get(j.job) ?? []).slice(-14).map(logLineEl),
-    );
-    attachLogs(log);
+    jobLog.bind(j.job);
     if (done) {
       if (logsFor !== j.job) {
         logsFor = j.job;
@@ -1532,6 +1528,7 @@ export function mount(root, scope) {
     detachMarks();
     detachGates();
     detachDeltas();
+    jobLog.stop();
     for (const f of detachRun) f();
   };
 }

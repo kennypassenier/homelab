@@ -15,15 +15,7 @@ import {
   topDirRows,
   versionText,
 } from "../js/host.js";
-import {
-  JOURNAL,
-  appChoices,
-  levelTone,
-  lineTime,
-  logRows,
-  logSettings,
-  logsUrl,
-} from "../js/logs.js";
+import { lineTime, logsUrl } from "../js/logs.js";
 import {
   aboutStack,
   stackChecks,
@@ -287,49 +279,12 @@ test("a question shows what each answer does and how long the host waits", () =>
   );
 });
 
-test("the logs tab reads its settings from the address and asks the server", () => {
-  const s = logSettings(
-    new URLSearchParams("app=sonarr&since=86400&q=err&follow=1"),
-  );
-  assert.deepEqual(s, {
-    since: "86400",
-    app: "sonarr",
-    q: "err",
-    follow: true,
-  });
-  assert.deepEqual(logSettings(new URLSearchParams("since=5")), {
-    since: "3600",
-    app: "",
-    q: "",
-    follow: false,
-  });
+test("the logs tab asks the server for its window", () => {
   assert.equal(
-    logsUrl("media", s, 200),
+    logsUrl("media", { since: "86400", app: "sonarr", q: "err" }, 200),
     "/data/logs?stack=media&since=86400&limit=200&app=sonarr&q=err",
   );
-  assert.deepEqual(
-    appChoices(["sonarr", "bazarr"]).map((c) => c.value),
-    ["", "bazarr", "sonarr", JOURNAL],
-  );
-  assert.equal(levelTone("error"), "bad");
-  assert.equal(levelTone("warning"), "warn");
-  assert.equal(levelTone("informational"), "ok");
-  assert.equal(levelTone(""), "");
   assert.equal(lineTime(1790606585948, UTC), "28/09/2026 14:43:05");
-  const rows = logRows(
-    [
-      { ts_ms: 1000, source: "a", stream: "stdout", level: "", line: "old" },
-      { ts_ms: 2000, source: "", stream: "", level: "error", line: "new" },
-    ],
-    UTC,
-  );
-  assert.deepEqual(
-    rows.map((r) => [r.line, r.source, r.level, r.tone]),
-    [
-      ["new", "—", "error", "bad"],
-      ["old", "a", "—", ""],
-    ],
-  );
 });
 
 test("a stack's tabs keep only what is about that stack", () => {

@@ -6,7 +6,6 @@ import { reopenDelay } from "../js/store.js";
 import {
   LOG_LEVELS_KEY,
   levelBucket,
-  logText,
   readLogLevels,
   saveLogLevels,
   wholeLogLines,
@@ -53,14 +52,7 @@ test("the chosen levels are remembered, and a broken memory gives the defaults",
   assert.deepEqual([...readLogLevels(store)], ["info", "warning", "critical"]);
 });
 
-test("Copy writes one line per log line, and the whole-log answer has two shapes", () => {
-  const text = logText([
-    { ts: 1790000000, level: "warn", source: "gw", msg: "slow" },
-  ]);
-  assert.match(
-    text,
-    /^\d\d\/\d\d\/\d{4} \d\d:\d\d:\d\d {2}warn {2}gw {2}slow$/,
-  );
+test("the whole-log answer has two shapes", () => {
   assert.equal(wholeLogLines({ lines: [1] })?.length, 1);
   assert.equal(wholeLogLines([1, 2])?.length, 2);
   assert.equal(wholeLogLines({ nope: 1 }), null);

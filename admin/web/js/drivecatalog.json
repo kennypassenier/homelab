@@ -2433,9 +2433,9 @@
     {
       "id": "job-log-level",
       "page": "activity",
-      "what": "show or hide a job log's lines of one level",
+      "what": "choose the lowest level a job log shows (debug, info, warning or error)",
       "opens": "view",
-      "row": "<job>:<debug|info|warning|critical>",
+      "row": "<job>",
       "href": "/activity",
       "was": [],
       "shows": "in a job's log",

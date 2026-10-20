@@ -653,32 +653,29 @@ p:has(> .measured:only-child):first-child {
   align-content: start;
   box-sizing: border-box;
 }
-/* fix-371-1 (Kenny, 2026-10-04: "the job log as a textarea showing at
-   least 10 lines"): kp's `.kp-log` is the component, so the ask becomes a
-   floor on its own height, not a different element — ten of its own
-   lines (`1lh`, its font and line-height) plus its padding and border,
-   from the first frame, empty or loading too; jobpanel.js never hides
-   the box, it shows one placeholder row inside it instead. */
-.job-log {
-  min-block-size: calc(
-    10 * 1lh + 2 * var(--kp-log-padding, var(--kp-space-sm, 0.5rem)) + 2px
-  );
-  block-size: 14rem;
-  overflow: auto;
-  overflow-wrap: anywhere;
-  /* The floor is room, not spacing: kp's log is a grid, and its rows
-     stretched to share the ten-line floor (five lines stood 38 px apart). */
-  align-content: start;
+/* The job's log is kp's log viewer (joblog.js): a fixed height in every
+   state, the "whole log" switch and its note on two shared tracks under it. */
+.jl {
+  display: grid;
+  gap: var(--kp-space-xs, 4px);
+  min-inline-size: 0;
+}
+.jl-viewer {
+  min-inline-size: 0;
+}
+.jl-foot {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: var(--kp-space-md, 12px);
+}
+.jl-note {
+  min-inline-size: 0;
+  font-size: var(--kp-text-xs);
 }
 .job-log-wrap summary {
   cursor: pointer;
   margin-block: 8px 4px;
-}
-/* The placeholder row is not a `.kp-log__line` (never counted as a line),
-   but it sits in the same four-column grid, so it spans it on its own. */
-.job-log-empty {
-  grid-column: 1 / -1;
-  margin: 4px 0;
 }
 /* feat-stacks-5: the batch bar and progress. */
 .select-col {
@@ -907,13 +904,6 @@ tr.unread td:first-child {
    the log keeping its own box. */
 .job-steps .kp-steplist {
   min-inline-size: 0;
-}
-/* On a phone a log line's message gets a row of its own. */
-@media (max-width: 520px) {
-  .job-log .kp-log__message {
-    grid-column: 1 / -1;
-    padding-inline-start: 1em;
-  }
 }
 
 /* Milestone edit: the plan, the diff, the edit forms, the matrix. */

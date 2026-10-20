@@ -135,25 +135,12 @@
   overflow: hidden;
   text-overflow: ellipsis;
 }
-/* The log tail scrolls inside its own fixed box: a job that printed two
-   lines and one that printed five hundred take the same room, and the
-   card never grows as lines arrive (invariant 47). */
+/* The log tail is kp's log viewer in a fixed height: a job that printed two
+   lines and one that printed five hundred take the same room, and the card
+   never grows as lines arrive (invariant 47). */
 .ac-job__log {
   grid-column: 1 / -1;
-  margin: 0;
   min-inline-size: 0;
-  padding: 10px 12px;
-  block-size: 6.6em;
-  overflow: auto;
-  background: var(--ac-soft);
-  border-radius: calc(var(--radius, 0.5rem) * 0.6);
-  font-size: 0.8125rem;
-  line-height: 1.6;
-  color: var(--muted-foreground);
-}
-.ac-job__log[hidden] {
-  display: block;
-  visibility: hidden;
 }
 
 /* ── Timeline, grid and History: the kp parts, laid out on shared tracks ─ */
@@ -513,38 +500,6 @@
   }
   .con-shell select {
     grid-column: 1 / -1;
-  }
-}
-
-/* ── Log tools (feat-logs-1): the level filter, Copy and the whole log,
-   shared by the job panel, Activity's running jobs and the drawer. ─── */
-.log-tools {
-  display: grid;
-  grid-template-columns: auto auto minmax(0, 1fr);
-  align-items: center;
-  gap: var(--kp-space-xs, 4px) var(--kp-space-md, 12px);
-  margin-block: var(--kp-space-xs, 4px);
-}
-.log-tools__levels,
-.log-tools__acts {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--kp-space-xs, 4px);
-}
-.log-tools__level[aria-pressed="true"] {
-  background: var(--accent);
-  color: var(--accent-foreground);
-}
-.log-tools__note {
-  min-inline-size: 0;
-  font-size: var(--kp-text-xs);
-}
-.ac-job__tools {
-  grid-column: 1 / -1;
-}
-@media (max-width: 40rem) {
-  .log-tools {
-    grid-template-columns: minmax(0, 1fr);
   }
 }
 

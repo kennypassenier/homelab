@@ -72,7 +72,6 @@ import {
   remaining,
   stepText,
 } from "../jobs.js";
-import { levelShown } from "../logs.js";
 import { narrowBar } from "../narrowbar.js";
 import { cover } from "../statecover.js";
 import { current, subscribe } from "../store.js";
@@ -87,7 +86,8 @@ import {
   segSwitch,
   skeletonLines,
 } from "../ui.js";
-import { logLineEl, mountLogTools, openJobDialog } from "../jobpanel.js";
+import { openJobDialog } from "../jobpanel.js";
+import { jobLogViewer } from "../joblog.js";
 import { setParams } from "../urlstate.js";
 import { tabRow } from "../dom.js";
 import { mountJobsTable } from "./jobs.js";
@@ -112,7 +112,6 @@ import {
 import { attachSteplists } from "/static/kp/js/steplist.js";
 import { attachTicks, tickTo } from "/static/kp/js/tick.js";
 import { attachToolbars } from "/static/kp/js/toolbar.js";
-import { attachLogs } from "/static/kp/js/log.js";
 import { leave } from "/static/kp/js/motion.js";
 
 // Live view (invariant 39): every control on this page that opens a dialog
@@ -1041,22 +1040,14 @@ function mountNow(body, x) {
       role: "list",
       "aria-label": "Steps",
     });
-    // feat-logs-1: kp-themes' log, as the job panel draws it.
-    const log = h("div", {
-      class: "kp-log ac-job__log",
-      role: "log",
-      "aria-live": "polite",
-      "aria-label": "The newest lines of this job",
-      "data-kp-arrive": "none",
-    });
-    const tools = mountLogTools(id, {
+    // feat-kpadopt-2: kp's log viewer, the job panel's own builder.
+    const jobLog = jobLogViewer(id, {
       whole: false,
-      onChange: () => {
-        shownLines = -1;
-        update();
-      },
+      tools: "search,wrap,time,level,copy",
+      label: "The newest lines of this job",
+      height: "11rem",
     });
-    tools.el.classList.add("ac-job__tools");
+    jobLog.element.classList.add("ac-job__log");
     const cancel = drivable(
       h(
         "button",
@@ -1097,10 +1088,8 @@ function mountNow(body, x) {
       h("div", { class: "ac-job__main" }, title, facts),
       h("div", { class: "ac-job__acts" }, cancel, openLog),
       steps,
-      tools.el,
-      log,
+      jobLog.element,
     );
-    let shownLines = 0;
     const update = () => {
       const j = act.jobs.find((x) => x.job === id);
       if (!j) return;
@@ -1186,23 +1175,12 @@ function mountNow(body, x) {
         if (steps.firstElementChild !== whole || steps.childElementCount > 1)
           steps.replaceChildren(whole);
       }
-      const ls = act.logs.get(id) ?? [];
-      if (ls.length !== shownLines) {
-        const near = log.scrollHeight - log.scrollTop - log.clientHeight < 24;
-        const shown = ls.filter((l) => levelShown(l.level, tools.levels()));
-        tools.setHidden(ls.length - shown.length);
-        log.replaceChildren(...shown.slice(-200).map(logLineEl));
-        attachLogs(log);
-        log.hidden = ls.length === 0;
-        shownLines = ls.length;
-        if (near || shownLines === ls.length) log.scrollTop = log.scrollHeight;
-      }
     };
     update();
     return {
       el,
       update,
-      stop: () => tools.stop(),
+      stop: () => jobLog.stop(),
     };
   };
 

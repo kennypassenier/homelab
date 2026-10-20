@@ -656,7 +656,8 @@ export function mountChrome(where, ctx) {
   attachThemePickers(themes);
   // The themes' pointer effects (the dark theme's cursor glow) follow the
   // mouse only once attached (Kenny, 2026-09-29 05:53).
-  attachEffects(document);
+  const effects = attachEffects(document);
+  watchEffectMarks(effects);
   // feat-shell-2: the rows are written per query by intent.js's ranking,
   // so kp's own filter keeps every row it is given.
   attachPalettes(document, { hotkey: "k", sheetKey: "?", match: () => true });
@@ -774,4 +775,36 @@ export function mountChrome(where, ctx) {
     ctx.navigate(to);
   });
   return { repaint: () => tabbar.paint() };
+}
+
+/**
+ * feat-kp11demo-14.5: pages are drawn after the first paint and `attachEffects`
+ * only reads what exists when it runs, so every page title and exact counter
+ * a page draws later is marked here and handed to the effects once. A title
+ * with nested elements (a freshness chip, a sub-title) is left alone: the
+ * headline routines rewrite the text node, which would flatten them. Page
+ * titles reveal once per session per page (kp's default), a counter counts
+ * up to the number it already says.
+ * @param {{observe: (el: Element) => void}} effects
+ */
+function watchEffectMarks(effects) {
+  const page = document.getElementById("page");
+  if (!page) return;
+  /** @param {ParentNode} scope */
+  const scan = (scope) => {
+    for (const t of scope.querySelectorAll(
+      ".kp-page-header__title:not([data-kp-reveal])",
+    )) {
+      if (t.childElementCount) continue;
+      t.setAttribute("data-kp-reveal", "headline");
+      effects.observe(t);
+    }
+    for (const c of scope.querySelectorAll("[data-kp-count]"))
+      effects.observe(c);
+  };
+  scan(page);
+  new MutationObserver((records) => {
+    for (const r of records)
+      for (const n of r.addedNodes) if (n instanceof Element) scan(n);
+  }).observe(page, { childList: true, subtree: true });
 }

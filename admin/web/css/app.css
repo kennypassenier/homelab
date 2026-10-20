@@ -826,6 +826,14 @@ tr.unread td:first-child {
 .job-bar {
   margin: 0;
 }
+.job-progress-box {
+  display: grid;
+  gap: var(--kp-space-xs, 0.25rem);
+  max-inline-size: 40rem;
+}
+.job-progress__note {
+  margin: 0;
+}
 .job-cols {
   display: grid;
   grid-template-columns: minmax(0, 3fr) minmax(16rem, 2fr);

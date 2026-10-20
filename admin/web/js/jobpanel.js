@@ -6,7 +6,7 @@
 
 import { act, actionLabel, onAct } from "./act.js";
 import { badge, labeledCliCommand, openDialog } from "./actui.js";
-import { fetchReport, h } from "./dom.js";
+import { fetchReport, h, progressBar, setProgress } from "./dom.js";
 import { formatDateTime, humanDuration } from "./format.js";
 import {
   elapsedS,
@@ -87,6 +87,17 @@ export function mountJobPanel(jobId, opts = {}) {
       h("dd", { class: "job-fact" }, medianText, " ", delta),
     ),
   );
+  // How far along: by steps when the host counts them, else by the time
+  // earlier runs took; with neither (a first run) the bar is indeterminate
+  // and the line under it says why, never a 0 % that looks stuck.
+  const progress = progressBar("How far the job is", null, "job-progress");
+  const progressNote = h("p", { class: "measured job-progress__note" });
+  const progressBox = h(
+    "div",
+    { class: "job-progress-box", hidden: "" },
+    progress,
+    progressNote,
+  );
   const bar = h("figure", { class: "kp-stackbar job-bar" });
   const stepsHost = h("div", {
     class: "job-steps",
@@ -135,6 +146,7 @@ export function mountJobPanel(jobId, opts = {}) {
     ),
     restarts,
     figures,
+    progressBox,
     bar,
     h("div", { class: "job-cols" }, stepsHost, discHost),
     problems,
@@ -322,6 +334,13 @@ export function mountJobPanel(jobId, opts = {}) {
       delta.className = `kp-badge kp-badge--${diff > 0 ? "warning" : "success"}`;
       delta.textContent = `${humanDuration(Math.abs(diff))} ${diff > 0 ? "slower" : "faster"}`;
     }
+
+    progressBox.hidden = ended;
+    setProgress(progress, v.percent);
+    progressNote.textContent =
+      v.percent == null
+        ? "Working. There is no earlier run to estimate from yet, so the bar only shows that it is busy."
+        : `${v.percent} % done, by ${p?.m ? "steps" : "the time earlier runs took"}.`;
 
     // Where the time went: one bar, split by step.
     /** @type {{key: string, label: string, value: number, tone?: "destructive"}[]} */

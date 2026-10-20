@@ -179,6 +179,9 @@ export function startTour(i = 0) {
     {
       start: i,
       remember: TOUR_NAME,
+      // The tour starts from the Help panel or on a first visit, where
+      // nothing holds focus: it ends on the bar's "?" that opens Help.
+      returnFocus: document.querySelector(".help-button"),
       // Live view finds the card's buttons by name.
       decorate: (part, info) => void dialogControl(part, info.kind),
     },

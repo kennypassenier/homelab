@@ -607,10 +607,10 @@ export function mount(root, opts = {}) {
   /** @param {string} s @param {import("../secretsview.js").Declared} d */
   function keysHtml(s, d) {
     const rows = secretRows(s, d);
-    return `<div class="kp-formgrid sx-keys st-lines" data-kp-formgrid-label="wide" data-kp-formgrid-lines="lines" style="--kp-secret-min: 9rem">${rows
+    return `<div class="kp-formgrid sx-keys st-lines" data-kp-anchors="rows" data-kp-formgrid-label="wide" data-kp-formgrid-lines="lines" style="--kp-secret-min: 9rem">${rows
       .map(
         (r, i) =>
-          `<div class="kp-formgrid__row" data-sx-row="${i}" data-key="${esc(r.key)}"><div class="kp-formgrid__label"><span class="sx-what"><span class="kp-idmark kp-idmark--sm" data-kp-idmark="${esc(r.name)}" aria-hidden="true"></span><b>${esc(r.name)}</b></span><small>${esc(r.note)}</small></div><div class="kp-formgrid__control"><div class="kp-secret" data-kp-secret data-kp-secret-ttl="30" data-kp-secret-mask="12" data-kp-secret-label="${esc(s)}/${esc(r.name)}" data-sx-i="${i}"></div></div><p class="kp-formgrid__value" data-audit></p><div class="kp-formgrid__actions"><button type="button" class="kp-button kp-button--sm" data-sx-change="${i}" title="Stage a new value for this secret">Change…</button></div></div>`,
+          `<div class="kp-formgrid__row" data-sx-row="${i}" data-key="${esc(r.key)}" data-kp-anchor="${esc(r.key)}" data-kp-anchor-label="${esc(r.name)}"><div class="kp-formgrid__label"><span class="sx-what"><span class="kp-idmark kp-idmark--sm" data-kp-idmark="${esc(r.name)}" aria-hidden="true"></span><b>${esc(r.name)}</b></span><small>${esc(r.note)}</small></div><div class="kp-formgrid__control"><div class="kp-secret" data-kp-secret data-kp-secret-ttl="30" data-kp-secret-mask="12" data-kp-secret-label="${esc(s)}/${esc(r.name)}" data-sx-i="${i}"></div></div><p class="kp-formgrid__value" data-audit></p><div class="kp-formgrid__actions"><button type="button" class="kp-button kp-button--sm" data-sx-change="${i}" title="Stage a new value for this secret">Change…</button></div></div>`,
       )
       .join("")}</div>`;
   }

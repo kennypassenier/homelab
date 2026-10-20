@@ -26,7 +26,7 @@ import { attachDisabledReasons } from "/static/kp/js/reason.js";
 import { declare, declareField, drivable } from "../drivable.js";
 import { shellResult, shellTargets } from "../parity.js";
 import { current, subscribe } from "../store.js";
-import { ensureStyle, pageHeader } from "../ui.js";
+import { ensureStyle, pageHeader, toast } from "../ui.js";
 import { onPageKey } from "../shortcuts.js";
 import { setParams } from "../urlstate.js";
 import { mountHostLog } from "./log.js";
@@ -500,17 +500,25 @@ export function mount(root) {
     const job = /** @type {number} */ (r.body.job);
     /** @type {(() => void) | null} */
     let stop = null;
-    return {
+    /** @type {import("/static/kp/js/console.js").ConsoleJob} */
+    const consoleJob = {
       update: (handler) => {
         const paint = () => {
           const j = act.jobs.find((x) => x.job === job);
           if (!j) return handler({ state: "queued" });
           const res = shellResult(j);
-          if (!res.done)
+          if (!res.done) {
+            // The host cancels only a job still in the queue; once it runs,
+            // Cancel is withdrawn instead of offered and refused (WP-11
+            // lists a running exec's cancel as a backend need).
+            if (j.state !== "queued") consoleJob.cancel = undefined;
             return handler({
               state: j.state === "queued" ? "queued" : "running",
             });
+          }
           stop?.();
+          if (j.state === "refused" && /^cancelled by /.test(j.message ?? ""))
+            return handler({ state: "cancelled" });
           handler({
             state: res.ok ? "ok" : "failed",
             ...(res.exit != null ? { code: res.exit } : {}),
@@ -528,9 +536,12 @@ export function mount(root) {
           `/data/actions/jobs/${job}/cancel`,
           {},
           "cancel the command",
-        );
+        ).then((r) => {
+          if (!r.ok) toast(`Could not cancel: ${r.error.why}`);
+        });
       },
     };
+    return consoleJob;
   });
   consoleEl.addEventListener(CONSOLE_RETRY_EVENT, () => fillTargets());
   fillTargets();

@@ -293,20 +293,6 @@
   display: none;
 }
 
-/* The undo window in days (js/longcountdown.js, gap 124): a name and the
-   time left on one grid, like kp's countdown name over its digits. */
-.uf-clock__words {
-  display: grid;
-  gap: var(--kp-space-xs, 0.25rem);
-  margin: 0;
-}
-.uf-clock__name {
-  color: var(--muted-foreground);
-}
-.uf-clock__time {
-  font-variant-numeric: tabular-nums;
-  font-size: var(--kp-text-lg, 1.25rem);
-}
 /* A major version's release notes, plain text in kp's code block, inside its gate. */
 .uf-notes {
   margin-block: var(--kp-space-sm, 0.5rem) 0;

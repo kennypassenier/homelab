@@ -2801,3 +2801,19 @@ details.nx-card--fold[open] > summary::before {
 .boot-stage {
   min-block-size: 24rem;
 }
+
+/* A time left in days (js/longcountdown.js, gap 124), on the Update flow's undo
+   window and the Schedules hero: a name and the time left on one grid, like
+   kp's countdown name over its digits. */
+.uf-clock__words {
+  display: grid;
+  gap: var(--kp-space-xs, 0.25rem);
+  margin: 0;
+}
+.uf-clock__name {
+  color: var(--muted-foreground);
+}
+.uf-clock__time {
+  font-variant-numeric: tabular-nums;
+  font-size: var(--kp-text-lg, 1.25rem);
+}

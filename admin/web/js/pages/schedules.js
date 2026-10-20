@@ -21,6 +21,7 @@ import { schedulableActions } from "../actionforms.js";
 import { agoEl, setAgo } from "../ago.js";
 import { refusalCallout } from "../actui.js";
 import { fetchJson, h, patchKeyed, tableBlock } from "../dom.js";
+import { longCountdown } from "../longcountdown.js";
 import { declare, declareField, drivable } from "../drivable.js";
 import { openJobDialog } from "../jobpanel.js";
 import {
@@ -63,11 +64,7 @@ import { registerShortcuts } from "/static/kp/js/shortcuts.js";
 import { GROUP_SCHEDULES, noDialog, unlessDialog } from "../shortcuts.js";
 import { attachCardStates, setCardState } from "/static/kp/js/card-state.js";
 import { openConfirmation } from "/static/kp/js/components.js";
-import {
-  COUNTDOWN_END_EVENT,
-  attachCountdowns,
-  countdownOf,
-} from "/static/kp/js/countdown.js";
+import { COUNTDOWN_END_EVENT } from "/static/kp/js/countdown.js";
 import { attachDataTables, dataTable } from "/static/kp/js/datatable.js";
 import {
   GANTT_OPEN_EVENT,
@@ -395,13 +392,11 @@ export function mount(root, opts = {}) {
   });
 
   // ── 2 · the next run ──
-  const countdown = h("div", {
-    class: "kp-countdown",
-    "data-kp-countdown": "1:00:00",
-    "data-kp-countdown-name": "Next run in",
-    "data-kp-countdown-controls": "none",
-    id: "sched-countdown",
-  });
+  // gap 124: more than a day away reads in days (js/longcountdown.js), the
+  // last day is kp's own countdown again.
+  const countdown = h("div", { class: "sch-clock", id: "sched-countdown" });
+  /** @type {{stop: () => void} | null} */
+  let clockNow = null;
   const heroTitle = h("b", { id: "sched-hero-title" });
   const heroWhen = h("span", { id: "sched-hero-when" });
   const heroNote = h("p", {
@@ -748,7 +743,6 @@ export function mount(root, opts = {}) {
       },
     }),
     attachCardStates(root),
-    attachCountdowns(root),
     attachRuns(root),
     attachMasterDetails(editCard.el, { history: false }),
     attachDataTables(tableCard.el),
@@ -886,12 +880,14 @@ export function mount(root, opts = {}) {
     const s = next.schedule;
     heroTitle.textContent = titleOf(s);
     heroWhen.textContent = `${withWeekday(next.next_run, zone())} · ${cadenceWords(s.when)}`;
-    const clock = countdownOf(countdown);
-    const left = Math.round(next.next_run - now());
-    if (left > 0) {
-      clock?.reset(left);
-      clock?.start();
-    } else clock?.reset(1);
+    clockNow?.stop();
+    const clock = longCountdown(
+      Math.max(next.next_run, now() + 1) * 1000,
+      "Next run in",
+      { now: () => now() * 1000 },
+    );
+    clockNow = clock;
+    countdown.replaceChildren(clock.el);
     setRuns(
       thenEl,
       runsWithClash(
@@ -1963,6 +1959,7 @@ export function mount(root, opts = {}) {
     offJobs();
     offStore();
     window.clearTimeout(heroTimer);
+    clockNow?.stop();
     document.removeEventListener("keydown", onSpace);
     stopKeys();
     form?.destroy();

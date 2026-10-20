@@ -283,9 +283,13 @@ export function settingsTab(panel, params) {
     // and opens/acts on the row tables' rows.
     unregister();
     unregister = register(`stack-edit:${stack}`, {
+      // The Files card is a plain section (kp's master-detail), always open:
+      // there is nothing to unfold, so the Live view step only brings it
+      // into view.
       openRaw: () => {
-        const d = panel.querySelector("#raw-editor");
-        if (d instanceof HTMLDetailsElement) d.open = true;
+        panel
+          .querySelector("#raw-editor")
+          ?.scrollIntoView({ block: "start", behavior: "instant" });
       },
       // A card's review is its unsaved bar's Save; the two add forms keep
       // their own button.

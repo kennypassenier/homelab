@@ -418,7 +418,7 @@ export function mount(root) {
         type: "button",
         class: "kp-button nr-col-btn",
         title:
-          "Send one test push to the phone now, through the route real notices use",
+          "Send one test push to the phone now, through the route real notices use; it goes out even while pushes are off or held, and the Inbox does not keep it",
       },
       "Send test push",
     ),
@@ -529,11 +529,7 @@ export function mount(root) {
             "nr-test-l",
             "Test push",
             [],
-            [
-              hint(
-                "Sends one push to your phone now, to show that pushes arrive. It goes out even while pushes are off or held; the Inbox does not keep it.",
-              ),
-            ],
+            [hint("Sends one push now, to show that pushes arrive.")],
             [testPush],
           ),
         ),

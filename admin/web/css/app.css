@@ -956,6 +956,19 @@ tr.unread td:first-child {
   grid-area: action;
   align-self: start;
 }
+/* A phone: the action goes under the sentence, which keeps the whole width. */
+@media (max-width: 40rem) {
+  .edit-block__head {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-areas:
+      "title"
+      "desc"
+      "action";
+  }
+  .edit-block__action {
+    justify-self: start;
+  }
+}
 /* The restart order: handle | number | unit | Earlier Later, on shared tracks. */
 .rs-order > li {
   display: grid;
@@ -986,6 +999,16 @@ tr.unread td:first-child {
   display: block;
   color: var(--muted-foreground);
   font-size: 0.8em;
+}
+/* A phone: Rename and Delete stand on two lines instead of running off the card. */
+.edit-files .kp-formgrid__buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--kp-space-sm, 0.5rem);
+}
+/* The stacked rows of the edit cards keep a label word whole ("Destination"). */
+.edit-card td::before {
+  overflow-wrap: normal;
 }
 .edit-files__tools {
   display: grid;

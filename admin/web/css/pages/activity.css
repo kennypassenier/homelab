@@ -546,8 +546,8 @@
   min-inline-size: 0;
 }
 .con-chips {
-  display: inline-grid;
-  grid-auto-flow: column;
+  display: flex;
+  flex-wrap: wrap;
   gap: var(--kp-space-xs, 0.25rem);
 }
 /* Every row's action stands in the one actions track and fills it (one role,
@@ -561,4 +561,15 @@
 }
 .con-pane .kp-console__output {
   white-space: pre-wrap;
+}
+/* A phone: a command's four tools share the block's width instead of
+   standing on three tracks as wide as their words (kp-gaps line 132). */
+@media (max-width: 40rem) {
+  .con-pane .kp-console__tools {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+  .con-pane .kp-console__tool {
+    white-space: normal;
+    min-inline-size: 0;
+  }
 }

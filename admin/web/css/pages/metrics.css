@@ -178,6 +178,17 @@ main.mk-page > .mk-failed:empty {
   gap: var(--kp-space-md, 1rem);
   padding-block: var(--kp-space-sm, 0.5rem);
 }
+/* On a phone the table scrolls sideways and its open row is as wide as the table:
+   the detail stays as wide as the window on it and does not scroll away. */
+[data-kp-remember="metrics-drives"] .kp-table-wrap {
+  container-type: inline-size;
+}
+[data-kp-remember="metrics-drives"] .mk-drive-detail {
+  position: sticky;
+  inset-inline-start: var(--kp-space-md, 1rem);
+  inline-size: calc(100cqw - 2 * var(--kp-space-md, 1rem));
+  box-sizing: border-box;
+}
 .mk-drive-detail__state {
   margin: 0;
   font-size: var(--kp-text-sm);

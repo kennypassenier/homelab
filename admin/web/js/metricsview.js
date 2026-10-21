@@ -51,7 +51,7 @@ export const HOST_SECTIONS = [
         key: "mem",
         panel: "Memory used",
         title: "Memory used",
-        desc: "RAM in use by the host and every guest; the dashed line is what the stacks are promised.",
+        desc: "RAM in use by the host and every guest; the dashed line is what the stacks are promised, the dotted one all the RAM the host has.",
         span: 1,
         unit: "bytes",
         now: "first",

@@ -48,8 +48,12 @@ import {
  * @typedef {"percent" | "bytes" | "rate" | "celsius" | "count" | "flag"} Unit
  * @typedef {{label: string, series: Series[], unit?: Unit, from: number,
  *   to: number, height?: number, annotations?: Annotation[],
- *   threshold?: number, yMax?: number, stacked?: boolean, key?: string,
+ *   threshold?: number | number[], yMax?: number, stacked?: boolean,
+ *   columns?: boolean, key?: string,
  *   typical?: boolean}} ChartSpec
+ *   `threshold`: a dashed alarm line, or several (the first is the alarm,
+ *   the others are finer and dotted); `columns`: one column per reading, a
+ *   count per interval (stacked ones stand on each other).
  *   `key`: the chart's name for Live view (its card), `label` otherwise;
  *   `typical`: a dashed line at each source's typical level and a ring on
  *   every run of six readings on one side of it (kp's `median` and `runs`)
@@ -170,6 +174,7 @@ export const chartData = (opt) => ({
     points: s.points.map(([t, v]) => [t, v]),
     colour: s.colour,
     total: s.n,
+    ...(opt.columns ? { shape: /** @type {const} */ ("columns") } : {}),
   })),
   events: (opt.annotations ?? []).map(toKpEvent),
   kinds: EVENT_KINDS,

@@ -1047,7 +1047,11 @@ export function mount(root, ctx) {
         const threshold =
           c.threshold === "committed"
             ? host?.ram_committed_mb
-              ? host.ram_committed_mb * 1048576
+              ? [
+                  host.ram_committed_mb * 1048576,
+                  // The second, finer line: all the RAM the host has.
+                  ...(host.ram_total_mb ? [host.ram_total_mb * 1048576] : []),
+                ]
               : undefined
             : c.threshold === "allowance"
               ? st?.ram_max_mb
@@ -2501,6 +2505,7 @@ export function mount(root, ctx) {
           label: "Requests over time",
           unit: "count",
           stacked: true,
+          columns: true,
           series: classes[0]?.points.length
             ? classes
             : [{ label: "Requests", points: [] }],

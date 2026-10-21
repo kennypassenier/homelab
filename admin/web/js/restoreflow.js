@@ -9,7 +9,7 @@ import { formatClock, formatDateTime, formatDay } from "./format.js";
 
 /**
  * @typedef {{id: string, short_id: string, time: number,
- *   size_bytes?: number | null}} Snap
+ *   size_bytes?: number | null, file_count?: number | null}} Snap
  * @typedef {{key: string, label: string, snap: Snap | null,
  *   missed: boolean}} Night
  */

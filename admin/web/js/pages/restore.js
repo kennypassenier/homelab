@@ -136,6 +136,18 @@ const STEP_STATE = {
 };
 
 /**
+ * A night's meta texts, side by side in the dated picker (kp-themes 11.2.0):
+ * its size, and its file count when the host reports one.
+ * @param {import("../restoreflow.js").Snap} snap
+ */
+const snapMeta = (snap) => [
+  humanBytes(snap.size_bytes) ?? "—",
+  ...(snap.file_count != null
+    ? [`${snap.file_count} ${snap.file_count === 1 ? "file" : "files"}`]
+    : []),
+];
+
+/**
  * @param {HTMLElement} root
  * @param {{navigate: (href: string) => void}} ctx
  * @returns {() => void}
@@ -621,8 +633,7 @@ export function mount(root, ctx) {
                   value: n.key,
                   label: n.label,
                   when: /** @type {any} */ (n.snap).time * 1000,
-                  meta:
-                    humanBytes(/** @type {any} */ (n.snap).size_bytes) ?? "—",
+                  meta: snapMeta(/** @type {any} */ (n.snap)),
                 },
           ),
           S.night && list.some((n) => n.key === S.night && !n.missed)

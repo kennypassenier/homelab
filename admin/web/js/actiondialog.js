@@ -557,12 +557,13 @@ function drawActionDialog(form, values, sources, driven, locked = []) {
         rows.map((row) => ({
           value: row.shortId,
           when: (timeOf.get(row.shortId) ?? 0) * 1000,
+          // kp-themes 11.2.0: several meta texts sit side by side.
           meta: [
             row.kind ?? "kind not recorded",
             row.size ?? "size not recorded",
             ...(row.files ? [row.files] : []),
             row.shortId,
-          ].join(" · "),
+          ],
         })),
         rows.find((row) => row.selected)?.shortId ?? null,
       );

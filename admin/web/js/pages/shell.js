@@ -510,7 +510,7 @@ export function mount(root) {
           if (!res.done) {
             // Cancel stays offered while the command runs: a queued job
             // leaves the queue, a running one is stopped on the host (a host
-            // before 3.76.0 answers why it cannot, and the toast says it).
+            // before 4.0.0 answers why it cannot, and the toast says it).
             return handler({
               state: j.state === "queued" ? "queued" : "running",
             });

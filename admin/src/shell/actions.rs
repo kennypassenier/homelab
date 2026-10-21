@@ -688,7 +688,7 @@ struct Inner {
 /// drops the command unanswered, so the dashboard says so instead of
 /// waiting for a reply that cannot come (a version check informs; the
 /// command itself still runs to its end there).
-pub const CANCEL_EXEC_SINCE: &str = "3.76.0";
+pub const CANCEL_EXEC_SINCE: &str = "4.0.0";
 
 /// feat-secrets-2: how long a staged secret value waits for the job that
 /// asked for it before it is dropped unused.

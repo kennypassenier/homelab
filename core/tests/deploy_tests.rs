@@ -4642,44 +4642,64 @@ async fn fix_142_a_deploy_records_the_hash_of_every_file_it_pushed() {
 }
 
 /// covers: feat-imageprune-1
-/// The weekly prune keeps what runs and, per repository, the newest image
-/// nothing runs (a rollback's way back); every other unused image goes.
+/// The weekly prune keeps, per container (stopped ones too), the image in
+/// use and the one it used before; every other unused image goes, whatever
+/// its name. One app (jellyfin) has images under three repository names.
 #[test]
-fn feat_imageprune_1_keeps_what_runs_and_one_previous_version_per_app() {
+fn feat_imageprune_1_keeps_current_and_previous_image_per_container_whatever_the_names() {
     use std::os::unix::fs::PermissionsExt;
     let dir = std::env::temp_dir().join(format!("image-prune-test-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     let script = dir.join("prune");
     std::fs::write(&script, homelab_core::ops::guards::IMAGE_PRUNE_SCRIPT).unwrap();
     let docker = dir.join("docker");
-    // app: v3 runs, v2 and v1 do not; db: v9 runs only; tool: two unused.
+    // c1 runs jellyfin j3 (configured "jellyfin/jellyfin:10.11"); j2 is its
+    // previous under a registry-cache name; j4 was pulled but never
+    // deployed (newer than j3, must go); j1 and j0 are older, under a third
+    // and a fourth spelling of the same repository. c2 runs postgres p2
+    // (previous p1, p0 goes). c3 is a STOPPED tool on t2 (previous t1).
+    // u1 is unrelated and unused; n1 is dangling.
     std::fs::write(
         &docker,
         "#!/bin/sh\n\
          case \"$1\" in\n\
-         ps) echo c1; echo c2;;\n\
-         inspect) shift 3; for c in \"$@\"; do case $c in c1) echo sha256:a3;; c2) echo sha256:d9;; esac; done;;\n\
-         image) printf '%s\\n' \
-           'app sha256:a3 2026-10-10 10:00:00 +0200 CEST' \
-           'app sha256:a2 2026-10-05 10:00:00 +0200 CEST' \
-           'app sha256:a1 2026-09-01 10:00:00 +0200 CEST' \
-           'db sha256:d9 2026-09-01 10:00:00 +0200 CEST' \
-           'tool sha256:t2 2026-10-02 10:00:00 +0200 CEST' \
-           'tool sha256:t1 2026-09-02 10:00:00 +0200 CEST' \
-           '<none> sha256:n1 2026-09-02 10:00:00 +0200 CEST';;\n\
-         rmi) echo \"$2\" >> \"$RMI_LOG\";;\n\
+         ps) echo c1; echo c2; echo c3;;\n\
+         inspect) printf '%s\\n' 'sha256:j3 jellyfin/jellyfin:10.11' 'sha256:p2 postgres:16' 'sha256:t2 ghcr.io/acme/tool:1';;\n\
+         image) case \"$2\" in\n\
+           ls) printf '%s\\n' sha256:j3 sha256:j2 sha256:j1 sha256:j0 sha256:j4 sha256:p2 sha256:p1 sha256:p0 sha256:t2 sha256:t1 sha256:u1 sha256:n1;;\n\
+           inspect) printf '%s\\n' \
+             'sha256:j3|2026-10-10T10:00:00Z|1000|ghcr.io/jellyfin/jellyfin:10.11.2|' \
+             'sha256:j2|2026-10-01T10:00:00Z|900|10.10.10.17:5000/jellyfin/jellyfin:10.11.1|' \
+             'sha256:j1|2026-09-01T10:00:00Z|100|lscr.io/jellyfin/jellyfin:10.10|' \
+             'sha256:j0|2026-08-01T10:00:00Z|50|jellyfin/jellyfin:10.9|' \
+             'sha256:j4|2026-10-15T10:00:00.5Z|10|jellyfin/jellyfin:10.12|' \
+             'sha256:p2|2026-10-09T10:00:00Z|500|postgres:16|' \
+             'sha256:p1|2026-09-09T10:00:00Z|400|postgres:15|' \
+             'sha256:p0|2026-08-09T10:00:00Z|5|postgres:14|' \
+             'sha256:t2|2026-10-02T10:00:00Z|70|ghcr.io/acme/tool:1|' \
+             'sha256:t1|2026-09-02T10:00:00Z|60|docker.io/acme/tool:0.9|' \
+             'sha256:u1|2026-10-03T10:00:00Z|1|random/unused:1|' \
+             'sha256:n1|2026-09-02T10:00:00Z|1||';;\n\
+           esac;;\n\
+         rmi) shift; echo \"$@\" >> \"$RMI_LOG\";;\n\
          esac\n",
     )
     .unwrap();
     std::fs::set_permissions(&docker, std::fs::Permissions::from_mode(0o755)).unwrap();
     let log = dir.join("rmi.log");
     std::fs::write(&log, "").unwrap();
-    let out = std::process::Command::new("sh")
-        .arg(&script)
-        .env("PATH", format!("{}:/usr/bin:/bin", dir.display()))
-        .env("RMI_LOG", &log)
-        .output()
-        .unwrap();
+    let run = |args: &[&str]| {
+        std::process::Command::new("sh")
+            .arg(&script)
+            .args(args)
+            .env("PATH", format!("{}:/usr/bin:/bin", dir.display()))
+            .env("RMI_LOG", &log)
+            .output()
+            .unwrap()
+    };
+    let dry = run(&["--dry-run"]);
+    let dry_removed = std::fs::read_to_string(&log).unwrap();
+    let real = run(&[]);
     let mut removed: Vec<String> = std::fs::read_to_string(&log)
         .unwrap()
         .lines()
@@ -4688,9 +4708,25 @@ fn feat_imageprune_1_keeps_what_runs_and_one_previous_version_per_app() {
     removed.sort();
     let _ = std::fs::remove_dir_all(&dir);
     assert!(
-        out.status.success(),
+        real.status.success(),
         "{}",
-        String::from_utf8_lossy(&out.stderr)
+        String::from_utf8_lossy(&real.stderr)
     );
-    assert_eq!(removed, vec!["sha256:a1", "sha256:t1"]);
+    assert_eq!(dry_removed, "", "--dry-run must remove nothing");
+    let dry_out = String::from_utf8_lossy(&dry.stdout);
+    assert!(
+        dry_out.contains("would remove 6 images, 167 B in total"),
+        "{dry_out}"
+    );
+    assert_eq!(
+        removed,
+        vec![
+            "jellyfin/jellyfin:10.12",
+            "jellyfin/jellyfin:10.9",
+            "lscr.io/jellyfin/jellyfin:10.10",
+            "postgres:14",
+            "random/unused:1",
+            "sha256:n1",
+        ]
+    );
 }

@@ -480,7 +480,7 @@ Tests:
 - `fix_141_a_deploy_records_the_commit_and_the_uncommitted_files`: fix-141 (expert panel 2026-09-27, changes-reach-prod-without-ci): every intent commit said only `deploy <stack>`, so "which commit is deployed on CT 104?" had no answer, and a stack deployed from files in no commit looked like any other.
 - `fix_141_a_deploy_without_a_source_records_none`: fix-141: a client that does not say where the files came from still deploys, and the record says nothing rather than something invented.
 - `fix_142_a_deploy_records_the_hash_of_every_file_it_pushed`: fix-142 (nightly hash comparison, Kenny's go 2026-10-01): a deploy records the sha256 of every file it sent, by its manifest path — ground truth for `fleetcheck::evaluate_container_drift`, which has no other way to know what SHOULD be in the container without re-hashing a registry-cache-rewritten compose file and calling it drifted.
-- `feat_imageprune_1_keeps_what_runs_and_one_previous_version_per_app`: The weekly prune keeps what runs and, per repository, the newest image nothing runs (a rollback's way back); every other unused image goes. *(pins feat-imageprune-1)*
+- `feat_imageprune_1_keeps_current_and_previous_image_per_container_whatever_the_names`: The weekly prune keeps, per container (stopped ones too), the image in use and the one it used before; every other unused image goes, whatever its name. *(pins feat-imageprune-1)*
 
 ### deployguard_tests
 

@@ -7367,11 +7367,11 @@ test("invariants: redesign-config every control Firewall, Settings and Presets d
             // package draws inside a component (the passkey list, the QR, the
             // refresh bar, a command block, the Save bar's menu, a version
             // badge's release link, a stack bar's segments) are its own
-            // and "This browser" decides nothing on the host.
+            // and "This browser" and "Account" (calm mode) decide nothing on the host.
             .filter(
               (e) =>
                 !e.closest(
-                  "#browser, .kp-passkeys, .kp-qr, .kp-refresh, .kp-command, .kp-code, .kp-anchor, .st-keylist .kp-formrow, .kp-unsaved__more, .kp-unsaved__panel, .kp-badge--version, .kp-stackbar",
+                  "#browser, #account, .kp-passkeys, .kp-qr, .kp-refresh, .kp-command, .kp-code, .kp-anchor, .st-keylist .kp-formrow, .kp-unsaved__more, .kp-unsaved__panel, .kp-badge--version, .kp-stackbar",
                 ),
             )
             .map((e) => ({

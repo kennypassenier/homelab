@@ -63,6 +63,7 @@ import { mount as overview } from "./pages/overview.js";
 import { mount as stack } from "./pages/stack.js";
 import { mount as shell } from "./pages/shell.js";
 import { mount as presets } from "./pages/presets.js";
+import { mount as storagePage } from "./pages/storage.js";
 import { mount as homePage } from "./pages/home.js";
 import { mount as inboxPage } from "./pages/needsyou.js";
 import { mount as updatePage } from "./pages/update.js";
@@ -342,6 +343,9 @@ function render() {
       break;
     case "presets":
       cleanup = presets(page, { navigate });
+      break;
+    case "storage":
+      cleanup = storagePage(page);
       break;
     case "fleetview":
       cleanup = fleetviewPage(page);

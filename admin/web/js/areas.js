@@ -215,6 +215,7 @@ const AREA_OF_PAGE = /** @type {Record<string, string>} */ ({
   notifications: "system",
   shell: "system",
   restore: "backups",
+  storage: "system",
 });
 
 /**

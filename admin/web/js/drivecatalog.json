@@ -4776,6 +4776,138 @@
       "twins": false
     },
     {
+      "id": "storage-band-clean",
+      "page": "storage",
+      "what": "the warning's button: open the delete dialog of the biggest kind",
+      "opens": "dialog",
+      "row": null,
+      "href": "/storage",
+      "was": [],
+      "shows": "while the space is at or past its warn line",
+      "reach": [],
+      "twins": false
+    },
+    {
+      "id": "storage-budget-reset",
+      "page": "storage",
+      "what": "put the budget and the warn line back to their defaults",
+      "opens": "run",
+      "row": null,
+      "href": "/storage",
+      "was": [],
+      "shows": null,
+      "reach": [],
+      "twins": false
+    },
+    {
+      "id": "storage-budget-save",
+      "page": "storage",
+      "what": "save the budget and the warn line",
+      "opens": "run",
+      "row": null,
+      "href": "/storage",
+      "was": [],
+      "shows": null,
+      "reach": [],
+      "twins": false
+    },
+    {
+      "id": "storage-open-clean-cpu-lines",
+      "page": "storage",
+      "what": "open the delete dialog for the cpu lines the dashboard keeps",
+      "opens": "dialog",
+      "row": null,
+      "href": "/storage",
+      "was": [],
+      "shows": null,
+      "reach": [],
+      "twins": false
+    },
+    {
+      "id": "storage-open-clean-notices",
+      "page": "storage",
+      "what": "open the delete dialog for the notices the dashboard keeps",
+      "opens": "dialog",
+      "row": null,
+      "href": "/storage",
+      "was": [],
+      "shows": null,
+      "reach": [],
+      "twins": false
+    },
+    {
+      "id": "storage-open-clean-schedules",
+      "page": "storage",
+      "what": "open the delete dialog for the schedules the dashboard keeps",
+      "opens": "dialog",
+      "row": null,
+      "href": "/storage",
+      "was": [],
+      "shows": null,
+      "reach": [],
+      "twins": false
+    },
+    {
+      "id": "storage-open-clean-snoozes",
+      "page": "storage",
+      "what": "open the delete dialog for the snoozes the dashboard keeps",
+      "opens": "dialog",
+      "row": null,
+      "href": "/storage",
+      "was": [],
+      "shows": null,
+      "reach": [],
+      "twins": false
+    },
+    {
+      "id": "storage-open-clean-update-records",
+      "page": "storage",
+      "what": "open the delete dialog for the update records the dashboard keeps",
+      "opens": "dialog",
+      "row": null,
+      "href": "/storage",
+      "was": [],
+      "shows": null,
+      "reach": [],
+      "twins": false
+    },
+    {
+      "id": "storage-open-clean-uptime",
+      "page": "storage",
+      "what": "open the delete dialog for the uptime the dashboard keeps",
+      "opens": "dialog",
+      "row": null,
+      "href": "/storage",
+      "was": [],
+      "shows": null,
+      "reach": [],
+      "twins": false
+    },
+    {
+      "id": "storage-open-compact",
+      "page": "storage",
+      "what": "open Compact…: give the database file's free space back to the disk",
+      "opens": "dialog",
+      "row": null,
+      "href": "/storage",
+      "was": [],
+      "shows": null,
+      "reach": [],
+      "twins": false
+    },
+    {
+      "id": "storage-try-again",
+      "page": "storage",
+      "what": "read what failed again",
+      "opens": "view",
+      "row": null,
+      "href": "/storage",
+      "was": [],
+      "shows": "after the storage could not be read",
+      "reach": [],
+      "twins": false
+    },
+    {
       "id": "table-reset-sort",
       "page": "host",
       "what": "a table's Reset sort: clear every sort key it was given (each header clicked is a further key)",
@@ -5325,6 +5457,34 @@
       "row": "<stack>-<owner>-snap|path"
     },
     {
+      "id": "storage-budget-mb",
+      "page": "storage",
+      "what": "the budget in whole megabytes (a warning only: nothing is deleted)",
+      "was": [],
+      "row": null
+    },
+    {
+      "id": "storage-clean-filter",
+      "page": "storage",
+      "what": "in the delete dialog: narrow the rows by one of the kind's filters (level, stack, read…)",
+      "was": [],
+      "row": "<filter name>"
+    },
+    {
+      "id": "storage-clean-older",
+      "page": "storage",
+      "what": "in the delete dialog: only rows at least this old (a number; the unit is beside it)",
+      "was": [],
+      "row": null
+    },
+    {
+      "id": "storage-warn-mb",
+      "page": "storage",
+      "what": "the warn line in whole megabytes, below the budget",
+      "was": [],
+      "row": null
+    },
+    {
       "id": "token-name",
       "page": "settings",
       "what": "the name of a token to issue (Issue token dialog)",
@@ -5380,6 +5540,7 @@
     "stacks",
     "start",
     "status",
+    "storage",
     "system",
     "system/notifications",
     "timeline",

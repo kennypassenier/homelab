@@ -47,7 +47,7 @@ export const RETIRED_STACK_TABS = /** @type {const} */ (["checks", "firewall"]);
  *   {page: "system"} | {page: "host"} | {page: "metrics"} |
  *   {page: "fleetview"} | {page: "firewall"} | {page: "settings"} |
  *   {page: "presets"} | {page: "notifications"} | {page: "shell"} |
- *   {page: "update"} | {page: "restore"} |
+ *   {page: "update"} | {page: "restore"} | {page: "storage"} |
  *   {page: "stack", name: string, tab: StackTab} |
  *   {page: "retired", from: string, name?: string} |
  *   {page: "notfound", path: string}} Route
@@ -85,6 +85,8 @@ export const CURRENT_PATHS = {
   update: "update",
   // redesign-final-h3: the Restore flow, under Backups (FLOWS.md §5).
   "backups/restore": "restore",
+  // chassis 3.11.0 (kit_pages_in_webapp): the kit's Storage, drawn here.
+  storage: "storage",
 };
 
 /**
@@ -206,6 +208,7 @@ const FALLBACK_TITLE = /** @type {Record<string, string>} */ ({
   shell: "Console",
   update: "Update apps",
   restore: "Restore",
+  storage: "Storage",
 });
 
 /**

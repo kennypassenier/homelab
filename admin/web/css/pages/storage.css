@@ -1,0 +1,100 @@
+/* The Storage page (chassis-rs 3.11.0, feat-kpadopt-2): the space against its
+   budget, the kinds of data and the files. kp-themes tokens only; the cards
+   are the dashboard's sections, the tables kp datatables. */
+
+.st-page .st-inner {
+  display: grid;
+  gap: var(--kp-space-md, 12px);
+  min-block-size: 8rem;
+  align-content: start;
+}
+.st-figure {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: baseline;
+  gap: var(--kp-space-sm, 8px) var(--kp-space-md, 12px);
+}
+.st-figure__value {
+  font-family: var(--kp-font-display, inherit);
+  font-size: var(--kp-text-2xl, 1.75rem);
+  line-height: 1.1;
+}
+.st-figure__of,
+.st-note,
+.st-desc {
+  color: var(--muted-foreground);
+  font-size: var(--kp-text-sm);
+}
+.st-desc {
+  display: block;
+  max-inline-size: 60ch;
+}
+.st-note {
+  margin: 0;
+}
+.st-bar {
+  position: relative;
+  block-size: 0.75rem;
+  border: 1px solid var(--border);
+  background: var(--muted, transparent);
+}
+.st-bar__fill {
+  position: absolute;
+  inset-block: 0;
+  inset-inline-start: 0;
+  inline-size: var(--st-fill, 0%);
+  background: var(--kp-success, var(--foreground));
+}
+.st-bar--warn .st-bar__fill {
+  background: var(--kp-warning, var(--foreground));
+}
+.st-bar--over .st-bar__fill {
+  background: var(--kp-danger, var(--foreground));
+}
+.st-bar__warn {
+  position: absolute;
+  inset-block: -3px;
+  inset-inline-start: var(--st-warn, 80%);
+  inline-size: 2px;
+  background: var(--foreground);
+}
+.st-band {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--kp-space-md, 12px);
+}
+.st-band p {
+  margin: 0;
+}
+.st-table .kp-text-end {
+  white-space: nowrap;
+}
+.st-clean {
+  display: grid;
+  gap: var(--kp-space-md, 12px);
+  min-inline-size: 0;
+}
+.st-age {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr);
+  gap: var(--kp-space-sm, 8px);
+}
+.st-sample {
+  max-inline-size: 100%;
+  overflow-x: auto;
+}
+.st-sum,
+.st-none {
+  margin: 0;
+}
+.st-state {
+  min-block-size: 1.5em;
+  margin: 0;
+}
+@media (max-width: 48rem) {
+  .st-figure,
+  .st-band {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

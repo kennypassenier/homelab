@@ -373,4 +373,7 @@ fn kit_paths_router() -> axum::Router {
     axum::Router::new()
         .route("/status", axum::routing::get(index))
         .route("/passkeys", axum::routing::get(index))
+        // chassis 3.11.0: the kit draws no `/storage` for a web app that draws
+        // the kit's pages itself; this app's Storage page reads `/api/kit/storage`.
+        .route("/storage", axum::routing::get(index))
 }

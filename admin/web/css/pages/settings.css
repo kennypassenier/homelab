@@ -25,7 +25,7 @@
 }
 .st-side {
   /* the list's first line stands on the first card's title line */
-  padding-block-start: 1.0375rem;
+  padding-block-start: 0.8719rem;
   position: sticky;
   top: 72px;
   min-inline-size: 0;

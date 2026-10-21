@@ -445,7 +445,7 @@ export function mount(root) {
             h(
               "div",
               {
-                class: "kp-formgrid__control",
+                class: "nr-quiet-cell kp-formgrid__control",
                 "data-kp-formgrid-span": "wide",
               },
               quietEl,

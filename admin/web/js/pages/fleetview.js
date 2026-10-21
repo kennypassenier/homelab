@@ -415,6 +415,9 @@ export function mount(root) {
     onChange: (sel, hover) => onGraph(sel, hover),
   });
   stops.push(graph.stop);
+  graph.el.addEventListener("kp-graph-retry", () => {
+    void readTopology().catch(() => {});
+  });
   topoGrid.append(graph.el);
   topoData.replaceChildren(topoGrid, listBox, matrixBox);
   topoRow.append(side);
@@ -599,11 +602,12 @@ export function mount(root) {
     if (!r.ok) {
       sideOff = true;
       side.hidden = true;
-      setCardState(topoStage, "error", {
-        title: "Could not read the topology",
-        text: `${r.error.what}: ${r.error.why}`,
-        retry: false,
-      });
+      const title = "Could not read the topology";
+      const text = `${r.error.what}: ${r.error.why}`;
+      if (viewSeg.value() === "graph") {
+        setCardState(topoStage, "ready");
+        graph.failed(title, text);
+      } else setCardState(topoStage, "error", { title, text, retry: false });
       panel.set(null, "failed", r.error.why);
       matrix.set(null, "failed", r.error.why);
       return;

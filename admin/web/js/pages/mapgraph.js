@@ -216,6 +216,15 @@ export function mapGraph(opts) {
       setGraphState(el, "loading", words);
     },
     /**
+     * The theme's failed plate over the picture, with its own Retry
+     * (`kp-graph-retry` on the figure).
+     * @param {string} title @param {string} text
+     */
+    failed: (title, text) => {
+      attach();
+      setGraphState(el, "error", title, { text });
+    },
+    /**
      * Draw the topology; `pick` is the selection to start with (the
      * address's `select`), used only the first time.
      * @param {Topology} t @param {string[]} [pick]

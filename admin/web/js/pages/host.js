@@ -1184,16 +1184,12 @@ export function mount(root, ctx) {
     desc: "The pinned TLS line this dashboard holds to the host daemon.",
     foot: [pingBtn, pingCount],
   });
-  // Each strip stands in a wrapper of its own: strips that share a parent
-  // share one busy card on the parent (kp-gaps/homelab.md line 128), and
-  // the held-back measure looks for the card inside the strip.
-  const alone = (/** @type {HTMLElement} */ strip) =>
-    h("div", { class: "hk-strip" }, strip);
+  // The three strips share one parent, so while they load one busy card
+  // stands over the three of them (uptime.js groupHost; since kp-themes
+  // 11.2.0 the measure counts that card, kp-gaps/homelab.md line 128).
   lineCard.body.append(
     facts,
-    alone(lat),
-    alone(reach24),
-    alone(reach90),
+    h("div", { class: "hk-strips" }, lat, reach24, reach90),
     reachFigs,
     h("p", { class: "hk-ping-out", role: "status" }, pingDot, pingOut),
   );

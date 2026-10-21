@@ -8,6 +8,7 @@
 // still ends as a `raw` edit (what Live view drives with
 // `homelab ui open raw <stack>`); create/delete/rename end as a `files` edit.
 
+import { send } from "./act.js";
 import { notify } from "./actui.js";
 import { h } from "./dom.js";
 import { setParams } from "./urlstate.js";
@@ -20,6 +21,10 @@ import {
   wireBar,
 } from "./editui.js";
 import { attachAutosize } from "/static/kp/js/autosize.js";
+import {
+  attachCodeFields,
+  setCodeFieldError,
+} from "/static/kp/js/code-field.js";
 import { showError } from "/static/kp/js/forms.js";
 import {
   attachJsonFields,
@@ -33,6 +38,15 @@ const lineCount = (text) => (text === "" ? 0 : text.split("\n").length);
 
 /** @param {string} path */
 const isJson = (path) => /\.json$/i.test(path);
+
+/**
+ * The language kp's code field shows for a YAML or TOML file; any other
+ * file is plain text.
+ * @param {string} path
+ * @returns {"yaml" | "toml" | null}
+ */
+const codeLanguage = (path) =>
+  /\.ya?ml$/i.test(path) ? "yaml" : /\.toml$/i.test(path) ? "toml" : null;
 
 /**
  * @param {string} stack
@@ -300,31 +314,66 @@ export function filesCard(stack, e, reload, pending) {
 
   /** @type {() => void} */
   let stopKind = () => {};
-  /** @type {"json" | "text" | null} */
+  /** @type {"json" | "yaml" | "toml" | "text" | null} */
   let kind = null;
-  /** The text box is kp's JSON field for a .json file, a growing box otherwise. */
+  /** The language of the file being edited or created, when kp's code field fits it. */
+  const languageNow = () =>
+    codeLanguage(mode === "edit" ? current : pathInput.value);
+  /** The text box is kp's JSON field for a .json file, kp's code field for YAML and TOML, a growing box otherwise. */
   const applyMode = () => {
     if (!node.isConnected) return;
-    const want = mode === "edit" && isJson(current) ? "json" : "text";
+    const language = languageNow();
+    const want =
+      mode === "edit" && isJson(current) ? "json" : (language ?? "text");
     if (want === kind) {
       if (kind === "json") jsonField(area)?.check();
+      else if (language) area.dispatchEvent(new Event("input"));
       return;
     }
     stopKind();
     kind = want;
+    area.removeAttribute("data-kp-json");
+    area.removeAttribute("data-kp-code-field");
+    area.removeAttribute("data-kp-autosize");
+    area.removeAttribute("data-kp-counter");
     if (want === "json") {
-      area.removeAttribute("data-kp-autosize");
-      area.removeAttribute("data-kp-counter");
       area.setAttribute("data-kp-json", "strict");
       stopKind = attachJsonFields(area.parentElement ?? node);
+    } else if (want === "yaml" || want === "toml") {
+      area.setAttribute("data-kp-code-field", want);
+      stopKind = attachCodeFields(area.parentElement ?? node);
     } else {
-      area.removeAttribute("data-kp-json");
       area.setAttribute("data-kp-autosize", "");
       area.setAttribute("data-kp-autosize-max", "30");
       area.setAttribute("data-kp-counter", "lines");
       stopKind = attachAutosize(area.parentElement ?? node);
     }
   };
+  // The dashboard's server reads the text (kp's code field brings no parser)
+  // and says where it stops reading; kp marks that line in the gutter.
+  let checkSeq = 0;
+  area.addEventListener("kp-code-field-check", (ev) => {
+    const { value } = /** @type {CustomEvent} */ (ev).detail;
+    const path = mode === "edit" ? current : pathInput.value;
+    const seq = ++checkSeq;
+    void send(
+      "POST",
+      "/data/check-text",
+      { path, text: value },
+      "the file check",
+    )
+      .then((r) => {
+        if (seq !== checkSeq || area.value !== value) return;
+        const p = r.ok ? r.body?.problem : null;
+        setCodeFieldError(
+          area,
+          p ? p.line : null,
+          p ? p.column : null,
+          p ? p.message : "",
+        );
+      })
+      .catch(() => {});
+  });
 
   const choose = (/** @type {string} */ path, fromList = false) => {
     if (mode !== "edit" || !(path in e.texts) || path === current) return;
@@ -378,6 +427,10 @@ export function filesCard(stack, e, reload, pending) {
       showFile();
     }
   };
+  // A new file typed as .yml or .toml gets the code field as the name is typed.
+  pathInput.addEventListener("input", () => {
+    if (mode === "create") applyMode();
+  });
   newBtn.addEventListener("click", () => setMode("create"));
   cancelBtn.addEventListener("click", () => setMode("edit"));
   templateSel.addEventListener("change", () => {

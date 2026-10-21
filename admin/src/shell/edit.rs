@@ -45,6 +45,7 @@ use crate::core::stackedit_files;
 use crate::core::stackedit_latch;
 use crate::core::stackedit_native;
 use crate::core::stackedit_tiles;
+use crate::core::textcheck;
 use crate::core::yamledit;
 
 /// The host release that answers `GetHostConfig` (feat-settings-1). An
@@ -182,6 +183,26 @@ async fn repo_unpushed(
         Ok(()) => Json(repo_status_json(&c).await).into_response(),
         Err(r) => refusal(StatusCode::CONFLICT, r),
     }
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct CheckTextBody {
+    path: String,
+    text: String,
+}
+
+/// feat-kpadopt-2: `POST /data/check-text` `{ path, text }`: where a YAML or
+/// TOML file stops reading (`{ "problem": { line, column, message } }`, or
+/// `null`), for the Files editor's code field. Writes nothing; any other
+/// kind of file has no problem.
+async fn check_text(b: Result<Json<CheckTextBody>, JsonRejection>) -> Response {
+    let b = match body(b, "the text check") {
+        Ok(b) => b,
+        Err(r) => return refusal(StatusCode::BAD_REQUEST, r),
+    };
+    let problem = textcheck::kind_of(&b.path).and_then(|k| textcheck::check(k, &b.text));
+    Json(serde_json::json!({ "problem": problem })).into_response()
 }
 
 // ── validation, shared by every plan and commit ─────────────────────────
@@ -2173,6 +2194,7 @@ pub fn router(ctx: EditCtx) -> Router {
         .route("/data/repo", get(repo_status))
         .route("/data/repo/sync", post(repo_sync))
         .route("/data/repo/unpushed", post(repo_unpushed))
+        .route("/data/check-text", post(check_text))
         .route("/data/stacks/{stack}/edit", get(stack_edit))
         .route("/data/stacks/{stack}/plan", post(stack_plan))
         .route("/data/stacks/{stack}/commit", post(stack_commit))

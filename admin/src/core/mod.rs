@@ -41,6 +41,7 @@ pub mod stackedit_settings_ext;
 pub mod stackedit_tiles;
 pub mod stale_images;
 pub mod templates;
+pub mod textcheck;
 pub mod textdiff;
 pub mod topology;
 pub mod trend;

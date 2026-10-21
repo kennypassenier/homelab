@@ -4,6 +4,8 @@ export declare const SECRET = "[data-kp-secret]";
 export declare const SECRET_TTL = 30;
 /** The mask's length, in characters. Per element as `data-kp-secret-mask`. */
 export declare const SECRET_MASK = 12;
+/** Fired on the field, bubbling, when the clipboard was emptied after a copy (`data-kp-secret-clear`) or left alone: `{ cleared, reason }`. */
+export declare const SECRET_CLIPBOARD_EVENT = "kp-secret-clipboard";
 /** Fired on the field, bubbling, when a secret is shown or hidden: `{ shown, reason }`, reason `press` | `hold` | `timer` | `away` | `call`. */
 export declare const SECRET_EVENT = "kp-secret";
 /** Fired on the field, bubbling and cancelable, when it needs the value: `{ respond(value), fail(reason), purpose }`; call preventDefault() to answer. */
@@ -23,6 +25,8 @@ export type ActionDetail = {
 export declare const COMMIT_EVENT = "kp-action-commit";
 /** Fired on the row when it is undone instead. Detail: ActionDetail. */
 export declare const UNDO_EVENT = "kp-action-undo";
+/** How long after a Copy the clipboard is emptied again, in ms [wish-1120, homelab 108]. */
+export declare const CLEAR_AFTER_MS = 30000;
 /** Fired on the copy button after a successful copy: `{ text }`. */
 export declare const COPY_EVENT = "kp-copy";
 /** Fired on the copy button when the clipboard refused: `{ text, error }`. */
@@ -34,8 +38,11 @@ export declare const COPY_FAILED_EVENT = "kp-copy-failed";
  * value is in the page only while it is shown; without it a field asks through `kp-secret-request`, and last reads its
  * own `data-kp-secret-value`.
  *
+ * `clearAfterMs` is how long after a Copy the clipboard is emptied again (default 30 000 ms; 0 or false: never), for every
+ * secret field without its own `data-kp-secret-clear`.
+ *
  * @param {ParentNode} root
- * @param {{ copiedMs?: number, undoMs?: number, toastOnCopyFailure?: boolean, undoClassName?: string, secretLoad?: SecretLoad }} [options]
+ * @param {{ copiedMs?: number, undoMs?: number, clearAfterMs?: number | false, toastOnCopyFailure?: boolean, undoClassName?: string, secretLoad?: SecretLoad }} [options]
  * @returns {() => void} detach
  */
 export declare function attachPatterns(
@@ -43,12 +50,14 @@ export declare function attachPatterns(
   {
     copiedMs,
     undoMs,
+    clearAfterMs,
     toastOnCopyFailure,
     undoClassName,
     secretLoad,
   }?: {
     copiedMs?: number;
     undoMs?: number;
+    clearAfterMs?: number | false;
     toastOnCopyFailure?: boolean;
     undoClassName?: string;
     secretLoad?: SecretLoad;
@@ -72,7 +81,7 @@ export declare function hideSecret(field: Element): void;
 /**
  * Attach every secret field under `root`.
  * @param {ParentNode} [root]
- * @param {{ load?: SecretLoad, copiedMs?: number }} [options]
+ * @param {{ load?: SecretLoad, copiedMs?: number, clearAfterMs?: number | false }} [options]
  * @returns {() => void} detach
  */
 export declare function attachSecrets(
@@ -80,8 +89,10 @@ export declare function attachSecrets(
   {
     load,
     copiedMs,
+    clearAfterMs,
   }?: {
     load?: SecretLoad;
     copiedMs?: number;
+    clearAfterMs?: number | false;
   },
 ): () => void;

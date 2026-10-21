@@ -1,5 +1,3 @@
-// The kp-themes module chassis-rs serves at /static/kp/js/card-state.js (kp-themes 11.1.1),
-// copied from kp-themes js/card-state.d.ts: chassis serves the module, not its types.
 /** The cards this module looks after. */
 export declare const CARD_STATE = ".kp-card[data-kp-state]";
 /** The four states, in the order a read goes through them. */

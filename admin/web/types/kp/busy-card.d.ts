@@ -1,5 +1,3 @@
-// The kp-themes module chassis-rs serves at /static/kp/js/busy-card.js (kp-themes 11.1.1),
-// copied from kp-themes js/busy-card.d.ts: chassis serves the module, not its types.
 /** Every busy card, whatever component laid it. */
 export declare const BUSY_CARD = ".kp-datatable__busy-card";
 export type BusyCardOptions = {

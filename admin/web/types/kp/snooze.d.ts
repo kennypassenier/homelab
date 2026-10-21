@@ -1,5 +1,3 @@
-// The kp-themes module chassis-rs serves at /static/kp/js/snooze.js (kp-themes 11.1.1),
-// copied from kp-themes js/snooze.d.ts: chassis serves the module, not its types.
 /** A snooze picker. */
 export declare const SNOOZE = "[data-kp-snooze]";
 /** Fired on the picker when a choice is made: `{ until, choice }`. */
@@ -8,6 +6,26 @@ export declare const SNOOZE_EVENT = "kp-snooze";
 export declare const SNOOZE_END_EVENT = "kp-snooze-end";
 /** The choices a picker offers when it does not say. */
 export declare const SNOOZE_CHOICES: string[];
+/**
+ * Name a set of words a picker can choose with `data-kp-snooze-words="<name>"`: any of the dictionary's `snooze…` words. The page that uses
+ * the picker as a pause says "Pause until…" and "Resume now" in its pickers and the page that uses it as a reminder keeps "Remind me later",
+ * with no `setStrings()` on mount and none on unmount [wish-1120, homelab 125].
+ * @param {string} name
+ * @param {Partial<import('./strings.js').Strings>} words
+ */
+export declare function registerSnoozeWords(
+  name: string,
+  words: Partial<import("./strings.js").Strings>,
+): void;
+/**
+ * The words one picker speaks: the dictionary's, over them the set its `data-kp-snooze-words` names, over them its own attributes
+ * (`data-kp-snooze-trigger`, `-change`, `-none`, `-end`, `-apply`, `-saving`, and `-until` with `{when}` for the moment) [wish-1120, homelab 125].
+ * @param {Element} el
+ * @returns {import('./strings.js').Strings}
+ */
+export declare function snoozeWords(
+  el: Element,
+): import("./strings.js").Strings;
 export type SnoozeChoice = {
   /**
    * `1h`, `tonight`, `last`, `pick` …
@@ -54,6 +72,10 @@ export type SnoozeRules = {
    */
   last?: number | null;
   locale?: string;
+  /**
+   * the words (a picker's own set, see snoozeWords()); the dictionary's when absent
+   */
+  strings?: import("./strings.js").Strings;
 };
 /**
  * @typedef {object} SnoozeChoice
@@ -72,6 +94,7 @@ export type SnoozeRules = {
  * @property {string} [zone]
  * @property {number | null} [last] the last custom moment, ms
  * @property {string} [locale]
+ * @property {import('./strings.js').Strings} [strings] the words (a picker's own set, see snoozeWords()); the dictionary's when absent
  */
 /**
  * The wall-clock moment `days` after today at a time of day in a zone. Pure.
@@ -102,6 +125,7 @@ export declare function snoozeChoices({
   zone,
   last,
   locale,
+  strings,
 }: SnoozeRules): SnoozeChoice[];
 export type SnoozeHandle = {
   element: HTMLElement;

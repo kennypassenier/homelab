@@ -1,5 +1,3 @@
-// The kp-themes module chassis-rs serves at /static/kp/js/timer-disc.js (kp-themes 11.1.1),
-// copied from kp-themes js/timer-disc.d.ts: chassis serves the module, not its types.
 /** A visual timer. */
 export declare const TIMER_DISC =
   "[data-kp-timer-disc], [data-kp-timer-disc-until]";

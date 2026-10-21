@@ -25,9 +25,9 @@ export type DatedOption = {
    */
   when?: number | string | Date;
   /**
-   * a short text, a size or a kind, in the column at the end
+   * a short text, a size or a kind, in the column at the end; several texts (a size and a count of files) sit side by side in that column [wish-1120]
    */
-  meta?: string;
+  meta?: string | readonly string[];
   /**
    * why it cannot be chosen now; the option stays and says so
    */
@@ -57,7 +57,7 @@ export type DatedStateOptions = {
  * @property {string} value what the page gets back
  * @property {string} [label] the option's name; the date when absent
  * @property {number | string | Date} [when] the moment it was made
- * @property {string} [meta] a short text, a size or a kind, in the column at the end
+ * @property {string | readonly string[]} [meta] a short text, a size or a kind, in the column at the end; several texts (a size and a count of files) sit side by side in that column [wish-1120]
  * @property {string} [disabled] why it cannot be chosen now; the option stays and says so
  * @typedef {'ready' | 'empty' | 'loading' | 'error'} DatedState
  * @typedef {object} DatedStateOptions

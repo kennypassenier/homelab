@@ -1,5 +1,3 @@
-// The kp-themes module chassis-rs serves at /static/kp/js/heat.js (kp-themes 11.1.1),
-// copied from kp-themes js/heat.d.ts: chassis serves the module, not its types.
 /** A heat grid. */
 export declare const HEAT = "[data-kp-heat]";
 /** A matrix. */
@@ -144,6 +142,36 @@ export type HeatSpec = {
    * the key line at the end of the legend
    */
   legendKeys?: HeatLegendOptions["keys"];
+  /**
+   * the Earlier / Today / Later bar before the grid (setHeatPaging); `false` takes it away [wish-1120]
+   */
+  paging?: HeatPaging | false;
+};
+export type HeatDecorateInfo = {
+  kind: "row-label" | "cell" | "pager-earlier" | "pager-today" | "pager-later";
+  host: HTMLElement;
+  key?: string;
+  index?: number;
+  value?: string;
+  label?: string;
+};
+export type HeatPaging = {
+  /**
+   * how many pages back from today: 0 is now, 1 is the page before (default: the grid's `data-kp-heat-offset`, else 0)
+   */
+  offset?: number;
+  /**
+   * the words between the buttons: the window the grid shows ("13 to 19 October")
+   */
+  label?: string;
+  /**
+   * the lowest offset: Later stops here (default 0, nothing after today; a negative one lets a plan read into the future)
+   */
+  min?: number;
+  /**
+   * the highest offset: Earlier stops here (default none, Earlier never ends)
+   */
+  max?: number;
 };
 export type HeatLegendEntry = {
   /**
@@ -274,8 +302,17 @@ export type MatrixSpec = {
  *
  * @param {HTMLElement} el
  * @param {HeatSpec} spec
+ * @param {{ decorate?: (part: HTMLElement, info: HeatDecorateInfo) => void }} [options]  `decorate`: called with every row label button and
+ *   every cell button the grid builds (and the paging buttons), each time it builds one, the same shape gantt and the data table have;
+ *   kept for later redraws until another is given [wish-1120, homelab 65, 114]
  */
-export declare function setHeat(el: HTMLElement, spec: HeatSpec): void;
+export declare function setHeat(
+  el: HTMLElement,
+  spec: HeatSpec,
+  options?: {
+    decorate?: (part: HTMLElement, info: HeatDecorateInfo) => void;
+  },
+): void;
 /**
  * Pick a column (or none, with `null`) without an event: the cells and the
  * axis name of that column are marked `data-kp-picked`.
@@ -292,6 +329,28 @@ export declare function setHeatRows(
   el: HTMLElement,
   keys: readonly string[],
 ): void;
+/** @param {HTMLElement} el @returns {number} the page the grid shows now: 0 is today, 1 the page before */
+export declare function heatOffset(el: HTMLElement): number;
+/**
+ * The Earlier / Today / Later bar before a heat grid [wish-1120, homelab 100]: three buttons and the words of the window between
+ * them. A press fires `kp-heat-page` on the grid (the event Page Up and Page Down already send) with `{ direction: 'earlier' | 'later'
+ * | 'today', offset, source: 'pager' }`, where `offset` is the page it asks for (0 is today, 1 the page before); a grid that is not
+ * `data-kp-heat-owned` also moves its `data-kp-heat-offset` and the bar's disabled buttons itself, an owned one waits for the page to
+ * call this again with the new `offset` and `label`. Today is off at offset 0, Later at `min` (0), Earlier at `max` (none). Called
+ * again it rewrites in place. The page draws the window's columns with `setHeat` as it always did.
+ * @param {HTMLElement} el the heat grid
+ * @param {HeatPaging} [paging]
+ * @returns {HTMLElement | null} the bar, null for a grid that is not in a page
+ */
+export declare function setHeatPaging(
+  el: HTMLElement,
+  paging?: HeatPaging,
+): HTMLElement | null;
+/**
+ * Take the paging bar away.
+ * @param {HTMLElement} el the heat grid
+ */
+export declare function removeHeatPaging(el: HTMLElement): void;
 /**
  * The legend under a heat grid: a swatch and its words per entry, in the order given, a value ramp where an entry asks for one,
  * and at the end the line of keys. The list is the one right after the grid (made when there is none), named in the grid's

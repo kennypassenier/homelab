@@ -1,5 +1,3 @@
-// The kp-themes module chassis-rs serves at /static/kp/js/weekdays.js (kp-themes 11.1.1),
-// copied from kp-themes js/weekdays.d.ts: chassis serves the module, not its types.
 /** A weekday picker. */
 export declare const WEEKDAYS = "[data-kp-weekdays]";
 /** Fired on the picker when the days change by a person: `{ values, summary, valid }`. */

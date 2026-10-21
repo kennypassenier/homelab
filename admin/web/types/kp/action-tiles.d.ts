@@ -1,5 +1,3 @@
-// The kp-themes module chassis-rs serves at /static/kp/js/action-tiles.js (kp-themes 11.1.1),
-// copied from kp-themes js/action-tiles.d.ts: chassis serves the module, not its types.
 /** The tiles this module looks after. */
 export declare const ACTION_TILE = ".kp-action";
 /** Fired on the tile, bubbling, when it becomes busy or stops being busy: `{ tile, busy }`. */

@@ -1,5 +1,3 @@
-// The kp-themes module chassis-rs serves at /static/kp/js/actions.js (kp-themes 11.1.1),
-// copied from kp-themes js/actions.d.ts: chassis serves the module, not its types.
 /** A row's button box. */
 export declare const ROW_ACTIONS = ".kp-row-actions";
 /** A list or table whose rows' buttons share columns. */

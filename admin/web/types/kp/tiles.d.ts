@@ -41,6 +41,19 @@ export declare const TILES_EXIT_EVENT = "kp-tiles-exit";
  */
 export declare function tileStop(tile: Element): HTMLElement | null;
 /**
+ * The next tile whose name starts with the letters typed, from the one after `from` and round again. A letter typed again and again
+ * (the whole buffer one repeated letter) steps through the tiles of that letter. Pure.
+ * @param {readonly string[]} names the tiles' names, lower case, in document order
+ * @param {number} from the index the focus is on
+ * @param {string} typed the buffer, lower case
+ * @returns {number | null}
+ */
+export declare function letterTile(
+  names: readonly string[],
+  from: number,
+  typed: string,
+): number | null;
+/**
  * Where to go from a tile: pure geometry over the tiles' boxes. Left and Right keep to the row (the tiles whose centres stand
  * within half a tile of this one's), and wrap to the next or the previous row at its end; Up and Down take the nearest row in
  * that direction and, in it, the tile nearest in the column, so a group with a short last row sends Down to its last tile rather

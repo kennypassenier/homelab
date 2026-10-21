@@ -1,5 +1,3 @@
-// The kp-themes module chassis-rs serves at /static/kp/js/undo-toast.js (kp-themes 11.1.1),
-// copied from kp-themes js/undo-toast.d.ts: chassis serves the module, not its types.
 /** The toast's own class. */
 export declare const UNDO_TOAST = "kp-toast--undo";
 /** Fired on the toast region, bubbling, when the action is committed, undone or failed: `{ toast, outcome }`. */

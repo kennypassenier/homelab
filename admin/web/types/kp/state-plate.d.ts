@@ -1,5 +1,3 @@
-// The kp-themes module chassis-rs serves at /static/kp/js/state-plate.js (kp-themes 11.1.1),
-// copied from kp-themes js/state-plate.d.ts: chassis serves the module, not its types.
 export type StatePlateOptions = {
   kind: "empty" | "error";
   /**

@@ -1,5 +1,3 @@
-// The kp-themes module chassis-rs serves at /static/kp/js/shortcuts.js (kp-themes 11.1.1),
-// copied from kp-themes js/shortcuts.d.ts: chassis serves the module, not its types.
 /** The chord's wait for its second key, in ms (homelab's tested value). */
 export declare const CHORD_MS = 1500;
 /** How long the "no shortcut on g x" line stays, in ms. */
@@ -40,6 +38,11 @@ export type Shortcut = {
    * the sheet's sentence for why it is not available now
    */
   reason?: string;
+  /**
+   * true: the keys also fire while the focus is in a field (an input, a textarea, a select), where a plain key
+   * is the typing's own and does nothing by default; for a key that means the same there ("Esc closes the change form") [wish-1120, homelab 122]
+   */
+  inFields?: boolean;
 };
 export type EngineOptions = {
   /**
@@ -91,11 +94,6 @@ export type Step = {
    */
   key: string;
 };
-/**
- * @typedef {object} Step
- * @property {string[]} mods sorted modifier names: `alt`, `mod`, `shift`
- * @property {string} key the key, as `KeyboardEvent.key` spells it
- */
 /**
  * Read "g s" or "Mod K" into steps.
  * @param {string} keys

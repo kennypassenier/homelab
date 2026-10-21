@@ -1,5 +1,3 @@
-// The kp-themes module chassis-rs serves at /static/kp/js/chart.js (kp-themes 11.1.1),
-// copied from kp-themes js/chart.d.ts: chassis serves the module, not its types.
 /** A chart: `data-kp-chart` (a plot) or `data-kp-chart="spark"`. */
 export declare const CHART = "[data-kp-chart]";
 /** Charts that share one crosshair, one zoom and one range. */
@@ -37,6 +35,11 @@ export type ChartSeries = {
    * the consumer's own colour (`var(--…)`) instead of the next `--chart-n`
    */
   colour?: string;
+  /**
+   * `columns` draws one column per reading (a histogram: a count per bucket) instead of the line and its area;
+   * columns of a stacked chart stand on each other [wish-1120, homelab 104]. Default `line`
+   */
+  shape?: "line" | "columns";
   /**
    * shown in the legend while no time is under the crosshair
    */
@@ -188,9 +191,17 @@ export type ChartData = {
    */
   yMax?: number;
   /**
-   * a dashed line (an alarm level)
+   * a dashed line (an alarm level), or several: the first is the main one, the others are
+   * drawn finer and dotted (a warning level beside the alarm) [wish-1120, homelab 104]
    */
-  threshold?: number;
+  threshold?: number | readonly number[];
+  /**
+   * the unit of every time in this data (a point's time, a series' `start` and `step`, an event's `at` and
+   * `until`, `from` and `to`): `ms` (default), `s`, `min`, `h`, `d` or `w` since the epoch (a step in the same unit), which the chart turns into
+   * milliseconds itself. Months and years are not units: their length varies, so a month is given as the moment it starts. The element's
+   * `data-kp-chart-time-unit` says the same for data given by markup [wish-1120, homelab 103]
+   */
+  timeUnit?: ChartTimeUnit;
   /**
    * sources on top of each other, as areas
    */
@@ -269,6 +280,8 @@ export type Strings = import("./strings.js").Strings;
  * @property {number} [step] ms
  * @property {number[]} [values]
  * @property {string} [colour] the consumer's own colour (`var(--…)`) instead of the next `--chart-n`
+ * @property {'line' | 'columns'} [shape] `columns` draws one column per reading (a histogram: a count per bucket) instead of the line and its area;
+ *   columns of a stacked chart stand on each other [wish-1120, homelab 104]. Default `line`
  * @property {number} [total] shown in the legend while no time is under the crosshair
  * @typedef {object} ChartEvent
  * @property {number} at ms since the epoch
@@ -319,7 +332,12 @@ export type Strings = import("./strings.js").Strings;
  * @property {number} [from] the window, when the group's range should not set it
  * @property {number} [to]
  * @property {number} [yMax] the top of the axis; else a round number above the highest value
- * @property {number} [threshold] a dashed line (an alarm level)
+ * @property {number | readonly number[]} [threshold] a dashed line (an alarm level), or several: the first is the main one, the others are
+ *   drawn finer and dotted (a warning level beside the alarm) [wish-1120, homelab 104]
+ * @property {ChartTimeUnit} [timeUnit] the unit of every time in this data (a point's time, a series' `start` and `step`, an event's `at` and
+ *   `until`, `from` and `to`): `ms` (default), `s`, `min`, `h`, `d` or `w` since the epoch (a step in the same unit), which the chart turns into
+ *   milliseconds itself. Months and years are not units: their length varies, so a month is given as the moment it starts. The element's
+ *   `data-kp-chart-time-unit` says the same for data given by markup [wish-1120, homelab 103]
  * @property {boolean} [stacked] sources on top of each other, as areas
  * @property {number} [height] px; else `--kp-chart-height` on the chart (px or rem), else 168
  * @typedef {{ from: number, to: number }} ChartWindow
@@ -651,6 +669,7 @@ export type ChartContext = {
   decorate: ChartDecorate | undefined;
   now: () => number;
 };
+export type ChartTimeUnit = "ms" | "s" | "min" | "h" | "d" | "w";
 /**
  * @typedef {object} ChartState
  * @property {HTMLElement} host
@@ -672,6 +691,19 @@ export type ChartContext = {
  * @property {ChartDecorate | undefined} decorate
  * @property {() => number} now
  */
+/** @typedef {'ms' | 's' | 'min' | 'h' | 'd' | 'w'} ChartTimeUnit */
+/** Milliseconds in one of each time unit a chart's data can be given in. @type {Record<ChartTimeUnit, number>} */
+export declare const CHART_TIME_UNITS: Record<ChartTimeUnit, number>;
+/**
+ * The data with every time in milliseconds: a copy, the page's own object is left alone. Data already in `ms` (or in no known unit) comes back as it is.
+ * @param {ChartData} data
+ * @param {string | null} [attribute] the element's `data-kp-chart-time-unit`
+ * @returns {ChartData}
+ */
+export declare function chartInMilliseconds(
+  data: ChartData,
+  attribute?: string | null,
+): ChartData;
 /**
  * Give a chart its sources and events (the page's own data). Before the chart
  * is attached the data waits for it; a `<script type="application/json"
@@ -705,6 +737,10 @@ export type TrendData = {
    * the points' spacing, ms (the axis says `now` while the last is at most two steps old)
    */
   step?: number;
+  /**
+   * the unit of the points' times and `step`: `ms` (default), `s`, `min`, `h`, `d` or `w` [wish-1120]
+   */
+  timeUnit?: ChartTimeUnit;
   unit?: string;
   unitKind?: ChartUnitKind;
   digits?: number;
@@ -717,6 +753,7 @@ export type TrendData = {
  * @property {string} [text] one sentence under `error` (else the package's own), or under the empty plate
  * @property {Node | string | null} [art] a picture over the heading of the empty and failed plates
  * @property {number} [step] the points' spacing, ms (the axis says `now` while the last is at most two steps old)
+ * @property {ChartTimeUnit} [timeUnit] the unit of the points' times and `step`: `ms` (default), `s`, `min`, `h`, `d` or `w` [wish-1120]
  * @property {string} [unit]
  * @property {ChartUnitKind} [unitKind]
  * @property {number} [digits]

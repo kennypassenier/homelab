@@ -1,5 +1,3 @@
-// The kp-themes module chassis-rs serves at /static/kp/js/logviewer.js (kp-themes 11.1.1),
-// copied from kp-themes js/logviewer.d.ts: chassis serves the module, not its types.
 /** The viewers this module looks after. */
 export declare const LOGVIEWER = "[data-kp-logviewer]";
 /** Fired when the buffer, the filter or the find changes: `{ total, shown, dropped, matches, current }`. */
@@ -38,6 +36,15 @@ export type LogViewerSpec = {
    */
   lines?: LogLine[];
   state?: "ready" | "loading" | "error";
+  /**
+   * the failed plate's sentence: the host's own reason ("Loki did not answer: connection refused"), in place of the package's;
+   * an empty string takes it back (`data-kp-log-error`) [wish-1120, homelab 115]
+   */
+  message?: string;
+  /**
+   * the failed plate's heading, in place of "Could not read the log" (`data-kp-log-error-title`)
+   */
+  errorTitle?: string;
   max?: number;
   wrap?: boolean;
   time?: "time" | "datetime" | "off";

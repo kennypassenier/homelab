@@ -1,5 +1,3 @@
-// The kp-themes module chassis-rs serves at /static/kp/js/usual-picker.js (kp-themes 11.1.1),
-// copied from kp-themes js/usual-picker.d.ts: chassis serves the module, not its types.
 /** A picker with the usual on top. */
 export declare const USUAL = "[data-kp-usual]";
 /** Fired on the picker when something is picked: `{ value, from }`. */

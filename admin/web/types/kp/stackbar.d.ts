@@ -1,5 +1,3 @@
-// The kp-themes module chassis-rs serves at /static/kp/js/stackbar.js (kp-themes 11.1.1),
-// copied from kp-themes js/stackbar.d.ts: chassis serves the module, not its types.
 /** A share bar the page fills with setStackbar(). */
 export declare const STACKBAR = "[data-kp-stackbar]";
 /** Fired on the root when a part or its legend row is pressed: `{ key, part }`. */

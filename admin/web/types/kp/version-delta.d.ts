@@ -1,5 +1,3 @@
-// The kp-themes module chassis-rs serves at /static/kp/js/version-delta.js (kp-themes 11.1.1),
-// copied from kp-themes js/version-delta.d.ts: chassis serves the module, not its types.
 /** The chips this module draws. */
 export declare const VERSION_DELTA =
   "[data-kp-version-to], [data-kp-version-from], .kp-badge--version[data-kp-state]";

@@ -55,14 +55,20 @@ export declare function typeConfirmMatches(
  * Used by openConfirmation() for `data-kp-confirm-type`, and by
  * attachTypeConfirms() for a block a page puts in its own dialog.
  *
+ * `id` is the typed field's own id (a page whose steps address it by a stable name, `act-confirm`); the label points at it and the rule
+ * and status lines take `<id>-rule` and `<id>-status`. Without it the id is generated (`kp-type-confirm-N-input`). `fieldName` is the
+ * field's `name` for a form. (`name` stays what has to be typed.) [wish-1120, homelab 123]
+ *
  * @param {Document} doc
- * @param {{ name: string, anyCase?: boolean, loses?: Node | readonly string[] | null, strings?: Partial<import('./strings.js').Strings>, onChange?: (matched: boolean, value: string) => void, block?: HTMLElement }} options
+ * @param {{ name: string, id?: string, fieldName?: string, anyCase?: boolean, loses?: Node | readonly string[] | null, strings?: Partial<import('./strings.js').Strings>, onChange?: (matched: boolean, value: string) => void, block?: HTMLElement }} options
  * @returns {{ block: HTMLElement, input: HTMLInputElement, matched: () => boolean }}
  */
 export declare function buildTypeConfirm(
   doc: Document,
   {
     name,
+    id: fieldId,
+    fieldName,
     anyCase,
     loses,
     strings,
@@ -70,6 +76,8 @@ export declare function buildTypeConfirm(
     block: given,
   }: {
     name: string;
+    id?: string;
+    fieldName?: string;
     anyCase?: boolean;
     loses?: Node | readonly string[] | null;
     strings?: Partial<import("./strings.js").Strings>;

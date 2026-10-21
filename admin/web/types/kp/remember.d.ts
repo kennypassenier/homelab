@@ -18,7 +18,8 @@ export type Remembered =
   | "time"
   | "console"
   | "focus-steps"
-  | "picker";
+  | "picker"
+  | "alert";
 export type Memory = {
   /**
    * the name the element gave itself

@@ -1,5 +1,3 @@
-// The kp-themes module chassis-rs serves at /static/kp/js/facets.js (kp-themes 11.1.1),
-// copied from kp-themes js/facets.d.ts: chassis serves the module, not its types.
 /** The groups this module looks after. */
 export declare const FACETS = "[data-kp-facets]";
 /** Fired on the group, bubbling, when the choice changed: `{ group, values, source: 'toggle' | 'only' | 'all' | 'set', value }`. */

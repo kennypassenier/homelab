@@ -1,5 +1,3 @@
-// The kp-themes module chassis-rs serves at /static/kp/js/focus-steps.js (kp-themes 11.1.1),
-// copied from kp-themes js/focus-steps.d.ts: chassis serves the module, not its types.
 export declare const FOCUS_STEPS = "[data-kp-focus-steps]";
 export declare const FOCUS_STEPS_EVENT = "kp-focus-steps-change";
 export declare const FOCUS_STEPS_DONE_EVENT = "kp-focus-steps-done";

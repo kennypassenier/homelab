@@ -1,5 +1,3 @@
-// The kp-themes module chassis-rs serves at /static/kp/js/master-detail.js (kp-themes 11.1.1),
-// copied from kp-themes js/master-detail.d.ts: chassis serves the module, not its types.
 /** A list-and-detail layout. */
 export declare const MASTER_DETAIL = "[data-kp-master-detail]";
 /** Fired when the selection moves. */

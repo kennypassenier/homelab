@@ -1,5 +1,3 @@
-// The kp-themes module chassis-rs serves at /static/kp/js/steplist.js (kp-themes 11.1.1),
-// copied from kp-themes js/steplist.d.ts: chassis serves the module, not its types.
 /** The lists this module looks after. */
 export declare const STEPLIST_SELECTOR = ".kp-steplist";
 /** The attribute that names a step, for setStep(). */

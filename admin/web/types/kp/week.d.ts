@@ -1,5 +1,3 @@
-// The kp-themes module chassis-rs serves at /static/kp/js/week.js (kp-themes 11.1.1),
-// copied from kp-themes js/week.d.ts: chassis serves the module, not its types.
 /** A week agenda: `section.kp-week[data-kp-week]`. */
 export declare const WEEK = "[data-kp-week]";
 /** Fired on the agenda, bubbling, when an item was opened: `detail` `{ id, event, source: 'pointer' | 'keyboard' }`. */

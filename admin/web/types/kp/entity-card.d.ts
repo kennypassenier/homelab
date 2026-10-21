@@ -80,6 +80,10 @@ export type EntityData = {
    */
   lines?: string[];
   /**
+   * a tile's typed search: its first occurrence in the name (any case) is wrapped in a `<mark class="kp-entity__match">`; the rest is plain text, and nothing is parsed as HTML [wish-1120]
+   */
+  match?: string;
+  /**
    * the favourite star is on; a refill with it changes the star in place
    */
   starred?: boolean;

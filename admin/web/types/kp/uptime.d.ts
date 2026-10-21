@@ -1,5 +1,3 @@
-// The kp-themes module chassis-rs serves at /static/kp/js/uptime.js (kp-themes 11.1.1),
-// copied from kp-themes js/uptime.d.ts: chassis serves the module, not its types.
 /** A strip. */
 export declare const UPTIME = "[data-kp-uptime]";
 /** Fired on the strip when a cell is pressed: `{ key, index, period }`. */

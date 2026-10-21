@@ -1,5 +1,3 @@
-// The kp-themes module chassis-rs serves at /static/kp/js/gantt.js (kp-themes 11.1.1),
-// copied from kp-themes js/gantt.d.ts: chassis serves the module, not its types.
 /** A run timeline: `section.kp-gantt[data-kp-gantt]`. */
 export declare const GANTT = "[data-kp-gantt]";
 /** Fired on the timeline, bubbling, when a bar was opened: `detail` `{ id, run, source: 'pointer' | 'keyboard' }`. */

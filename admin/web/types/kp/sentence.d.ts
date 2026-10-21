@@ -1,5 +1,3 @@
-// The kp-themes module chassis-rs serves at /static/kp/js/sentence.js (kp-themes 11.1.1),
-// copied from kp-themes js/sentence.d.ts: chassis serves the module, not its types.
 /** A sentence form. */
 export declare const SENTENCE = "[data-kp-sentence]";
 /** Fired on the sentence, bubbling, after a change, once things have settled: `{ summary }`. */

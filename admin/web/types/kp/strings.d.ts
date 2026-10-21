@@ -1,5 +1,3 @@
-// The kp-themes module chassis-rs serves at /static/kp/js/strings.js (kp-themes 11.1.1),
-// copied from kp-themes js/strings.d.ts: chassis serves the module, not its types.
 export type Strings = {
   /**
    * The count's name while it is still being counted (js/toggle.js) [kpadopt6-ops]
@@ -150,6 +148,14 @@ export type Strings = {
    * The release-notes link's words on an acknowledge gate [kpadopt6-ops]
    */
   ackLink: string;
+  /**
+   * The fold of the release notes inside an acknowledge gate, and the notes' accessible name (js/ack-gate.js) [wish-1120]
+   */
+  ackNotes: string;
+  /**
+   * Why the tick is off until the release notes were opened (`data-kp-ack-require-notes`) [wish-1120]
+   */
+  ackOpenNotes: string;
   /**
    * The tick's words when the page names none [kpadopt6-ops]
    */
@@ -1107,6 +1113,10 @@ export type Strings = {
    */
   selectionBusy: (words: string) => string;
   /**
+   * How far a running bar action is, "3 of 7 done" (js/selection-bar.js setSelectionProgress) [wish-1120]
+   */
+  selectionProgress: (done: number, total: number) => string;
+  /**
    * The bar's line after an action some rows refused, "2 done, 1 refused" [kpadopt5]
    */
   selectionResult: (done: number, refused: number) => string;
@@ -1270,6 +1280,90 @@ export type Strings = {
    * The help line under the field: how to leave it with the keyboard [kpadopt5]
    */
   jsonTabHint: string;
+  /**
+   * The quiet-hours control's name and its switch (js/quiet-hours.js) [wish-1120]
+   */
+  quietLabel: string;
+  /**
+   * The quiet window's start [wish-1120]
+   */
+  quietFrom: string;
+  /**
+   * The quiet window's end [wish-1120]
+   */
+  quietTo: string;
+  /**
+   * The days the quiet window applies on [wish-1120]
+   */
+  quietDays: string;
+  /**
+   * The ticks that let a severity break the quiet [wish-1120]
+   */
+  quietThroughLabel: string;
+  /**
+   * The severity words of the quiet-hours ticks [wish-1120]
+   */
+  quietCritical: string;
+  /**
+   * Severity word [wish-1120]
+   */
+  quietWarning: string;
+  /**
+   * Severity word [wish-1120]
+   */
+  quietInfo: string;
+  /**
+   * Severity word [wish-1120]
+   */
+  quietOk: string;
+  /**
+   * The line when quiet hours are off [wish-1120]
+   */
+  quietOff: string;
+  /**
+   * The problem when the window starts and ends at the same time [wish-1120]
+   */
+  quietSame: string;
+  /**
+   * The window in words, "Quiet from 22:00 to 07:00 : Every weekday." [wish-1120]
+   */
+  quietWhen: (from: string, to: string, days: string) => string;
+  /**
+   * What still comes through, "Critical still comes through." or "Critical and Warning still come through." [wish-1120]
+   */
+  quietThrough: (names: string, count: number) => string;
+  /**
+   * The line when nothing comes through the quiet [wish-1120]
+   */
+  quietNothing: string;
+  /**
+   * The accessible name of an on-this-page list (js/page-contents.js) [wish-1120]
+   */
+  contentsLabel: string;
+  /**
+   * The heading over an on-this-page list [wish-1120]
+   */
+  contentsTitle: string;
+  /**
+   * The caret's place under a code field, "Line 3, column 12" (js/code-field.js) [wish-1120]
+   */
+  codeFieldPosition: (line: number, column: number) => string;
+  /**
+   * The problem the page found in a code field, with its place [wish-1120]
+   */
+  codeFieldError: (line: number, column: number, message: string) => string;
+  /**
+   * The same when only the line is known [wish-1120]
+   */
+  codeFieldErrorLine: (line: number, message: string) => string;
+  /**
+   * The same when no place is known [wish-1120]
+   */
+  codeFieldErrorPlain: (message: string) => string;
+  /**
+   * Why a form is held back while a code field has an error [wish-1120]
+   */
+  codeFieldBlocked: string;
   /**
    * The accessible name of the line numbers [kpadopt5]
    */
@@ -1615,6 +1709,30 @@ export type Strings = {
    */
   transferAnnounce: (name: string, percent: number) => string;
   /**
+   * Said after a link in rendered notes that opens in a new tab (js/markdown.js) [wish-1120]
+   */
+  markdownNewTab: string;
+  /**
+   * The line after release notes that were cut for length [wish-1120]
+   */
+  markdownCut: string;
+  /**
+   * A job line's step position, "Step 3 of 35" (js/job-line.js) [wish-1120]
+   */
+  jobLineStep: (step: number, steps: number) => string;
+  /**
+   * A job line's bytes with the unit said once, done "1.2" and total "4 GB" make "1.2 of 4 GB" [wish-1120]
+   */
+  jobLineBytes: (done: string, total: string) => string;
+  /**
+   * What joins the parts of a job line [wish-1120]
+   */
+  jobLineSeparator: string;
+  /**
+   * A job line before anything was reported [wish-1120]
+   */
+  jobLineIdle: string;
+  /**
    * The banner's first line when the connection is gone (js/connection.js) [kpadopt5-connection]
    */
   connOffline: string;
@@ -1905,6 +2023,22 @@ export type Strings = {
    */
   heatKeysPage: string;
   /**
+   * The name of a heat grid's Earlier / Today / Later bar for a screen reader (js/heat.js) [wish-1120]
+   */
+  heatPagerLabel: string;
+  /**
+   * The paging bar's button to the page before [wish-1120]
+   */
+  heatEarlier: string;
+  /**
+   * The paging bar's button back to the present [wish-1120]
+   */
+  heatToday: string;
+  /**
+   * The paging bar's button to the page after [wish-1120]
+   */
+  heatLater: string;
+  /**
    * A matrix cell that pairs a row with itself, for a screen reader [kpadopt2-grids]
    */
   matrixSelf: string;
@@ -2055,6 +2189,18 @@ export type Strings = {
    */
   tableRowDetails: (key: string) => string;
   /**
+   * The name of the data table's column of drag handles for a screen reader [wish-1120]
+   */
+  tableReorderColumn: string;
+  /**
+   * A row's drag handle: "Move media", with Alt+Up and Alt+Down named in the aria-keyshortcuts [wish-1120]
+   */
+  tableReorderRow: (name: string) => string;
+  /**
+   * Why the handles are off while the table is sorted, filtered or searched [wish-1120]
+   */
+  tableReorderOff: string;
+  /**
    * A group row's fold button: the group's name and how many of its rows match [J2]
    */
   tableGroupRows: (group: string, count: number) => string;
@@ -2186,6 +2332,10 @@ export type Strings = {
    * The button that copies a secret without showing it
    */
   secretCopy: string;
+  /**
+   * Said when a secret field emptied the clipboard again after its Copy (js/patterns.js) [wish-1120]
+   */
+  secretClipboardCleared: string;
   /**
    * The words beside the spinner while a secret is fetched
    */
@@ -2959,6 +3109,10 @@ export type Strings = {
    * The still line of a timer that counts down to a moment: "until 14:30" [gaps-time-1019]
    */
   timerUntil: (when: string) => string;
+  /**
+   * A countdown of 24 hours or more, "6 d 22 h" (js/countdown.js) [wish-1120]
+   */
+  countdownDays: (days: number, hours: number) => string;
   /**
    * The range picker's preset group, for a screen reader (js/range.js) [kpadopt4-ideas]
    */
@@ -4004,6 +4158,42 @@ export type Strings = {
    * The picture's name when the graph has no `aria-label` [scope-143]
    */
   graphUnnamed: string;
+  /**
+   * The name of the group of zoom controls inside the graph (`data-kp-zoom`) [graph-1020]
+   */
+  graphZoom: string;
+  /**
+   * The zoom-in control's name [graph-1020]
+   */
+  graphZoomIn: string;
+  /**
+   * The zoom-out control's name [graph-1020]
+   */
+  graphZoomOut: string;
+  /**
+   * The words on the control that puts the view back [graph-1020]
+   */
+  graphZoomReset: string;
+  /**
+   * Its title and accessible name [graph-1020]
+   */
+  graphZoomResetTitle: string;
+  /**
+   * The sentence added to the hint while zoom is on: wheel or pinch, drag, the keys [graph-1020]
+   */
+  graphZoomHint: string;
+  /**
+   * The sentence added to the hint while details are on: what a pick opens and what Esc does [graph-1020]
+   */
+  graphDetailHint: string;
+  /**
+   * The words on the button that closes a node's details [graph-1020]
+   */
+  graphDetailClose: string;
+  /**
+   * Its title [graph-1020]
+   */
+  graphDetailCloseTitle: string;
   breadcrumb: string;
   pagination: string;
   themePicker: string;
@@ -6191,6 +6381,8 @@ export type Strings = {
  * @property {(from: string, to: string) => string} versionSpokenDown  What it hears for a version that went back [kpadopt6-ops]
  * @property {(from: string, to: string) => string} versionSpokenChanged  What a screen reader hears for a change that has no size, "changed from latest to nightly" [kpadopt6-ops]
  * @property {string} ackLink  The release-notes link's words on an acknowledge gate [kpadopt6-ops]
+ * @property {string} ackNotes  The fold of the release notes inside an acknowledge gate, and the notes' accessible name (js/ack-gate.js) [wish-1120]
+ * @property {string} ackOpenNotes  Why the tick is off until the release notes were opened (`data-kp-ack-require-notes`) [wish-1120]
  * @property {string} ackLabel  The tick's words when the page names none [kpadopt6-ops]
  * @property {string} ackRetry  The Retry button of a gate whose notes could not be found [kpadopt6-ops]
  * @property {string} ackLooking  Why the tick is off while the notes are looked up [kpadopt6-ops]
@@ -6433,6 +6625,7 @@ export type Strings = {
  * @property {(total: number) => string} selectionMatchingOn  The bar's line once every match is selected [kpadopt5]
  * @property {(n: number) => string} selectionOnlyShown  The button that takes the offer back, "Select only the 40 shown" [kpadopt5]
  * @property {(words: string) => string} selectionBusy  Said when a bar action starts, "Backing up 3…" is the page's own words; this is the fallback [kpadopt5]
+ * @property {(done: number, total: number) => string} selectionProgress  How far a running bar action is, "3 of 7 done" (js/selection-bar.js setSelectionProgress) [wish-1120]
  * @property {(done: number, refused: number) => string} selectionResult  The bar's line after an action some rows refused, "2 done, 1 refused" [kpadopt5]
  * @property {(n: number) => string} selectionDropped  Said when selected rows are gone after a refresh [kpadopt5]
  * @property {(can: number, total: number) => string} selectionCan  The reason an action is off for some rows, "2 of 3 can be updated" with the page's verb after it [kpadopt5]
@@ -6474,6 +6667,27 @@ export type Strings = {
  * @property {string} jsonWrap  The Wrap toggle [kpadopt5]
  * @property {string} jsonCopy  The Copy button [kpadopt5]
  * @property {string} jsonTabHint  The help line under the field: how to leave it with the keyboard [kpadopt5]
+ * @property {string} quietLabel  The quiet-hours control's name and its switch (js/quiet-hours.js) [wish-1120]
+ * @property {string} quietFrom  The quiet window's start [wish-1120]
+ * @property {string} quietTo  The quiet window's end [wish-1120]
+ * @property {string} quietDays  The days the quiet window applies on [wish-1120]
+ * @property {string} quietThroughLabel  The ticks that let a severity break the quiet [wish-1120]
+ * @property {string} quietCritical  The severity words of the quiet-hours ticks [wish-1120]
+ * @property {string} quietWarning  Severity word [wish-1120]
+ * @property {string} quietInfo  Severity word [wish-1120]
+ * @property {string} quietOk  Severity word [wish-1120]
+ * @property {string} quietOff  The line when quiet hours are off [wish-1120]
+ * @property {string} quietSame  The problem when the window starts and ends at the same time [wish-1120]
+ * @property {(from: string, to: string, days: string) => string} quietWhen  The window in words, "Quiet from 22:00 to 07:00 : Every weekday." [wish-1120]
+ * @property {(names: string, count: number) => string} quietThrough  What still comes through, "Critical still comes through." or "Critical and Warning still come through." [wish-1120]
+ * @property {string} quietNothing  The line when nothing comes through the quiet [wish-1120]
+ * @property {string} contentsLabel  The accessible name of an on-this-page list (js/page-contents.js) [wish-1120]
+ * @property {string} contentsTitle  The heading over an on-this-page list [wish-1120]
+ * @property {(line: number, column: number) => string} codeFieldPosition  The caret's place under a code field, "Line 3, column 12" (js/code-field.js) [wish-1120]
+ * @property {(line: number, column: number, message: string) => string} codeFieldError  The problem the page found in a code field, with its place [wish-1120]
+ * @property {(line: number, message: string) => string} codeFieldErrorLine  The same when only the line is known [wish-1120]
+ * @property {(message: string) => string} codeFieldErrorPlain  The same when no place is known [wish-1120]
+ * @property {string} codeFieldBlocked  Why a form is held back while a code field has an error [wish-1120]
  * @property {string} jsonGutter  The accessible name of the line numbers [kpadopt5]
  * @property {string} jsonBlocked  The validity message that stops a form with broken JSON [kpadopt5]
  * @property {(why: string) => string} jsonSchemaFailed  The error line when the page's shape check refuses valid JSON [kpadopt5]
@@ -6560,6 +6774,12 @@ export type Strings = {
  * @property {string} transferFailed  The first words of a failed transfer's note [kpadopt5-transfer]
  * @property {string} transferRetry  The Retry button of a failed transfer [kpadopt5-transfer]
  * @property {(name: string, percent: number) => string} transferAnnounce  What a screen reader hears at 25, 50, 75 and 100 % [kpadopt5-transfer]
+ * @property {string} markdownNewTab  Said after a link in rendered notes that opens in a new tab (js/markdown.js) [wish-1120]
+ * @property {string} markdownCut  The line after release notes that were cut for length [wish-1120]
+ * @property {(step: number, steps: number) => string} jobLineStep  A job line's step position, "Step 3 of 35" (js/job-line.js) [wish-1120]
+ * @property {(done: string, total: string) => string} jobLineBytes  A job line's bytes with the unit said once, done "1.2" and total "4 GB" make "1.2 of 4 GB" [wish-1120]
+ * @property {string} jobLineSeparator  What joins the parts of a job line [wish-1120]
+ * @property {string} jobLineIdle  A job line before anything was reported [wish-1120]
  * @property {string} connOffline  The banner's first line when the connection is gone (js/connection.js) [kpadopt5-connection]
  * @property {string} connOfflineWhy  What is true meanwhile and what happens next [kpadopt5-connection]
  * @property {string} connReconnecting  The first line while a try is under way [kpadopt5-connection]
@@ -6652,6 +6872,10 @@ export type Strings = {
  * @property {string} heatKeysPick          Enter or Space on a cell: pick the column [gap-tab-count]
  * @property {string} heatKeysDrop          Escape: drop the picked column [gap-tab-count]
  * @property {string} heatKeysPage          Page Up and Page Down: show earlier or later columns [gap-tab-count]
+ * @property {string} heatPagerLabel  The name of a heat grid's Earlier / Today / Later bar for a screen reader (js/heat.js) [wish-1120]
+ * @property {string} heatEarlier  The paging bar's button to the page before [wish-1120]
+ * @property {string} heatToday  The paging bar's button back to the present [wish-1120]
+ * @property {string} heatLater  The paging bar's button to the page after [wish-1120]
  * @property {string} matrixSelf            A matrix cell that pairs a row with itself, for a screen reader [kpadopt2-grids]
  * @property {string} matrixUnknown         A matrix cell with no answer, for a screen reader [kpadopt2-grids]
  * @property {string} tableClearSearch      The way out of the no-match state
@@ -6697,6 +6921,9 @@ export type Strings = {
  * @property {(shown: number, total: number) => string} tableColumnsShown
  * @property {string} tableDetailsColumn    The expansion column's header, read by a screen reader only
  * @property {(key: string) => string} tableRowDetails  A row's expand button
+ * @property {string} tableReorderColumn  The name of the data table's column of drag handles for a screen reader [wish-1120]
+ * @property {(name: string) => string} tableReorderRow  A row's drag handle: "Move media", with Alt+Up and Alt+Down named in the aria-keyshortcuts [wish-1120]
+ * @property {string} tableReorderOff  Why the handles are off while the table is sorted, filtered or searched [wish-1120]
  * @property {(group: string, count: number) => string} tableGroupRows  A group row's fold button: the group's name and how many of its rows match [J2]
  * @property {(column: string, key: string, value: string) => string} tableEdit  An editable cell's button
  * @property {(column: string, key: string) => string} tableEditField  The editor's accessible name
@@ -6753,6 +6980,7 @@ export type Strings = {
  * @property {string} secretHide  The same button while the secret is shown
  * @property {string} secretHold  The button of a secret shown only while it is held (`data-kp-secret-reveal-on="hold"`)
  * @property {string} secretCopy  The button that copies a secret without showing it
+ * @property {string} secretClipboardCleared  Said when a secret field emptied the clipboard again after its Copy (js/patterns.js) [wish-1120]
  * @property {string} secretReading  The words beside the spinner while a secret is fetched
  * @property {string} secretRetry  The reveal button's words after a secret could not be read
  * @property {(seconds: number) => string} secretHidesIn  The countdown under a shown secret, "Hides in 28 s"
@@ -6956,6 +7184,7 @@ export type Strings = {
  * @property {string} timerUnderMinute  The time left on the face in its last minute [kpadopt4-ideas]
  * @property {(name: string, duration: string) => string} timerDiscCaption  The still line under the disc: "Focus · 25 min" [kpadopt4-ideas]
  * @property {(when: string) => string} timerUntil  The still line of a timer that counts down to a moment: "until 14:30" [gaps-time-1019]
+ * @property {(days: number, hours: number) => string} countdownDays  A countdown of 24 hours or more, "6 d 22 h" (js/countdown.js) [wish-1120]
  * @property {string} rangePresets  The range picker's preset group, for a screen reader (js/range.js) [kpadopt4-ideas]
  * @property {(key: string) => string} rangePresetName  A preset in words: "Last 24 hours" [kpadopt4-ideas]
  * @property {(key: string) => string} rangePresetShort  A preset on its segment: "24h" [kpadopt4-ideas]
@@ -7216,6 +7445,15 @@ export type Strings = {
  * @property {string} graphKinds  The name of the list of kinds of link over the graph [scope-143]
  * @property {string} graphLoading  A loading graph's sentence when the page gives none (`setGraphState(el, 'loading')`) [scope-143]
  * @property {string} graphUnnamed  The picture's name when the graph has no `aria-label` [scope-143]
+ * @property {string} graphZoom  The name of the group of zoom controls inside the graph (`data-kp-zoom`) [graph-1020]
+ * @property {string} graphZoomIn  The zoom-in control's name [graph-1020]
+ * @property {string} graphZoomOut  The zoom-out control's name [graph-1020]
+ * @property {string} graphZoomReset  The words on the control that puts the view back [graph-1020]
+ * @property {string} graphZoomResetTitle  Its title and accessible name [graph-1020]
+ * @property {string} graphZoomHint  The sentence added to the hint while zoom is on: wheel or pinch, drag, the keys [graph-1020]
+ * @property {string} graphDetailHint  The sentence added to the hint while details are on: what a pick opens and what Esc does [graph-1020]
+ * @property {string} graphDetailClose  The words on the button that closes a node's details [graph-1020]
+ * @property {string} graphDetailCloseTitle  Its title [graph-1020]
 
  * @property {string} breadcrumb
  * @property {string} pagination

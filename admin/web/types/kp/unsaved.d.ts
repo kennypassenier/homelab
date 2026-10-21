@@ -1,5 +1,3 @@
-// The kp-themes module chassis-rs serves at /static/kp/js/unsaved.js (kp-themes 11.1.1),
-// copied from kp-themes js/unsaved.d.ts: chassis serves the module, not its types.
 /** An unsaved-changes bar. */
 export declare const UNSAVED = "[data-kp-unsaved]";
 /** Fired on the bar when the count changes: `{ count, changes }`. */

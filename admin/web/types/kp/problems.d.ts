@@ -1,5 +1,3 @@
-// The kp-themes module chassis-rs serves at /static/kp/js/problems.js (kp-themes 11.1.1),
-// copied from kp-themes js/problems.d.ts: chassis serves the module, not its types.
 /** A container of problems. */
 export declare const PROBLEMS = "[data-kp-problems]";
 /** The severities, worst first. */

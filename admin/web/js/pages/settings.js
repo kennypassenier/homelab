@@ -42,7 +42,7 @@ import {
   slug,
 } from "../settingsview.js";
 import { listen } from "../store.js";
-import { mountThisBrowser } from "../thisbrowser.js";
+import { mountAccount, mountThisBrowser } from "../thisbrowser.js";
 import { highlight, pageHeader, segSwitch } from "../ui.js";
 import { setParams } from "../urlstate.js";
 import { editable } from "../editforms.js";
@@ -378,11 +378,21 @@ export function mount(root, opts = {}) {
   const browserCard = dataCard({
     id: "browser",
     title: "This browser",
-    desc: "Choices that belong to this device and never reach the host: the theme, calm mode, what Live view opens in, the tour, and a way to forget it all.",
+    desc: "Choices that belong to this device and never reach the host: the theme, what Live view opens in, the tour, and a way to forget it all.",
     data: [],
     state: "static",
   });
   stops.push(mountThisBrowser(browserCard.data));
+
+  // ── account (choices that follow you to every device) ────────────────
+  const accountCard = dataCard({
+    id: "account",
+    title: "Account",
+    desc: "Choices that follow you to every device you sign in on: calm mode.",
+    data: [],
+    state: "static",
+  });
+  stops.push(mountAccount(accountCard.data));
 
   // ── sign-in (passkeys, machine tokens, a QR to register a phone) ──────
   const signinBody = h("div", { class: "si-grid" });
@@ -468,6 +478,7 @@ export function mount(root, opts = {}) {
     setContents(side, [
       { id: "wc", label: "Working copy" },
       { id: "signin", label: "Sign-in" },
+      { id: "account", label: "Account" },
       { id: "browser", label: "This browser" },
       { id: "host-settings", label: "host.toml" },
       ...gs.map((g) => ({
@@ -512,6 +523,7 @@ export function mount(root, opts = {}) {
     { class: "st-main" },
     wc.card,
     signin.card,
+    accountCard.card,
     browserCard.card,
     hsCard.card,
   );

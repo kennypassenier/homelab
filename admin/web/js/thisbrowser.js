@@ -1,6 +1,6 @@
 // feat-kp11demo-5.4 ("This browser"): what only this device decides, in one
 // card on Settings: the theme (every theme drawn as its own swatch, light and
-// dark apart), calm mode, what Live view opens in, "follow my system", the
+// dark apart), what Live view opens in, "follow my system", the
 // tour, and a way to forget what this browser remembers. Nothing here is sent
 // to the host. The card is a form grid: the name and one sentence in the
 // label track, the control in the control track, so every control starts on
@@ -74,7 +74,7 @@ export function startFollowingSystem() {
 
 /**
  * The remembered choices this browser holds for the dashboard (kp's
- * `data-kp-remember` memory), without calm mode and the theme.
+ * `data-kp-remember` memory), without calm mode (it follows the account) and the theme.
  * @returns {string[]} their storage keys
  */
 export function rememberedKeys() {
@@ -98,6 +98,21 @@ const themes = (dark) =>
   `<ul class="st-themes" data-kp-theme-picker aria-label="${dark ? "Dark themes" : "Light themes"}" data-st-kind="${dark ? "dark" : "light"}">${themeOptionsMarkup({ themes: THEMES.filter((t) => !!t.dark === dark), grouped: false })}</ul>`;
 
 /**
+ * Draw the Account card's body: the choices that follow Kenny to every device
+ * (calm mode; its key syncs, see `store::browser_keys()`).
+ * @param {HTMLElement} body the card's stage
+ * @returns {() => void} stop
+ */
+export function mountAccount(body) {
+  body.innerHTML = `<div class="kp-formgrid st-lines" data-kp-formgrid-label="wide" data-kp-formgrid-lines="lines">${row(
+    "Calm mode",
+    "Turns movement and effects off; loading keeps breathing slowly. Follows you to every device you sign in on.",
+    `<label class="kp-switch"><input class="kp-switch__input" type="checkbox" role="switch" id="st-calm" data-kp-calm-switch /><span>Calm</span></label>`,
+  )}</div>`;
+  return attachCalm(body);
+}
+
+/**
  * Draw the card's body into `body` and wire it.
  * @param {HTMLElement} body the card's stage
  * @returns {() => void} stop
@@ -118,11 +133,6 @@ export function mountThisBrowser(body) {
       themes(false),
     ),
     row("Dark theme", "For a dark room, or a dark system.", themes(true)),
-    row(
-      "Calm mode",
-      "Turns movement and effects off; loading keeps breathing slowly.",
-      `<label class="kp-switch"><input class="kp-switch__input" type="checkbox" role="switch" id="st-calm" data-kp-calm-switch /><span>Calm</span></label>`,
-    ),
     row(
       "Live view opens",
       "Whether Live view follows Claude when this dashboard opens.",
@@ -149,11 +159,7 @@ export function mountThisBrowser(body) {
       "st-actionrow",
     ),
   ].join("")}</div>`;
-  const stops = [
-    attachThemePickers(body),
-    attachCalm(body),
-    attachSegmented(body),
-  ];
+  const stops = [attachThemePickers(body), attachSegmented(body)];
   body.addEventListener(PICK_EVENT, (e) => {
     const theme = /** @type {CustomEvent} */ (e).detail?.theme;
     const kind = /** @type {HTMLElement} */ (e.target)
@@ -193,7 +199,7 @@ export function mountThisBrowser(body) {
       loses: [
         `${keys.length} remembered ${keys.length === 1 ? "choice" : "choices"}: open groups, sort orders, folded sections`,
         "The tour starts again on the next visit",
-        "The theme and calm mode stay",
+        "The theme stays",
       ],
       acceptLabel: "Forget them",
       onAccept: () => {

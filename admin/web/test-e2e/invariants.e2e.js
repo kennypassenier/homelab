@@ -6917,8 +6917,9 @@ test("invariants: review metrics — the wording is the demo's, Connections is g
     assert.equal(await page.locator(".mp-stackkey").count(), 0);
     // A touch screen: no hover, so no "hover"/"point at" hints.
     const touch = await browser.newContext({
+      // Firefox has no `isMobile`; a phone-sized viewport with touch is what
+      // makes `(hover: none)` and the touch hints true there.
       viewport: { width: 390, height: 900 },
-      isMobile: true,
       hasTouch: true,
     });
     const t = await freshPage(touch);

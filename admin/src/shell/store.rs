@@ -72,8 +72,7 @@ pub const FILE_TREND: &str = "fleet-trend.json";
 ///   never kept, never synced (`web/test/secretkeep.test.js`, invariant 121).
 ///
 /// Left in the browser: the theme keys `theme-boot` reads before login, the
-/// stored `theme` that `themesettle` repairs, calm mode (a device's own
-/// comfort, listed under "This browser"), and the per-tab Live view state.
+/// stored `theme` that `themesettle` repairs, and the per-tab Live view state.
 pub fn browser_keys() -> BrowserKeys {
     BrowserKeys::new()
         .prefix("homelab.")
@@ -90,8 +89,6 @@ pub fn browser_keys() -> BrowserKeys {
         // Per tab, by design: the tab's name and the Live view switch.
         .except_prefix("homelab.drive.")
         .except_exact("homelab.live-view")
-        // This device's calm mode.
-        .except_prefix("kp-remember:calm:")
 }
 
 /// How long after it ended a snooze is left for the dashboard to tell its
@@ -652,6 +649,8 @@ mod tests {
             "homelab.apps.starred",
             "nx-sort:stacks",
             "kp-remember:host-refresh:value",
+            // Calm mode follows Kenny across devices (Kenny, 2026-10-22).
+            "kp-remember:calm:calm:value",
         ] {
             assert!(k.is_synced_local(synced), "{synced} should sync");
         }
@@ -663,7 +662,6 @@ mod tests {
             "theme",
             "homelab.drive.tab",
             "homelab.live-view",
-            "kp-remember:calm:calm:value",
             "chassis-prefs:synced",
             "somebody-else",
         ] {

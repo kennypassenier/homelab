@@ -11,9 +11,7 @@ mod act_support;
 use std::sync::Arc;
 use std::time::Duration;
 
-use act_support::{
-    MemFiles, MockHost, Recorder, Script, TestClock, history, shared, temp_dir, until,
-};
+use act_support::{MemFiles, MockHost, Recorder, Script, TestClock, history, shared, until};
 use homelab_admin::core::drive::TabAnswer;
 use homelab_admin::shell::actions::{Actions, ActionsDeps};
 use homelab_admin::shell::actions_notify::NotifyCenter;
@@ -22,7 +20,7 @@ use homelab_proto::{Scope, UiStep};
 use serde_json::Value;
 use tokio::task::JoinHandle;
 
-fn driver(tag: &str) -> (Driver, Arc<Recorder>) {
+fn driver(_tag: &str) -> (Driver, Arc<Recorder>) {
     let clock = TestClock::at(1_790_000_000);
     let host = MockHost::start(
         clock.clone(),
@@ -31,9 +29,8 @@ fn driver(tag: &str) -> (Driver, Arc<Recorder>) {
         Arc::new(std::sync::Mutex::new(Vec::new())),
     );
     let live = Arc::new(Recorder::default());
-    let dir = temp_dir(&format!("follow-click-{tag}"));
     let notify = NotifyCenter::load(
-        dir.join("notifications.json"),
+        homelab_admin::shell::store::memory_db(),
         Arc::new(act_support::RecPusher::default()),
         live.clone(),
         clock.clock(),

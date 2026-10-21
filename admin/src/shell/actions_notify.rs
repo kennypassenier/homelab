@@ -1,21 +1,21 @@
 //! feat-overview-5, feat-ops-8, feat-ops-9: the notification center's shell.
-//! The list lives in `notifications.json` under the data dir (arch-state);
-//! every notice is stored, published to open pages as the SSE event
-//! `notification`, and pushed through kyu when `core::notify::route` says so.
+//! The list lives in the app database (`shell::store`, `notice_store`); until
+//! 4.0.0 it was `notifications.json` (arch-state). Every notice is stored,
+//! published to open pages as the SSE event `notification`, and pushed
+//! through kyu when `core::notify::route` says so.
 //! The push goes through [`Pusher`], so tests use a double and never reach
 //! kyu.
 
 use std::future::Future;
-use std::path::PathBuf;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::time::Duration;
 
-use tokio::sync::Mutex;
-
 use super::actions::{Clock, Publish};
-use super::actions_state::{StateError, read_json, write_json};
-use crate::core::notify::{self, Draft, Notice, NotifyFile, PushOutcome, Settings};
+use super::actions_state::StateError;
+use super::notice_store as store;
+use crate::core::notify::{self, Draft, Notice, PushOutcome, Settings};
+use chassis::storage::AppDb;
 
 /// Where a push goes.
 pub trait Pusher: Send + Sync + 'static {
@@ -147,18 +147,19 @@ impl Pusher for NoPusher {
 }
 
 pub struct NotifyCenter {
-    path: PathBuf,
-    state: Mutex<NotifyFile>,
+    /// The app database (`shell::store`): the notices, the settings and the
+    /// cursors. It opens at start, so nothing here reads it before.
+    db: AppDb,
     pusher: Arc<dyn Pusher>,
     publish: Arc<dyn Publish>,
     clock: Clock,
     /// The dashboard's public address, for a push's `click_url`.
     base_url: std::sync::RwLock<String>,
-    /// Decision "23 constants" (2026-09-30): how many notices are kept
-    /// (`notify::KEEP` by default, `HOMELAB_ADMIN_NOTIFY_KEEP`), the
-    /// longest snooze (`notify::SNOOZE_MAX_S`,
-    /// `HOMELAB_ADMIN_NOTIFY_SNOOZE_MAX_S`) and how late a digest may still
-    /// go out (`notify::DIGEST_LATE_S`, `HOMELAB_ADMIN_NOTIFY_DIGEST_LATE_S`).
+    /// Decision "23 constants" (2026-09-30): how many notices a list shows
+    /// (`notify::KEEP` by default, `HOMELAB_ADMIN_NOTIFY_KEEP`), the longest
+    /// snooze (`notify::SNOOZE_MAX_S`, `HOMELAB_ADMIN_NOTIFY_SNOOZE_MAX_S`)
+    /// and how late a digest may still go out (`notify::DIGEST_LATE_S`,
+    /// `HOMELAB_ADMIN_NOTIFY_DIGEST_LATE_S`).
     limits: std::sync::RwLock<NotifyLimits>,
     /// ask-kp11be-10: when the last test push went out (unix seconds, 0 =
     /// never), so the button cannot be used to flood a phone.
@@ -182,12 +183,12 @@ pub enum TestPushError {
 /// with the module's own defaults.
 #[derive(Debug, Clone, Copy)]
 pub struct NotifyLimits {
+    /// The size of one list: the newest this many notices are listed and
+    /// named in a digest. Nothing is deleted past it (4.0.0, Kenny,
+    /// 2026-10-21: no automatic removal of useful data).
     pub keep: usize,
     pub snooze_max_s: i64,
     pub digest_late_s: i64,
-    /// rule-20 (disk-audit, 2026-10-01): a notice older than this many days
-    /// falls off too, whatever `keep` would otherwise still hold.
-    pub max_age_days: i64,
 }
 
 impl Default for NotifyLimits {
@@ -196,28 +197,34 @@ impl Default for NotifyLimits {
             keep: notify::KEEP,
             snooze_max_s: notify::SNOOZE_MAX_S,
             digest_late_s: notify::DIGEST_LATE_S,
-            max_age_days: notify::MAX_AGE_DAYS as i64,
+        }
+    }
+}
+
+/// What a store call that failed is told as: logged, and the caller goes on
+/// with what it can do without it (the old file store also only logged
+/// "notifications not saved").
+fn logged<T>(what: &str, r: Result<T, chassis::Error>) -> Option<T> {
+    match r {
+        Ok(v) => Some(v),
+        Err(e) => {
+            tracing::error!(error = %e.message, remedy = %e.remedy, "notifications: {what}");
+            None
         }
     }
 }
 
 impl NotifyCenter {
-    /// The center from its file; a file this build cannot read is an error
-    /// (arch-state: never silently replaced).
+    /// The centre over the app database. Nothing is read here: the
+    /// database opens when the service starts.
     pub fn load(
-        path: PathBuf,
+        db: AppDb,
         pusher: Arc<dyn Pusher>,
         publish: Arc<dyn Publish>,
         clock: Clock,
     ) -> Result<Arc<Self>, StateError> {
-        let state: NotifyFile = read_json(&path)?.unwrap_or_default();
-        state.check().map_err(|why| StateError::Parse {
-            path: path.display().to_string(),
-            why,
-        })?;
         Ok(Arc::new(NotifyCenter {
-            path,
-            state: Mutex::new(state),
+            db,
             pusher,
             publish,
             clock,
@@ -259,7 +266,7 @@ impl NotifyCenter {
             .push(payload)
             .await
             .map_err(TestPushError::Failed)?;
-        let settings = self.state.lock().await.settings.clone();
+        let settings = self.settings().await;
         Ok(serde_json::json!({
             "sent": true,
             "at": now,
@@ -295,24 +302,27 @@ impl NotifyCenter {
             .unwrap_or_else(|_| homelab_core::notify::DEFAULT_DASHBOARD_URL.into())
     }
 
-    fn save(&self, s: &NotifyFile) {
-        if let Err(e) = write_json(&self.path, s) {
-            tracing::warn!(error = %e, "notifications not saved");
-        }
+    /// The newest host notice read, for the poll's `after`.
+    pub async fn host_cursor(&self) -> u64 {
+        logged("the host cursor", self.db.read(store::state).await)
+            .map(|s| s.host_cursor)
+            .unwrap_or(0)
     }
 
     /// Store, push when the rules say so, and tell the open pages.
     pub async fn notify(&self, draft: Draft) -> Notice {
         let now = (self.clock)();
         // fix-watch-1: a Down still open and unread is kept, not repeated.
-        {
-            let mut s = self.state.lock().await;
-            if let Some(n) = s.refresh_open_down(&draft) {
-                self.save(&s);
-                return n;
-            }
+        let probe = draft.clone();
+        if let Some(Some(n)) = logged(
+            "refreshing an open notice",
+            self.db
+                .write(move |tx| store::refresh_open(tx, &probe))
+                .await,
+        ) {
+            return n;
         }
-        let settings = self.state.lock().await.settings.clone();
+        let settings = self.settings().await;
         let route = notify::route(&settings, &draft, now);
         let push = match route.push {
             Ok(()) => {
@@ -324,13 +334,21 @@ impl NotifyCenter {
             }
             Err(why) => PushOutcome::Skipped { why },
         };
-        let (notice, unread) = {
-            let mut s = self.state.lock().await;
-            let lim = self.limits();
-            let n = s.add(draft, now, push, lim.keep, lim.max_age_days);
-            self.save(&s);
-            (n, s.unread())
-        };
+        let (d, p) = (draft.clone(), push.clone());
+        let stored = logged(
+            "a notice was not saved",
+            self.db
+                .write(move |tx| {
+                    let n = store::add(tx, d, now, p)?;
+                    Ok((n, store::unread(tx)?))
+                })
+                .await,
+        );
+        // A notice that could not be saved is still told to the open pages
+        // (and returned): the person sees it once, the log says why it is
+        // not in the list.
+        let (notice, unread) =
+            stored.unwrap_or_else(|| (Notice::from_draft(0, draft, now, push), 0));
         self.publish.publish(
             "notification",
             serde_json::json!({ "notice": notice, "pop_up": route.pop_up, "unread": unread }),
@@ -339,12 +357,8 @@ impl NotifyCenter {
     }
 
     /// Tell the open pages about a stored notice.
-    fn announce(&self, notice: &Notice, unread: usize, now: i64) {
-        let pop_up = !self
-            .state
-            .try_lock()
-            .map(|s| s.settings.snoozed(now))
-            .unwrap_or(false)
+    fn announce(&self, notice: &Notice, unread: usize, snoozed: bool) {
+        let pop_up = !snoozed
             && matches!(
                 notice.level,
                 notify::Level::Critical | notify::Level::Warning
@@ -368,33 +382,46 @@ impl NotifyCenter {
         job_of: &(dyn Fn(u64) -> Option<u64> + Send + Sync),
     ) -> usize {
         let now = (self.clock)();
-        let mut out = Vec::new();
-        {
-            let mut s = self.state.lock().await;
-            if !s.host_seeded {
-                s.host_seeded = true;
-                s.host_cursor = last_seq;
-                self.save(&s);
-                return 0;
-            }
-            for n in &notices {
-                if n.seq <= s.host_cursor {
-                    continue;
-                }
-                let job = n.req.and_then(job_of);
-                let lim = self.limits();
-                if let Some(x) = s.import_host(n, job, now, lim.keep, lim.max_age_days) {
-                    out.push(x);
-                }
-            }
-            s.host_cursor = s
-                .host_cursor
-                .max(last_seq.min(notices.iter().map(|n| n.seq).max().unwrap_or(s.host_cursor)));
-            self.save(&s);
-        }
-        let unread = self.state.lock().await.unread();
+        // The jobs are looked up first: `job_of` is not `Send + 'static`.
+        let jobs: Vec<Option<u64>> = notices.iter().map(|n| n.req.and_then(job_of)).collect();
+        let done = logged(
+            "the host's notices were not saved",
+            self.db
+                .write(move |tx| {
+                    let mut st = store::state(tx)?;
+                    if !st.host_seeded {
+                        st.host_seeded = true;
+                        st.host_cursor = last_seq;
+                        store::put_state(tx, &st)?;
+                        return Ok(None);
+                    }
+                    let mut out = Vec::new();
+                    for (n, job) in notices.iter().zip(&jobs) {
+                        if n.seq <= st.host_cursor {
+                            continue;
+                        }
+                        st.host_cursor = st.host_cursor.max(n.seq);
+                        out.push(store::import_host(tx, n, *job, now)?);
+                    }
+                    st.host_cursor = st.host_cursor.max(
+                        last_seq.min(
+                            notices
+                                .iter()
+                                .map(|n| n.seq)
+                                .max()
+                                .unwrap_or(st.host_cursor),
+                        ),
+                    );
+                    store::put_state(tx, &st)?;
+                    Ok(Some((out, store::unread(tx)?, st.settings.snoozed(now))))
+                })
+                .await,
+        );
+        let Some(Some((out, unread, snoozed))) = done else {
+            return 0;
+        };
         for n in &out {
-            self.announce(n, unread, now);
+            self.announce(n, unread, snoozed);
         }
         out.len()
     }
@@ -403,22 +430,27 @@ impl NotifyCenter {
     /// firing adds nothing). How many were stored.
     pub async fn alerts(&self, body: &serde_json::Value) -> usize {
         let now = (self.clock)();
-        let mut out = Vec::new();
-        {
-            let mut s = self.state.lock().await;
-            for a in notify::alert_drafts(body) {
-                let lim = self.limits();
-                if let Some(n) = s.add_alert(a, now, lim.keep, lim.max_age_days) {
-                    out.push(n);
-                }
-            }
-            if !out.is_empty() {
-                self.save(&s);
-            }
-        }
-        let unread = self.state.lock().await.unread();
+        let drafts = notify::alert_drafts(body);
+        let done = logged(
+            "alerts were not saved",
+            self.db
+                .write(move |tx| {
+                    let mut out = Vec::new();
+                    for a in drafts {
+                        if let Some(n) = store::add_alert(tx, a, now)? {
+                            out.push(n);
+                        }
+                    }
+                    let st = store::state(tx)?;
+                    Ok((out, store::unread(tx)?, st.settings.snoozed(now)))
+                })
+                .await,
+        );
+        let Some((out, unread, snoozed)) = done else {
+            return 0;
+        };
         for n in &out {
-            self.announce(n, unread, now);
+            self.announce(n, unread, snoozed);
         }
         out.len()
     }
@@ -433,16 +465,23 @@ impl NotifyCenter {
         Fut: Future<Output = Result<Vec<notify::DigestLine>, String>>,
     {
         let now = (self.clock)();
-        let (day, settings, notices) = {
-            let s = self.state.lock().await;
-            let day = notify::digest_due(
-                &s.settings,
-                s.last_digest.as_ref(),
-                now,
-                self.limits().digest_late_s,
-            )?;
-            (day, s.settings.clone(), s.notices.clone())
-        };
+        let late = self.limits().digest_late_s;
+        let keep = self.limits().keep;
+        let (day, settings, notices) = logged(
+            "the digest could not read the list",
+            self.db
+                .read(move |c| {
+                    let st = store::state(c)?;
+                    let Some(day) =
+                        notify::digest_due(&st.settings, st.last_digest.as_ref(), now, late)
+                    else {
+                        return Ok(None);
+                    };
+                    // A digest names the newest `keep` things that wait.
+                    Ok(Some((day, st.settings, store::newest_unread(c, keep)?)))
+                })
+                .await,
+        )??;
         let lines = match today().await {
             Ok(l) => l,
             Err(why) => {
@@ -479,36 +518,72 @@ impl NotifyCenter {
             count,
             push,
         };
-        let mut s = self.state.lock().await;
-        s.last_digest = Some(rec.clone());
-        self.save(&s);
-        drop(s);
+        let r = rec.clone();
+        logged(
+            "the digest record was not saved",
+            self.db
+                .write(move |tx| {
+                    let mut st = store::state(tx)?;
+                    st.last_digest = Some(r);
+                    store::put_state(tx, &st)
+                })
+                .await,
+        );
         self.publish
             .publish("notify_digest", serde_json::json!({ "digest": rec }));
         Some(rec)
     }
 
     pub async fn snapshot(&self) -> serde_json::Value {
-        let s = self.state.lock().await;
         let now = (self.clock)();
-        serde_json::json!({
-            "notices": s.notices.iter().rev().collect::<Vec<_>>(),
-            "unread": s.unread(),
-            "unread_by_stack": notify::unread_by_stack(&s),
-            "settings": s.settings,
-            "snoozed": s.settings.snoozed(now),
-            "last_digest": s.last_digest,
-        })
+        let keep = self.limits().keep;
+        let read = self
+            .db
+            .read(move |c| {
+                Ok((
+                    store::newest(c, keep)?,
+                    store::total(c)?,
+                    store::unread(c)?,
+                    store::unread_by_stack(c)?,
+                    store::state(c)?,
+                ))
+            })
+            .await;
+        match read {
+            Ok((notices, total, unread, by_stack, st)) => serde_json::json!({
+                // Newest first; at most `keep` of the `total` stored.
+                "notices": notices,
+                "total": total,
+                "unread": unread,
+                "unread_by_stack": by_stack,
+                "settings": st.settings,
+                "snoozed": st.settings.snoozed(now),
+                "last_digest": st.last_digest,
+            }),
+            Err(e) => {
+                tracing::error!(error = %e.message, remedy = %e.remedy, "notifications: the list could not be read");
+                serde_json::json!({
+                    "notices": [], "total": 0, "unread": 0, "unread_by_stack": {},
+                    "settings": Settings::default(), "snoozed": false, "last_digest": null,
+                    "error": e.message,
+                })
+            }
+        }
     }
 
     pub async fn mark(&self, ids: Option<Vec<u64>>, read: bool) -> usize {
-        let mut s = self.state.lock().await;
-        let n = s.mark(ids.as_deref(), read);
-        if n > 0 {
-            self.save(&s);
-        }
-        let unread = s.unread();
-        drop(s);
+        let done = logged(
+            "notices were not marked",
+            self.db
+                .write(move |tx| {
+                    let n = store::mark(tx, ids.as_deref(), read)?;
+                    Ok((n, store::unread(tx)?))
+                })
+                .await,
+        );
+        let Some((n, unread)) = done else {
+            return 0;
+        };
         self.publish.publish(
             "notifications_read",
             serde_json::json!({ "changed": n, "unread": unread }),
@@ -517,58 +592,93 @@ impl NotifyCenter {
     }
 
     pub async fn settings(&self) -> Settings {
-        self.state.lock().await.settings.clone()
+        logged(
+            "the settings could not be read",
+            self.db.read(store::state).await,
+        )
+        .map(|s| s.settings)
+        .unwrap_or_default()
+    }
+
+    /// Change the settings in one transaction and tell the open pages.
+    async fn change_settings<T: Send + 'static>(
+        &self,
+        f: impl FnOnce(&mut Settings) -> Result<T, String> + Send + 'static,
+    ) -> Result<(Settings, T), String> {
+        let done = self
+            .db
+            .write(move |tx| {
+                let mut st = store::state(tx)?;
+                match f(&mut st.settings) {
+                    Ok(v) => {
+                        store::put_state(tx, &st)?;
+                        Ok(Ok((st.settings, v)))
+                    }
+                    Err(why) => Ok(Err(why)),
+                }
+            })
+            .await
+            .map_err(|e| format!("{} ({})", e.message, e.remedy))??;
+        self.publish
+            .publish("notify_settings", serde_json::json!({ "settings": done.0 }));
+        Ok(done)
     }
 
     pub async fn set_settings(&self, new: Settings) -> Result<Settings, String> {
         new.validate()?;
-        let mut s = self.state.lock().await;
-        s.settings = new;
-        self.save(&s);
-        let out = s.settings.clone();
-        drop(s);
-        self.publish
-            .publish("notify_settings", serde_json::json!({ "settings": out }));
-        Ok(out)
+        self.change_settings(move |s| {
+            *s = new;
+            Ok(())
+        })
+        .await
+        .map(|(s, ())| s)
     }
 
     pub async fn set_stack_muted(&self, stack: &str, muted: bool) -> Settings {
-        let mut s = self.state.lock().await;
-        notify::set_stack_muted(&mut s.settings, stack, muted);
-        self.save(&s);
-        let out = s.settings.clone();
-        drop(s);
-        self.publish
-            .publish("notify_settings", serde_json::json!({ "settings": out }));
-        out
+        let stack = stack.to_string();
+        self.change_settings(move |s| {
+            notify::set_stack_muted(s, &stack, muted);
+            Ok(())
+        })
+        .await
+        .map(|(s, ())| s)
+        .unwrap_or_default()
     }
 
     pub async fn snooze(&self, seconds: i64) -> Result<Option<i64>, String> {
         let now = (self.clock)();
-        let mut s = self.state.lock().await;
-        let until = s.snooze(now, seconds, self.limits().snooze_max_s)?;
-        self.save(&s);
-        let settings = s.settings.clone();
-        drop(s);
-        self.publish.publish(
-            "notify_settings",
-            serde_json::json!({ "settings": settings }),
-        );
-        Ok(until)
+        let max = self.limits().snooze_max_s;
+        self.change_settings(move |s| {
+            let until = notify::snooze_until(now, seconds, max)?;
+            s.snooze_until = until;
+            Ok(until)
+        })
+        .await
+        .map(|(_, until)| until)
     }
 
     /// The host's incident list, as read; a notice per bundle not seen
     /// before (the first list only seeds the memory).
     pub async fn incidents(&self, listed: Vec<String>) -> usize {
-        let fresh = {
-            let mut s = self.state.lock().await;
-            let fresh = s.new_incidents(&listed);
-            self.save(&s);
-            // Decision notify-routing: once the host's own notices arrive,
-            // each failure comes with its bundle named in it; a second
-            // notice per bundle would say the same thing twice.
-            if s.host_seeded { Vec::new() } else { fresh }
-        };
+        let fresh = logged(
+            "the incident list was not saved",
+            self.db
+                .write(move |tx| {
+                    let mut st = store::state(tx)?;
+                    let (fresh, seen, seeded) =
+                        notify::fresh_incidents(&st.seen_incidents, st.incidents_seeded, &listed);
+                    st.seen_incidents = seen;
+                    st.incidents_seeded = seeded;
+                    store::put_state(tx, &st)?;
+                    // Decision notify-routing: once the host's own notices
+                    // arrive, each failure comes with its bundle named in
+                    // it; a second notice per bundle would say the same
+                    // thing twice.
+                    Ok(if st.host_seeded { Vec::new() } else { fresh })
+                })
+                .await,
+        )
+        .unwrap_or_default();
         let n = fresh.len();
         for name in fresh {
             self.notify(notify::incident_draft(&name)).await;
@@ -833,7 +943,7 @@ pub fn spawn_host_notice_poll(
                 rest -= 1;
                 continue;
             }
-            let after = center.state.lock().await.host_cursor;
+            let after = center.host_cursor().await;
             let reply = host
                 .ask_traced(
                     homelab_proto::Command::Notices { after, limit: 200 },

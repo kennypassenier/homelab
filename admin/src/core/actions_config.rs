@@ -6,7 +6,7 @@
 //!
 //! | Key | Default | Meaning |
 //! |---|---|---|
-//! | `HOMELAB_ADMIN_DATA_DIR` | `HOMELAB_ADMIN_STATE_DIR`, else `/appdata/admin/admin-config` | where schedules.json and notifications.json live (arch-state) |
+//! | `HOMELAB_ADMIN_DATA_DIR` | `HOMELAB_ADMIN_STATE_DIR`, else `/appdata/admin/admin-config` | where schedules.json and the other JSON files live, and where the one-time import of notifications.json and inbox-snoozes.json looks (arch-state) |
 //! | `HOMELAB_ADMIN_REPO` | `<data dir>/repo` | the homelab working copy the stack files are read from |
 //! | `HOMELAB_ADMIN_NOTIFY_URL` | none: no pushes | kyu's publish URL for feat-ops-8 |
 //! | `HOMELAB_ADMIN_NOTIFY_TOKEN` | none | kyu's bearer token (a secret: admin.env) |
@@ -35,8 +35,7 @@
 //! |---|---|---|
 //! | `HOMELAB_ADMIN_KEEP_JOBS` | 200 | jobs kept for `GET /data/actions/jobs` and a reload |
 //! | `HOMELAB_ADMIN_HISTORY_WINDOW_S` | 15552000 (180 d) | history read for a job's expected duration |
-//! | `HOMELAB_ADMIN_NOTIFY_KEEP` | 500 | newest notices kept; older ones fall off |
-//! | `HOMELAB_ADMIN_NOTIFY_MAX_AGE_DAYS` | 180 | notices older than this fall off too, whatever the count (rule-20) |
+//! | `HOMELAB_ADMIN_NOTIFY_KEEP` | 500 | newest notices one list shows; none is deleted past it (Storage page) |
 //! | `HOMELAB_ADMIN_NOTIFY_SNOOZE_MAX_S` | 604800 (7 d) | the longest snooze |
 //! | `HOMELAB_ADMIN_NOTIFY_DIGEST_LATE_S` | 10800 (3 h) | how late the daily digest may still go out |
 //! | `HOMELAB_ADMIN_HOSTLOG_RING` | 2000 | host-log lines kept for a page that opens mid-operation |
@@ -85,12 +84,10 @@ pub struct ActConfig {
     pub keep_jobs: usize,
     /// History read for a job's expected duration, in seconds.
     pub history_window_s: i64,
-    /// Newest notices kept in the notification centre.
+    /// Newest notices one list shows (the Inbox, `GET /data/notifications`,
+    /// the digest). Nothing is deleted past it: since 4.0.0 the notices live
+    /// in the database until the Storage page deletes them.
     pub notify_keep: usize,
-    /// rule-20 (disk-audit, 2026-10-01): a notice older than this many days
-    /// falls off too, whatever `notify_keep` would otherwise still hold —
-    /// the store had a count cap and no age cap before this.
-    pub notify_max_age_days: i64,
     /// The longest snooze, in seconds.
     pub notify_snooze_max_s: i64,
     /// How late the daily digest may still go out, in seconds.
@@ -283,13 +280,6 @@ pub fn from_env(lookup: &dyn Fn(&str) -> Option<String>) -> Result<ActConfig, St
             1,
             &mut why,
         ) as usize,
-        notify_max_age_days: number(
-            lookup,
-            "NOTIFY_MAX_AGE_DAYS",
-            crate::core::notify::MAX_AGE_DAYS as u64,
-            1,
-            &mut why,
-        ) as i64,
         notify_snooze_max_s: number(
             lookup,
             "NOTIFY_SNOOZE_MAX_S",
@@ -425,13 +415,6 @@ impl ActConfig {
     /// ask-kp11be-2: the capped hourly watch/ping history (`core::uptime`).
     pub fn uptime_file(&self) -> PathBuf {
         self.data_dir.join("uptime-history.json")
-    }
-    /// ask-kp11be-7: the Inbox's per-row snoozes.
-    pub fn snoozes_file(&self) -> PathBuf {
-        self.data_dir.join("inbox-snoozes.json")
-    }
-    pub fn notify_file(&self) -> PathBuf {
-        self.data_dir.join("notifications.json")
     }
     /// Where a scratch copy of a stack is validated, and removed again.
     pub fn scratch_dir(&self) -> PathBuf {

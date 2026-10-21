@@ -7,15 +7,13 @@ mod act_support;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use act_support::{
-    MemFiles, MockHost, RecPusher, Recorder, Script, TestClock, history, temp_dir, until,
-};
+use act_support::{MemFiles, MockHost, RecPusher, Recorder, Script, TestClock, history, until};
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use homelab_admin::core::actions::{
     ActionArgs, ActionKind, BatchRequest, native_batch_backups, validate, validate_batch,
 };
-use homelab_admin::core::notify::{Draft, Kind, Level, NotifyFile};
+use homelab_admin::core::notify::{Draft, Kind, Level};
 use homelab_admin::shell::actions::{Actions, ActionsDeps, JobState, Origin, PauseGate, router};
 use homelab_admin::shell::actions_notify::NotifyCenter;
 use homelab_proto::Command;
@@ -45,7 +43,7 @@ struct World {
 
 /// `native`: the stacks the fleet says run native services. Starts paused,
 /// so submitted jobs stay queued until `resume`.
-fn world(tag: &str, native: &[&str]) -> World {
+fn world(_tag: &str, native: &[&str]) -> World {
     let clock = TestClock::at(1_790_000_000);
     let host = MockHost::start(
         clock.clone(),
@@ -55,9 +53,8 @@ fn world(tag: &str, native: &[&str]) -> World {
     );
     let live = Arc::new(Recorder::default());
     let pusher = Arc::new(RecPusher::default());
-    let dir = temp_dir(tag);
     let notify = NotifyCenter::load(
-        dir.join("notifications.json"),
+        homelab_admin::shell::store::memory_db(),
         pusher.clone(),
         live.clone(),
         clock.clock(),
@@ -172,24 +169,16 @@ async fn fix_watch_1_a_down_still_open_is_not_added_again() {
     );
 }
 
-#[test]
-fn fix_watch_1_a_read_down_may_be_announced_again() {
-    let mut f = NotifyFile::default();
+#[tokio::test]
+async fn fix_watch_1_a_read_down_may_be_announced_again() {
+    let w = world("down-read", &[]);
     let d = down("tile:pve", "r");
-    assert!(f.refresh_open_down(&d).is_none(), "nothing open yet");
-    f.add(
-        d.clone(),
-        1,
-        homelab_admin::core::notify::PushOutcome::Sent,
-        100,
-        0,
-    );
-    assert!(f.refresh_open_down(&d).is_some());
-    f.mark(None, true);
-    assert!(
-        f.refresh_open_down(&d).is_none(),
-        "read: a new outage is news"
-    );
+    let first = w.notify.notify(d.clone()).await;
+    let again = w.notify.notify(d.clone()).await;
+    assert_eq!(again.id, first.id, "still open: refreshed, not repeated");
+    w.notify.mark(None, true).await;
+    let third = w.notify.notify(d).await;
+    assert_ne!(third.id, first.id, "read: a new outage is news");
 }
 
 // ── fix-batch-native-1 ──────────────────────────────────────────────────

@@ -305,7 +305,7 @@ impl Releases for FakeGitHub {
 }
 
 fn queue(
-    tag: &str,
+    _tag: &str,
     binary: Result<String, String>,
 ) -> (
     Actions,
@@ -322,9 +322,8 @@ fn queue(
         Arc::new(Mutex::new(Vec::new())),
     );
     let live = Arc::new(Recorder::default());
-    let dir = temp_dir(tag);
     let notify = NotifyCenter::load(
-        dir.join("notifications.json"),
+        homelab_admin::shell::store::memory_db(),
         Arc::new(act_support::RecPusher::default()),
         live.clone(),
         clock.clock(),

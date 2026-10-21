@@ -2894,8 +2894,38 @@ pub fn mount(
     let publish_for_drive = publish.clone();
     let clock_for_drive = clock.clone();
     let publish_for_edit = publish.clone();
-    let notify = NotifyCenter::load(cfg.notify_file(), pusher, publish.clone(), clock.clone())
+    // feat-kpadopt-2 (4.0.0): the dashboard's data is one sqlite file
+    // through chassis' storage layer. A notifications.json this build cannot
+    // read stops the start, as it always did; the file's records move over
+    // once, in one transaction (`store::import`).
+    super::store::precheck(&cfg.data_dir)?;
+    let db = app
+        .app_db(super::store::spec(cfg.data_dir.clone()))
         .map_err(|e| e.to_string())?;
+    for kind in super::store::kinds() {
+        app.storage_kind(kind);
+    }
+    let notify = NotifyCenter::load(db.clone(), pusher, publish.clone(), clock.clone())
+        .map_err(|e| e.to_string())?;
+    // The budget only warns; the warning is an Inbox notice that stays until
+    // it is read (a restart refreshes it instead of adding a second).
+    {
+        let center = notify.clone();
+        app.on_storage_warn(move |report| {
+            let draft = super::store::warn_draft(report);
+            let center = center.clone();
+            match tokio::runtime::Handle::try_current() {
+                Ok(rt) => {
+                    rt.spawn(async move {
+                        center.notify(draft).await;
+                    });
+                }
+                Err(_) => {
+                    tracing::warn!("the storage warning found no runtime to raise its notice")
+                }
+            }
+        });
+    }
     // Decision notify-routing / notify-detail: pushes link to this address,
     // and Alertmanager's hook now has somewhere to go.
     notify.set_base_url(&cfg.public_url);
@@ -2935,7 +2965,6 @@ pub fn mount(
         keep: cfg.notify_keep,
         snooze_max_s: cfg.notify_snooze_max_s,
         digest_late_s: cfg.notify_digest_late_s,
-        max_age_days: cfg.notify_max_age_days,
     });
     let scheduler = super::scheduler::Scheduler::load(
         cfg.schedules_file(),
@@ -2957,7 +2986,7 @@ pub fn mount(
     // redesign-flows-6: the Update flow commits through the stack editor
     // and keeps its undo records beside the notifications.
     actions.set_committer(Arc::new(super::edit::EditCommitter(edit_ctx.clone())));
-    actions.set_flow_store(cfg.notify_file().with_file_name("update-flows.json"));
+    actions.set_flow_store(cfg.data_dir.join(super::store::FILE_FLOWS));
     // feat-backup-1/3: the Backups page's read-only routes.
     app.dashboard_routes(super::backups::router(host.clone()));
     // feat-retired-1: the Retired page's one read-only route.
@@ -3030,7 +3059,7 @@ pub fn mount(
     app.dashboard_routes(super::actions_notify::router(notify.clone()));
     // ask-kp11be-7: the Inbox's per-row snooze and remind-me.
     let row_snoozes =
-        super::rowsnooze::RowSnoozes::load(cfg.snoozes_file(), clock.clone(), publish.clone());
+        super::rowsnooze::RowSnoozes::load(db.clone(), clock.clone(), publish.clone());
     app.dashboard_routes(super::rowsnooze::router(row_snoozes.clone()));
     app.dashboard_routes(super::scheduler::router(scheduler.clone()));
     let (tick, poll) = (cfg.tick(), Duration::from_secs(cfg.incidents_poll_s));
@@ -3052,6 +3081,15 @@ pub fn mount(
     });
     let git = cfg.git.clone();
     app.on_start(move || {
+        // A failed import means the notices and snoozes were NOT moved into
+        // the database; running on would start a second, empty history that
+        // the retried import then collides with. The old file is untouched
+        // (the transaction rolled back), so stopping loses nothing.
+        if let chassis::storage::ImportState::Failed { why } = db.import_state() {
+            tracing::error!(why = %why, "the one-time import of the dashboard's files failed; stopping, nothing was changed");
+            eprintln!("homelab-admin: the one-time import of the dashboard's files failed: {why}");
+            std::process::exit(1);
+        }
         // Clone or bring the working copy up to date, off the async threads.
         tokio::task::spawn_blocking(move || {
             // CT 120: the deploy key arrives from latch as an environment

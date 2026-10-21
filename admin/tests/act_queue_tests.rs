@@ -53,7 +53,7 @@ fn world(tag: &str, files: MemFiles, behaviour: act_support::Behaviour) -> World
     let pusher = Arc::new(RecPusher::default());
     let dir = temp_dir(tag);
     let notify = NotifyCenter::load(
-        dir.join("notifications.json"),
+        homelab_admin::shell::store::file_db(&dir.join("homelab-admin.db")),
         pusher.clone(),
         live.clone(),
         clock.clock(),
@@ -173,17 +173,20 @@ async fn feat_stacks_4_a_short_action_lands_in_the_list_without_a_push() {
     assert_eq!(list["unread"], 1);
     assert_eq!(list["notices"][0]["push"]["state"], "skipped");
     assert_eq!(list["notices"][0]["job"], job.job);
-    // arch-state: the list is on disk and reads back.
+    // arch-state: the list is on disk and reads back through a fresh handle.
     let reread = NotifyCenter::load(
-        w.dir.join("notifications.json"),
+        homelab_admin::shell::store::file_db(&w.dir.join("homelab-admin.db")),
         w.pusher.clone(),
         w.live.clone(),
         w.clock.clock(),
     )
     .unwrap();
     assert_eq!(reread.snapshot().await["unread"], 1);
-    let raw = std::fs::read_to_string(w.dir.join("notifications.json")).unwrap();
-    assert!(raw.contains("\"schema_version\": 1"), "{raw}");
+    assert!(w.dir.join("homelab-admin.db").exists());
+    assert!(
+        !w.dir.join("notifications.json").exists(),
+        "since 4.0.0 the list is no JSON file"
+    );
 }
 
 #[tokio::test]

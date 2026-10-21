@@ -9,9 +9,7 @@ mod act_support;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use act_support::{
-    MemFiles, MockHost, Recorder, Script, TestClock, history, shared, temp_dir, until,
-};
+use act_support::{MemFiles, MockHost, Recorder, Script, TestClock, history, shared, until};
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use homelab_admin::core::drivelive::Control;
@@ -35,7 +33,7 @@ struct World {
     clock: TestClock,
 }
 
-fn world(tag: &str) -> World {
+fn world(_tag: &str) -> World {
     let clock = TestClock::at(1_790_000_000);
     let host = MockHost::start(
         clock.clone(),
@@ -44,9 +42,8 @@ fn world(tag: &str) -> World {
         Arc::new(std::sync::Mutex::new(Vec::new())),
     );
     let live = Arc::new(Recorder::default());
-    let dir = temp_dir(&format!("follow-live-{tag}"));
     let notify = NotifyCenter::load(
-        dir.join("notifications.json"),
+        homelab_admin::shell::store::memory_db(),
         Arc::new(act_support::RecPusher::default()),
         live.clone(),
         clock.clock(),

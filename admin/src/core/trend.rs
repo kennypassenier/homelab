@@ -24,19 +24,19 @@ pub const POINTS: usize = 288;
 
 /// The running sums of one bucket.
 #[derive(Debug, Clone, Default, PartialEq, serde::Serialize, serde::Deserialize)]
-struct Bucket {
+pub struct Bucket {
     /// Which bucket: `at / step`.
-    slot: u64,
-    host_cpu: Mean,
-    load_x100: Mean,
+    pub slot: u64,
+    pub host_cpu: Mean,
+    pub load_x100: Mean,
     /// Per stack: CPU in permille of one core's worth of the host.
-    stacks: BTreeMap<String, Mean>,
+    pub stacks: BTreeMap<String, Mean>,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, serde::Serialize, serde::Deserialize)]
-struct Mean {
-    sum: u64,
-    n: u64,
+pub struct Mean {
+    pub sum: u64,
+    pub n: u64,
 }
 
 impl Mean {
@@ -111,6 +111,17 @@ impl Trend {
             t.buckets.push_back(b);
         }
         t
+    }
+
+    /// Seconds one bucket covers.
+    pub fn step_s(&self) -> u64 {
+        self.step_s
+    }
+
+    /// The buckets as kept, oldest first (the one-time import into the app
+    /// database reads them; `shell::store`).
+    pub fn buckets(&self) -> impl Iterator<Item = &Bucket> {
+        self.buckets.iter()
     }
 
     /// The newest bucket's slot, to tell when a new one was started.

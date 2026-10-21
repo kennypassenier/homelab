@@ -1,0 +1,760 @@
+//! feat-kpadopt-2 (4.0.0): all of the dashboard's data in one sqlite file,
+//! `<state dir>/homelab-admin.db`, through chassis-rs 3.11.0's storage layer
+//! (Kenny, 2026-10-21). This module is the whole description of that file:
+//!
+//! * [`migrations`]: the schema as ONE numbered list, append only. It holds
+//!   the tables of all six stores the dashboard used to keep as JSON, so
+//!   moving a store over later changes code and no schema.
+//! * [`import`]: the one-time move of the six JSON files, in one transaction
+//!   with a count check, run by chassis at the first start of 4.0.0.
+//! * [`kinds`]: what the kit's Storage page lists, filters and deletes
+//!   (targeted delete, with a preview and a typed confirmation).
+//! * [`warn_draft`]: the Inbox notice for the budget's warning.
+//!
+//! | table | was | time column | moved |
+//! |---|---|---|---|
+//! | `notices` | `notifications.json` | `at` | yes |
+//! | `notify_state` | `notifications.json` (settings, cursors) | | yes |
+//! | `inbox_snoozes` | `inbox-snoozes.json` | `set_at` | yes |
+//! | `schedules` | `schedules.json` | `created_at` | not yet |
+//! | `update_records` | `update-flows.json` | `at` | not yet |
+//! | `uptime_cells` | `uptime-history.json` | `hour_at` | not yet |
+//! | `trend_buckets`, `trend_stacks` | `fleet-trend.json` | `at` | not yet |
+//!
+//! "Not yet" stores are copied into their tables by the import and still
+//! run on their JSON files, which the import therefore leaves where they
+//! are; when a store moves, its file name joins [`MOVED`] so the import
+//! renames it to `*.migrated` too.
+//!
+//! Power loss: sqlite runs in WAL mode with `synchronous=FULL` (chassis),
+//! every write here is one transaction, and the import commits its marker
+//! with its data, so a cut leaves the old JSON files or the finished
+//! database, and the next start tries the import again in the first case.
+
+use std::path::{Path, PathBuf};
+
+use chassis::Error;
+use chassis::storage::rusqlite::{Connection, Transaction, params};
+use chassis::storage::{
+    AppDb, AppDbSpec, DataKind, Filter, ImportReport, Level as BudgetLevel, Migration,
+    StorageReport, TimeFormat,
+};
+
+use super::actions_state::read_json;
+use super::notice_store;
+use crate::core::notify::{Detail, Draft, Kind, Level, NotifyFile};
+use crate::core::rowsnooze;
+use crate::core::schedule::ScheduleFile;
+use crate::core::trend;
+use crate::core::updateflow::UpdateRecord;
+use crate::core::uptime;
+
+/// The files whose store lives in the database and nowhere else: the import
+/// renames them to `*.migrated` once it committed. A store that still runs on
+/// its JSON file is not here (see the module docs).
+pub const MOVED: [&str; 2] = [FILE_NOTICES, FILE_SNOOZES];
+
+pub const FILE_NOTICES: &str = "notifications.json";
+pub const FILE_SNOOZES: &str = "inbox-snoozes.json";
+pub const FILE_SCHEDULES: &str = "schedules.json";
+pub const FILE_FLOWS: &str = "update-flows.json";
+pub const FILE_UPTIME: &str = "uptime-history.json";
+pub const FILE_TREND: &str = "fleet-trend.json";
+
+/// How long after it ended a snooze is left for the dashboard to tell its
+/// reminder (the first tick after a start does): the same 30 days the JSON
+/// store kept ended snoozes for.
+pub const SNOOZE_GRACE_S: i64 = 30 * 86_400;
+
+/// The schema. Append only: a step that shipped is never edited.
+pub fn migrations() -> Vec<Migration> {
+    vec![
+        // 1 · the Inbox's notices. One column for everything a page filters
+        // by or the code looks up by; the rest of a notice is the JSON cell.
+        // `AUTOINCREMENT`: an id is never handed out twice, even after the
+        // Storage page deleted the newest row.
+        Migration::sql(
+            "CREATE TABLE notices (
+                id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                at          INTEGER NOT NULL,
+                kind        TEXT    NOT NULL,
+                level       TEXT    NOT NULL,
+                stack       TEXT,
+                is_read     INTEGER NOT NULL DEFAULT 0,
+                title       TEXT    NOT NULL,
+                body        TEXT    NOT NULL,
+                job         INTEGER,
+                since       INTEGER,
+                source      TEXT,
+                notice_key  TEXT,
+                op          TEXT,
+                label       TEXT,
+                resolved_by INTEGER,
+                extra       TEXT    NOT NULL DEFAULT '{}'
+            ) STRICT;
+            CREATE INDEX notices_at ON notices (at);
+            CREATE INDEX notices_level_at ON notices (level, at);
+            CREATE INDEX notices_unread ON notices (id) WHERE is_read = 0;
+            CREATE INDEX notices_stack ON notices (stack, is_read) WHERE stack IS NOT NULL;
+            CREATE INDEX notices_key ON notices (notice_key, id) WHERE notice_key IS NOT NULL;
+            CREATE INDEX notices_job ON notices (job) WHERE job IS NOT NULL;",
+        ),
+        // 2 · the centre's settings and cursors: one row, settings as the
+        // JSON the API already speaks (`{}` reads as every default).
+        Migration::sql(
+            "CREATE TABLE notify_state (
+                id               INTEGER PRIMARY KEY CHECK (id = 1),
+                settings         TEXT    NOT NULL DEFAULT '{}',
+                seen_incidents   TEXT    NOT NULL DEFAULT '[]',
+                incidents_seeded INTEGER NOT NULL DEFAULT 0,
+                host_cursor      INTEGER NOT NULL DEFAULT 0,
+                host_seeded      INTEGER NOT NULL DEFAULT 0,
+                last_digest      TEXT
+            ) STRICT;
+            INSERT INTO notify_state (id) VALUES (1);",
+        ),
+        // 3 · the Inbox's per-row snoozes (at most 300 rows: core::rowsnooze).
+        Migration::sql(
+            "CREATE TABLE inbox_snoozes (
+                row_key TEXT    PRIMARY KEY,
+                until   INTEGER NOT NULL,
+                title   TEXT    NOT NULL,
+                href    TEXT,
+                remind  INTEGER NOT NULL DEFAULT 0,
+                set_at  INTEGER NOT NULL
+            ) STRICT;
+            CREATE INDEX inbox_snoozes_until ON inbox_snoozes (until);",
+        ),
+        // 4 · schedules: what the page lists and the tick compares as
+        // columns, the action's arguments and the two last-run records as
+        // JSON cells (their shapes belong to core::schedule).
+        Migration::sql(
+            "CREATE TABLE schedules (
+                id            TEXT    PRIMARY KEY,
+                stack         TEXT    NOT NULL,
+                action        TEXT    NOT NULL,
+                enabled       INTEGER NOT NULL DEFAULT 1,
+                note          TEXT    NOT NULL DEFAULT '',
+                created_at    INTEGER NOT NULL,
+                handled_until INTEGER NOT NULL,
+                paused_until  INTEGER,
+                args          TEXT    NOT NULL DEFAULT '{}',
+                when_json     TEXT    NOT NULL,
+                last_run      TEXT,
+                last_missed   TEXT
+            ) STRICT;
+            CREATE INDEX schedules_stack ON schedules (stack);",
+        ),
+        // 5 · the Update flow's undo records. `stacks` is the touched stacks
+        // as `,a,b,` so the page can filter by one.
+        Migration::sql(
+            "CREATE TABLE update_records (
+                job     INTEGER PRIMARY KEY,
+                at      INTEGER NOT NULL,
+                by_whom TEXT    NOT NULL,
+                outcome TEXT    NOT NULL,
+                stacks  TEXT    NOT NULL DEFAULT ',',
+                items   TEXT    NOT NULL DEFAULT '[]',
+                commits TEXT    NOT NULL DEFAULT '[]'
+            ) STRICT;
+            CREATE INDEX update_records_at ON update_records (at);
+            CREATE INDEX update_records_outcome ON update_records (outcome, at);",
+        ),
+        // 6 · the minute watch's hourly cells. `hour_at` is the unix second
+        // the hour starts at (the old file counted hours since the epoch).
+        Migration::sql(
+            "CREATE TABLE uptime_cells (
+                cell_key TEXT    NOT NULL,
+                hour_at  INTEGER NOT NULL,
+                up       INTEGER NOT NULL DEFAULT 0,
+                dep      INTEGER NOT NULL DEFAULT 0,
+                down     INTEGER NOT NULL DEFAULT 0,
+                ms_sum   INTEGER NOT NULL DEFAULT 0,
+                ms_n     INTEGER NOT NULL DEFAULT 0,
+                ms_max   INTEGER NOT NULL DEFAULT 0,
+                PRIMARY KEY (cell_key, hour_at)
+            ) STRICT, WITHOUT ROWID;
+            CREATE INDEX uptime_cells_hour ON uptime_cells (hour_at);",
+        ),
+        // 7 · the fleet's last day, one row per five-minute bucket and one
+        // per stack in it. `at` is the bucket's start; deleting a bucket
+        // takes its stacks with it.
+        Migration::sql(
+            "CREATE TABLE trend_buckets (
+                slot         INTEGER PRIMARY KEY,
+                at           INTEGER NOT NULL,
+                host_cpu_sum INTEGER NOT NULL DEFAULT 0,
+                host_cpu_n   INTEGER NOT NULL DEFAULT 0,
+                load_sum     INTEGER NOT NULL DEFAULT 0,
+                load_n       INTEGER NOT NULL DEFAULT 0
+            ) STRICT;
+            CREATE INDEX trend_buckets_at ON trend_buckets (at);
+            CREATE TABLE trend_stacks (
+                slot  INTEGER NOT NULL REFERENCES trend_buckets (slot) ON DELETE CASCADE,
+                stack TEXT    NOT NULL,
+                sum   INTEGER NOT NULL DEFAULT 0,
+                n     INTEGER NOT NULL DEFAULT 0,
+                PRIMARY KEY (slot, stack)
+            ) STRICT, WITHOUT ROWID;",
+        ),
+    ]
+}
+
+/// What the Storage page lists. Only the stores that live in the database
+/// are declared: a table that still mirrors a JSON file would show numbers
+/// nobody reads and offer a delete that changes nothing.
+pub fn kinds() -> Vec<DataKind> {
+    vec![
+        DataKind::new("notices", "Notices")
+            .description(
+                "What the dashboard, the host and Alertmanager told you in the Inbox. \
+                 Nothing here is removed on its own: delete the old ones when you want the space.",
+            )
+            .unit("notices")
+            .table("notices")
+            .time_column("at", TimeFormat::UnixSeconds)
+            .filter(Filter::choice(
+                "level",
+                "Level",
+                "level",
+                ["critical", "warning", "info", "ok"],
+            ))
+            .filter(Filter::flag("read", "Read", "is_read"))
+            .filter(Filter::text("stack", "Stack", "stack")),
+        DataKind::new("snoozes", "Inbox snoozes")
+            .description(
+                "Rows you hid from the Inbox until a moment. A snooze that ended \
+                 more than 30 days ago is finished and is removed daily.",
+            )
+            .unit("snoozes")
+            .table("inbox_snoozes")
+            .time_column("set_at", TimeFormat::UnixSeconds)
+            .filter(Filter::flag("remind", "Remind me", "remind"))
+            .finished_by_definition("until < :now - 2592000"),
+    ]
+}
+
+/// The app database's description: schema, kinds are declared separately
+/// (`App::storage_kind`), and the one-time import of the JSON files in
+/// `data_dir`.
+pub fn spec(data_dir: PathBuf) -> AppDbSpec {
+    AppDbSpec::new(migrations()).with_import(move |tx, _ctx| import(tx, &data_dir))
+}
+
+/// A database in a file, opened the way the service opens it (migrations
+/// and kinds, no import), for tests that read it back through a second
+/// handle.
+pub fn file_db(path: &Path) -> AppDb {
+    AppDb::open(path, AppDbSpec::new(migrations()), kinds()).expect("the database opens")
+}
+
+/// An empty database in memory, for tests of everything that reads or
+/// writes the dashboard's data.
+pub fn memory_db() -> AppDb {
+    AppDb::open_in_memory(AppDbSpec::new(migrations()), kinds())
+        .expect("the schema and the kinds agree")
+}
+
+// ── the one-time import ─────────────────────────────────────────────────
+
+fn refuse(what: &str, e: impl std::fmt::Display) -> Error {
+    Error::invalid(
+        format!("{what} does not read as the dashboard's file: {e}"),
+        format!(
+            "fix or move {what} aside; the dashboard starts again with the next restart (nothing was imported)"
+        ),
+    )
+}
+
+/// The same check the old loader made, before anything opens: an
+/// `notifications.json` this build cannot read stops the start (never
+/// silently replaced by an empty list), exactly as it did.
+pub fn precheck(data_dir: &Path) -> Result<(), String> {
+    let path = data_dir.join(FILE_NOTICES);
+    match read_json::<NotifyFile>(&path) {
+        Ok(Some(f)) => f
+            .check()
+            .map_err(|why| format!("{}: {why}", path.display())),
+        Ok(None) => Ok(()),
+        Err(e) => Err(e.to_string()),
+    }
+}
+
+/// A store that never was a reason to stop: unreadable means empty, with a
+/// line in the log (the old loaders did the same for a measurement log).
+fn lenient<T: serde::de::DeserializeOwned>(path: &Path) -> Option<T> {
+    match read_json::<T>(path) {
+        Ok(v) => v,
+        Err(e) => {
+            tracing::warn!(error = %e, "an old dashboard file does not read and is not imported");
+            None
+        }
+    }
+}
+
+fn count(tx: &Transaction, table: &str) -> Result<u64, Error> {
+    Ok(
+        tx.query_row(&format!("SELECT COUNT(*) FROM \"{table}\""), [], |r| {
+            r.get::<_, i64>(0)
+        })? as u64,
+    )
+}
+
+/// Move the six JSON files into the tables, in the caller's transaction.
+/// Each store reports how many records its file held; after all six are
+/// written the tables are counted and a store whose table holds another
+/// number fails the whole import (chassis then rolls everything back).
+pub fn import(tx: &Transaction, data_dir: &Path) -> Result<ImportReport, Error> {
+    let at = |name: &str| data_dir.join(name);
+    let mut expected = 0u64;
+    let mut checks: Vec<(&str, u64)> = Vec::new();
+    let mut files: Vec<PathBuf> = Vec::new();
+    let mut note = |table: &'static str, n: u64, expected: &mut u64| {
+        *expected += n;
+        checks.push((table, n));
+    };
+
+    // notifications.json: strict, as the old loader was.
+    if let Some(f) =
+        read_json::<NotifyFile>(&at(FILE_NOTICES)).map_err(|e| refuse(FILE_NOTICES, e))?
+    {
+        f.check().map_err(|why| refuse(FILE_NOTICES, why))?;
+        let mut top = f.next_id.saturating_sub(1) as i64;
+        for n in &f.notices {
+            notice_store::insert(tx, n, true)?;
+            top = top.max(n.id as i64);
+        }
+        // The next id is the file's, even when its newest notice had fallen
+        // off: an id that was handed out stays spent.
+        if tx.execute(
+            "UPDATE sqlite_sequence SET seq = MAX(seq, ?1) WHERE name = 'notices'",
+            params![top],
+        )? == 0
+        {
+            tx.execute(
+                "INSERT INTO sqlite_sequence (name, seq) VALUES ('notices', ?1)",
+                params![top],
+            )?;
+        }
+        notice_store::put_state(
+            tx,
+            &notice_store::State {
+                settings: f.settings,
+                seen_incidents: f.seen_incidents,
+                incidents_seeded: f.incidents_seeded,
+                host_cursor: f.host_cursor,
+                host_seeded: f.host_seeded,
+                last_digest: f.last_digest,
+            },
+        )?;
+        note("notices", f.notices.len() as u64, &mut expected);
+    }
+
+    // inbox-snoozes.json: a file that does not read is set aside, the rows
+    // simply show again (what the old loader did).
+    let snoozes = at(FILE_SNOOZES);
+    match read_json::<rowsnooze::File>(&snoozes) {
+        Ok(Some(f)) => {
+            let mut keys = std::collections::BTreeSet::new();
+            let mut n = 0u64;
+            // The last row of a key wins, as a snooze set again moves.
+            for e in f.rows.iter().rev().filter(|e| keys.insert(e.key.clone())) {
+                tx.execute(
+                    "INSERT INTO inbox_snoozes (row_key, until, title, href, remind, set_at) \
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                    params![e.key, e.until, e.title, e.href, e.remind as i64, e.set_at],
+                )?;
+                n += 1;
+            }
+            note("inbox_snoozes", n, &mut expected);
+        }
+        Ok(None) => {}
+        Err(e) => {
+            tracing::warn!(error = %e, "inbox snoozes not read, starting empty");
+            let _ = std::fs::rename(&snoozes, snoozes.with_extension("json.bad"));
+        }
+    }
+
+    // schedules.json
+    if let Some(f) = lenient::<ScheduleFile>(&at(FILE_SCHEDULES)) {
+        for s in &f.schedules {
+            tx.execute(
+                "INSERT INTO schedules (id, stack, action, enabled, note, created_at, handled_until, \
+                 paused_until, args, when_json, last_run, last_missed) \
+                 VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12)",
+                params![
+                    s.id,
+                    s.stack,
+                    s.action,
+                    s.enabled as i64,
+                    s.note,
+                    s.created_at,
+                    s.handled_until,
+                    s.paused_until,
+                    to_json(&s.args)?,
+                    to_json(&s.when)?,
+                    s.last_run.as_ref().map(to_json).transpose()?,
+                    s.last_missed.as_ref().map(to_json).transpose()?,
+                ],
+            )?;
+        }
+        note("schedules", f.schedules.len() as u64, &mut expected);
+    }
+
+    // update-flows.json
+    if let Some(all) = lenient::<Vec<UpdateRecord>>(&at(FILE_FLOWS)) {
+        for r in &all {
+            let mut stacks: Vec<&str> = r.items.iter().map(|i| i.stack.as_str()).collect();
+            stacks.sort_unstable();
+            stacks.dedup();
+            tx.execute(
+                "INSERT INTO update_records (job, at, by_whom, outcome, stacks, items, commits) \
+                 VALUES (?1,?2,?3,?4,?5,?6,?7)",
+                params![
+                    r.job as i64,
+                    r.at,
+                    r.by,
+                    r.outcome,
+                    format!(",{},", stacks.join(",")),
+                    to_json(&r.items)?,
+                    to_json(&r.commits)?,
+                ],
+            )?;
+        }
+        note("update_records", all.len() as u64, &mut expected);
+    }
+
+    // uptime-history.json
+    if let Some(s) = lenient::<uptime::Store>(&at(FILE_UPTIME)) {
+        let mut n = 0u64;
+        for (key, cells) in &s.keys {
+            for c in cells {
+                tx.execute(
+                    "INSERT INTO uptime_cells (cell_key, hour_at, up, dep, down, ms_sum, ms_n, ms_max) \
+                     VALUES (?1,?2,?3,?4,?5,?6,?7,?8)",
+                    params![
+                        key,
+                        c.h.saturating_mul(3600),
+                        c.up,
+                        c.dep,
+                        c.down,
+                        c.ms_sum as i64,
+                        c.ms_n,
+                        c.ms_max
+                    ],
+                )?;
+                n += 1;
+            }
+        }
+        note("uptime_cells", n, &mut expected);
+    }
+
+    // fleet-trend.json
+    if let Some(saved) = lenient::<trend::Saved>(&at(FILE_TREND)) {
+        let step = saved.trend.step_s();
+        let (mut buckets, mut stacks) = (0u64, 0u64);
+        for b in saved.trend.buckets() {
+            tx.execute(
+                "INSERT INTO trend_buckets (slot, at, host_cpu_sum, host_cpu_n, load_sum, load_n) \
+                 VALUES (?1,?2,?3,?4,?5,?6)",
+                params![
+                    b.slot as i64,
+                    (b.slot.saturating_mul(step)) as i64,
+                    b.host_cpu.sum as i64,
+                    b.host_cpu.n as i64,
+                    b.load_x100.sum as i64,
+                    b.load_x100.n as i64
+                ],
+            )?;
+            buckets += 1;
+            for (name, m) in &b.stacks {
+                tx.execute(
+                    "INSERT INTO trend_stacks (slot, stack, sum, n) VALUES (?1,?2,?3,?4)",
+                    params![b.slot as i64, name, m.sum as i64, m.n as i64],
+                )?;
+                stacks += 1;
+            }
+        }
+        note("trend_buckets", buckets, &mut expected);
+        note("trend_stacks", stacks, &mut expected);
+    }
+
+    // The count check: what each table holds is what its file held.
+    let mut imported = 0u64;
+    for (table, want) in &checks {
+        let have = count(tx, table)?;
+        if have != *want {
+            return Err(Error::internal(
+                format!("the import of `{table}` wrote {have} rows, its file held {want}"),
+                "nothing was kept; report this, the next start tries again",
+            ));
+        }
+        imported += have;
+    }
+
+    for name in MOVED {
+        let p = at(name);
+        if p.exists() {
+            files.push(p);
+        }
+    }
+    Ok(ImportReport::new(expected, imported, files))
+}
+
+fn to_json<T: serde::Serialize>(v: &T) -> Result<String, Error> {
+    serde_json::to_string(v)
+        .map_err(|e| Error::internal(format!("a record does not serialise: {e}"), "report this"))
+}
+
+// ── the budget's warning ────────────────────────────────────────────────
+
+/// Megabytes as chassis counts them (1 MB = 1 000 000 bytes), one decimal.
+fn mb(bytes: u64) -> String {
+    format!("{:.1}", bytes as f64 / 1_000_000.0)
+}
+
+/// The Inbox notice for a budget that is at its warn line or past the
+/// budget. Chassis only warns, and so does this: the notice says nothing was
+/// refused or deleted, and where to look.
+pub fn warn_draft(r: &StorageReport) -> Draft {
+    warn_notice(
+        r.total_bytes,
+        r.warn_bytes,
+        r.budget_bytes,
+        r.level == BudgetLevel::Over,
+    )
+}
+
+/// [`warn_draft`] from the figures (chassis' report is not buildable in a
+/// test).
+pub fn warn_notice(total: u64, warn: u64, budget: u64, over: bool) -> Draft {
+    let mut d = Draft::new(
+        Kind::StorageWarn,
+        "storage-warn",
+        &if over {
+            format!(
+                "The dashboard's data is past its budget: {} of {} MB",
+                mb(total),
+                mb(budget)
+            )
+        } else {
+            format!(
+                "The dashboard's data is nearly at its budget: {} of {} MB",
+                mb(total),
+                mb(budget)
+            )
+        },
+        &format!(
+            "The files the dashboard keeps its data in hold {} MB; the warning line is {} MB and the budget {} MB.",
+            mb(total),
+            mb(warn),
+            mb(budget)
+        ),
+    );
+    d.detail = Detail {
+        level: Level::Warning,
+        consequence: Some(
+            "Nothing breaks and nothing is deleted or refused: the budget only warns.".into(),
+        ),
+        remedy: Some(
+            "Open Storage to see what takes the space and delete what you no longer need, or raise the budget there."
+                .into(),
+        ),
+        link: Some("/storage".into()),
+        key: Some("storage-budget".into()),
+        ..Default::default()
+    };
+    d
+}
+
+/// Read access for the few places that need the connection directly.
+pub fn read<T>(db: &AppDb, f: impl FnOnce(&Connection) -> Result<T, Error>) -> Result<T, Error> {
+    db.read_blocking(f)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn dir(tag: &str) -> PathBuf {
+        let p = std::env::temp_dir().join(format!("homelab-store-{tag}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&p);
+        std::fs::create_dir_all(&p).unwrap();
+        p
+    }
+
+    #[test]
+    fn the_schema_and_the_kinds_agree() {
+        // `memory_db` validates every kind against the tables.
+        let db = memory_db();
+        assert_eq!(db.kinds().len(), 2);
+        let tables: Vec<String> = db
+            .read_blocking(|c| {
+                let mut s = c.prepare(
+                    "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' \
+                     AND name NOT LIKE 'chassis_%' ORDER BY name",
+                )?;
+                Ok(s.query_map([], |r| r.get(0))?.collect::<Result<_, _>>()?)
+            })
+            .unwrap();
+        assert_eq!(
+            tables,
+            [
+                "inbox_snoozes",
+                "notices",
+                "notify_state",
+                "schedules",
+                "trend_buckets",
+                "trend_stacks",
+                "update_records",
+                "uptime_cells"
+            ]
+        );
+    }
+
+    #[test]
+    fn an_import_with_no_old_files_is_empty_and_renames_nothing() {
+        let d = dir("empty");
+        let db = AppDb::open(&d.join("t.db"), spec(d.clone()), kinds()).unwrap();
+        assert_eq!(db.import_state(), chassis::storage::ImportState::Done);
+        assert_eq!(db.read_blocking(notice_store::unread).unwrap(), 0);
+    }
+
+    #[test]
+    fn the_six_files_land_in_their_tables_and_only_the_moved_two_are_renamed() {
+        let d = dir("six");
+        std::fs::write(
+            d.join(FILE_NOTICES),
+            r#"{"schema_version":1,"next_id":9,"settings":{"push":false,"muted_stacks":["media"]},
+                "notices":[{"id":3,"at":100,"kind":"action_failed","stack":"media","title":"t","body":"b",
+                "read":false,"push":{"state":"sent"},"level":"warning","fixes":[]},
+                {"id":4,"at":200,"kind":"down","title":"t2","body":"b2","read":true,
+                "push":{"state":"skipped","why":"x"},"key":"k"}],
+                "seen_incidents":["1-a"],"incidents_seeded":true,"host_cursor":7,"host_seeded":true}"#,
+        )
+        .unwrap();
+        std::fs::write(
+            d.join(FILE_SNOOZES),
+            r#"{"schema_version":1,"rows":[{"key":"notice:3","until":900,"title":"t","remind":true,"set_at":100}]}"#,
+        )
+        .unwrap();
+        std::fs::write(
+            d.join(FILE_SCHEDULES),
+            r#"{"schema_version":1,"zone":"Europe/Brussels","schedules":[{"id":"s1","stack":"media",
+                "action":"backup","when":{"every":"day","at":"03:30"},"enabled":true,"note":"",
+                "created_at":10,"handled_until":20}]}"#,
+        )
+        .unwrap();
+        std::fs::write(
+            d.join(FILE_FLOWS),
+            r#"[{"job":5,"at":300,"by":"Kenny","items":[],"commits":["abc"],"outcome":"done"}]"#,
+        )
+        .unwrap();
+        std::fs::write(
+            d.join(FILE_UPTIME),
+            r#"{"schema_version":1,"keys":{"tile:a":[{"h":10,"up":3},{"h":11,"down":1}]}}"#,
+        )
+        .unwrap();
+        let db = AppDb::open(&d.join("t.db"), spec(d.clone()), kinds()).unwrap();
+        assert_eq!(db.import_state(), chassis::storage::ImportState::Done);
+        let (notices, snoozes, schedules, flows, cells): (i64, i64, i64, i64, i64) = db
+            .read_blocking(|c| {
+                let n = |t: &str| {
+                    c.query_row(&format!("SELECT COUNT(*) FROM {t}"), [], |r| {
+                        r.get::<_, i64>(0)
+                    })
+                };
+                Ok((
+                    n("notices")?,
+                    n("inbox_snoozes")?,
+                    n("schedules")?,
+                    n("update_records")?,
+                    n("uptime_cells")?,
+                ))
+            })
+            .unwrap();
+        assert_eq!((notices, snoozes, schedules, flows, cells), (2, 1, 1, 1, 2));
+        // The settings and cursors came along; the id counter is the file's.
+        let st = db.read_blocking(notice_store::state).unwrap();
+        assert!(!st.settings.push);
+        assert_eq!(
+            (st.host_cursor, st.host_seeded, st.incidents_seeded),
+            (7, true, true)
+        );
+        let fresh = db
+            .write_blocking(|tx| {
+                notice_store::add(
+                    tx,
+                    Draft::new(Kind::ActionDone, "deploy-x", "t", "b"),
+                    500,
+                    crate::core::notify::PushOutcome::Sent,
+                )
+            })
+            .unwrap();
+        assert_eq!(fresh.id, 9, "next_id of the file is the next id handed out");
+        // The two moved files are renamed; the four still on JSON stay.
+        assert!(!d.join(FILE_NOTICES).exists() && d.join("notifications.json.migrated").exists());
+        assert!(!d.join(FILE_SNOOZES).exists() && d.join("inbox-snoozes.json.migrated").exists());
+        for stays in [FILE_SCHEDULES, FILE_FLOWS, FILE_UPTIME] {
+            assert!(d.join(stays).exists(), "{stays} still runs on JSON");
+        }
+    }
+
+    #[test]
+    fn a_notifications_file_this_build_cannot_read_stops_the_import() {
+        let d = dir("bad");
+        std::fs::write(d.join(FILE_NOTICES), "{not json").unwrap();
+        assert!(precheck(&d).is_err());
+        let db = AppDb::open(&d.join("t.db"), spec(d.clone()), kinds()).unwrap();
+        assert!(matches!(
+            db.import_state(),
+            chassis::storage::ImportState::Failed { .. }
+        ));
+        assert!(
+            d.join(FILE_NOTICES).exists(),
+            "the file is left where it is"
+        );
+        assert_eq!(db.read_blocking(notice_store::total).unwrap(), 0);
+    }
+
+    #[test]
+    fn only_snoozes_that_ended_long_ago_are_finished_by_definition() {
+        let db = memory_db();
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs() as i64;
+        db.write_blocking(|tx| {
+            for (k, until) in [
+                ("ended-long-ago", now - SNOOZE_GRACE_S - 3_600),
+                ("ended-lately", now - 3_600),
+                ("running", now + 3_600),
+            ] {
+                tx.execute(
+                    "INSERT INTO inbox_snoozes (row_key, until, title, remind, set_at) VALUES (?1,?2,'t',0,0)",
+                    params![k, until],
+                )?;
+            }
+            Ok(())
+        })
+        .unwrap();
+        let removed = db.prune_finished().unwrap();
+        assert_eq!(removed, vec![("snoozes".to_string(), 1)]);
+        let left: Vec<String> = db
+            .read_blocking(|c| {
+                let mut s = c.prepare("SELECT row_key FROM inbox_snoozes ORDER BY row_key")?;
+                Ok(s.query_map([], |r| r.get(0))?.collect::<Result<_, _>>()?)
+            })
+            .unwrap();
+        assert_eq!(left, ["ended-lately", "running"]);
+    }
+
+    #[test]
+    fn the_warning_notice_says_nothing_was_deleted_and_where_to_look() {
+        let d = warn_notice(42_000_000, 40_000_000, 50_000_000, false);
+        assert_eq!(d.kind, Kind::StorageWarn);
+        assert_eq!(d.detail.link.as_deref(), Some("/storage"));
+        assert!(d.title.contains("42.0 of 50.0 MB"));
+        assert!(d.detail.consequence.unwrap().contains("nothing is deleted"));
+    }
+}

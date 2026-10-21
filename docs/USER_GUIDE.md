@@ -3656,7 +3656,7 @@ place to look.
 | homelab daemon's own `push-staging-*` files | swept at daemon start and after every operation, 1h grace | `core/src/ops/util.rs` (`stale_push_staging`), called from `host/src/main.rs` (`cleanup_push_staging`) |
 | incident bundles | age + count (`incident_bundle_max_age_days`/`_count`) | `host.toml`, unchanged by this round |
 | journal.jsonl (daemon's own) | size (`journal_max_bytes`) | `host.toml`, unchanged by this round |
-| dashboard notification store | count (`notify_keep`) + age (new: `notify_max_age_days`, default 180) | env vars on CT 120, `HOMELAB_ADMIN_NOTIFY_KEEP` / `HOMELAB_ADMIN_NOTIFY_MAX_AGE_DAYS` — `admin/src/core/actions_config.rs` |
+| dashboard notification store | since 4.0.0 no count or age cap: the notices live in the dashboard's sqlite file and stay until the Storage page deletes them (preview, typed confirmation); `notify_keep` (500) only sizes one list; the file's budget (50 MB, warning at 40 MB, changeable on `/storage`) warns and never deletes | env var on CT 120, `HOMELAB_ADMIN_NOTIFY_KEEP` — `admin/src/core/actions_config.rs`; `HOMELAB_ADMIN_NOTIFY_MAX_AGE_DAYS` is retired |
 | kyu's own backup-file retention | count (`KYU_BACKUP_KEEP`, default 7) | `stacks/kyu/rootfs/usr/local/bin/kyu-backup` — already had a default |
 | kyu's own message-store retention | kyu's own concern, outside this repository | not declared here; flagged to the kyu project (disk-audit) |
 | kyu migration leftovers (`kyu-config-newstore-backup`, `kyu-config-pre-update` on CT 109) | none — small today, never cleaned up | manual cleanup for Kenny; this repo's code does not know an individual stack's leftover file names (app-knowledge guard, `core/tests/app_knowledge_guard_tests.rs`) |

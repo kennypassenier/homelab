@@ -191,7 +191,7 @@ fn world(
     let live = Arc::new(Recorder::default());
     let dir = temp_dir(tag);
     let notify = NotifyCenter::load(
-        dir.join("notifications.json"),
+        homelab_admin::shell::store::memory_db(),
         Arc::new(RecPusher::default()),
         live.clone(),
         clock.clock(),

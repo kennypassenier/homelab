@@ -13,9 +13,7 @@ mod act_support;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use act_support::{
-    Behaviour, MemFiles, MockHost, RecPusher, Recorder, Script, TestClock, shared, temp_dir,
-};
+use act_support::{Behaviour, MemFiles, MockHost, RecPusher, Recorder, Script, TestClock, shared};
 use homelab_admin::shell::actions::{Actions, ActionsDeps, HostPort};
 use homelab_admin::shell::actions_notify::NotifyCenter;
 use homelab_admin::shell::watch::{Watched, round, snapshot};
@@ -52,10 +50,9 @@ async fn fake_backend(status: &'static str) -> String {
     format!("http://{}/", addr)
 }
 
-fn center(tag: &str, clock: &TestClock) -> Arc<NotifyCenter> {
-    let dir = temp_dir(tag);
+fn center(_tag: &str, clock: &TestClock) -> Arc<NotifyCenter> {
     NotifyCenter::load(
-        dir.join("notifications.json"),
+        homelab_admin::shell::store::memory_db(),
         Arc::new(RecPusher::default()),
         Arc::new(Recorder::default()),
         clock.clock(),

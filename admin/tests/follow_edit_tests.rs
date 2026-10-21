@@ -169,7 +169,7 @@ async fn world(tag: &str) -> World {
     );
     let live = Arc::new(Recorder::default());
     let notify = NotifyCenter::load(
-        root.join("notifications.json"),
+        homelab_admin::shell::store::memory_db(),
         Arc::new(RecPusher::default()),
         live.clone(),
         clock.clock(),

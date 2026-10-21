@@ -22,12 +22,12 @@ use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 
 pub const NOTIFY_SCHEMA: u32 = 1;
-/// The newest notices kept; older ones fall off.
+/// How many of the newest notices the Inbox and `GET /data/notifications`
+/// list. Since 4.0.0 this is the size of one page of a list, not a cap on
+/// what is kept: nothing falls off on its own (Kenny, 2026-10-21), older
+/// notices stay in the database until the Storage page deletes them. It
+/// bounds what one request reads and sends, and what the digest names.
 pub const KEEP: usize = 500;
-/// rule-20 (disk-audit, 2026-10-01): a notice older than this falls off too,
-/// whatever `KEEP` would otherwise still hold — the store had a count cap
-/// and no age cap before this.
-pub const MAX_AGE_DAYS: u32 = 180;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -58,6 +58,9 @@ pub enum Kind {
     Up,
     /// ask-kp11be-7: a row someone snoozed with "remind me" is due again.
     Reminder,
+    /// feat-kpadopt-2: what the dashboard stores has passed its warning
+    /// line (chassis-rs 3.11.0's budget). Nothing is deleted or refused.
+    StorageWarn,
 }
 
 /// How bad a notice is, worst first (the digest's order).
@@ -397,7 +400,10 @@ impl Settings {
 /// The longest snooze: a week.
 pub const SNOOZE_MAX_S: i64 = 7 * 86_400;
 
-/// The on-disk file (arch-state).
+/// The pre-4.0.0 `notifications.json` (arch-state): the shape the one-time
+/// import into the app database reads, and nothing else. The notices live in
+/// the `notices` table now and the settings and cursors in `notify_state`
+/// (`shell::store`).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct NotifyFile {
     pub schema_version: u32,
@@ -541,6 +547,10 @@ pub fn draft_urgency(d: &Draft) -> homelab_core::notify::Urgency {
             urgent: false,
             why: "not pushed: it only brings a row you snoozed back",
         },
+        Kind::StorageWarn => Urgency {
+            urgent: false,
+            why: "not pushed: it waits in the Inbox, nothing breaks while it does",
+        },
         Kind::HostEvent | Kind::FleetCheck | Kind::Alert | Kind::AlertResolved => Urgency {
             urgent: false,
             why: "pushed at its source",
@@ -602,22 +612,13 @@ impl NotifyFile {
         }
         Ok(())
     }
+}
 
-    /// Store a notice; the oldest fall off past `keep` (`KEEP` is the
-    /// default, overridden by `HOMELAB_ADMIN_NOTIFY_KEEP`), and anything
-    /// older than `max_age_days` falls off too (`MAX_AGE_DAYS`,
-    /// `HOMELAB_ADMIN_NOTIFY_MAX_AGE_DAYS`) — rule-20: the store had a count
-    /// cap and no age cap before this.
-    pub fn add(
-        &mut self,
-        d: Draft,
-        at: i64,
-        push: PushOutcome,
-        keep: usize,
-        max_age_days: i64,
-    ) -> Notice {
-        let n = Notice {
-            id: self.next_id,
+impl Notice {
+    /// A draft as stored: unread, with the push outcome it met.
+    pub fn from_draft(id: u64, d: Draft, at: i64, push: PushOutcome) -> Notice {
+        Notice {
+            id,
             at,
             kind: d.kind,
             stack: d.stack,
@@ -638,102 +639,40 @@ impl NotifyFile {
             op: (!d.op.is_empty()).then(|| d.op.clone()),
             label: d.detail.label.clone(),
             resolved_by: None,
-        };
-        self.next_id += 1;
-        // fix-inbox-resolve-1 (Kenny, 2026-10-09: "als er in inbox meldingen
-        // zijn zoals bv 'deploy media failed', dan moet die melding zelf
-        // resolven de volgende keer dat media succesvol deployed"): a
-        // success settles every open failure, incident or missed schedule
-        // of the same operation on the same stack.
-        if n.kind == Kind::ActionDone {
-            for x in self.notices.iter_mut() {
-                if !x.read && settles(&n, x) {
-                    x.read = true;
-                    x.resolved_by = Some(n.id);
-                }
-            }
         }
-        self.notices.push(n.clone());
-        if self.notices.len() > keep {
-            let cut = self.notices.len() - keep;
-            self.notices.drain(..cut);
-        }
-        if max_age_days > 0 {
-            let oldest_kept = at.saturating_sub(max_age_days.saturating_mul(86_400));
-            self.notices.retain(|x| x.at >= oldest_kept);
-        }
-        n
     }
+}
 
-    /// Mark some notices (or all, with `ids` None) read or unread; how many
-    /// changed.
-    pub fn mark(&mut self, ids: Option<&[u64]>, read: bool) -> usize {
-        let mut n = 0;
-        for x in self.notices.iter_mut() {
-            if ids.is_none_or(|ids| ids.contains(&x.id)) && x.read != read {
-                x.read = read;
-                n += 1;
-            }
-        }
-        n
+/// What a list of incident bundles the host still keeps means against what
+/// was seen before: the bundles not seen before (oldest first), the list to
+/// remember (only what the host still lists, so the memory cannot grow past
+/// the host's own retention), and whether the first list was read. The first
+/// list ever read only seeds the memory.
+pub fn fresh_incidents(
+    seen: &[String],
+    seeded: bool,
+    listed: &[String],
+) -> (Vec<String>, Vec<String>, bool) {
+    let mut fresh: Vec<String> = listed
+        .iter()
+        .filter(|n| !seen.contains(n))
+        .cloned()
+        .collect();
+    fresh.sort();
+    if !seeded {
+        fresh.clear();
     }
+    (fresh, listed.to_vec(), true)
+}
 
-    /// fix-watch-1: a Down notice for `key` that is still open and unread.
-    /// The watch does not add a second one while it waits (every dashboard
-    /// restart used to announce the same outage again); its body is
-    /// refreshed instead, so the newest reason shows. `None` when no Down
-    /// is open or the draft is not a keyed Down.
-    pub fn refresh_open_down(&mut self, d: &Draft) -> Option<Notice> {
-        let key = d.detail.key.as_deref()?;
-        if d.kind != Kind::Down {
-            return None;
-        }
-        let x = self
-            .notices
-            .iter_mut()
-            .rev()
-            .find(|n| n.kind == Kind::Down && !n.read && n.key.as_deref() == Some(key))?;
-        x.body = d.body.clone();
-        Some(x.clone())
+/// Snooze everything for `seconds` from `now` (at most `snooze_max_s`,
+/// `SNOOZE_MAX_S` by default, a week); 0 ends the snooze. The new
+/// `snooze_until`.
+pub fn snooze_until(now: i64, seconds: i64, snooze_max_s: i64) -> Result<Option<i64>, String> {
+    if !(0..=snooze_max_s).contains(&seconds) {
+        return Err(format!("a snooze lasts 0 to {snooze_max_s} seconds"));
     }
-
-    pub fn unread(&self) -> usize {
-        self.notices.iter().filter(|n| !n.read).count()
-    }
-
-    /// The incident bundles in `listed` not seen before, oldest first. The
-    /// first list ever read only seeds the memory.
-    pub fn new_incidents(&mut self, listed: &[String]) -> Vec<String> {
-        let mut fresh: Vec<String> = listed
-            .iter()
-            .filter(|n| !self.seen_incidents.contains(n))
-            .cloned()
-            .collect();
-        fresh.sort();
-        // Remember only what the host still lists, so the memory cannot grow
-        // past the host's own retention.
-        self.seen_incidents = listed.to_vec();
-        if !self.incidents_seeded {
-            self.incidents_seeded = true;
-            return Vec::new();
-        }
-        fresh
-    }
-
-    /// Snooze everything for `seconds` from `now` (at most `snooze_max_s`,
-    /// `SNOOZE_MAX_S` by default, a week); 0 ends the snooze.
-    pub fn snooze(
-        &mut self,
-        now: i64,
-        seconds: i64,
-        snooze_max_s: i64,
-    ) -> Result<Option<i64>, String> {
-        if !(0..=snooze_max_s).contains(&seconds) {
-            return Err(format!("a snooze lasts 0 to {snooze_max_s} seconds"));
-        }
-        self.settings.snooze_until = (seconds > 0).then_some(now + seconds);
-        Ok(self.settings.snooze_until)
-    }
+    Ok((seconds > 0).then_some(now + seconds))
 }
 
 /// An incident bundle's name is `<unix>-<op>`; the notice says which op.
@@ -764,17 +703,6 @@ pub fn set_stack_muted(s: &mut Settings, stack: &str, muted: bool) {
     }
 }
 
-/// The unread count per stack, for badges.
-pub fn unread_by_stack(f: &NotifyFile) -> BTreeMap<String, usize> {
-    let mut m = BTreeMap::new();
-    for n in f.notices.iter().filter(|n| !n.read) {
-        if let Some(s) = &n.stack {
-            *m.entry(s.clone()).or_insert(0) += 1;
-        }
-    }
-    m
-}
-
 /// The kyu payload of a notice: the host's shape (core `push_payload`),
 /// sent as `homelab-admin`, with the notice's kind as the label, the short
 /// text (title and what to do) and the link to its page.
@@ -792,6 +720,7 @@ pub fn push_payload(d: &Draft, version: &str, base_url: &str) -> String {
         Kind::Down => "down",
         Kind::Up => "up",
         Kind::Reminder => "reminder",
+        Kind::StorageWarn => "storage-warn",
     };
     let ok = matches!(d.kind, Kind::ActionDone | Kind::ActionDeferred | Kind::Up);
     let short =
@@ -1040,43 +969,25 @@ pub fn host_draft(n: &homelab_core::notify::HostNotice) -> (Draft, PushOutcome) 
     (d, push)
 }
 
-impl NotifyFile {
-    /// One host notice into the list. The notice of the dashboard job that
-    /// asked for it (`job`) takes the host's words instead of a second
-    /// notice being added. Returns the notice as stored.
-    pub fn import_host(
-        &mut self,
-        n: &homelab_core::notify::HostNotice,
-        job: Option<u64>,
-        at: i64,
-        keep: usize,
-        max_age_days: i64,
-    ) -> Option<Notice> {
-        self.host_cursor = self.host_cursor.max(n.seq);
-        let (d, push) = host_draft(n);
-        if let Some(j) = job
-            && let Some(x) = self.notices.iter_mut().rev().find(|x| x.job == Some(j))
-        {
-            // The dashboard's title and push stay; the host adds the rest.
-            x.level = d.detail.level.min(x.level_hint());
-            x.since = d.detail.since;
-            x.consequence = d.detail.consequence;
-            x.remedy = d.detail.remedy;
-            x.link = d.detail.link;
-            x.source = d.detail.source;
-            x.fixes = d.detail.fixes;
-            if !d.body.is_empty() {
-                x.body = d.body;
-            }
-            return Some(x.clone());
-        }
-        Some(self.add(d, at, push, keep, max_age_days))
+/// A host notice that answers a dashboard job: the dashboard's title and
+/// push stay on `x`, the host adds the rest (its words, since when, the
+/// consequence, the remedy, the page and the fixes).
+pub fn merge_host(x: &mut Notice, d: Draft) {
+    x.level = d.detail.level.min(x.level_hint());
+    x.since = d.detail.since;
+    x.consequence = d.detail.consequence;
+    x.remedy = d.detail.remedy;
+    x.link = d.detail.link;
+    x.source = d.detail.source;
+    x.fixes = d.detail.fixes;
+    if !d.body.is_empty() {
+        x.body = d.body;
     }
 }
 
 impl Notice {
     /// A dashboard notice stored before levels existed reads as Info.
-    fn level_hint(&self) -> Level {
+    pub fn level_hint(&self) -> Level {
         match self.kind {
             Kind::ActionFailed | Kind::Incident | Kind::ScheduleMissed => Level::Warning,
             _ => self.level,
@@ -1223,47 +1134,6 @@ pub fn alert_drafts(body: &serde_json::Value) -> Vec<AlertDraft> {
             })
         })
         .collect()
-}
-
-impl NotifyFile {
-    /// Is an alert with this key firing now (its newest notice is a firing
-    /// one)?
-    fn alert_open(&self, key: &str) -> Option<usize> {
-        let i = self
-            .notices
-            .iter()
-            .rposition(|n| n.key.as_deref() == Some(key))?;
-        (self.notices[i].kind == Kind::Alert).then_some(i)
-    }
-
-    /// One alert into the list. A repeat of an alert that still fires adds
-    /// nothing; a resolved one is stored read, and the firing notice it ends
-    /// no longer waits.
-    pub fn add_alert(
-        &mut self,
-        a: AlertDraft,
-        at: i64,
-        keep: usize,
-        max_age_days: i64,
-    ) -> Option<Notice> {
-        let key = a.draft.detail.key.clone().unwrap_or_default();
-        let open = self.alert_open(&key);
-        if a.firing {
-            if open.is_some() {
-                return None;
-            }
-            return Some(self.add(a.draft, at, a.push, keep, max_age_days));
-        }
-        if let Some(i) = open {
-            self.notices[i].read = true;
-        }
-        let mut n = self.add(a.draft, at, a.push, keep, max_age_days);
-        if let Some(x) = self.notices.iter_mut().rev().find(|x| x.id == n.id) {
-            x.read = true;
-        }
-        n.read = true;
-        Some(n)
-    }
 }
 
 // ── The daily digest (decision daily-digest) ────────────────────────────

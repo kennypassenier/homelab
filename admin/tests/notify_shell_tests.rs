@@ -7,10 +7,10 @@ mod act_support;
 
 use std::sync::Arc;
 
-use act_support::{RecPusher, Recorder, TestClock, temp_dir};
+use act_support::{RecPusher, Recorder, TestClock};
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
-use homelab_admin::core::notify::{DigestLine, Level, PushOutcome};
+use homelab_admin::core::notify::{DigestLine, Draft, Kind, Level, PushOutcome};
 use homelab_admin::shell::actions_notify::{HookSlot, NotifyCenter, hooks_router};
 use homelab_core::notify::HostNotice;
 use tower::ServiceExt as _;
@@ -48,12 +48,11 @@ fn notice(seq: u64, ok: bool, req: Option<u64>) -> HostNotice {
     }
 }
 
-fn center(tag: &str, clock: &TestClock) -> (Arc<NotifyCenter>, Arc<RecPusher>, Arc<Recorder>) {
-    let dir = temp_dir(tag);
+fn center(_tag: &str, clock: &TestClock) -> (Arc<NotifyCenter>, Arc<RecPusher>, Arc<Recorder>) {
     let pusher = Arc::new(RecPusher::default());
     let live = Arc::new(Recorder::default());
     let c = NotifyCenter::load(
-        dir.join("notifications.json"),
+        homelab_admin::shell::store::memory_db(),
         pusher.clone(),
         live.clone(),
         clock.clock(),
@@ -279,4 +278,254 @@ async fn a_test_push_reaches_the_route_stores_nothing_and_waits_between_presses(
     assert_eq!(pusher.sent.lock().unwrap().len(), 1);
     clock.advance(TEST_PUSH_EVERY_S);
     assert!(c.test_push().await.is_ok());
+}
+
+fn plain(kind: Kind, op: &str, stack: Option<&str>, label: Option<&str>) -> Draft {
+    let mut d = Draft::new(kind, op, "t", "b");
+    d.stack = stack.map(str::to_string);
+    d.detail.label = label.map(str::to_string);
+    d
+}
+
+/// feat-overview-5 on the database: ids count up, read and unread, the
+/// badge per stack, and the push column's few fixed words.
+#[tokio::test]
+async fn the_list_keeps_read_and_unread_with_ids_that_count_up() {
+    let clock = TestClock::at(10);
+    let (c, _, _) = center("list", &clock);
+    let a = c
+        .notify(plain(Kind::ActionDone, "deploy-media", Some("media"), None))
+        .await;
+    clock.advance(1);
+    let b = c
+        .notify(plain(Kind::ActionFailed, "deploy-home", Some("home"), None))
+        .await;
+    assert_eq!((a.id, b.id), (1, 2));
+    // Owner decision 2026-09-30 (item 3): the push column is a handful of
+    // fixed words, never the raw routing reason.
+    assert!(a.push_short.starts_with("No push"), "{}", a.push_short);
+    let snap = c.snapshot().await;
+    assert_eq!(
+        (snap["unread"].as_u64(), snap["total"].as_u64()),
+        (Some(2), Some(2))
+    );
+    assert_eq!(snap["notices"][0]["id"], 2, "newest first");
+    assert_eq!(c.mark(Some(vec![1]), true).await, 1);
+    assert_eq!(c.mark(Some(vec![1]), true).await, 0, "already read");
+    let snap = c.snapshot().await;
+    assert_eq!(snap["unread_by_stack"]["home"], 1);
+    assert!(snap["unread_by_stack"].get("media").is_none());
+    assert_eq!(c.mark(None, true).await, 1);
+    assert_eq!(c.snapshot().await["unread"], 0);
+    assert_eq!(c.mark(None, false).await, 2);
+    let json = &c.snapshot().await["notices"][0];
+    for k in ["id", "at", "kind", "title", "body", "read", "push"] {
+        assert!(json.get(k).is_some(), "{k} in {json}");
+    }
+}
+
+/// feat-kpadopt-2 (Kenny, 2026-10-21: never auto-prune useful data): the
+/// old 500-notice and 180-day caps are gone. `keep` only sizes one list;
+/// every notice stays, however old, until the Storage page deletes it.
+#[tokio::test]
+async fn no_notice_falls_off_on_its_own() {
+    use homelab_admin::shell::actions_notify::NotifyLimits;
+    let clock = TestClock::at(0);
+    let (c, _, _) = center("nocap", &clock);
+    c.set_limits(NotifyLimits {
+        keep: 3,
+        ..NotifyLimits::default()
+    });
+    for i in 0..6 {
+        // A year apart: far past the 180 days the old store kept.
+        clock.set(i * 365 * 86_400);
+        c.notify(plain(Kind::ActionDone, "x", None, None)).await;
+    }
+    let snap = c.snapshot().await;
+    assert_eq!(snap["total"], 6, "nothing was deleted");
+    let ids: Vec<u64> = snap["notices"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|n| n["id"].as_u64().unwrap())
+        .collect();
+    assert_eq!(ids, [6, 5, 4], "a list shows the newest `keep`");
+    assert_eq!(snap["unread"], 6, "the unread count is every notice");
+    assert_eq!(
+        c.mark(Some(vec![1]), true).await,
+        1,
+        "the oldest is still there"
+    );
+}
+
+/// fix-inbox-resolve-1 (Kenny, 2026-10-09): "deploy media failed" settles
+/// itself the next time media deploys well; another stack's or another
+/// operation's failure stays.
+#[tokio::test]
+async fn a_success_settles_the_same_operations_failure_on_the_same_stack() {
+    let clock = TestClock::at(10);
+    let (c, _, _) = center("settle", &clock);
+    let failed = c
+        .notify(plain(
+            Kind::ActionFailed,
+            "backup-media",
+            Some("media"),
+            Some("backup"),
+        ))
+        .await;
+    clock.advance(10);
+    let missed = c
+        .notify(plain(
+            Kind::ScheduleMissed,
+            "backup-media",
+            Some("media"),
+            Some("backup"),
+        ))
+        .await;
+    clock.advance(10);
+    let other_stack = c
+        .notify(plain(
+            Kind::ActionFailed,
+            "backup-films",
+            Some("films"),
+            Some("backup"),
+        ))
+        .await;
+    clock.advance(10);
+    let deploy = c
+        .notify(plain(
+            Kind::ActionFailed,
+            "deploy-media",
+            Some("media"),
+            Some("deploy"),
+        ))
+        .await;
+    clock.advance(10);
+    let done = c
+        .notify(plain(
+            Kind::ActionDone,
+            "backup-media",
+            Some("media"),
+            Some("backup"),
+        ))
+        .await;
+    let snap = c.snapshot().await;
+    let by = |id: u64| {
+        snap["notices"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|n| n["id"] == id)
+            .cloned()
+            .unwrap()
+    };
+    assert_eq!(by(failed.id)["read"], true);
+    assert_eq!(by(failed.id)["resolved_by"], done.id);
+    assert_eq!(
+        by(missed.id)["read"],
+        true,
+        "a missed schedule of the same backup is settled too"
+    );
+    assert_eq!(
+        by(other_stack.id)["read"],
+        false,
+        "another stack's failure stays"
+    );
+    assert_eq!(
+        by(deploy.id)["read"],
+        false,
+        "another operation's failure stays"
+    );
+}
+
+/// A Down still open and unread is kept, not repeated (fix-watch-1), and so
+/// is the storage warning, which would otherwise repeat at every start.
+#[tokio::test]
+async fn an_open_down_and_an_open_storage_warning_are_refreshed_not_repeated() {
+    let clock = TestClock::at(10);
+    let (c, _, live) = center("open", &clock);
+    let mut down = plain(Kind::Down, "watch", Some("media"), None);
+    down.detail.key = Some("media".into());
+    down.body = "first reason".into();
+    let first = c.notify(down.clone()).await;
+    down.body = "newer reason".into();
+    let again = c.notify(down).await;
+    assert_eq!(again.id, first.id);
+    let snap = c.snapshot().await;
+    assert_eq!(snap["total"], 1);
+    assert_eq!(snap["notices"][0]["body"], "newer reason");
+    assert_eq!(
+        live.events("notification").len(),
+        1,
+        "a refresh tells no page"
+    );
+    // The warning for a budget past its warn line.
+    let warn = homelab_admin::shell::store::warn_notice(42_000_000, 40_000_000, 50_000_000, false);
+    let w1 = c.notify(warn.clone()).await;
+    let w2 = c.notify(warn.clone()).await;
+    assert_eq!(w1.id, w2.id, "a restart does not stack a second warning");
+    assert_eq!(c.snapshot().await["total"], 2);
+    // Once read it is history: the next warning is news again.
+    c.mark(Some(vec![w1.id]), true).await;
+    let w3 = c.notify(warn).await;
+    assert_ne!(w3.id, w1.id);
+    assert_eq!(w3.kind, Kind::StorageWarn);
+    assert_eq!(w3.level, Level::Warning);
+    assert_eq!(w3.link.as_deref(), Some("/storage"));
+}
+
+/// An alert that still fires adds nothing; its end is stored read and ends
+/// the firing one; firing again afterwards is news.
+#[tokio::test]
+async fn alertmanager_repeats_add_nothing_and_a_resolve_ends_the_firing_notice() {
+    let clock = TestClock::at(2_000);
+    let (c, _, _) = center("alerts", &clock);
+    let body = |s: &str| serde_json::from_str::<serde_json::Value>(&alert_body(s)).unwrap();
+    assert_eq!(c.alerts(&body("firing")).await, 1);
+    assert_eq!(c.alerts(&body("firing")).await, 0, "a 12 h repeat");
+    assert_eq!(c.snapshot().await["unread"], 1);
+    assert_eq!(c.alerts(&body("resolved")).await, 1);
+    let snap = c.snapshot().await;
+    assert_eq!(snap["unread"], 0);
+    assert_eq!(snap["notices"][0]["read"], true);
+    assert_eq!(snap["total"], 2);
+    assert_eq!(c.alerts(&body("firing")).await, 1, "firing again is news");
+}
+
+/// The settings and the cursors live in the database: a muted stack, a
+/// snooze (bounded), the first incident list that only seeds, and the host
+/// cursor.
+#[tokio::test]
+async fn settings_snooze_and_cursors_are_kept() {
+    let clock = TestClock::at(1_000);
+    let (c, _, _) = center("state", &clock);
+    c.set_stack_muted("media", true).await;
+    assert_eq!(c.settings().await.muted_stacks, ["media"]);
+    assert_eq!(c.snooze(3_600).await.unwrap(), Some(4_600));
+    assert!(c.snapshot().await["snoozed"].as_bool().unwrap());
+    assert!(c.snooze(8 * 86_400).await.is_err(), "a week at most");
+    assert_eq!(
+        c.settings().await.snooze_until,
+        Some(4_600),
+        "a refused snooze changes nothing"
+    );
+    assert_eq!(c.snooze(0).await.unwrap(), None);
+    let mut s = c.settings().await;
+    s.digest_at = Some("25:00".into());
+    assert!(c.set_settings(s).await.is_err());
+    // Incidents: the first list is history, a new bundle is news.
+    assert_eq!(c.incidents(vec!["1800000000-deploy-media".into()]).await, 0);
+    assert_eq!(
+        c.incidents(vec![
+            "1800000000-deploy-media".into(),
+            "1800000500-backup-home".into()
+        ])
+        .await,
+        1
+    );
+    assert_eq!(c.snapshot().await["notices"][0]["kind"], "incident");
+    assert_eq!(c.host_cursor().await, 0);
+    c.host_notices(vec![notice(5, true, None)], 5, &|_| None)
+        .await;
+    assert_eq!(c.host_cursor().await, 5);
 }

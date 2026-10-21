@@ -6,9 +6,9 @@
 
 use homelab_admin::core::actions::ActionKind;
 use homelab_admin::core::notify::{
-    DIGEST_LATE_S, DigestRecord, Draft, FixSource, KEEP, Kind, Level, NotifyFile, PushOutcome,
-    QuietHours, Routing, Settings, alert_drafts, digest, digest_due, fix_for, host_draft,
-    push_payload, route, today_lines,
+    DIGEST_LATE_S, DigestRecord, Draft, FixSource, Kind, Level, Notice, PushOutcome, QuietHours,
+    Routing, Settings, alert_drafts, digest, digest_due, fix_for, host_draft, push_payload, route,
+    today_lines,
 };
 use homelab_core::notify::HostNotice;
 use homelab_core::ops::fleetcheck::{Finding, Severity};
@@ -250,82 +250,6 @@ fn host_notices_land_in_the_centre_with_their_detail_and_fix() {
     assert_eq!(d.detail.fixes[0].stack, "media");
 }
 
-#[test]
-fn host_notices_merge_into_the_dashboards_own_notice_of_that_job() {
-    let mut f = NotifyFile::default();
-    let own = f.add(
-        {
-            let mut d = Draft::new(
-                Kind::ActionFailed,
-                "deploy-media",
-                "Deploy media: failed",
-                "x",
-            );
-            d.job = Some(3);
-            d
-        },
-        950,
-        PushOutcome::Skipped { why: "x".into() },
-        KEEP,
-        i64::MAX,
-    );
-    // The job that sent request 77 is job 3: the host's words fill that notice.
-    let merged = f
-        .import_host(&host_notice(5, true), Some(3), 1_001, KEEP, i64::MAX)
-        .unwrap();
-    assert_eq!(merged.id, own.id);
-    assert_eq!(f.notices.len(), 1);
-    assert_eq!(
-        merged.remedy.as_deref(),
-        Some("Run it again: `homelab deploy media`.")
-    );
-    assert_eq!(merged.job, Some(3));
-    assert_eq!(merged.fixes.len(), 1);
-    assert_eq!(f.host_cursor, 5);
-    // Without a job of its own it is a notice of its own.
-    let n = f
-        .import_host(&host_notice(6, false), None, 1_002, KEEP, i64::MAX)
-        .unwrap();
-    assert_eq!(f.notices.len(), 2);
-    assert_eq!(n.kind, Kind::HostEvent);
-    assert_eq!(f.host_cursor, 6);
-}
-
-/// rule-20 (disk-audit, 2026-10-01): a notice older than `max_age_days`
-/// falls off even while the store is nowhere near `keep` — the store had a
-/// count cap and no age cap before this.
-#[test]
-fn rule_20_notices_older_than_max_age_days_fall_off() {
-    let mut f = NotifyFile::default();
-    let day = 86_400;
-    f.add(
-        draft(Kind::ActionDone, Some("old")),
-        0,
-        PushOutcome::Sent,
-        KEEP,
-        10, // max_age_days
-    );
-    let recent = f.add(
-        draft(Kind::ActionDone, Some("new")),
-        12 * day,
-        PushOutcome::Sent,
-        KEEP,
-        10,
-    );
-    // "now" (`at` of the add that triggers the prune) is 20 days past the
-    // first notice and 8 past the second — only the second is inside the
-    // 10-day window.
-    let _ = f.add(
-        draft(Kind::ActionDone, Some("trigger")),
-        20 * day,
-        PushOutcome::Sent,
-        KEEP,
-        10,
-    );
-    let ids: Vec<_> = f.notices.iter().map(|n| n.id).collect();
-    assert_eq!(ids, vec![recent.id, 3], "{:?}", ids);
-}
-
 fn am(status: &str, name: &str, severity: &str, fp: &str) -> serde_json::Value {
     serde_json::json!({
         "version": "4",
@@ -371,39 +295,6 @@ fn alerts_become_notices_firing_and_resolved() {
     assert_eq!(warn[0].draft.detail.level, Level::Warning);
     assert!(matches!(warn[0].push, PushOutcome::Skipped { .. }));
 
-    let mut f = NotifyFile::default();
-    let first = f
-        .add_alert(firing[0].clone(), 1_000, KEEP, i64::MAX)
-        .unwrap();
-    assert!(!first.read);
-    // Alertmanager repeats a firing alert every 12 h: one notice, not two.
-    assert!(
-        f.add_alert(
-            alert_drafts(&am("firing", "HostDown", "critical", "fp1"))[0].clone(),
-            2_000,
-            KEEP,
-            i64::MAX,
-        )
-        .is_none()
-    );
-    // Resolved: stored as read, and the firing one no longer waits.
-    let resolved = alert_drafts(&am("resolved", "HostDown", "critical", "fp1"));
-    assert_eq!(resolved[0].draft.kind, Kind::AlertResolved);
-    let r = f
-        .add_alert(resolved[0].clone(), 3_000, KEEP, i64::MAX)
-        .unwrap();
-    assert!(r.read && r.fixes.is_empty());
-    assert_eq!(f.unread(), 0);
-    // Firing again after it resolved is news again.
-    assert!(
-        f.add_alert(
-            alert_drafts(&am("firing", "HostDown", "critical", "fp1"))[0].clone(),
-            4_000,
-            KEEP,
-            i64::MAX,
-        )
-        .is_some()
-    );
     assert!(alert_drafts(&serde_json::json!({"alerts": "nope"})).is_empty());
 }
 
@@ -444,24 +335,21 @@ fn daily_digest_at_nine_only_when_something_waits_worst_first() {
     };
     assert_eq!(digest_due(&off, None, nine, DIGEST_LATE_S), None);
 
-    let mut f = NotifyFile::default();
-    assert!(digest(&f.notices, &[]).is_none(), "all clear: nothing");
+    assert!(digest(&[], &[]).is_none(), "all clear: nothing");
     let mut ok = Draft::new(Kind::HostEvent, "deploy-a", "deploy a: done", "");
     ok.detail.level = Level::Ok;
-    f.add(
-        ok,
-        1,
-        PushOutcome::Skipped { why: "x".into() },
-        KEEP,
-        i64::MAX,
-    );
     let mut crit = Draft::new(Kind::HostEvent, "backup-b", "backup b failed", "");
     crit.detail.level = Level::Critical;
-    f.add(crit, 2, PushOutcome::Sent, KEEP, i64::MAX);
     let mut done = Draft::new(Kind::Alert, "x", "read already", "");
     done.detail.level = Level::Critical;
-    let n = f.add(done, 3, PushOutcome::Sent, KEEP, i64::MAX);
-    f.mark(Some(&[n.id]), true);
+    let skipped = PushOutcome::Skipped { why: "x".into() };
+    let mut read = Notice::from_draft(3, done, 3, PushOutcome::Sent);
+    read.read = true;
+    let notices = vec![
+        Notice::from_draft(1, ok, 1, skipped),
+        Notice::from_draft(2, crit, 2, PushOutcome::Sent),
+        read,
+    ];
     let today = today_lines(&Today {
         items: vec![Item {
             level: TodayLevel::Attention,
@@ -471,7 +359,7 @@ fn daily_digest_at_nine_only_when_something_waits_worst_first() {
         }],
         unread: Vec::new(),
     });
-    let d = digest(&f.notices, &today).unwrap();
+    let d = digest(&notices, &today).unwrap();
     assert_eq!(d.count, 3, "two unread notices and one Today item");
     assert_eq!(d.lines[0], "backup b failed", "worst first");
     assert_eq!(d.lines[1], "a manual check is open");
@@ -492,51 +380,6 @@ fn settings_the_digest_time_is_checked_and_old_files_still_load() {
     assert_eq!(old.digest_at.as_deref(), Some("09:00"));
     let json = serde_json::to_value(&old).unwrap();
     assert!(json.get("long_action_s").is_none());
-}
-
-/// covers: fix-inbox-resolve-1
-/// Kenny, 2026-10-09: "deploy media failed" settles itself the next time
-/// media deploys well; another stack's or another operation's failure
-/// stays.
-#[test]
-fn fix_inbox_resolve_a_success_settles_the_same_operations_failure_on_the_same_stack() {
-    let mut f = NotifyFile::default();
-    let failed = f.add(
-        draft(Kind::ActionFailed, Some("backup")),
-        10,
-        PushOutcome::Sent,
-        KEEP,
-        0,
-    );
-    let missed = f.add(
-        draft(Kind::ScheduleMissed, Some("backup")),
-        20,
-        PushOutcome::Sent,
-        KEEP,
-        0,
-    );
-    let mut other_stack = draft(Kind::ActionFailed, Some("backup"));
-    other_stack.stack = Some("films".into());
-    let other_stack = f.add(other_stack, 30, PushOutcome::Sent, KEEP, 0);
-    let mut deploy = Draft::new(Kind::ActionFailed, "deploy-media", "t", "b");
-    deploy.stack = Some("media".into());
-    deploy.detail.label = Some("deploy".into());
-    let deploy = f.add(deploy, 40, PushOutcome::Sent, KEEP, 0);
-    let done = f.add(
-        draft(Kind::ActionDone, Some("backup")),
-        50,
-        PushOutcome::Sent,
-        KEEP,
-        0,
-    );
-    let by = |id: u64| f.notices.iter().find(|n| n.id == id).cloned().unwrap();
-    assert!(by(failed.id).read && by(failed.id).resolved_by == Some(done.id));
-    assert!(
-        by(missed.id).read,
-        "a missed schedule of the same backup is settled too"
-    );
-    assert!(!by(other_stack.id).read, "another stack's failure stays");
-    assert!(!by(deploy.id).read, "another operation's failure stays");
 }
 
 /// ask-kp11be-3: quiet hours (a window across midnight belongs to the day it

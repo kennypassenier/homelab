@@ -8,9 +8,7 @@ mod act_support;
 use std::sync::Arc;
 use std::time::Duration;
 
-use act_support::{
-    MemFiles, MockHost, Recorder, Script, TestClock, history, shared, temp_dir, until,
-};
+use act_support::{MemFiles, MockHost, Recorder, Script, TestClock, history, shared, until};
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use homelab_admin::core::actions::{self, ActionKind};
@@ -29,7 +27,7 @@ struct World {
     driver: Driver,
 }
 
-fn world(tag: &str, files: MemFiles, applied: Option<&str>) -> World {
+fn world(_tag: &str, files: MemFiles, applied: Option<&str>) -> World {
     let clock = TestClock::at(1_790_000_000);
     let host = MockHost::start(
         clock.clone(),
@@ -38,9 +36,8 @@ fn world(tag: &str, files: MemFiles, applied: Option<&str>) -> World {
         Arc::new(std::sync::Mutex::new(Vec::new())),
     );
     let live = Arc::new(Recorder::default());
-    let dir = temp_dir(&format!("follow-{tag}"));
     let notify = NotifyCenter::load(
-        dir.join("notifications.json"),
+        homelab_admin::shell::store::memory_db(),
         Arc::new(act_support::RecPusher::default()),
         live.clone(),
         clock.clock(),
@@ -514,9 +511,8 @@ async fn parity_a_check_answer_is_drivable() {
         Arc::new(std::sync::Mutex::new(Vec::new())),
     );
     let live = Arc::new(Recorder::default());
-    let dir = temp_dir("follow-answer");
     let notify = NotifyCenter::load(
-        dir.join("notifications.json"),
+        homelab_admin::shell::store::memory_db(),
         Arc::new(act_support::RecPusher::default()),
         live.clone(),
         clock.clock(),

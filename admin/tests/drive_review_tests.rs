@@ -349,7 +349,11 @@ async fn drive_review_a_local_refusal_is_counted() {
 #[tokio::test(start_paused = true)]
 async fn drive_review_an_alias_with_a_press_is_two_tab_steps() {
     let (d, live) = driver("alias");
-    let pending = send(&d, click("edit-schedule", Some("s1")));
+    // The shipped catalog has no old name that became a menu item any more
+    // (kp-themes 11: the row menu is three buttons), so one is declared
+    // here: `schedule-menu` was the menu, `edit` its first item.
+    let d = d.with_press_alias("schedule-menu", "edit");
+    let pending = send(&d, click("schedule-menu", Some("s1")));
     let seq = waiting(&d, &live, 1).await;
     d.claim(seq, "tab-a").unwrap();
     d.taken(

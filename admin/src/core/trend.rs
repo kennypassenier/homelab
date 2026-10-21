@@ -326,7 +326,7 @@ mod tests {
             1
         );
         assert_eq!(
-            Trend::from_buckets(t.buckets().cloned(), 1_000_000 - 1).view()["points"],
+            Trend::from_buckets(t.buckets().cloned(), 1_000_000 - STEP_S).view()["points"],
             0,
             "a bucket from the future is not drawn"
         );

@@ -111,6 +111,7 @@ struct Inner {
     /// Where the running countdown ends; None when none runs (or paused).
     deadline: Mutex<Option<Instant>>,
     announced: AtomicU64,
+    press_aliases: Mutex<std::collections::HashMap<String, String>>,
     /// Who pressed Continue last, for the CLI's note.
     continued_by: Mutex<Option<String>>,
     /// fix-239: the page-control step a tab takes now.
@@ -127,6 +128,19 @@ pub struct Driver {
 impl Driver {
     pub fn new(actions: Actions, shared: Shared, publish: Arc<dyn Publish>, clock: Clock) -> Self {
         Self::with_edit(actions, shared, publish, clock, None)
+    }
+
+    /// An old control name that is the menu item `press` of the control it
+    /// became, on top of what the shipped catalog says. The catalog has no
+    /// such name now (kp-themes 11 made the row menu three buttons), so the
+    /// two-step click-and-press path is proven through this.
+    pub fn with_press_alias(self, old: &str, press: &str) -> Self {
+        self.inner
+            .press_aliases
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .insert(old.to_string(), press.to_string());
+        self
     }
 
     /// A driver that can drive the edit forms too.
@@ -150,6 +164,7 @@ impl Driver {
                 wake: Arc::new(tokio::sync::Notify::new()),
                 deadline: Mutex::new(None),
                 announced: AtomicU64::new(0),
+                press_aliases: Mutex::new(std::collections::HashMap::new()),
                 continued_by: Mutex::new(None),
                 tab_turn: Mutex::new(TabTurn::default()),
                 refusals: Mutex::new(RefusalLog::default()),
@@ -724,7 +739,7 @@ impl Driver {
                         // an item of its control's menu is clicked as that
                         // control, and the menu press goes to the tab as a
                         // step of its own, with its own wait.
-                        None => match alias_press(&step) {
+                        None => match self.alias_press(&step) {
                             Some(button) => {
                                 let press = UiStep::Press { button };
                                 self.lock().seq += 1;
@@ -1560,14 +1575,23 @@ pub fn catalog_hash() -> &'static str {
     H.get_or_init(|| homelab_core::drivecatalog::hash_text(crate::core::drive::DRIVE_CATALOG_JSON))
 }
 
-/// The menu item an old control name became, when the click names one.
-fn alias_press(step: &UiStep) -> Option<String> {
-    let UiStep::Click { control, .. } = step else {
-        return None;
-    };
-    match catalog().click(control) {
-        homelab_core::drivecatalog::Click::Renamed { press, .. } => press,
-        _ => None,
+impl Driver {
+    /// The menu item an old control name became, when the click names one.
+    fn alias_press(&self, step: &UiStep) -> Option<String> {
+        let UiStep::Click { control, .. } = step else {
+            return None;
+        };
+        let extra = self
+            .inner
+            .press_aliases
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .get(control)
+            .cloned();
+        extra.or_else(|| match catalog().click(control) {
+            homelab_core::drivecatalog::Click::Renamed { press, .. } => press,
+            _ => None,
+        })
     }
 }
 

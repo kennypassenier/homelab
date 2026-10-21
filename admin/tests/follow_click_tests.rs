@@ -239,7 +239,7 @@ async fn drive_reach_an_unknown_control_is_refused_with_the_closest_and_recorded
         "{answer}"
     );
     let fix = answer["refusal"]["fix"].as_str().unwrap_or_default();
-    assert!(fix.contains("schedule-menu (on schedules"), "{fix}");
+    assert!(fix.contains("edit-schedule (on schedules"), "{fix}");
     assert!(fix.contains("homelab ui click"), "{fix}");
     // No tab was asked: nothing went out as a click.
     assert!(
@@ -263,7 +263,7 @@ async fn drive_reach_an_unknown_control_is_refused_with_the_closest_and_recorded
         .as_array()
         .map(|a| a.iter().filter_map(|c| c["id"].as_str()).collect())
         .unwrap_or_default();
-    assert!(ids.contains(&"schedule-menu") && ids.len() > 40, "{ids:?}");
+    assert!(ids.contains(&"edit-schedule") && ids.len() > 40, "{ids:?}");
 }
 
 /// covers: redesign-drive-1
@@ -272,7 +272,8 @@ async fn drive_reach_an_unknown_control_is_refused_with_the_closest_and_recorded
 #[tokio::test(start_paused = true)]
 async fn drive_reach_an_old_control_name_is_not_refused_by_the_dashboard() {
     let (d, live) = driver("old-name");
-    let pending = send(&d, click("edit-schedule", Some("s1")));
+    // `schedule-menu` is the old name of `edit-schedule` (kp-themes 11).
+    let pending = send(&d, click("schedule-menu", Some("s1")));
     let seq = waiting(&d, &live, 1).await;
     d.claim(seq, "tab-a").unwrap();
     d.taken(
@@ -285,19 +286,7 @@ async fn drive_reach_an_old_control_name_is_not_refused_by_the_dashboard() {
         },
     )
     .unwrap();
-    // review: the menu press goes to the tab as a step of its own.
-    let seq = waiting(&d, &live, 2).await;
-    d.claim(seq, "tab-a").unwrap();
-    d.taken(
-        seq,
-        "tab-a",
-        TabAnswer {
-            ok: true,
-            dialog: Some("Edit schedule".into()),
-            ..TabAnswer::default()
-        },
-    )
-    .unwrap();
+    // A name that became a whole control, not a menu item: no press follows.
     assert_eq!(pending.await.unwrap()["ok"], true);
 }
 

@@ -121,7 +121,7 @@ const MODE = declare({
   page: "presets",
   opens: "view",
   row: "intent|text",
-  what: "search the presets by meaning (gpu media finds the media preset) or by the letters of their name",
+  what: "search the presets by meaning (gpu vpn finds the presets that need both) or by the letters of their name",
 });
 const NEEDS = declare({
   id: "presets-needs",

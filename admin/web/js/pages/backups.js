@@ -1338,11 +1338,7 @@ export function mount(root) {
       return !(r?.status === "ok" && r.noBackup);
     });
     const wanted =
-      S.weekStack && keeping.includes(S.weekStack)
-        ? S.weekStack
-        : keeping.includes("kyu")
-          ? "kyu"
-          : keeping[0];
+      S.weekStack && keeping.includes(S.weekStack) ? S.weekStack : keeping[0];
     S.weekStack = wanted ?? null;
     setOptions(
       weekSel,

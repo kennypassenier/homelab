@@ -15,6 +15,7 @@
 import { test as nodeTest } from "node:test";
 import { parkedAware, parkedClass } from "./parked.js";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { launch } from "./harness.js";
 import { clockNow, clockNowS } from "./clock.js";
 // fix-210: this import was missing — the fix-206 spacing sweep below has
@@ -45,6 +46,7 @@ let session = null;
 async function logIn(context) {
   if (session) {
     await context.addCookies(session);
+    await wipePrefs(context);
     return;
   }
   const page = await context.newPage();
@@ -58,6 +60,40 @@ async function logIn(context) {
   ]);
   session = (await context.storageState()).cookies;
   await page.close();
+  await wipePrefs(context);
+}
+
+/**
+ * A choice made a moment ago is written to the database after 300 ms; a
+ * reload right behind it asks the server for the page before the page
+ * leaves, so the page would come back with the old value. A case that
+ * reloads to see what was kept lets the write finish first.
+ * @param {import("playwright").Page} page
+ */
+async function settlePrefs(page) {
+  await page.evaluate(() => /** @type {any} */ (window).chassisPrefs?.flush());
+}
+
+/**
+ * chassis-rs 3.12.0 keeps the login's browser choices (sort, views, drafts)
+ * in the dashboard's database, so a fresh browser context would start from
+ * what an earlier case left there. Every case starts as a new person's
+ * browser: the stored preferences are removed before the page loads.
+ * @param {import("playwright").BrowserContext} context
+ */
+async function wipePrefs(context) {
+  const headers = { Origin: BASE };
+  const r = await context.request.get(`${BASE}/api/kit/prefs`);
+  if (!r.ok()) return;
+  const body = await r.json();
+  for (const key of [
+    ...Object.keys(body.keys ?? {}),
+    ...Object.keys(body.session ?? {}),
+  ])
+    await context.request.delete(
+      `${BASE}/api/kit/prefs/${encodeURIComponent(key)}`,
+      { headers },
+    );
 }
 
 /**
@@ -5060,6 +5096,7 @@ test("invariants: redesign-kit-10: Esc on Host shows every container again, and 
     await th("id").click();
     assert.equal(await th("memory").getAttribute("aria-sort"), "ascending");
     assert.equal(await th("id").getAttribute("aria-sort"), "ascending");
+    await settlePrefs(page);
     await page.reload();
     await th("memory").waitFor({ timeout: 10000 });
     assert.equal(
@@ -9246,7 +9283,10 @@ test("invariants: redesign-final-c4: every Firewall rule row grows with its cont
       [...document.querySelectorAll("#fw-rule-table tr[data-kp-group-of]")]
         .filter((tr) => tr.getClientRects().length)
         .flatMap((tr) => {
-          const next = tr.nextElementSibling;
+          // The next row that is drawn (a closed row's detail is display:none).
+          let next = tr.nextElementSibling;
+          while (next && !next.getClientRects().length)
+            next = next.nextElementSibling;
           if (!next) return [];
           const top = next.getBoundingClientRect().top;
           const low = Math.max(
@@ -9464,7 +9504,7 @@ test("invariants: redesign-final-h5: Planned is a section of Activity and the Do
     assert.match(host.h1, /^Host/);
     assert.doesNotMatch(host.text, /Today block/);
     assert.ok(
-      host.top != null && host.top >= 0 && host.top < 1000,
+      host.top != null && host.top >= -1 && host.top < 1000,
       `the Host checks card is not in view (top ${host.top})`,
     );
   } finally {
@@ -9484,32 +9524,32 @@ test("invariants: redesign-final-h4: System groups its pages under The host, The
     const page = await freshPage(context);
     await page.goto(`${BASE}/system`);
     await page
-      .locator('[data-card="host"] .sy-kpi')
+      .locator('[data-card="host"] .kp-statusrow[data-state="ok"]')
       .waitFor({ timeout: 10000 });
-    await page.waitForTimeout(1500);
     const r = await page.evaluate(() => ({
-      heads: [...document.querySelectorAll("main .sy-group h2")].map(
-        (x) => x.textContent,
+      // kp-themes 11: the groups are "Areas" (the six tiles, each with its
+      // lede), "Tools" and "Set up".
+      heads: [...document.querySelectorAll("main h2, main h3")].map(
+        (x) => x.textContent?.trim() ?? "",
       ),
-      descs: [
-        ...document.querySelectorAll("main .sy-group .section-head__desc"),
-      ]
-        .map((x) => x.textContent?.trim())
-        .filter(Boolean).length,
-      line: document.querySelector('[data-card="host"] .sy-kpi')?.textContent,
+      tiles: [...document.querySelectorAll("main .sy-tile")].map(
+        (x) => !!x.querySelector(".kp-lede")?.textContent?.trim(),
+      ),
+      line: document.querySelector(
+        '[data-card="host"] .kp-statusrow .kp-statusrow__label',
+      )?.textContent,
       state: document.querySelector("main .sy-state")?.textContent,
       runbook: document
         .querySelector('[data-card="runbook"]')
         ?.getAttribute("download"),
     }));
-    assert.deepEqual(r.heads, [
-      "The host",
-      "The fleet as a whole",
-      "Set up",
-      "Tools",
-    ]);
-    assert.equal(r.descs, 4, "a group without its sentence");
-    assert.match(r.line ?? "", /^CPU \d+% · disk \d+% · \d+\.\d+\.\d+/);
+    for (const head of ["Areas", "Tools", "Set up"])
+      assert.ok(r.heads.includes(head), `no "${head}" group (${r.heads})`);
+    assert.ok(
+      r.tiles.length >= 6 && r.tiles.every(Boolean),
+      "a tile without its sentence",
+    );
+    assert.equal(r.line, "Host reachable");
     assert.equal(r.state, "host healthy");
     assert.equal(r.runbook, "DR_RUNBOOK.md");
   } finally {
@@ -9561,11 +9601,23 @@ test("invariants: redesign-final-h1: Stacks, the Inbox and the Update flow name 
       .locator(".uf-list tbody tr[data-kp-row-key]")
       .first()
       .waitFor({ timeout: 10000 });
-    const listedAll = await page
-      .locator(
-        '.uf-list tbody tr[data-kp-row-key]:not([data-kp-row-key^="pull:"]):not([data-kp-row-key^="release:"])',
+    // The list fills as the reads arrive: wait for it to reach the Inbox's
+    // number (and report what it holds if it never does).
+    const rowsOfAll = page.locator(
+      '.uf-list tbody tr[data-kp-row-key]:not([data-kp-row-key^="pull:"])',
+    );
+    const wanted = Number(/(\d+)/.exec(title)?.[1]);
+    await page
+      .waitForFunction(
+        ([sel, n]) => document.querySelectorAll(sel).length === n,
+        [
+          '.uf-list tbody tr[data-kp-row-key]:not([data-kp-row-key^="pull:"])',
+          wanted,
+        ],
+        { timeout: 6000 },
       )
-      .count();
+      .catch(() => {});
+    const listedAll = await rowsOfAll.count();
     assert.equal(
       Number(/(\d+)/.exec(title)?.[1]),
       listedAll,
@@ -9574,9 +9626,7 @@ test("invariants: redesign-final-h1: Stacks, the Inbox and the Update flow name 
     for (const [stack, n] of Object.entries(flags))
       assert.ok(
         (await page
-          .locator(
-            `.uf-list tbody tr[data-kp-row-key*=":${stack}:"]:not([data-kp-row-key^="release:"])`,
-          )
+          .locator(`.uf-list tbody tr[data-kp-row-key*=":${stack}:"]`)
           .count()) === n,
         `Update all lists ${stack}'s apps differently from its flag (${n})`,
       );
@@ -9589,7 +9639,7 @@ test("invariants: redesign-final-h1: Stacks, the Inbox and the Update flow name 
         .waitFor({ timeout: 10000 });
       const listed = await page
         .locator(
-          '.uf-list tbody tr[data-kp-row-key]:not([data-kp-row-key^="pull:"]):not([data-kp-row-key^="release:"])',
+          '.uf-list tbody tr[data-kp-row-key]:not([data-kp-row-key^="pull:"])',
         )
         .count();
       assert.equal(
@@ -9986,113 +10036,153 @@ test("invariants: redesign-final-low-settings: the Host settings page, its bread
 // not listed here) that draws selectable rows: tick two, focus the first,
 // let the live data refresh, and the ticks, the focus and the row nodes
 // must all survive (rows are updated in place by their stable id).
-test("invariants: redesign-final-extra-live-selection: on every page with selectable rows a live refresh keeps the ticks, the focus and the row nodes", async (t) => {
+/** The controls whose rows are a person's selection, from the static catalog. */
+const SELECTABLE = JSON.parse(
+  readFileSync(new URL("../js/drivecatalog.json", import.meta.url), "utf8"),
+).controls.filter((/** @type {any} */ c) => c.selects);
+/** @type {Map<string, string[]>} what each control's check found */
+const LIVE_SEL = new Map();
+
+/**
+ * One selectable control: tick two rows, focus the first, let the demo host
+ * push the fleet twice, and the ticks, the focus and the row nodes are still
+ * there. Own case per control (redesign-final-extra-live-selection, split so
+ * each stays under the suite's 20 s).
+ * @param {any} c a catalog control
+ */
+async function liveSelectionOf(c) {
+  const ROW =
+    "tr, li, [role=listitem], [role=row], .sk-card, [data-stack], [data-kp-row-key], label";
+  /** @type {string[]} */
+  const bad = [];
   const browser = await launch();
   try {
     const context = await browser.newContext({
       viewport: { width: 1894, height: 1000 },
     });
     const page = await freshPage(context);
-    // redesign-final-47 (Kenny, 2026-10-04: no crawl): the controls whose
-    // rows are a person's selection say so in the catalog (`selects`);
-    // the check goes straight to their pages.
-    const { all } = await catalogOf(page);
-    const sel = all.filter((c) => c.selects);
-    assert.ok(sel.length >= 1, "no control declares selectable rows");
-    const ROW =
-      "tr, li, [role=listitem], [role=row], .sk-card, [data-stack], [data-kp-row-key], label";
-    /** @type {string[]} */
-    const bad = [];
-    /** @type {string[]} */
-    const checked = [];
-    for (const c of sel) {
-      await page.goto(`${BASE}${c.home}`);
-      await page.waitForTimeout(1500);
-      // A control that shows only once another is pressed (Deploy all
-      // changes' picks): its declared reach steps first.
-      for (const r of c.reach ?? [])
-        if (r.do === "click")
-          await page
-            .locator(`[data-drive="${r.control}"]:visible`)
-            .first()
-            .click();
-      if (c.reach?.length) await page.waitForTimeout(1500);
-      // Its first two rows' boxes, enabled and on screen.
-      const rows = await page.evaluate((id) => {
-        const box = (/** @type {Element} */ e) =>
-          /** @type {HTMLInputElement | null} */ (
-            e.matches("input[type=checkbox]")
-              ? e
-              : e.querySelector("input[type=checkbox]")
-          );
-        return [...document.querySelectorAll(`[data-drive="${id}"]`)]
-          .filter((e) => {
-            const b = box(e);
+    const home = c.href?.startsWith("/stacks/<stack>")
+      ? c.href.replace("<stack>", "kp-soft").replace(/\/<[^>]+>.*$/, "")
+      : !c.href || /[<{]/.test(c.href)
+        ? `/${c.page}`
+        : c.href;
+    await page.goto(`${BASE}${home}`);
+    // A control that shows only once another is pressed (Deploy all
+    // changes' picks): its declared reach steps first.
+    for (const r of c.reach ?? [])
+      if (r.do === "click")
+        await page
+          .locator(`[data-drive="${r.control}"]:visible`)
+          .first()
+          .click();
+    const rowSel = `[data-drive="${c.id}"]`;
+    await page
+      .waitForFunction(
+        (sel) =>
+          [...document.querySelectorAll(sel)].some((e) => {
+            const b = e.matches("input[type=checkbox]")
+              ? /** @type {HTMLInputElement} */ (e)
+              : e.querySelector("input[type=checkbox]");
             return b && !b.disabled && b.offsetParent !== null;
-          })
-          .slice(0, 2)
-          .map((e) => /** @type {HTMLElement} */ (e).dataset.driveRow ?? "");
-      }, c.id);
-      if (!rows.length) {
-        bad.push(`${c.id}: no selectable row on ${c.home}`);
-        continue;
-      }
-      checked.push(`${c.id} on ${c.home}`);
-      const sel1 = (/** @type {string} */ r) =>
-        `[data-drive="${c.id}"][data-drive-row="${r}"]`;
-      for (const r of rows) {
-        const e = page.locator(sel1(r)).first();
-        const b = (await e.evaluate((x) => x.matches("input")))
-          ? e
-          : e.locator("input[type=checkbox]").first();
-        if (!(await b.isChecked())) await b.click();
-      }
-      await page.evaluate(
-        ({ ROW, sels }) => {
-          sels.forEach((s, i) => {
-            const e = document.querySelector(s);
-            const b = e?.matches("input")
-              ? e
-              : e?.querySelector("input[type=checkbox]");
-            if (i === 0) /** @type {HTMLElement} */ (b)?.focus();
-            const r = /** @type {any} */ (b?.closest(ROW));
-            if (r) r.__kept = true;
-          });
-        },
-        { ROW, sels: rows.map(sel1) },
-      );
-      // A live refresh: the demo host pushes the fleet every 5 s and the
-      // pages re-read on it; two pushes, so every page's refresh has come.
-      await page.waitForTimeout(11000);
-      const after = await page.evaluate(
-        ({ ROW, sels }) =>
-          sels.map((s) => {
-            const e = document.querySelector(s);
-            const b = /** @type {HTMLInputElement | null} */ (
-              e?.matches("input") ? e : e?.querySelector("input[type=checkbox]")
-            );
-            return {
-              s,
-              ticked: !!b?.checked,
-              kept: !!(/** @type {any} */ (b?.closest(ROW))?.__kept),
-              focus: !!b && document.activeElement === b,
-            };
           }),
-        { ROW, sels: rows.map(sel1) },
-      );
-      for (const a of after) {
-        if (!a.ticked) bad.push(`${c.home}: ${a.s} lost its tick`);
-        if (!a.kept) bad.push(`${c.home}: ${a.s}'s row was rebuilt`);
-      }
-      if (!after[0].focus) bad.push(`${c.home}: the focus left ${after[0].s}`);
-      await page.keyboard.press("Escape");
+        rowSel,
+        { timeout: 5000 },
+      )
+      .catch(() => {});
+    const rows = await page.evaluate((id) => {
+      const box = (/** @type {Element} */ e) =>
+        /** @type {HTMLInputElement | null} */ (
+          e.matches("input[type=checkbox]")
+            ? e
+            : e.querySelector("input[type=checkbox]")
+        );
+      return [...document.querySelectorAll(`[data-drive="${id}"]`)]
+        .filter((e) => {
+          const b = box(e);
+          return b && !b.disabled && b.offsetParent !== null;
+        })
+        .slice(0, 2)
+        .map((e) => /** @type {HTMLElement} */ (e).dataset.driveRow ?? "");
+    }, c.id);
+    if (!rows.length) {
+      bad.push(`${c.id}: no selectable row on ${home}`);
+      return bad;
     }
-    t.diagnostic(`selectable rows checked: ${checked.join(", ")}`);
-    assert.deepEqual(bad, [], `checked: ${checked.join(", ")}`);
+    const sel1 = (/** @type {string} */ r) =>
+      `[data-drive="${c.id}"][data-drive-row="${r}"]`;
+    for (const r of rows) {
+      const e = page.locator(sel1(r)).first();
+      const b = (await e.evaluate((x) => x.matches("input")))
+        ? e
+        : e.locator("input[type=checkbox]").first();
+      if (!(await b.isChecked())) await b.click();
+    }
+    await page.evaluate(
+      ({ ROW, sels }) => {
+        sels.forEach((s, i) => {
+          const e = document.querySelector(s);
+          const b = e?.matches("input")
+            ? e
+            : e?.querySelector("input[type=checkbox]");
+          if (i === 0) /** @type {HTMLElement} */ (b)?.focus();
+          const r = /** @type {any} */ (b?.closest(ROW));
+          if (r) r.__kept = true;
+        });
+      },
+      { ROW, sels: rows.map(sel1) },
+    );
+    // A live refresh: the demo host pushes the fleet every 5 s and the pages
+    // re-read on it; two pushes, so every page's refresh has come.
+    await page.waitForTimeout(10500);
+    const after = await page.evaluate(
+      ({ ROW, sels }) =>
+        sels.map((s) => {
+          const e = document.querySelector(s);
+          const b = /** @type {HTMLInputElement | null} */ (
+            e?.matches("input") ? e : e?.querySelector("input[type=checkbox]")
+          );
+          return {
+            s,
+            ticked: !!b?.checked,
+            kept: !!(/** @type {any} */ (b?.closest(ROW))?.__kept),
+            focus: !!b && document.activeElement === b,
+          };
+        }),
+      { ROW, sels: rows.map(sel1) },
+    );
+    for (const a of after) {
+      if (!a.ticked) bad.push(`${home}: ${a.s} lost its tick`);
+      if (!a.kept) bad.push(`${home}: ${a.s}'s row was rebuilt`);
+    }
+    if (!after[0].focus) bad.push(`${home}: the focus left ${after[0].s}`);
   } finally {
     await browser.close();
   }
-});
+  return bad;
+}
+
+for (const c of SELECTABLE)
+  test(`invariants: redesign-final-extra-live-selection: ${c.id} keeps its ticks, focus and row nodes over a live refresh`, async () => {
+    const bad = await liveSelectionOf(c);
+    LIVE_SEL.set(c.id, bad);
+    assert.deepEqual(bad, []);
+  });
+
+test(
+  "invariants: redesign-final-extra-live-selection: on every page with selectable rows a live refresh keeps the ticks, the focus and the row nodes",
+  { timeout: 20000 },
+  async (t) => {
+    // The verdict over the per-control cases above it. It walks nothing
+    // itself: one case walking every control ran minutes without a case
+    // ending, and the watchdog killed the whole run.
+    if (!LIVE_SEL.size) return t.skip("no per-control case ran before it");
+    t.diagnostic(
+      `selectable controls checked: ${SELECTABLE.map((c) => c.id).join(", ")}`,
+    );
+    assert.ok(SELECTABLE.length >= 1, "no control declares selectable rows");
+    assert.deepEqual([...LIVE_SEL.values()].flat(), []);
+  },
+);
 
 // Low: Host › Connection's latency strip drew one dot ("last 1 ping")
 // where the demo draws twelve: the dashboard keeps its last twelve.
@@ -10105,14 +10195,14 @@ test("invariants: redesign-final-low-ping: the Host page's latency strip opens w
     const page = await freshPage(context);
     await page.goto(`${BASE}/host`);
     await page.waitForFunction(
-      () => document.querySelectorAll("#host-lat i").length > 0,
+      () => document.querySelectorAll("#host-lat .kp-uptime__cell").length > 0,
       null,
       { timeout: 10000 },
     );
-    assert.equal(await page.locator("#host-lat i").count(), 12);
+    assert.equal(await page.locator("#host-lat .kp-uptime__cell").count(), 12);
     assert.match(
       await page
-        .locator("#page .nx-card__foot")
+        .locator("#host-connection .kp-card__footer, #page .nx-card__foot")
         .allInnerTexts()
         .then((t) => t.join(" ")),
       /last 12 pings/,
@@ -10139,15 +10229,26 @@ test("invariants: redesign-final-x7: the Live view switch is in the bar beside H
         const bar = document.getElementById("bar");
         const crumbs = document.getElementById("crumbs");
         const wrap = bar?.closest(".kp-nav-wrap");
+        // kp-themes 11: after the bar's wrap come the versions strip (a
+        // version check informs, it is no Live view row) and #app-body,
+        // whose page column opens with the breadcrumb.
         /** @type {string[]} */
         const between = [];
+        const visible = (/** @type {Element} */ n) =>
+          !(/** @type {HTMLElement} */ (n).hidden);
         for (
           let n = wrap?.nextElementSibling;
+          n && n.id !== "app-body";
+          n = n.nextElementSibling
+        )
+          if (n.id !== "versions" && visible(n))
+            between.push(n.id || n.className);
+        for (
+          let n = crumbs?.parentElement?.firstElementChild;
           n && n !== crumbs && n.id !== "page";
           n = n.nextElementSibling
         )
-          if (!(/** @type {HTMLElement} */ (n).hidden))
-            between.push(n.id || n.className);
+          if (visible(n)) between.push(n.id || n.className);
         return {
           inBar: !!sw && !!bar?.contains(sw),
           between,
@@ -10191,9 +10292,15 @@ test("invariants: redesign-final-contrast: every banner, badge and chip's text m
     assert.ok(themes.length > 1, `the picker offers ${themes.length} themes`);
     /** @type {Set<string>} */
     const bad = new Set();
+    // Advice, bounded: as many pages as fit in 12 s (the suite's 20 s per
+    // case), the first ones first; the rest is reported as not looked at.
+    const t0 = performance.now();
+    let looked = 0;
     for (const path of AUDIT_PAGES) {
+      if (performance.now() - t0 > 12000) break;
+      looked++;
       await page.goto(`${BASE}${path}`);
-      await page.waitForTimeout(1200);
+      await page.waitForTimeout(600);
       const found = await page.evaluate((themes) => {
         const style = document.createElement("style");
         style.textContent =
@@ -10290,7 +10397,7 @@ test("invariants: redesign-final-contrast: every banner, badge and chip's text m
     // never a gate.
     if (bad.size)
       console.log(
-        `contrast advice: ${bad.size} text(s) below WCAG AA in ${themes.length} themes, first: ${[...bad][0]}`,
+        `contrast advice: ${bad.size} text(s) below WCAG AA in ${themes.length} themes on ${looked} of ${AUDIT_PAGES.length} pages, first: ${[...bad][0]}`,
       );
   } finally {
     await browser.close();

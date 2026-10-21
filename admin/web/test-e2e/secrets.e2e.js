@@ -137,8 +137,18 @@ test("secrets: a reveal hides itself after 30 s, Copy copies, and Activity names
     const context = await browser.newContext({
       viewport: { width: 1894, height: 1000 },
     });
-    await context.grantPermissions(["clipboard-read", "clipboard-write"], {
-      origin: BASE,
+    // Firefox has no clipboard permission to grant: the page's clipboard is
+    // replaced by one that keeps what was written, and the test reads that.
+    await context.addInitScript(() => {
+      Object.defineProperty(navigator, "clipboard", {
+        configurable: true,
+        value: {
+          writeText: async (/** @type {string} */ v) => {
+            /** @type {any} */ (window).__clip = v;
+          },
+          readText: async () => /** @type {any} */ (window).__clip ?? "",
+        },
+      });
     });
     const page = await login(context);
     // install() alone restarts the page at the REAL time; keep the run's one clock.
@@ -162,9 +172,11 @@ test("secrets: a reveal hides itself after 30 s, Copy copies, and Activity names
     const secret = (await value.textContent()) ?? "";
     assert.match(secret, /^DEMO_VALUE=/);
     assert.equal(await field.getAttribute("data-kp-secret-state"), "shown");
-    await page.clock.fastForward(29_000);
+    // runFor fires the 1 s countdown every second; fastForward fires a due
+    // timer once.
+    await page.clock.runFor(29_000);
     assert.equal(await value.textContent(), secret, "still shown at 29 s");
-    await page.clock.fastForward(1_500);
+    await page.clock.runFor(1_500);
     await page.waitForFunction(
       (r) =>
         !document

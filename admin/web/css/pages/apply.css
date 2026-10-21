@@ -107,7 +107,9 @@
 }
 .ap-name {
   display: inline-grid;
-  grid-template-columns: auto minmax(0, 1fr);
+  /* The name never gets less than its own width (Firefox sized the column
+     to 0 inside a table cell and the name spilled out by 7 px). */
+  grid-template-columns: auto minmax(min-content, 1fr);
   align-items: center;
   gap: var(--kp-space-sm, 0.5rem);
 }

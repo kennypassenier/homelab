@@ -38,7 +38,13 @@ afterEach(async () => {
  * @param {import("playwright").LaunchOptions} [opts]
  */
 export async function launch(opts) {
-  const browser = await firefox.launch(opts);
+  // INVARIANTS_FIREFOX: a Firefox build to use when the one this Playwright
+  // wants is not downloaded (the same protocol works across a few builds).
+  const executablePath = process.env.INVARIANTS_FIREFOX || undefined;
+  const browser = await firefox.launch({
+    ...(executablePath && { executablePath }),
+    ...opts,
+  });
   open.add(browser);
   browser.on("disconnected", () => open.delete(browser));
   const raw = browser.newContext.bind(browser);

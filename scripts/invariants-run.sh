@@ -265,7 +265,7 @@ cd admin/web
 # release gate makes. INVARIANTS_SCRIPT: run another script against the same
 # demo host instead (a screenshot pass), with the same two variables set.
 # redesign-integrate-7: every case has a deadline of its own
-# (INVARIANTS_TEST_TIMEOUT_MS, 300 s by default), and an outer watchdog
+# (INVARIANTS_TEST_TIMEOUT_MS, 20 s by default (Kenny: no whole-screen case runs longer; a case that passes it FAILS and the run goes on with the next one)), and an outer watchdog
 # (scripts/e2e-watchdog.py) kills the whole run when no case started or
 # ended for 90 s while its browsers did no work — a hang the in-test
 # deadline cannot see (a stuck browser or driver connection) — and names
@@ -287,7 +287,7 @@ else
   INVARIANTS_PROGRESS_FILE="$progress" \
     node --test --test-concurrency=1 \
       --test-force-exit \
-      --test-timeout="${INVARIANTS_TEST_TIMEOUT_MS:-300000}" \
+      --test-timeout="${INVARIANTS_TEST_TIMEOUT_MS:-20000}" \
       --test-reporter=spec --test-reporter-destination=stdout \
       --test-reporter=tap --test-reporter-destination="$progress" \
       "${only[@]}" test-e2e/*.e2e.js &

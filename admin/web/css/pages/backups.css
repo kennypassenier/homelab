@@ -23,11 +23,6 @@
 .bk-reads .kp-formgrid__row[hidden] {
   display: none;
 }
-.bk-range {
-  color: var(--muted-foreground);
-  font-size: var(--kp-text-sm, 0.8125rem);
-  font-variant-numeric: tabular-nums;
-}
 .bk-reads .kp-formgrid__control {
   margin: 0;
   font-size: var(--kp-text-sm, 0.8125rem);

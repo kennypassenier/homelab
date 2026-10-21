@@ -3062,7 +3062,10 @@ test("invariants: clicking a Backups heatmap night pins it into the address and 
     assert.equal(param(), null, "Unpin left the night in the address");
     assert.match(await pin.innerText(), /No night pinned/);
     // Today as well.
+    // The grid's Today is off on the newest nights, so page back first.
     await pinOne();
+    await page.locator('[data-drive="backup-nights-earlier"]').click();
+    await page.waitForTimeout(150);
     await page.locator('[data-drive="backup-nights-today"]').click();
     await page.waitForTimeout(150);
     assert.equal(param(), null, "Today left the night in the address");

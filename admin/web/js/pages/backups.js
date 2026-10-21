@@ -75,7 +75,7 @@ import {
   selectionBar,
   snapshotList,
 } from "../backuprepos.js";
-import { gridRow, formGrid, buttonGroup } from "../gridrow.js";
+import { gridRow, formGrid } from "../gridrow.js";
 import {
   countOf,
   attentionBand,
@@ -601,44 +601,10 @@ export function mount(root) {
     "data-kp-range-custom": "off",
     "aria-label": "Nights to show",
   });
-  const earlier = drivable(
-    button("‹ Earlier", {
-      cls: "kp-button--sm kp-button--ghost",
-      title: "Show the nights before these (Page Up in the grid)",
-      onClick: () => page(+1),
-    }),
-    EARLIER,
-  );
-  const later = drivable(
-    button("Later ›", {
-      cls: "kp-button--sm kp-button--ghost",
-      title: "Show the nights after these (Page Down in the grid)",
-      onClick: () => page(-1),
-    }),
-    LATER,
-  );
-  const today = drivable(
-    button("Today", {
-      cls: "kp-button--sm kp-button--secondary",
-      title: "Back to the latest nights and unpin (Home)",
-      onClick: () => {
-        S.offset = 0;
-        pin(null);
-      },
-    }),
-    TODAY,
-  );
-  const rangeText = h("span", { class: "bk-range" });
   const rangeRow = gridRow({
     label: "Nights shown",
     hideLabel: true,
     control: rangeBox,
-  });
-  const pagingRow = gridRow({
-    label: "Nights",
-    control: buttonGroup([earlier, later, today]),
-    value: rangeText,
-    buttons: true,
   });
   const toolbar = formGrid(
     [
@@ -649,7 +615,6 @@ export function mount(root) {
         value: readAgo,
       }),
       rangeRow,
-      pagingRow,
     ],
     "bk-toolbar",
   );
@@ -1127,22 +1092,32 @@ export function mount(root) {
     !current().fleet && /could not read the fleet/.test(current().link ?? "");
   const nn = () => nightsNow(nowS());
 
-  /** Decorate what the package drew in the grid so Live view reaches it. @param {HTMLElement} grid */
+  /**
+   * Live view reaches what the grids draw through kp-themes 11.2.0's decorate
+   * hook: the night cells, the stack names and the paging buttons.
+   * @type {(part: HTMLElement, info: import("/static/kp/js/heat.js").HeatDecorateInfo) => void}
+   */
+  const heatDecorate = (part, info) => {
+    if (info.kind === "row-label")
+      drivable(part, STACK_FILTER, info.value ?? "");
+    else if (info.kind === "cell") {
+      const at = (info.value ?? "").indexOf("/");
+      const row = (info.value ?? "").slice(0, at);
+      const col = (info.value ?? "").slice(at + 1);
+      if (row === "fleet") drivable(part, FLEET_NIGHT, col);
+      else drivable(part, NIGHT, `${row}/${col}`);
+    } else if (info.kind === "pager-earlier") drivable(part, EARLIER);
+    else if (info.kind === "pager-later") drivable(part, LATER);
+    else if (info.kind === "pager-today") drivable(part, TODAY);
+  };
+  /** The window the nights grid shows, for its Earlier / Today / Later bar. @param {string[]} nights */
+  const pagingFor = (nights) => ({
+    offset: S.offset / RANGES[S.range].n,
+    label: `${nightDate(nights[0])} – ${nightDate(nights[nights.length - 1])}`,
+    min: 0,
+  });
+  /** Stamp what the grids drew that is not a button the hook hands over. @param {HTMLElement} grid */
   const decorateHeat = (grid) => {
-    for (const cell of /** @type {HTMLElement[]} */ ([
-      ...grid.querySelectorAll(".kp-heat__cell[data-row-key]"),
-    ])) {
-      const row = cell.dataset.rowKey ?? "";
-      const col = cell.dataset.colKey ?? "";
-      if (row === "fleet") drivable(cell, FLEET_NIGHT, col);
-      else drivable(cell, NIGHT, `${row}/${col}`);
-    }
-    for (const label of /** @type {HTMLElement[]} */ ([
-      ...grid.querySelectorAll(
-        ".kp-heat__label button[data-key], button.kp-heat__label[data-key]",
-      ),
-    ]))
-      drivable(label, STACK_FILTER, label.dataset.key ?? "");
     // The rows the page already read: "N of M stacks answered" counts them.
     for (const row of /** @type {HTMLElement[]} */ ([
       ...grid.querySelectorAll(".kp-heat__row[data-row-key]"),
@@ -1170,7 +1145,6 @@ export function mount(root) {
     const now = nn();
     const isMonth = S.view === "month";
     rangeRow.hidden = isMonth;
-    pagingRow.hidden = isMonth;
     nightsBox.hidden = isMonth;
     monthBox.hidden = !isMonth;
     setSegmentedValues(viewSwitch, [S.view]);
@@ -1219,13 +1193,19 @@ export function mount(root) {
         },
       });
       const range = RANGES[S.range];
+      const loadingNights = nightRange(now.current, range.n, S.offset);
       setHeat(
         nightsHeat,
-        gridState(nightRange(now.current, range.n, S.offset), range.every),
+        {
+          ...gridState(loadingNights, range.every),
+          paging: pagingFor(loadingNights),
+        },
+        { decorate: heatDecorate },
       );
       setHeat(
         monthHeat,
         gridState(monthNights(S.cursor.year, S.cursor.month), 5),
+        { decorate: heatDecorate },
       );
       return;
     }
@@ -1241,33 +1221,40 @@ export function mount(root) {
       shown: S.stacks,
     };
     if (!isMonth) {
-      setHeat(nightsHeat, {
-        ...heatLegend,
-        ...nightsSpec({
-          ...common,
-          nights,
-          every: range.every,
-          label: `Backups per stack, last ${range.n} nights`,
-        }),
-      });
+      setHeat(
+        nightsHeat,
+        {
+          ...heatLegend,
+          ...nightsSpec({
+            ...common,
+            nights,
+            every: range.every,
+            label: `Backups per stack, last ${range.n} nights`,
+          }),
+          paging: pagingFor(nights),
+        },
+        { decorate: heatDecorate },
+      );
       decorateHeat(nightsHeat);
       if (S.night && nights.includes(S.night)) setHeatPick(nightsHeat, S.night);
       else setHeatPick(nightsHeat, null);
       setHeatRows(nightsHeat, [...S.stacks]);
-      rangeText.textContent = `${nightDate(nights[0])} – ${nightDate(nights[nights.length - 1])}`;
-      later.toggleAttribute("disabled", S.offset === 0);
     } else {
       const days = monthNights(S.cursor.year, S.cursor.month);
-      setHeat(monthHeat, {
-        ...heatLegend,
-        ...nightsSpec({
-          ...common,
-          nights: days,
-          every: 5,
-          label: `Backups per stack in ${String(S.cursor.month).padStart(2, "0")}/${S.cursor.year}`,
-        }),
-        toggle: false,
-      });
+      setHeat(
+        monthHeat,
+        {
+          ...heatLegend,
+          ...nightsSpec({
+            ...common,
+            nights: days,
+            every: 5,
+            label: `Backups per stack in ${String(S.cursor.month).padStart(2, "0")}/${S.cursor.year}`,
+          }),
+          toggle: false,
+        },
+        { decorate: heatDecorate },
+      );
       decorateHeat(monthHeat);
       const from = addDays(now.current, -400);
       setCalendarDays(
@@ -1842,11 +1829,15 @@ export function mount(root) {
       : "All stacks shown. Press a stack name to show only that one.";
     paintCoverage();
   });
-  nightsHeat.addEventListener(HEAT_PAGE_EVENT, (e) =>
-    page(
-      /** @type {CustomEvent} */ (e).detail.direction === "earlier" ? +1 : -1,
-    ),
-  );
+  // The grid's own Earlier / Today / Later bar and Page Up / Page Down.
+  nightsHeat.addEventListener(HEAT_PAGE_EVENT, (e) => {
+    const direction = /** @type {CustomEvent} */ (e).detail.direction;
+    if (direction === "today") {
+      S.offset = 0;
+      pin(null);
+    } else if (direction === "earlier" || direction === "later")
+      page(direction === "earlier" ? +1 : -1);
+  });
   calendar.addEventListener(CALENDAR_PICK_EVENT, (e) => {
     const date = /** @type {CustomEvent} */ (e).detail.date;
     S.night = date;

@@ -32,15 +32,15 @@ export function narrowBar(spec) {
     el,
     state,
     set: (tags) => {
-      setToolbarActive(el, tags);
-      for (const b of /** @type {NodeListOf<HTMLElement>} */ (
-        el.querySelectorAll(".kp-tag__remove")
-      ))
-        spec.markRemove(b, b.dataset.id ?? "");
-      for (const b of /** @type {NodeListOf<HTMLElement>} */ (
-        el.querySelectorAll("[data-kp-toolbar-clear]")
-      ))
-        spec.markClear(b);
+      // kp-themes 11.2.0's decorate hook marks the cross of each tag and
+      // Clear all for Live view as the toolbar builds them.
+      setToolbarActive(el, tags, {
+        decorate: (part, info) => {
+          if (info.kind === "tag-remove")
+            spec.markRemove(part, info.value ?? "");
+          else spec.markClear(part);
+        },
+      });
     },
   };
 }

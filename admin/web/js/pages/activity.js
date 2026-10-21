@@ -1317,6 +1317,9 @@ function mountNow(body, x) {
           drivable(part, ROW, info.value);
         else if (info.kind === "row-group-toggle")
           drivable(part, DAY, info.value ?? "");
+        else if (info.kind === "add-filter") drivable(part, ADD_FILTER);
+        else if (info.kind === "search") drivable(part, SEARCH);
+        else if (info.kind === "clear-filters") drivable(part, CLEAR);
       },
     }),
   ];
@@ -1572,16 +1575,17 @@ function mountNow(body, x) {
       picked: pickDay,
       label: `Operations per stack per day, last ${days === 1 ? "day" : `${days} days`}`,
     };
-    setHeat(heatEl, spec);
+    // kp-themes 11.2.0's decorate hook marks the stack names and the Fleet
+    // row's day cells for Live view as the grid builds them.
+    setHeat(heatEl, spec, {
+      decorate: (part, info) => {
+        if (info.kind === "row-label")
+          drivable(part, HEAT_STACK, info.value ?? "");
+        else if (info.kind === "cell" && info.value?.startsWith("fleet/"))
+          drivable(part, HEAT_DAY, info.value.slice("fleet/".length));
+      },
+    });
     setHeatRows(heatEl, [...pickStacks]);
-    for (const b of /** @type {NodeListOf<HTMLElement>} */ (
-      heatEl.querySelectorAll(".kp-heat__label-button")
-    ))
-      drivable(b, HEAT_STACK, b.dataset.key ?? "");
-    for (const b of /** @type {NodeListOf<HTMLElement>} */ (
-      heatEl.querySelectorAll('.kp-heat__cell[data-row-key="fleet"]')
-    ))
-      drivable(b, HEAT_DAY, b.dataset.colKey ?? "");
   };
   heatEl.addEventListener("kp-heat-pick", (e) => {
     const d = /** @type {CustomEvent} */ (e).detail;
@@ -1633,16 +1637,6 @@ function mountNow(body, x) {
     [...t.wrap.querySelectorAll("thead th")].findIndex(
       (th) => (th.textContent ?? "").trim() === name,
     );
-  /** Wire the table's own controls for Live view, once it is attached. */
-  const markTable = () => {
-    const add = t.wrap.querySelector("[data-kp-datatable-add-filter]");
-    if (add instanceof HTMLElement && !add.dataset.drive)
-      drivable(add, ADD_FILTER);
-    const search = t.wrap.querySelector("[data-kp-datatable-search]");
-    if (search instanceof HTMLElement) drivable(search, SEARCH);
-    const clear = t.wrap.querySelector("[data-kp-datatable-clear]");
-    if (clear instanceof HTMLElement) drivable(clear, CLEAR);
-  };
   /** @param {string} key */
   const rowOf = (key) =>
     t.tbody.querySelector(`tr[data-kp-row-key="${CSS.escape(key)}"]`);
@@ -1849,7 +1843,6 @@ function mountNow(body, x) {
         )?.focus({ preventScroll: true });
       }
     } else t.ready({ refresh: false });
-    markTable();
   };
 
   const changed = () => {

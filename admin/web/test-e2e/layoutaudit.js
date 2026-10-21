@@ -88,10 +88,19 @@ export function layoutAudit(rootSel) {
     return r.width > 2 && r.height > 2;
   };
   /** Skeletons, screen-reader-only and decorative pieces. */
-  const skip = (/** @type {Element} */ el) =>
-    !!el.closest(
-      ".nx-skel,.skeleton,[class*='skel'],.sr-only,.visually-hidden,.nx-sr,input,textarea,select,option,pre,code,.cm-editor",
-    );
+  const skip = (/** @type {Element} */ el) => {
+    if (
+      el.closest(
+        ".nx-skel,.skeleton,[class*='skel'],.sr-only,.visually-hidden,.nx-sr,input,textarea,select,option,pre,code,.cm-editor",
+      )
+    )
+      return true;
+    // A state plate that is playing its leave animation (kp's table shows
+    // its empty plate for the first frames, then it leaves): clipped by the
+    // animation, not a settled state.
+    const plate = el.closest(".kp-empty, .kp-stateplate");
+    return !!plate && /leave/.test(getComputedStyle(plate).animationName);
+  };
 
   // ---- a: per-letter wraps, cut and spilling text ----
   const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);

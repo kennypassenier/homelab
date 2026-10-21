@@ -969,9 +969,14 @@ export function mount(root) {
     else if (done < names.length)
       head.live?.set(null, `reading ${done} of ${names.length} stacks…`);
     else head.live?.set(readAt);
+    // The answered stacks are counted from the rows the grid draws; while kp
+    // still shows its loading rows the sentence says so instead of a number
+    // no row backs yet.
     readState.textContent = !current().fleet
       ? "Waiting for the host's report of the fleet…"
-      : `Read from the host's snapshot cache · ${done - failed.length} of ${names.length} stacks answered${failed.length ? ` · ${failed.join(", ")} could not be read` : ""}`;
+      : nightsHeat.getAttribute("aria-busy") === "true"
+        ? "Drawing the stacks' nights…"
+        : `Read from the host's snapshot cache · ${done - failed.length} of ${names.length} stacks answered${failed.length ? ` · ${failed.join(", ")} could not be read` : ""}`;
     // redesign-final (exact counts): "N of M stacks answered" is the
     // coverage rows of the stacks that answered.
     countOf(readState, nightsHeat, '.kp-heat__row[data-kp-read="ok"]');
@@ -1131,7 +1136,10 @@ export function mount(root) {
   // returned, and again on a redraw: stamp whatever it draws, so the
   // "N of M stacks answered" count always finds its rows. It only sets
   // attributes, so it never triggers itself.
-  const stampRows = new MutationObserver(() => decorateHeat(nightsHeat));
+  const stampRows = new MutationObserver(() => {
+    decorateHeat(nightsHeat);
+    paintLive();
+  });
   stampRows.observe(nightsHeat, { childList: true, subtree: true });
   cleanups.push(() => stampRows.disconnect());
 

@@ -71,6 +71,13 @@
 .ib-app {
   display: contents;
 }
+@media (max-width: 40rem) {
+  /* Name over its jump: the name gets the row's whole width. */
+  .ib-apps {
+    grid-template-columns: minmax(0, 1fr);
+    justify-items: start;
+  }
+}
 .ib-app > b {
   font-weight: 600;
   /* "stack/app" has no space to break at: on a phone the name track is

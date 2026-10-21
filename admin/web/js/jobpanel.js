@@ -20,6 +20,7 @@ import {
 } from "./jobs.js";
 import { jobLogViewer } from "./joblog.js";
 import { openBusyCard } from "/static/kp/js/busy-card.js";
+import { buildJobLine, setJobLine } from "/static/kp/js/job-line.js";
 import { setCode } from "/static/kp/js/code.js";
 import { attachProblems, setProblems } from "/static/kp/js/problems.js";
 import { setStackbar } from "/static/kp/js/stackbar.js";
@@ -97,14 +98,20 @@ export function mountJobPanel(jobId, opts = {}) {
   // ask-kp11be-5: a restic backup or restore also says how much data has
   // moved: a second bar with the bytes done of the total and the rate.
   const bytesBar = progressBar("How much data has moved", null, "job-bytes");
-  const bytesNote = h("p", { class: "measured job-progress__note" });
+  // feat-kpadopt-2: kp-themes 11.2.0's job line says the step, the data moved
+  // and the time left in one sentence, where two notes stood.
+  const jobLine = buildJobLine({ label: "Where the job stands" });
+  jobLine.setAttribute("role", "status");
+  jobLine.setAttribute("aria-live", "off");
+  jobLine.setAttribute("aria-atomic", "true");
+  jobLine.classList.add("measured", "job-progress__note");
   const progressBox = h(
     "div",
     { class: "job-progress-box", hidden: "" },
     progress,
     progressNote,
     bytesBar,
-    bytesNote,
+    jobLine,
   );
   const bar = h("figure", { class: "kp-stackbar job-bar" });
   const stepsHost = h("div", {
@@ -352,11 +359,8 @@ export function mountJobPanel(jobId, opts = {}) {
 
     // The data moved so far, while a transfer reports it.
     const moved = bytesView(j.bytes, (n) => humanBytes(n));
-    bytesBar.hidden = bytesNote.hidden = moved == null;
-    if (moved) {
-      setProgress(bytesBar, moved.percent);
-      bytesNote.textContent = moved.text;
-    }
+    bytesBar.hidden = moved == null;
+    if (moved) setProgress(bytesBar, moved.percent);
 
     // Where the time went: one bar, split by step.
     /** @type {{key: string, label: string, value: number, tone?: "destructive"}[]} */
@@ -406,6 +410,14 @@ export function mountJobPanel(jobId, opts = {}) {
     // The disc shrinks while an estimate says time is left.
     const left = remaining(j, act.progressAt.get(jobId) ?? null, now);
     const running = !ended && left.s != null && est != null;
+    setJobLine(jobLine, {
+      step: p && nTotal ? Math.min(nTotal, Math.max(1, p.n)) : undefined,
+      steps: nTotal || undefined,
+      done: j.bytes ? j.bytes.done : undefined,
+      total: j.bytes?.total ? j.bytes.total : undefined,
+      etaSeconds:
+        left.s != undefined && !left.late ? Math.round(left.s) : undefined,
+    });
     discHost.hidden = !running && !ended;
     if (running && est) {
       if (!discWired) {

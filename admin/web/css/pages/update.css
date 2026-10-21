@@ -325,9 +325,3 @@
 .uf-run > [hidden] {
   display: none;
 }
-
-/* A major version's release notes, plain text in kp's code block, inside its gate. */
-.uf-notes {
-  margin-block: var(--kp-space-sm, 0.5rem) 0;
-  min-inline-size: 0;
-}

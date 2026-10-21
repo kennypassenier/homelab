@@ -64,8 +64,7 @@ import {
   updatesBody,
   whoNotices,
 } from "../updateflow.js";
-import { attachAckGates } from "/static/kp/js/ack-gate.js";
-import { attachCodes, setCode } from "/static/kp/js/code.js";
+import { ackGate, attachAckGates } from "/static/kp/js/ack-gate.js";
 import { attachDataTables } from "/static/kp/js/datatable.js";
 import { attachIdmarks } from "/static/kp/js/idmark.js";
 import { setPipeline, attachPipelines } from "/static/kp/js/pipeline.js";
@@ -110,7 +109,7 @@ const MAJOR_GATE = declare({
   page: "update",
   opens: "view",
   row: "<pin:stack:app/service>",
-  what: "tick “I read the release notes of …” for a major version (it can be ticked once the notes link was opened; a version with no link, after 4 seconds)",
+  what: "tick “I read the release notes of …” for a major version (it can be ticked once the release notes in the gate were opened; when they cannot be shown, once the notes link was opened, or after 4 seconds for a version with no link)",
   shows: "under the list, once a major version is ticked",
   reach: [{ do: "click", control: "update-pick", row: "*" }],
 });
@@ -805,63 +804,41 @@ export function mount(root, scope) {
   });
   /**
    * ask-kp11be-6: a major version's release notes, fetched and cleaned by
-   * the dashboard and drawn as plain text in kp's code block (there is no
-   * markdown view in kp, gap line 113). The link above stays: the tick still
-   * waits for it to be opened.
+   * the dashboard and drawn inside its acknowledge gate (kp-themes 11.2.0's
+   * markdown fold, gap line 113). While they are read the gate shows its
+   * busy card; once they stand, the tick waits for the fold to be opened.
+   * A version whose notes cannot be shown keeps the older wait: the notes
+   * link, or a few seconds when there is no link.
+   * @param {HTMLElement} gate
    * @param {import("../updateflow.js").Item} m
    */
-  const noteBlock = (m) => {
-    const el = h("figure", { class: "kp-code uf-notes", "data-kp-code": "" });
+  const loadNotes = (gate, m) => {
+    const handle = ackGate(gate);
+    if (!handle) return;
+    handle.setState("loading");
     const title = `Release notes of ${m.to}`;
-    setCode(el, {
-      title,
-      language: "Markdown",
-      state: "loading",
-      loadingWords: `Reading the release notes of ${m.to}…`,
-    });
+    gate.setAttribute("data-kp-ack-notes-label", title);
     void (async () => {
       const r = await fetchJson(
         `/data/release-notes?${notesQuery(m.notes)}`,
         "the release notes",
         abort.signal,
       );
-      if (abort.signal.aborted) return;
-      if (!r.ok) {
-        setCode(el, {
-          title,
-          state: "error",
-          message: `${r.error.what}: ${r.error.why}`,
-        });
-        return;
-      }
+      if (abort.signal.aborted || !gate.isConnected) return;
+      handle.setState("ready");
+      if (!r.ok || !r.body.body) return;
       const n = r.body;
-      if (!n.body) {
-        setCode(el, {
-          title,
-          state: "empty",
-          message: `${n.name || m.to} has no release notes written. Open the release page from the link.`,
-        });
-        return;
-      }
-      setCode(el, {
-        title: n.name ? `${title}: ${n.name}` : title,
-        language: "Markdown",
-        text: n.body,
-        wrap: true,
-        maxLines: 14,
-        copy: true,
-        open: "dialog",
-        ...(n.truncated
-          ? {
-              truncated: {
-                shown: String(n.body.length),
-                total: String(n.total),
-              },
-            }
-          : {}),
-      });
+      if (n.name)
+        gate.setAttribute("data-kp-ack-notes-label", `${title}: ${n.name}`);
+      gate.setAttribute("data-kp-ack-require-notes", "");
+      gate.removeAttribute("data-kp-ack-require-link");
+      gate.removeAttribute("data-kp-ack-min-ms");
+      handle.setNotes(
+        n.truncated
+          ? `${n.body}\n\n*Cut at ${n.body.length} of ${n.total} characters; open the release page from the link for the rest.*`
+          : n.body,
+      );
     })().catch(() => {});
-    return el;
   };
   /** One kp acknowledge gate per ticked major version, kept in step with the ticks. */
   const syncGates = () => {
@@ -873,6 +850,8 @@ export function mount(root, scope) {
         acked.delete(g.dataset.kpAckKey ?? "");
         g.remove();
       }
+    /** @type {[import("../updateflow.js").Item, Element | null][]} */
+    const fresh = [];
     for (const m of majors) {
       if (gates.querySelector(`[data-kp-ack-key="${CSS.escape(m.id)}"]`))
         continue;
@@ -903,12 +882,12 @@ export function mount(root, scope) {
             ),
             "It can change settings or move data.",
           ),
-          ...(notesQuery(m.notes) ? [noteBlock(m)] : []),
         ),
       );
+      if (notesQuery(m.notes)) fresh.push([m, gates.lastElementChild]);
     }
-    attachCodes(gates);
     attachAckGates(gates);
+    for (const [m, g] of fresh) if (g instanceof HTMLElement) loadNotes(g, m);
     for (const box of /** @type {NodeListOf<HTMLInputElement>} */ (
       gates.querySelectorAll("[data-kp-ack] input[type=checkbox]")
     )) {

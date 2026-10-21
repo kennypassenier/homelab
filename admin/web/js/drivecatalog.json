@@ -4966,7 +4966,7 @@
     {
       "id": "update-major-read",
       "page": "update",
-      "what": "tick “I read the release notes of …” for a major version (it can be ticked once the notes link was opened; a version with no link, after 4 seconds)",
+      "what": "tick “I read the release notes of …” for a major version (it can be ticked once the release notes in the gate were opened; when they cannot be shown, once the notes link was opened, or after 4 seconds for a version with no link)",
       "opens": "view",
       "row": "<pin:stack:app/service>",
       "href": "/update",

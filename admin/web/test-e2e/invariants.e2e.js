@@ -1602,7 +1602,17 @@ test("invariants: a stale-image row offers Update with the from/to versions, and
       "true",
       "See what this changes must stay off until the release notes are ticked",
     );
-    await page.waitForTimeout(4500);
+    // The gate shows the release notes in a fold once the host has read
+    // them (the tick waits for the fold to be opened); a version whose notes
+    // cannot be shown only waits a few seconds.
+    await page.waitForFunction(
+      () => !document.querySelector('[data-kp-ack][data-kp-state="loading"]'),
+      null,
+      { timeout: 10000 },
+    );
+    const fold = page.locator("[data-kp-ack] .kp-ack__notes-summary");
+    if (await fold.count()) await fold.first().click();
+    else await page.waitForTimeout(4500);
     await tick.check();
     await see.click();
     const go = page.locator("[data-drive=update-go]");

@@ -40,6 +40,7 @@ import {
   manualRowFromValues,
   manualRowSummary,
   moveRule,
+  moveRuleTo,
   ruleIntent,
   toggleRuleOff,
   originJson,
@@ -1094,6 +1095,22 @@ function rowTable({
         openDialogFor(i);
         break;
     }
+  });
+  // kp-themes 11.2.0's row reorder, beside the Up and Down buttons Live view
+  // presses: a handle (or Alt+Up / Alt+Down) moves a row.
+  t.wrap.setAttribute("data-kp-rows-reorder", "");
+  t.wrap.addEventListener("kp-datatable-reorder", (ev) => {
+    const { from, to } = /** @type {CustomEvent} */ (ev).detail;
+    if (!rows[from] || to < 0 || to >= rows.length) return;
+    const next = [...rows];
+    const [moved] = next.splice(from, 1);
+    next.splice(to, 0, moved);
+    setRows(next);
+    /** @type {HTMLElement | null} */ (
+      t.tbody.querySelector(
+        `tr[data-kp-row-key="${to}"] [data-kp-reorder-handle]`,
+      )
+    )?.focus({ preventScroll: true });
   });
   const add = h(
     "button",
@@ -2625,6 +2642,7 @@ function drawFirewall(panel, stack, e, reload) {
       { label: "Change", sort: "text" },
     ],
   });
+  t.wrap.setAttribute("data-kp-rows-reorder", "");
   const add = h(
     "button",
     { type: "button", class: "kp-button", id: "fw-add" },
@@ -2763,6 +2781,17 @@ function drawFirewall(panel, stack, e, reload) {
         });
         break;
     }
+  });
+  // kp-themes 11.2.0's row reorder: the handle (and Alt+Up / Alt+Down on it)
+  // moves a rule; the table says where it went, the model follows and the
+  // rows are drawn again with their numbers.
+  t.wrap.addEventListener("kp-datatable-reorder", (ev) => {
+    const { from, to } = /** @type {CustomEvent} */ (ev).detail;
+    model = moveRuleTo(model, from, to);
+    paintRules();
+    /** @type {HTMLElement | null} */ (
+      t.tbody.querySelector(`tr[data-rule="${to}"] [data-kp-reorder-handle]`)
+    )?.focus({ preventScroll: true });
   });
   add.addEventListener("click", () =>
     openRuleDialog(null, (rule) => {

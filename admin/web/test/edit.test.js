@@ -41,6 +41,7 @@ import {
   manualRowFromValues,
   manualRowSummary,
   moveRule,
+  moveRuleTo,
   newStackBody,
   newStackWizard,
   parseKey,
@@ -1296,4 +1297,19 @@ test("redesign-stacks-8: New stack's Empty route skips the preset step and asks 
   assert.equal(v.vmid, "121");
   assert.equal(newStackBody({ ...v, name: "blank" }).preset, "");
   assert.ok(Number(v.ram_mb) > 0, "the size starts from the defaults");
+});
+
+test("moveRuleTo: a rule goes to its new place, the others shift by one", () => {
+  const rule = (/** @type {string} */ note) => ({
+    origin: null,
+    rule: { dir: "in", action: "ACCEPT", note },
+  });
+  const m = /** @type {any} */ ({ rules: ["a", "b", "c", "d"].map(rule) });
+  const notes = (/** @type {any} */ x) =>
+    x.rules.map((/** @type {any} */ r) => r.rule.note).join("");
+  assert.equal(notes(moveRuleTo(m, 3, 1)), "adbc");
+  assert.equal(notes(moveRuleTo(m, 0, 2)), "bcad");
+  assert.equal(moveRuleTo(m, 1, 1), m);
+  assert.equal(moveRuleTo(m, 0, 9), m);
+  assert.equal(moveRuleTo(m, 9, 0), m);
 });

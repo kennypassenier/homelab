@@ -1427,6 +1427,23 @@ export function moveRule(m, i, delta) {
 }
 
 /**
+ * Put rule `from` at place `to` (kp's row reorder reports both), the rules
+ * between shifting by one. A place outside the list, or the same one,
+ * changes nothing.
+ * @param {FirewallModel} m
+ * @param {number} from
+ * @param {number} to
+ * @returns {FirewallModel}
+ */
+export function moveRuleTo(m, from, to) {
+  if (from === to || !m.rules[from] || to < 0 || to >= m.rules.length) return m;
+  const rules = [...m.rules];
+  const [rule] = rules.splice(from, 1);
+  rules.splice(to, 0, rule);
+  return { ...m, rules };
+}
+
+/**
  * redesign-config-8: a rule switched off (kept in the file, skipped by
  * Proxmox) or back on.
  * @param {FirewallModel} m

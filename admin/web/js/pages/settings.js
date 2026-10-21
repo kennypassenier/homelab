@@ -880,7 +880,7 @@ export function mount(root, opts = {}) {
   /** @returns {Promise<boolean>} */
   const loadHost = async () => {
     // A read that arrives while changes wait must not wipe them.
-    const pending = barSlot.querySelectorAll("[data-kp-changed]").length;
+    const pending = groupBox.querySelectorAll("[data-kp-changed]").length;
     if (page && pending > 0 && groupBox.children.length) {
       stale = true;
       setProblems(band, [
@@ -916,7 +916,11 @@ export function mount(root, opts = {}) {
     await drawGroups();
     await settle();
     setCardState(hsCard.card, "ready");
-    unsaved(barSlot)?.markClean();
+    // The groups just drawn are the saved state, except for what the bar
+    // gave back from this tab (kp keeps staged changes for the tab and puts
+    // them back as the bar attaches): marking those clean would drop them.
+    if (!groupBox.querySelector("[data-kp-changed]"))
+      unsaved(barSlot)?.markClean();
     setAgo(ago, r.body.measured_at ?? Date.now() / 1000);
     refreshReadLine();
     if (first) goToSection();

@@ -2632,15 +2632,15 @@ details.nx-card--fold[open] > summary::before {
 /* The demo's phone header: the primary across the width, the others two
    a row under it (kp's narrow header lets them wrap at their own size). */
 @media (max-width: 48rem) {
-  .bk-page .nx-head .kp-page-header__inner {
+  :is(.bk-page, .con-page) .nx-head .kp-page-header__inner {
     grid-template-columns: minmax(0, 1fr);
   }
-  .bk-page .nx-head-actions {
+  :is(.bk-page, .con-page) .nx-head-actions {
     display: grid;
     grid-template-columns: 1fr 1fr;
     inline-size: 100%;
   }
-  .bk-page .nx-head-actions > .kp-button--primary {
+  :is(.bk-page, .con-page) .nx-head-actions > .kp-button--primary {
     grid-column: 1 / -1;
     order: -1;
   }
@@ -2810,4 +2810,14 @@ details.nx-card--fold[open] > summary::before {
 }
 .boot-stage {
   min-block-size: 24rem;
+}
+
+/* The stack hub's Backups view switch (a strip per app / a grid of 30
+   nights): two long words stand one under the other on a phone, never
+   a switch that scrolls inside its card. */
+@media (max-width: 48rem) {
+  .hb-ctl .kp-segmented {
+    grid-auto-flow: row;
+    grid-auto-columns: minmax(0, 1fr);
+  }
 }

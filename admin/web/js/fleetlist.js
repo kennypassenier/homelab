@@ -881,7 +881,11 @@ export function fleetList(ctx) {
         r.appsTotal,
         r.restarts,
         r.backup.at,
-        r.backup.text,
+        // The age text ticks with the clock ("39 min 41 s ago"); a row that
+        // has a time shows that time, so only a row without one is keyed by
+        // its words ("reading…", "keeps no data"). Otherwise every push
+        // rebuilt the table and took the focus and the hover with it.
+        r.backup.at ? "" : r.backup.text,
         r.flags.map((f) => f.key),
         r.problem,
         r.apps,

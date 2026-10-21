@@ -1817,6 +1817,20 @@ export function mount(root) {
           );
         }
       }
+      // A table with group headings (Inbound, Outbound) only places detail
+      // rows its markup already holds (kp-themes 11.2.0 queues a detail row
+      // built when a row first opens), so each rule carries an empty one
+      // that is filled when its row opens.
+      for (const tr of tbody.querySelectorAll("tr[data-kp-row-key]"))
+        tr.after(
+          h("tr", { "data-kp-row-detail": "", hidden: "" }, h("td", null)),
+        );
+      ruTable.addEventListener("kp-datatable-expand", (e) => {
+        const d = /** @type {CustomEvent} */ (e).detail;
+        if (!d?.open || !d.cell || d.cell.childElementCount) return;
+        const content = ruleDetail(String(d.key ?? ""));
+        if (content) d.cell.append(content);
+      });
       attachDataTables(ruTable, {
         detail: (row) => ruleDetail(row.dataset.kpRowKey ?? ""),
         decorate: (part, info) => {

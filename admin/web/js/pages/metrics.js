@@ -20,7 +20,7 @@
 // Data: /data/charts (Prometheus), /data/traffic (Loki), /data/history,
 // the fleet store (the host's own CPU, memory, disk and load).
 
-import { errorBox, fetchJson, fetchReport, h } from "../dom.js";
+import { errorBox, fetchJson, fetchReport, h, labelCells } from "../dom.js";
 import { declare, declareField, drivable } from "../drivable.js";
 import {
   CLASSES,
@@ -1592,6 +1592,8 @@ export function mount(root, ctx) {
           "data-kp-datatable": "",
           "data-kp-busy-overlay": "",
           "data-kp-expandable": "",
+          // On a phone a drive is a card, never a table that scrolls sideways.
+          "data-kp-cards": "",
           "data-kp-page-size": "500",
           "data-kp-page-sizes": "none",
           "data-kp-sort-multi": "",
@@ -1656,6 +1658,15 @@ export function mount(root, ctx) {
         empty,
       );
       k.body.replaceChildren(wrap);
+      labelCells(tbody, () => [
+        "",
+        "Drive",
+        "SMART",
+        "Temperature",
+        "Pending sectors",
+        "Reallocated sectors",
+        "Powered on",
+      ]);
       k.setFoot([
         "A rising pending or reallocated count is the early warning; temperature above 50 °C shortens a drive's life.",
         "smartctl via node-exporter",

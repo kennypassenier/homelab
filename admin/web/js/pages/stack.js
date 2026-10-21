@@ -2100,6 +2100,9 @@ function appsTab(panel, c) {
     ...block.wrap.querySelectorAll("thead th"),
   ]);
   ths[0].setAttribute("data-kp-column-locked", "");
+  // Opens sorted by its first column, so the phone's card sort reads
+  // "Sort by App · Ascending" rather than "Sort by None".
+  ths[0].setAttribute("aria-sort", "ascending");
   ths[5].setAttribute("data-kp-column-hidden", "");
   const card = section({
     title: "Apps",

@@ -49,6 +49,7 @@ import { editable } from "../editforms.js";
 import { mountSignin } from "../signin.js";
 import { chip, dot, ensureStyle } from "../ui.js";
 import { attachAll } from "/static/kp/js/auto.js";
+import { attachContents, setContents } from "/static/kp/js/page-contents.js";
 import { attachDisabledReasons } from "/static/kp/js/reason.js";
 import { setCardState } from "/static/kp/js/card-state.js";
 import { setProblems } from "/static/kp/js/problems.js";
@@ -454,55 +455,57 @@ export function mount(root, opts = {}) {
     data: [groupBox],
   });
 
-  // ── side list with scroll-spy ─────────────────────────────────────────
+  // ── side list with scroll-spy (kp-themes 11.2.0's "On this page") ──────
   const side = h("nav", {
-    class: "st-side",
+    class: "kp-contents st-side",
+    "data-kp-contents": "",
+    "data-kp-contents-min": "1",
     "aria-label": "Settings sections",
   });
-  /** @param {string} current */
-  const paintSide = (current) => {
+  /** The sections the list names: this dashboard's cards, then host.toml's groups. */
+  const paintSide = () => {
     const gs = page ? groupsOf(page.fields) : [];
-    /** @param {string} id @param {string} label @param {string} n */
-    const link = (id, label, n) =>
-      drivable(
-        h(
-          "a",
-          {
-            href: `${location.pathname}#${id}`,
-            "aria-current": String(id === current),
-            onclick: (/** @type {Event} */ e) => {
-              e.preventDefault();
-              const d = /** @type {HTMLDetailsElement | null} */ (
-                groupBox.querySelector(`details#${CSS.escape(id)}`)
-              );
-              if (d) d.open = true;
-              document
-                .getElementById(id)
-                ?.scrollIntoView({ behavior: "smooth", block: "start" });
-            },
-          },
-          h("span", null, label),
-          h("span", { class: "st-side__n" }, n),
-        ),
-        NAV,
-        id,
-      );
-    side.replaceChildren(
-      h("h4", null, "This dashboard"),
-      link("wc", "Working copy", ""),
-      link("signin", "Sign-in", ""),
-      link("browser", "This browser", ""),
-      h("h4", null, "host.toml"),
-      ...gs.map((g) =>
-        link(
-          slug(g),
-          g,
-          String(page?.fields.filter((f) => f.group === g).length ?? ""),
-        ),
-      ),
-    );
+    setContents(side, [
+      { id: "wc", label: "Working copy" },
+      { id: "signin", label: "Sign-in" },
+      { id: "browser", label: "This browser" },
+      { id: "host-settings", label: "host.toml" },
+      ...gs.map((g) => ({
+        id: slug(g),
+        label: g,
+        level: 1,
+        count: page?.fields.filter((f) => f.group === g).length ?? "",
+      })),
+    ]);
   };
-  paintSide("wc");
+  // A group folded shut is opened first, so the press lands on its keys.
+  side.addEventListener(
+    "click",
+    (e) => {
+      const link = /** @type {Element} */ (e.target).closest(
+        "a.kp-contents__link",
+      );
+      const id = link?.getAttribute("href")?.slice(1);
+      const d = id
+        ? /** @type {HTMLDetailsElement | null} */ (
+            groupBox.querySelector(`details#${CSS.escape(id)}`)
+          )
+        : null;
+      if (d) d.open = true;
+    },
+    true,
+  );
+  // Live view reaches each entry by its section.
+  const markSide = () => {
+    for (const a of /** @type {NodeListOf<HTMLAnchorElement>} */ (
+      side.querySelectorAll("a.kp-contents__link")
+    ))
+      if (!a.dataset.drive)
+        drivable(a, NAV, (a.getAttribute("href") ?? "").slice(1));
+  };
+  const sideMarks = new MutationObserver(markSide);
+  sideMarks.observe(side, { childList: true, subtree: true });
+  stops.push(() => sideMarks.disconnect());
 
   const main = h(
     "div",
@@ -522,21 +525,8 @@ export function mount(root, opts = {}) {
   setCardState(hsCard.card, "loading", { words: "Reading host.toml…" });
   setCardState(wc.card, "loading", { words: "Reading the working copy…" });
 
-  let spyCurrent = "wc";
-  const spy = new IntersectionObserver(
-    (es) => {
-      const v = es
-        .filter((e) => e.isIntersecting)
-        .sort((a, b) => a.boundingClientRect.top - b.boundingClientRect.top)[0];
-      if (v && v.target.id !== spyCurrent) {
-        spyCurrent = v.target.id;
-        paintSide(spyCurrent);
-      }
-    },
-    { rootMargin: "-80px 0px -60% 0px" },
-  );
-  for (const c of [wc.card, signin.card, browserCard.card]) spy.observe(c);
-  stops.push(() => spy.disconnect());
+  stops.push(attachContents(side));
+  paintSide();
 
   // ── the Save bar ──────────────────────────────────────────────────────
   /** @type {(() => void) | null} */
@@ -922,7 +912,7 @@ export function mount(root, opts = {}) {
     failed("the host settings", null, () => void loadHost());
     const first = page === null;
     page = r.body.page;
-    paintSide(spyCurrent);
+    paintSide();
     await drawGroups();
     await settle();
     setCardState(hsCard.card, "ready");

@@ -11,7 +11,11 @@ data_dirs:
 # fix-157 (2026-09-29): the dashboard writes its state and its working copy
 # while it runs, so a live tar read "file changed as we read it" and the
 # first backup failed. Stopped for the tar (fix-113), a few seconds a night.
-backup_pause: true
+# feat-kpadopt-2 (4.0.0): chassis-rs 3.11.0 checkpoints both database files
+# (homelab-admin.db and the kit's) and holds writes through the tar, so the
+# unit keeps running; a binary that cannot pause (exit 2, or 3 with the unit
+# active) makes the homelab fall back to the stop/start above.
+backup_pause: chassis
 # The homelab release carries homelab-admin beside the host and the client;
 # from the dashboard release on it is signed (Kenny, 2026-09-28).
 release_repo: kennypassenier/homelab

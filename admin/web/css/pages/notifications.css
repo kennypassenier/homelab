@@ -128,8 +128,3 @@
     min-inline-size: 0;
   }
 }
-
-/* Quiet-hours rows exist only while quiet hours are on. */
-.nr-card .kp-formgrid__row[hidden] {
-  display: none;
-}

@@ -25,7 +25,6 @@ import {
   digestLast,
   pushChip,
   pushVerdict,
-  quietWords,
   snoozeMinutes,
 } from "../notifyrules.js";
 import { current, subscribe } from "../store.js";
@@ -47,10 +46,11 @@ import {
 } from "/static/kp/js/snooze.js";
 import { attachTimes, setTime } from "/static/kp/js/timefield.js";
 import {
-  attachWeekdays,
-  setWeekdays,
-  weekdaysOf,
-} from "/static/kp/js/weekdays.js";
+  QUIET_EVENT,
+  attachQuietHours,
+  quietValue,
+  setQuiet,
+} from "/static/kp/js/quiet-hours.js";
 import { undoToast } from "/static/kp/js/undo-toast.js";
 
 // review M5: every page field Live view may set is declared.
@@ -178,7 +178,8 @@ const ROUTE_OK = declare({
   row: "push|digest",
   what: "send ok notices to the phone (push), or keep them for the daily digest and the Inbox (digest)",
 });
-const DAY_NAMES = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"];
+/** The Live view day names, by `Date#getDay` (0 is Sunday). */
+const SUNDAY_FIRST = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"];
 
 // redesign-final-c3: the demo's snooze choices, one press each; kp11: the
 // kp snooze picker's chips (1 hour, 4 hours, tonight, tomorrow, Monday, a
@@ -267,69 +268,18 @@ export function mount(root) {
   });
   const digestHint = hint("", "nr-digest-hint");
 
-  // ask-kp11be-3: quiet hours, then one switch per severity.
-  const quietSwitch = h("input", {
-    class: "kp-switch__input",
-    type: "checkbox",
-    role: "switch",
-    "aria-label": "Quiet hours",
+  // ask-kp11be-3: quiet hours (kp-themes 11.2.0's quiet-hours control, feat-kpadopt-2),
+  // then one switch per severity. Only critical may break the quiet window.
+  const quietEl = h("div", {
+    class: "kp-quiet nr-quiet",
+    "data-kp-quiet": "",
+    "data-kp-quiet-severities": "critical",
+    "data-kp-quiet-label": "Hold pushes in a window",
   });
-  drivable(quietSwitch, QUIET_ON);
-  const quietToggle = h(
-    "label",
-    {
-      class: "kp-switch",
-      title: "No pushes in the window; the Inbox still fills",
-    },
-    quietSwitch,
-    h("span", { class: "kp-switch__state", "aria-hidden": "true" }),
-    h("span", null, "Hold pushes in a window"),
+  const quietHint = hint(
+    "Local time, Brussels. No push in the window; the Inbox still fills. A window past midnight belongs to the day it starts on.",
+    "nr-quiet-hint",
   );
-  /** @param {string} name @param {string} label @param {string} presets @param {string} id */
-  const timeEl = (name, label, presets, id) =>
-    h("div", {
-      class: "kp-time nr-quiet-time",
-      "data-kp-time": "",
-      "data-kp-name": name,
-      "data-kp-value": "",
-      "data-kp-label": label,
-      "data-kp-time-step": "15",
-      "data-kp-time-presets": presets,
-      "data-kp-time-id": id,
-    });
-  const quietFrom = timeEl(
-    "quiet_from",
-    "Quiet hours start at",
-    "Evening=22:00,Late=23:00",
-    QUIET_FROM,
-  );
-  const quietTo = timeEl(
-    "quiet_to",
-    "Quiet hours end at",
-    "Morning=07:00,Late=08:00",
-    QUIET_TO,
-  );
-  const quietDays = h("span", {
-    class: "kp-weekdays nr-quiet-days",
-    "data-kp-weekdays": "",
-    "data-kp-week-starts-on": "1",
-    "aria-label": "Quiet on",
-  });
-  const quietCritSwitch = h("input", {
-    class: "kp-switch__input",
-    type: "checkbox",
-    role: "switch",
-    "aria-label": "A critical notice still pushes",
-  });
-  drivable(quietCritSwitch, QUIET_CRITICAL);
-  const quietCrit = h(
-    "label",
-    { class: "kp-switch" },
-    quietCritSwitch,
-    h("span", { class: "kp-switch__state", "aria-hidden": "true" }),
-    h("span", null, "A critical notice still pushes"),
-  );
-  const quietHint = hint("", "nr-quiet-hint");
   /**
    * One Push / Digest only switch for a severity.
    * @param {string} level @param {string} decl its declared Live view control
@@ -356,34 +306,6 @@ export function mount(root) {
     info: routeSwitchFor("info", ROUTE_INFO),
     ok: routeSwitchFor("ok", ROUTE_OK),
   };
-  /** The rows that exist only while quiet hours are on. */
-  const quietRows = [
-    rule(
-      "nr-quiet-from-l",
-      "Quiet from",
-      [quietFrom],
-      [hint("Local time, Brussels.")],
-    ),
-    rule(
-      "nr-quiet-to-l",
-      "Quiet until",
-      [quietTo],
-      [hint("A window that ends before it starts runs past midnight.")],
-    ),
-    rule(
-      "nr-quiet-days-l",
-      "Quiet on",
-      [quietDays],
-      [hint("A window past midnight belongs to the day it starts on.")],
-    ),
-    rule(
-      "nr-quiet-crit-l",
-      "Critical",
-      [quietCrit],
-      [hint("A service down five minutes is worth a wake-up call.")],
-    ),
-  ];
-
   const pushOpen = drivable(
     h(
       "button",
@@ -510,8 +432,7 @@ export function mount(root) {
             ],
           ),
           rule("nr-digest-l", "Daily digest at", [digestEl], [digestHint]),
-          rule("nr-quiet-l", "Quiet hours", [quietToggle], [quietHint]),
-          ...quietRows,
+          rule("nr-quiet-l", "Quiet hours", [quietEl], [quietHint]),
           ...SEVERITIES.map(([level, word, what]) =>
             rule(
               `nr-route-${level}-l`,
@@ -616,7 +537,7 @@ export function mount(root) {
     attachCardStates(root),
     attachSnoozes(delivery),
     attachTimes(delivery),
-    attachWeekdays(delivery),
+    attachQuietHours(delivery),
     attachAckGates(delivery),
     attachFacets(routing),
     attachNotices(routing),
@@ -640,11 +561,32 @@ export function mount(root) {
   snoozeWatch.observe(snoozeEl, { childList: true, subtree: true });
   cleanups.push(() => snoozeWatch.disconnect());
   markSnooze();
-  quietDays
-    .querySelectorAll(".kp-weekdays__chips button")
-    .forEach((b, i) =>
-      drivable(/** @type {HTMLElement} */ (b), QUIET_DAY, DAY_NAMES[i]),
+  // The quiet-hours control draws its own switch, fields, day chips and tick;
+  // they carry the Live view ids the old hand-made form had.
+  const markQuiet = () => {
+    const sw = quietEl.querySelector(".kp-quiet__on input");
+    if (sw instanceof HTMLElement) drivable(sw, QUIET_ON);
+    const from = quietEl.querySelector(
+      ".kp-quiet__field--from input.kp-time__input",
     );
+    if (from instanceof HTMLElement) from.id = QUIET_FROM;
+    const to = quietEl.querySelector(
+      ".kp-quiet__field--to input.kp-time__input",
+    );
+    if (to instanceof HTMLElement) to.id = QUIET_TO;
+    for (const b of /** @type {NodeListOf<HTMLElement>} */ (
+      quietEl.querySelectorAll(".kp-weekdays__chips button")
+    )) {
+      const name = SUNDAY_FIRST[Number(b.dataset.value)];
+      if (name) drivable(b, QUIET_DAY, name);
+    }
+    const crit = quietEl.querySelector(".kp-quiet__severity input");
+    if (crit instanceof HTMLElement) drivable(crit, QUIET_CRITICAL);
+  };
+  markQuiet();
+  const quietWatch = new MutationObserver(markQuiet);
+  quietWatch.observe(quietEl, { childList: true, subtree: true });
+  cleanups.push(() => quietWatch.disconnect());
   const tick = gate.querySelector("input[type=checkbox]");
   if (tick instanceof HTMLInputElement) tick.id = PUSH_OFF_ACK;
 
@@ -796,36 +738,24 @@ export function mount(root) {
   // valid yet (no day, or equal times) says so and waits.
   /** @type {import("../notifyrules.js").QuietHours | null} */
   let quietSaved = null;
-  const readQuiet = () => {
-    return {
-      from: quietFromValue,
-      to: quietToValue,
-      days: weekdaysOf(quietDays).map((d) => (Number(d) === 0 ? 7 : Number(d))),
-      critical_breaks: quietCritSwitch.checked,
-    };
-  };
-  let quietFromValue = "22:00";
-  let quietToValue = "07:00";
   const saveQuiet = async () => {
-    if (!quietSwitch.checked) {
+    const v = quietValue(quietEl);
+    if (!v) return;
+    if (!v.on) {
       if (quietSaved === null) return;
       const r = await saveSettings({ quiet_hours: null });
       if (r.ok) quietSaved = null;
       else paintDelivery();
       return;
     }
-    const next = readQuiet();
-    if (
-      !next.from ||
-      !next.to ||
-      next.from === next.to ||
-      next.days.length === 0
-    ) {
-      quietHint.textContent = !next.days.length
-        ? "Pick at least one day; nothing is held until you do."
-        : "Pick a start and an end that differ; nothing is held until you do.";
-      return;
-    }
+    // The control says why an equal start and end, or no day, waits.
+    if (!v.from || !v.to || v.from === v.to || v.days.length === 0) return;
+    const next = {
+      from: v.from,
+      to: v.to,
+      days: v.days.map((d) => (d === 0 ? 7 : d)),
+      critical_breaks: v.through.includes("critical"),
+    };
     const r = await saveSettings({ quiet_hours: next });
     if (!r.ok) {
       paintDelivery();
@@ -833,29 +763,7 @@ export function mount(root) {
     }
     quietSaved = next;
   };
-  quietSwitch.addEventListener("change", () => {
-    setQuietRows(quietSwitch.checked);
-    void saveQuiet();
-  });
-  quietCritSwitch.addEventListener("change", () => void saveQuiet());
-  quietDays.addEventListener("kp-weekdays-change", () => void saveQuiet());
-  quietFrom.addEventListener("kp-time-change", (event) => {
-    quietFromValue = String(
-      /** @type {CustomEvent} */ (event).detail.value || "",
-    );
-    void saveQuiet();
-  });
-  quietTo.addEventListener("kp-time-change", (event) => {
-    quietToValue = String(
-      /** @type {CustomEvent} */ (event).detail.value || "",
-    );
-    void saveQuiet();
-  });
-  /** @param {boolean} on */
-  const setQuietRows = (on) => {
-    for (const r of quietRows) r.hidden = !on;
-  };
-  setQuietRows(false);
+  quietEl.addEventListener(QUIET_EVENT, () => void saveQuiet());
   /** @param {string} level @param {boolean} pushes */
   const saveRoute = async (level, pushes) => {
     const cur = act.notices?.settings.routing ?? {
@@ -962,26 +870,22 @@ export function mount(root) {
     const q = s.quiet_hours ?? null;
     if (
       !delivery.contains(document.activeElement) ||
-      !q !== !quietSwitch.checked
+      !q !== !quietValue(quietEl)?.on
     ) {
       quietSaved = q;
-      quietSwitch.checked = q !== null;
-      setQuietRows(q !== null);
-      if (q) {
-        quietFromValue = q.from;
-        quietToValue = q.to;
-        setTime(quietFrom, q.from);
-        setTime(quietTo, q.to);
-        setWeekdays(
-          quietDays,
-          q.days.map((d) => (d === 7 ? 0 : d)),
-        );
-        quietCritSwitch.checked = q.critical_breaks;
-      }
+      setQuiet(
+        quietEl,
+        q
+          ? {
+              on: true,
+              from: q.from,
+              to: q.to,
+              days: q.days.map((d) => (d === 7 ? 0 : d)),
+              through: q.critical_breaks ? ["critical"] : [],
+            }
+          : { on: false },
+      );
     }
-    quietHint.textContent = q
-      ? `Nothing pushes ${quietWords(q)}${q.critical_breaks ? ", except critical notices" : ""}.`
-      : "Off: pushes follow the severity below at any hour.";
     const routes = s.routing ?? {
       critical: true,
       warning: true,

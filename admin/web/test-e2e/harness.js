@@ -7,7 +7,7 @@
 // admin/web/test/e2e_deadlines.test.js holds both.
 import { appendFileSync } from "node:fs";
 import { afterEach, beforeEach } from "node:test";
-import { chromium } from "playwright";
+import { firefox } from "playwright";
 import { clockNow } from "./clock.js";
 
 /** A Playwright step's default deadline. */
@@ -33,11 +33,12 @@ afterEach(async () => {
 });
 
 /**
- * A headless Chromium whose every context carries the per-step defaults.
+ * A headless Firefox (Kenny: browser tests run on Firefox only, never
+ * Chromium) whose every context carries the per-step defaults.
  * @param {import("playwright").LaunchOptions} [opts]
  */
 export async function launch(opts) {
-  const browser = await chromium.launch(opts);
+  const browser = await firefox.launch(opts);
   open.add(browser);
   browser.on("disconnected", () => open.delete(browser));
   const raw = browser.newContext.bind(browser);

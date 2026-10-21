@@ -44,7 +44,9 @@ test("redesign-integrate-7: every whole-screen case runs under a per-test deadli
     const src = read(f);
     const line = (/** @type {number | undefined} */ i) =>
       src.slice(0, i).split("\n").length;
-    for (const m of src.matchAll(/chromium\s*\.\s*launch\s*\(/g))
+    for (const m of src.matchAll(
+      /(?:chromium|firefox|webkit)\s*\.\s*launch\s*\(/g,
+    ))
       bad.push(`${f}:${line(m.index)}: ${m[0]}`);
     for (const m of src.matchAll(/^import\s*\{[^}]*\}\s*from\s*"playwright"/gm))
       bad.push(`${f}:${line(m.index)}: imports playwright itself`);
@@ -55,6 +57,6 @@ test("redesign-integrate-7: every whole-screen case runs under a per-test deadli
   assert.deepEqual(
     [...new Set(bad)],
     [],
-    "launch browsers through test-e2e/harness.js (launch()), never chromium directly, and never switch a deadline off",
+    "launch browsers through test-e2e/harness.js (launch()), never a browser type directly, and never switch a deadline off",
   );
 });

@@ -32,6 +32,12 @@
 }
 /* The graph is kp-themes' (js/graph.js, 11.2.0): its look is the theme's.
    The only thing the Map adds is the details panel's content, in a grid. */
+/* kp gap 138: the details panel's title carries an id (for aria-labelledby)
+   and kp's heading anchor puts a copy-link "#" on it, a link to a panel that
+   exists only while a stack is picked. */
+.kp-graph__detail-title .kp-anchor {
+  display: none;
+}
 .mp-facts {
   display: grid;
   grid-template-columns: minmax(0, 1fr);

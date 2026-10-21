@@ -155,7 +155,7 @@ export function mapGraph(opts) {
     "data-kp-direction": "arrows",
     "data-kp-zoom": true,
     "data-kp-detail": true,
-    "data-kp-ring-radius": "0.38",
+    "data-kp-ring-radius": "0.42",
     "data-kp-node-radius": "14",
     "aria-label":
       "Topology: Tab to a stack, Enter to add it to the selection or take it out",

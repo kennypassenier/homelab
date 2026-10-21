@@ -161,6 +161,10 @@ export function layoutAudit(rootSel) {
       if (!marked) out.a.push(`text cut by ${say(a)}: ${say(el)}`);
       break;
     }
+    // A heat grid's column name stands centred over a column narrower than
+    // the name; its neighbours draw no text by the package's own rule
+    // (kp-themes .kp-heat__col), so there is nothing to run into.
+    if (el.closest(".kp-heat__col")) continue;
     // Spilling past its own block (overflow visible).
     let blk = el;
     while (
@@ -260,7 +264,11 @@ export function layoutAudit(rootSel) {
       )
     )
       continue;
-    if (el.closest("[data-count-of], .kp-kpi, [class*='chip'], button, a"))
+    if (
+      el.closest(
+        "[data-count-of], [data-count-total], .kp-kpi, [class*='chip'], button, a",
+      )
+    )
       continue;
     out.h.push(`count ${say(el)} names no list (ui.js countOf)`);
   }
@@ -567,6 +575,8 @@ export function pageChecks() {
     for (const a of document.querySelectorAll("a[href]")) {
       const href = a.getAttribute("href") ?? "";
       if (/^https?:\/\/[^/\s]+/.test(href)) continue;
+      // A same-page anchor: the check below holds it to a section that exists.
+      if (/^#[^\s]+$/.test(href)) continue;
       if (href.startsWith("/") && !href.startsWith("//")) {
         out.hrefs.push(href);
         continue;

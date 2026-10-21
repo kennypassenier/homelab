@@ -1127,6 +1127,13 @@ export function mount(root) {
       if (r) row.dataset.kpRead = r.status;
     }
   };
+  // kp draws the grid's rows when its card settles, after the paint above
+  // returned, and again on a redraw: stamp whatever it draws, so the
+  // "N of M stacks answered" count always finds its rows. It only sets
+  // attributes, so it never triggers itself.
+  const stampRows = new MutationObserver(() => decorateHeat(nightsHeat));
+  stampRows.observe(nightsHeat, { childList: true, subtree: true });
+  cleanups.push(() => stampRows.disconnect());
 
   /** The state of the whole coverage card, from what is known. */
   const coverageState = () => {

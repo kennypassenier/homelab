@@ -275,7 +275,7 @@
 /* ---------- Logs: side column + toolbar + lines ---------- */
 .sh-side {
   display: grid;
-  grid-template-columns: 15rem minmax(0, 1fr);
+  grid-template-columns: 19rem minmax(0, 1fr);
   gap: var(--sh-gap);
   align-items: start;
 }
@@ -317,6 +317,13 @@
 .sh-viewer {
   --kp-logviewer-height: 26rem;
   min-inline-size: 0;
+}
+@media (max-width: 40rem) {
+  /* A phone shows each facet group at the panel's full width; two groups
+     side by side left a name 12 px to stand in. */
+  .sh-side__panel {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }
 @media (max-width: 48rem) {
   .sh-viewer {

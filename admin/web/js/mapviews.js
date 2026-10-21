@@ -47,6 +47,32 @@ import {
 
 /** @typedef {import("./topology.js").Topology} Topology */
 
+/**
+ * An image's upstream as the page shows it: a repository on a known forge is
+ * a link to that repository, anything else stays words.
+ * @param {string | null | undefined} upstream
+ * @returns {Node | string}
+ */
+const upstreamLink = (upstream) => {
+  if (!upstream) return "\u2014";
+  if (
+    !/^(?:github\.com|gitlab\.com|codeberg\.org)\/[\w.-]+\/[\w.-]+$/.test(
+      upstream,
+    )
+  )
+    return upstream;
+  return h(
+    "a",
+    {
+      href: `https://${upstream}`,
+      target: "_blank",
+      rel: "noopener noreferrer",
+      title: `${upstream}, in a new tab`,
+    },
+    upstream,
+  );
+};
+
 const MODE = declare({
   id: "map-panel-mode",
   page: "fleetview",
@@ -1206,7 +1232,7 @@ export function staleCard(deps) {
             h(
               "td",
               { class: "kp-mono", "data-kp-sort-value": g.upstream },
-              g.upstream || "—",
+              upstreamLink(g.upstream),
             ),
             h(
               "td",
@@ -1283,9 +1309,21 @@ export function staleCard(deps) {
                 h(
                   "p",
                   { class: "mv-line" },
-                  url
-                    ? `Release notes: ${url}`
-                    : "No release address is known for this image.",
+                  ...(url
+                    ? [
+                        "Release notes: ",
+                        h(
+                          "a",
+                          {
+                            href: url,
+                            target: "_blank",
+                            rel: "noopener noreferrer",
+                            title: `The ${g.latest} release notes, in a new tab`,
+                          },
+                          "open them in a new tab",
+                        ),
+                      ]
+                    : ["No release address is known for this image."]),
                 ),
               ),
             ),

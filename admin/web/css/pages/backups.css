@@ -229,6 +229,11 @@
 .bk-table .kp-bar-cell__value {
   white-space: nowrap;
 }
+/* The retired list's size column is as wide as its figure ("50 MB" is five
+   characters, the package's default column four). */
+.rt-kit .kp-bar-cell {
+  --kp-bar-cell-value: max-content;
+}
 .bk-table .bk-repo__note {
   display: block;
 }

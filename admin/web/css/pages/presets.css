@@ -106,3 +106,13 @@
     grid-row: auto;
   }
 }
+
+/* A phone card is 316 px wide and its figures row one line high: the three
+   figures with their "(default)" notes need a little less than they take at
+   the package's size, or "RAM" wraps under its value. */
+@media (max-width: 40rem) {
+  .ps-gallery .kp-entity__figures {
+    gap: var(--kp-space-sm, 0.5rem);
+    font-size: var(--kp-text-xs, 0.75rem);
+  }
+}

@@ -1250,6 +1250,7 @@ export function mount(root) {
     }
     const rows = snoozedNow();
     snoozedN.textContent = ` · ${rows.length}`;
+    countOf(snoozedN, snoozedList, ":scope > li");
     if (!rows.length) {
       setCardState(snoozedStage, "empty", {
         title: "Nothing is snoozed",

@@ -1898,6 +1898,9 @@ function logsTab(panel, c) {
     for (const l of LEVELS) made.add(`l:${l.value}`);
     setFacetCounts(appsGroup, v.sources, { all: v.total });
     setFacetCounts(levelsGroup, v.levels, { all: v.total });
+    // A long name is cut with an ellipsis: its full words are the tooltip.
+    for (const n of side.querySelectorAll(".kp-facet__name"))
+      /** @type {HTMLElement} */ (n).title = n.textContent ?? "";
   };
 
   /** @param {number} s */

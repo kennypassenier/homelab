@@ -1363,6 +1363,9 @@ function mountNow(body, x) {
       })),
     ];
     narrow.set(tags);
+    // The History table pages its rows: this sentence counts the whole
+    // history, not the rows drawn (layoutaudit.js class h skips it).
+    narrow.state.dataset.countTotal = "";
     // While the history is read the components show their own loading.
     narrow.state.textContent = !historyRead
       ? ""

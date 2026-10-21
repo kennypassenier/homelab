@@ -179,3 +179,19 @@
   text-align: start;
   justify-self: start;
 }
+
+/* A direction's heading on a phone: the fold button, the name, the count and
+   the one-line hint stand on one flowing row, the hint wrapping under them
+   on its own line instead of over the fold button (the card layout made the
+   cell a block and the hint a block inside it). */
+@media (max-width: 40rem) {
+  #fw-rule-table tr[data-kp-row-group] > th {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--kp-space-xs, 0.25rem) var(--kp-space-sm, 0.5rem);
+  }
+  #fw-rule-table tr[data-kp-row-group] .fw-hint {
+    flex: 1 1 100%;
+  }
+}

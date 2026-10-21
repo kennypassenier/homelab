@@ -73,6 +73,9 @@
 }
 .ib-app > b {
   font-weight: 600;
+  /* "stack/app" has no space to break at: on a phone the name track is
+     narrower than the name, so it breaks inside the word instead of spilling. */
+  overflow-wrap: anywhere;
 }
 
 /* 2 · the notices of the last 24 hours: the bar and the list share a column. */

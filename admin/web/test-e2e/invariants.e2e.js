@@ -8962,10 +8962,10 @@ const AUDIT_CLASSES = /** @type {const} */ ([
   ],
 ]);
 
-/** A walk entry's hard deadline (ms): a page that cannot be audited in this
+/** A walk entry's hard deadline (ms, 20 s, coordinator 2026-10-21): a page that cannot be audited in this
  * time is a finding of its own, never a stalled run (coordinator,
  * 2026-10-21: the one walk outran the watchdog's 90 s). */
-const GEN_ENTRY_MS = 60000;
+const GEN_ENTRY_MS = 20000;
 
 /** What the walk found so far, across its entries (one per page or dialog). */
 const GEN = {

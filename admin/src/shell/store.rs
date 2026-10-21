@@ -38,8 +38,8 @@ use std::path::{Path, PathBuf};
 use chassis::Error;
 use chassis::storage::rusqlite::{Connection, Transaction, params};
 use chassis::storage::{
-    AppDb, AppDbSpec, DataKind, Filter, ImportReport, ImportStore, Level as BudgetLevel, Migration,
-    StorageReport, TimeFormat,
+    AppDb, AppDbSpec, BrowserKeys, DataKind, Filter, ImportReport, ImportStore,
+    Level as BudgetLevel, Migration, StorageReport, TimeFormat,
 };
 
 use super::actions_state::read_json;
@@ -57,6 +57,42 @@ pub const FILE_SCHEDULES: &str = "schedules.json";
 pub const FILE_FLOWS: &str = "update-flows.json";
 pub const FILE_UPTIME: &str = "uptime-history.json";
 pub const FILE_TREND: &str = "fleet-trend.json";
+
+/// The browser keys that follow Kenny from device to device (chassis-rs
+/// 3.12.0 preferences, Kenny 2026-10-21: "app state belongs in the database,
+/// not the browser, unless the web app needs it to work").
+///
+/// * `homelab.` / `homelab-`: the dashboard's own choices (log levels, Stacks
+///   view and measure, Map looks, Apps stars, the tour, the update layout).
+/// * `nx-sort:` / `kp-remember:`: table sorts, and every `data-kp-remember`
+///   choice of kp-themes (its writes are caught without changing kp).
+/// * `kp-unsaved:` in `sessionStorage`: the Settings Save bar's draft
+///   (`kp-unsaved:/settings:settings`). kp leaves password fields out of it
+///   and chassis refuses a draft with a secret-named field; a secret is
+///   never kept, never synced (`web/test/secretkeep.test.js`, invariant 121).
+///
+/// Left in the browser: the theme keys `theme-boot` reads before login, the
+/// stored `theme` that `themesettle` repairs, calm mode (a device's own
+/// comfort, listed under "This browser"), and the per-tab Live view state.
+pub fn browser_keys() -> BrowserKeys {
+    BrowserKeys::new()
+        .prefix("homelab.")
+        .prefix("homelab-")
+        .prefix("nx-sort:")
+        .prefix("kp-remember:")
+        .session_prefix("kp-unsaved:")
+        // Read before login by theme-boot, so the browser's copy must stay.
+        .except_exact("homelab.theme-follow-system")
+        .except_exact("homelab.theme-light")
+        .except_exact("homelab.theme-dark")
+        // themesettle's key (kp's theme store).
+        .except_exact("theme")
+        // Per tab, by design: the tab's name and the Live view switch.
+        .except_prefix("homelab.drive.")
+        .except_exact("homelab.live-view")
+        // This device's calm mode.
+        .except_prefix("kp-remember:calm:")
+}
 
 /// How long after it ended a snooze is left for the dashboard to tell its
 /// reminder (the first tick after a start does): the same 30 days the JSON
@@ -603,6 +639,38 @@ mod tests {
         let _ = std::fs::remove_dir_all(&p);
         std::fs::create_dir_all(&p).unwrap();
         p
+    }
+
+    #[test]
+    fn the_browser_keys_sync_the_choices_and_keep_the_boot_and_tab_keys_home() {
+        let k = browser_keys();
+        for synced in [
+            "homelab.log-levels",
+            "homelab-toured",
+            "homelab-update-jobs",
+            "homelab.stacks.view",
+            "homelab.apps.starred",
+            "nx-sort:stacks",
+            "kp-remember:host-refresh:value",
+        ] {
+            assert!(k.is_synced_local(synced), "{synced} should sync");
+        }
+        assert!(k.is_synced_session("kp-unsaved:/settings:settings"));
+        for home in [
+            "homelab.theme-follow-system",
+            "homelab.theme-light",
+            "homelab.theme-dark",
+            "theme",
+            "homelab.drive.tab",
+            "homelab.live-view",
+            "kp-remember:calm:calm:value",
+            "chassis-prefs:synced",
+            "somebody-else",
+        ] {
+            assert!(!k.is_synced(home), "{home} should stay in the browser");
+        }
+        // One key, one area: a kp-unsaved draft is never a localStorage key.
+        assert!(!k.is_synced_local("kp-unsaved:/settings:settings"));
     }
 
     #[test]

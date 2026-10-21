@@ -2908,6 +2908,9 @@ pub fn mount(
     for kind in super::store::kinds() {
         app.storage_kind(kind);
     }
+    // chassis-rs 3.12.0: the browser's choices follow the login, not the
+    // device (declared after `app_db`, the table lives in that file).
+    app.sync_browser_keys(super::store::browser_keys());
     let notify = NotifyCenter::load(db.clone(), pusher, publish.clone(), clock.clone())
         .map_err(|e| e.to_string())?;
     // The budget only warns; the warning is an Inbox notice that stays until

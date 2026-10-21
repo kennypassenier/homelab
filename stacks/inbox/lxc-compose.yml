@@ -12,9 +12,8 @@
 # built the container by hand first.
 #
 # Every value below is what CT 118 has right now, read with `pct config 118`
-# on 2026-09-27, so a deploy of this file does not change the container. It
-# starts on boot (onboot: 1, Kenny 2026-10-21 after the 2026-10-20 host crash
-# left CT 118 down), is not protected, has no
+# on 2026-09-27, so a deploy of this file does not change the container. In
+# particular it does NOT start on boot (onboot: 0), is not protected, has no
 # startup order and no bind mount: its data lives in the container's own
 # rootfs (/var/lib/inbox) and reaches restic through the native backup.
 #
@@ -52,7 +51,7 @@ lxc:
   protection: false
 
 boot:
-  onboot: true
+  onboot: false
 
 storage: []
 

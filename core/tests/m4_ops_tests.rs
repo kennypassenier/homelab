@@ -539,7 +539,12 @@ async fn e2_restore_validates_quiesces_restores_resumes_verifies() {
     .await;
     assert!(report.ok, "{:?}", report.error);
     let calls = exec.calls();
-    let pos = |n: &str| calls.iter().position(|c| c.contains(n)).unwrap();
+    let pos = |n: &str| {
+        calls
+            .iter()
+            .position(|c| c.contains(n))
+            .unwrap_or_else(|| panic!("no call contains {n:?}: {calls:#?}"))
+    };
     assert!(
         pos("restic snapshots") < pos("compose down"),
         "validate before quiesce"
@@ -549,7 +554,7 @@ async fn e2_restore_validates_quiesces_restores_resumes_verifies() {
         "quiesce before restore"
     );
     assert!(
-        pos("restic restore latest --target /") < pos("compose up -d"),
+        pos("restic restore latest --json --target /") < pos("compose up -d"),
         "restore before resume"
     );
 }

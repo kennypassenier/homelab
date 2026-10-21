@@ -605,6 +605,7 @@ export function mount(root) {
     label: "Nights shown",
     hideLabel: true,
     control: rangeBox,
+    span: "wide",
   });
   const toolbar = formGrid(
     [

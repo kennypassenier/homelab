@@ -432,7 +432,26 @@ export function mount(root) {
             ],
           ),
           rule("nr-digest-l", "Daily digest at", [digestEl], [digestHint]),
-          rule("nr-quiet-l", "Quiet hours", [quietEl], [quietHint]),
+          // The control draws its own label and field tracks, so it takes the
+          // control, value and actions tracks of its row, hint under it.
+          h(
+            "div",
+            { class: "kp-formgrid__row" },
+            h(
+              "span",
+              { class: "kp-formgrid__label", id: "nr-quiet-l" },
+              "Quiet hours",
+            ),
+            h(
+              "div",
+              {
+                class: "kp-formgrid__control",
+                "data-kp-formgrid-span": "wide",
+              },
+              quietEl,
+              quietHint,
+            ),
+          ),
           ...SEVERITIES.map(([level, word, what]) =>
             rule(
               `nr-route-${level}-l`,

@@ -1169,6 +1169,13 @@ fn the_runbook_warns_that_a_restore_revives_retired_almanac_profiles() {
 /// wrong; leaving the question unanswered is.
 const CLI_ONLY: &[(&str, &str)] = &[
     (
+        "CancelExec",
+        "feat-kpadopt-2 (homelab-admin): stops one running ExecIn by its request \
+         id; the dashboard Console keeps those ids and cancels its own commands. \
+         `homelab exec` and the TUI run a command in the foreground and end it with \
+         the terminal, so neither holds a request id to cancel",
+    ),
+    (
         "SealEnv",
         "redesign-stackhub-2: the dashboard stack hub's \"Push the env…\" on its          no-env row; from the TUI and the CLI a deploy seals the env as it          always did, so neither needs a second way",
     ),

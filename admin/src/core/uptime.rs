@@ -2,21 +2,20 @@
 //! kept as hourly cells so the Apps tiles can draw a 24 h / 90 d strip and
 //! the Host page a reachability figure. Pure: no clock, no I/O.
 //!
-//! Bounded up front (Kenny's rule: anything that grows has a cap): a cell
-//! is one hour, a key keeps [`KEEP_HOURS`] of them (90 days), the store keeps
-//! at most [`MAX_KEYS`] keys, and a sample only ever adds counts to the
-//! current hour's cell, so a busy watch grows nothing.
+//! A cell is one hour and a sample only ever adds counts to the current
+//! hour's cell, so a busy watch grows nothing in memory: the store holds the
+//! last [`KEEP_HOURS`] (90 days) of each key, the window the strips draw.
+//! Nothing here deletes data (Kenny, 2026-10-21: the storage budget only
+//! warns): the cells live in the `uptime_cells` table, written a flush at a
+//! time ([`Store::take_dirty`]), and old ones are deleted only through the
+//! Storage page.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use serde::{Deserialize, Serialize};
 
 /// 90 days of hourly cells per key.
 pub const KEEP_HOURS: i64 = 90 * 24;
-/// Most keys held: tiles + stack containers + the host stay far below it;
-/// a stack that is removed loses its cells with age, and past this number
-/// the key whose newest cell is oldest goes first.
-pub const MAX_KEYS: usize = 300;
 
 /// One watch reading.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -47,34 +46,63 @@ pub struct Cell {
     pub ms_max: u32,
 }
 
+/// The store in memory. Serialised, it is the shape of the old
+/// `uptime-history.json`, which the one-time import reads.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct Store {
     #[serde(default)]
     pub schema_version: u32,
     #[serde(default)]
     pub keys: BTreeMap<String, Vec<Cell>>,
+    /// The cells (key, hour) that changed since the last flush.
+    #[serde(skip)]
+    dirty: BTreeSet<(String, i64)>,
 }
 
 impl Store {
-    /// Drop what is older than [`KEEP_HOURS`] and, past [`MAX_KEYS`], the
-    /// keys that have been quiet longest. Run after every load and record.
+    /// Forget (in memory only) what is older than [`KEEP_HOURS`]: the window
+    /// the strips draw. The stored cells stay. Run after every record.
     pub fn trim(&mut self, now: i64) {
         let oldest = now.div_euclid(3600) - KEEP_HOURS;
         self.keys.retain(|_, cells| {
             cells.retain(|c| c.h > oldest);
             !cells.is_empty()
         });
-        while self.keys.len() > MAX_KEYS {
-            let Some(victim) = self
-                .keys
-                .iter()
-                .min_by_key(|(_, c)| c.last().map(|c| c.h).unwrap_or(i64::MIN))
-                .map(|(k, _)| k.clone())
-            else {
-                break;
-            };
-            self.keys.remove(&victim);
+    }
+
+    /// A store holding `cells` as read back from the table (oldest first
+    /// per key), nothing marked as changed.
+    pub fn from_cells(cells: impl IntoIterator<Item = (String, Cell)>) -> Store {
+        let mut s = Store::default();
+        for (key, cell) in cells {
+            s.keys.entry(key).or_default().push(cell);
         }
+        s
+    }
+
+    /// The cells that changed since the last call, to be written; the list
+    /// is empty when nothing changed.
+    pub fn take_dirty(&mut self) -> Vec<(String, Cell)> {
+        let dirty = std::mem::take(&mut self.dirty);
+        dirty
+            .into_iter()
+            .filter_map(|(key, h)| {
+                let cell = self.keys.get(&key)?.iter().find(|c| c.h == h)?.clone();
+                Some((key, cell))
+            })
+            .collect()
+    }
+
+    /// Mark cells as changed again (their write failed).
+    pub fn mark_dirty(&mut self, cells: &[(String, Cell)]) {
+        for (key, cell) in cells {
+            self.dirty.insert((key.clone(), cell.h));
+        }
+    }
+
+    /// Whether a flush has something to write.
+    pub fn has_dirty(&self) -> bool {
+        !self.dirty.is_empty()
     }
 
     fn cell(&mut self, key: &str, now: i64) -> &mut Cell {
@@ -89,6 +117,7 @@ impl Store {
         // The clock stepping back puts the sample in the newest cell
         // rather than reordering history.
         let last = cells.len() - 1;
+        self.dirty.insert((key.to_string(), cells[last].h));
         &mut cells[last]
     }
 
@@ -126,7 +155,7 @@ impl Store {
             c.last()
                 .is_some_and(|c| c.h == h && c.up + c.dep + c.down <= 1)
         });
-        if fresh || self.keys.len() > MAX_KEYS {
+        if fresh {
             self.trim(now);
         }
     }
@@ -254,16 +283,46 @@ mod tests {
     }
 
     #[test]
-    fn age_and_key_count_are_capped() {
+    fn memory_holds_the_window_and_every_change_is_handed_out_once() {
         let mut s = Store::default();
         s.record("old", 0, Sample::Up);
+        let first = s.take_dirty();
+        assert_eq!(
+            first.len(),
+            1,
+            "the old cell was written before it aged out"
+        );
         let now = (KEEP_HOURS + 5) * 3600;
         s.record("new", now, Sample::Up);
-        assert!(!s.keys.contains_key("old"));
-        for i in 0..(MAX_KEYS + 20) {
+        assert!(
+            !s.keys.contains_key("old"),
+            "older than the window: not in memory"
+        );
+        for i in 0..400 {
             s.record(&format!("k{i}"), now + i as i64 * 3600, Sample::Up);
         }
-        assert!(s.keys.len() <= MAX_KEYS);
+        assert_eq!(s.keys.len(), 401, "no cap on the number of keys");
+        let dirty = s.take_dirty();
+        assert_eq!(dirty.len(), 401);
+        assert!(s.take_dirty().is_empty() && !s.has_dirty());
+        s.mark_dirty(&dirty[..2]);
+        assert_eq!(s.take_dirty().len(), 2, "a failed write is offered again");
+    }
+
+    #[test]
+    fn a_cell_read_back_is_not_dirty_until_it_counts_again() {
+        let mut s = Store::from_cells([(
+            "a".to_string(),
+            Cell {
+                h: 5,
+                up: 3,
+                ..Default::default()
+            },
+        )]);
+        assert!(!s.has_dirty());
+        s.record("a", 5 * 3600 + 10, Sample::Down);
+        let d = s.take_dirty();
+        assert_eq!((d[0].1.up, d[0].1.down), (3, 1));
     }
 
     #[test]

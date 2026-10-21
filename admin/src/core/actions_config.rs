@@ -6,7 +6,7 @@
 //!
 //! | Key | Default | Meaning |
 //! |---|---|---|
-//! | `HOMELAB_ADMIN_DATA_DIR` | `HOMELAB_ADMIN_STATE_DIR`, else `/appdata/admin/admin-config` | where schedules.json and the other JSON files live, and where the one-time import of notifications.json and inbox-snoozes.json looks (arch-state) |
+//! | `HOMELAB_ADMIN_DATA_DIR` | `HOMELAB_ADMIN_STATE_DIR`, else `/appdata/admin/admin-config` | where the app database (`homelab-admin.db`) lives, and where the one-time import of the six old JSON files (notifications, inbox-snoozes, schedules, update-flows, uptime-history, fleet-trend) looks and renames them to `*.migrated` (arch-state) |
 //! | `HOMELAB_ADMIN_REPO` | `<data dir>/repo` | the homelab working copy the stack files are read from |
 //! | `HOMELAB_ADMIN_NOTIFY_URL` | none: no pushes | kyu's publish URL for feat-ops-8 |
 //! | `HOMELAB_ADMIN_NOTIFY_TOKEN` | none | kyu's bearer token (a secret: admin.env) |
@@ -408,13 +408,6 @@ impl ActConfig {
     }
     pub fn action_timeout(&self) -> Duration {
         Duration::from_secs(self.action_timeout_s)
-    }
-    pub fn schedules_file(&self) -> PathBuf {
-        self.data_dir.join("schedules.json")
-    }
-    /// ask-kp11be-2: the capped hourly watch/ping history (`core::uptime`).
-    pub fn uptime_file(&self) -> PathBuf {
-        self.data_dir.join("uptime-history.json")
     }
     /// Where a scratch copy of a stack is validated, and removed again.
     pub fn scratch_dir(&self) -> PathBuf {

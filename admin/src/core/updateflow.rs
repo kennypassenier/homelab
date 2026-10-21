@@ -397,7 +397,9 @@ pub fn judge(
 }
 
 /// One update the stack's History offers to undo (`GET
-/// /data/update-flows?stack=`): kept for [`UNDO_DAYS`].
+/// /data/update-flows?stack=`): offered for [`UNDO_DAYS`]; the row stays in
+/// the database until the Storage page deletes it. Also the shape of the
+/// old `update-flows.json` the one-time import reads.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct UpdateRecord {
     pub job: u64,
@@ -422,13 +424,4 @@ pub fn undoable(records: &[UpdateRecord], stack: Option<&str>, now: i64) -> Vec<
         .collect();
     out.sort_by_key(|r| std::cmp::Reverse(r.at));
     out
-}
-
-/// What the store keeps: never more than 200 records, none older than 30
-/// days (nothing grows without a cap).
-pub fn prune(records: &mut Vec<UpdateRecord>, now: i64) {
-    let since = now - 30 * 86_400;
-    records.retain(|r| r.at >= since);
-    records.sort_by_key(|r| std::cmp::Reverse(r.at));
-    records.truncate(200);
 }

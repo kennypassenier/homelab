@@ -9,9 +9,13 @@
 //!
 //! The day outlives a restart (Kenny, 2026-10-09, after the 3.73.0 rollout:
 //! "De cpu grafieken zijn fucked?" — every row a straight line, because the
-//! restart had left two or three points): the shell saves the trend as
-//! [`Saved`] whenever a bucket is started and hands it back through
-//! [`Trend::restored`] at the next start.
+//! restart had left two or three points): the shell stores every finished
+//! bucket in the app database (`trend_buckets` and `trend_stacks`, one
+//! transaction per bucket) and hands the last day back through
+//! [`Trend::from_buckets`] at the next start. The ring of [`POINTS`] buckets
+//! is the window the page draws and lives in memory only: nothing stored is
+//! deleted when it falls off (Kenny, 2026-10-21: the storage budget only
+//! warns); old buckets go through the Storage page.
 
 use std::collections::{BTreeMap, VecDeque};
 
@@ -57,8 +61,8 @@ pub struct Trend {
     buckets: VecDeque<Bucket>,
 }
 
-/// The trend as the dashboard keeps it on disk (arch-state: typed JSON
-/// with a `schema_version`).
+/// The shape of the old `fleet-trend.json` (typed JSON with a
+/// `schema_version`), which the one-time import reads.
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct Saved {
     pub schema_version: u32,
@@ -84,26 +88,15 @@ impl Trend {
         }
     }
 
-    /// The trend to keep on disk.
-    pub fn saved(&self) -> Saved {
-        Saved {
-            schema_version: SAVED_SCHEMA,
-            trend: self.clone(),
-        }
-    }
-
-    /// A saved trend picked up again at `now` (unix seconds): the buckets
-    /// still inside the last day, in the default step and length. A file of
-    /// another schema or step starts an empty trend, never a bent line.
-    pub fn restored(saved: Saved, now: u64) -> Trend {
+    /// The trend of `buckets` (oldest first, as stored) picked up again at
+    /// `now` (unix seconds): the buckets still inside the last day, in the
+    /// default step and length.
+    pub fn from_buckets(buckets: impl IntoIterator<Item = Bucket>, now: u64) -> Trend {
         let mut t = Trend::default();
-        if saved.schema_version != SAVED_SCHEMA || saved.trend.step_s != t.step_s {
-            return t;
-        }
         let newest = now / t.step_s;
         let oldest = newest.saturating_sub(t.cap as u64 - 1);
         let mut last = None;
-        for b in saved.trend.buckets {
+        for b in buckets {
             if b.slot < oldest || b.slot > newest || last.is_some_and(|l| b.slot <= l) {
                 continue;
             }
@@ -111,6 +104,13 @@ impl Trend {
             t.buckets.push_back(b);
         }
         t
+    }
+
+    /// The bucket that was filled before the newest one: finished, so it is
+    /// the one to store when a new bucket starts.
+    pub fn finished(&self) -> Option<&Bucket> {
+        let n = self.buckets.len();
+        n.checked_sub(2).and_then(|i| self.buckets.get(i))
     }
 
     /// Seconds one bucket covers.
@@ -310,25 +310,25 @@ mod tests {
                 1_000_000 + k * STEP_S,
             );
         }
-        let json = serde_json::to_string(&t.saved()).expect("serialises");
-        let back: Saved = serde_json::from_str(&json).expect("reads back");
-        let r = Trend::restored(back, 1_000_000 + 10 * STEP_S);
+        let r = Trend::from_buckets(t.buckets().cloned(), 1_000_000 + 10 * STEP_S);
         assert_eq!(r, t);
         assert_eq!(r.view()["points"], 10);
     }
 
     #[test]
-    fn fix_trend_restart_a_restored_trend_drops_what_is_older_than_a_day_and_a_foreign_file() {
+    fn fix_trend_restart_a_restored_trend_drops_what_is_older_than_a_day() {
         let mut t = Trend::default();
         t.record(&fleet(Some(10), 100, &[]), 1_000_000);
         t.record(&fleet(Some(20), 100, &[]), 1_000_000 + STEP_S);
         let day_later = 1_000_000 + STEP_S * POINTS as u64;
-        assert_eq!(Trend::restored(t.saved(), day_later).view()["points"], 1);
-        let mut foreign = t.saved();
-        foreign.schema_version = 99;
         assert_eq!(
-            Trend::restored(foreign, 1_000_000 + STEP_S).view()["points"],
-            0
+            Trend::from_buckets(t.buckets().cloned(), day_later).view()["points"],
+            1
+        );
+        assert_eq!(
+            Trend::from_buckets(t.buckets().cloned(), 1_000_000 - 1).view()["points"],
+            0,
+            "a bucket from the future is not drawn"
         );
     }
 }

@@ -500,15 +500,15 @@ async fn arch_schedule_a_due_slot_is_queued_a_missed_one_is_notified() {
     let w = world("sched", MemFiles::default(), steady());
     let slot = resolve_local(2026, 9, 28, 3, 30).instant();
     w.clock.set(slot - 3_600);
+    let db = homelab_admin::shell::store::memory_db();
     let s = Scheduler::load(
-        w.dir.join("schedules.json"),
+        db.clone(),
         w.actions.clone(),
         w.notify.clone(),
         w.live.clone(),
         w.clock.clock(),
         300,
-    )
-    .unwrap();
+    );
     let created = s
         .create(ScheduleInput {
             stack: "media".into(),
@@ -547,16 +547,15 @@ async fn arch_schedule_a_due_slot_is_queued_a_missed_one_is_notified() {
             .any(|n| n["notice"]["kind"] == "schedule_missed")
     })
     .await;
-    // arch-state: the file reads back with the schedule and its progress.
+    // arch-state: the database reads back with the schedule and its progress.
     let reread = Scheduler::load(
-        w.dir.join("schedules.json"),
+        db.clone(),
         w.actions.clone(),
         w.notify.clone(),
         w.live.clone(),
         w.clock.clock(),
         300,
-    )
-    .unwrap();
+    );
     let list = reread.list().await;
     assert_eq!(list["zone"], "Europe/Brussels");
     assert_eq!(
@@ -593,15 +592,15 @@ async fn redesign_schedules_a_skipped_slot_is_quiet_and_a_missed_one_is_remember
     let w = world("sched-skip", MemFiles::default(), steady());
     let slot = resolve_local(2026, 9, 28, 3, 30).instant();
     w.clock.set(slot - 3_600);
+    let db = homelab_admin::shell::store::memory_db();
     let s = Scheduler::load(
-        w.dir.join("schedules.json"),
+        db.clone(),
         w.actions.clone(),
         w.notify.clone(),
         w.live.clone(),
         w.clock.clock(),
         300,
-    )
-    .unwrap();
+    );
     let created = s
         .create(ScheduleInput {
             stack: "media".into(),

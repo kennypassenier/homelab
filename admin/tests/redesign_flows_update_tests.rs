@@ -11,9 +11,7 @@ use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use act_support::{
-    MemFiles, MockHost, RecPusher, Recorder, Script, TestClock, shared, temp_dir, until,
-};
+use act_support::{MemFiles, MockHost, RecPusher, Recorder, Script, TestClock, shared, until};
 use homelab_admin::core::actions::{ActionArgs, Refusal, validate};
 use homelab_admin::core::updateflow::{self, ItemKind, UpdateItem, judge};
 use homelab_admin::shell::actions::{
@@ -162,7 +160,7 @@ struct World {
 
 /// `running`: what the stack's containers run after N deploys of a commit.
 fn world(
-    tag: &str,
+    _tag: &str,
     backup_ok: bool,
     running: Arc<dyn Fn(usize) -> StackRuntime + Send + Sync>,
 ) -> World {
@@ -189,9 +187,9 @@ fn world(
         Arc::new(Mutex::new(Vec::new())),
     );
     let live = Arc::new(Recorder::default());
-    let dir = temp_dir(tag);
+    let db = homelab_admin::shell::store::memory_db();
     let notify = NotifyCenter::load(
-        homelab_admin::shell::store::memory_db(),
+        db.clone(),
         Arc::new(RecPusher::default()),
         live.clone(),
         clock.clock(),
@@ -208,7 +206,7 @@ fn world(
     });
     let commits = Arc::new(Commits(Mutex::new(Vec::new())));
     actions.set_committer(commits.clone());
-    actions.set_flow_store(dir.join("update-flows.json"));
+    actions.set_flow_store(db);
     actions.set_flow_timing(Duration::from_millis(20), Duration::from_millis(200));
     World {
         host,
@@ -279,10 +277,10 @@ async fn redesign_flows_6_one_job_backs_up_commits_deploys_and_verifies() {
     assert!(deploy < verify, "{ran:?}");
     assert_eq!(w.commits.0.lock().unwrap()[0].1["api/api"], TO);
     assert!(rows(&j).iter().all(|(_, s)| s == "ok"), "{:?}", rows(&j));
-    let undo = w.actions.update_records(Some("media"));
+    let undo = w.actions.update_records(Some("media")).await;
     assert_eq!(undo.len(), 1);
     assert_eq!(undo[0].job, j.job);
-    assert!(w.actions.update_records(Some("other")).is_empty());
+    assert!(w.actions.update_records(Some("other")).await.is_empty());
 }
 
 /// A failed backup: nothing else happens.
@@ -328,7 +326,7 @@ async fn redesign_flows_6_not_healthy_rolls_the_earlier_version_back() {
     assert!(j.flow.as_ref().unwrap()["rolled_back"].as_bool().unwrap());
     assert!(j.message.unwrap().contains("put the earlier version back"));
     // A rolled-back update is not offered to undo.
-    assert!(w.actions.update_records(Some("media")).is_empty());
+    assert!(w.actions.update_records(Some("media")).await.is_empty());
 }
 
 /// Still the old version after the deploy (the image did not change): not
@@ -341,9 +339,10 @@ async fn redesign_flows_6_the_old_version_still_running_is_not_healthy() {
     assert!(rows(&j).contains(&("health".into(), "bad".into())));
 }
 
-/// The undo list keeps 7 days and never grows without a cap.
+/// The undo list offers 7 days; older rows stay stored (only the Storage
+/// page deletes them).
 #[test]
-fn redesign_flows_6_the_undo_keeps_seven_days_and_a_cap() {
+fn redesign_flows_6_the_undo_offers_seven_days() {
     let rec = |at: i64, outcome: &str| updateflow::UpdateRecord {
         job: at as u64,
         at,
@@ -361,9 +360,4 @@ fn redesign_flows_6_the_undo_keeps_seven_days_and_a_cap() {
     let u = updateflow::undoable(&all, Some("media"), now);
     assert_eq!(u.len(), 1);
     assert_eq!(u[0].at, now - 86_400);
-    let mut many: Vec<_> = (0..300).map(|i| rec(now - i, "done")).collect();
-    many.push(rec(now - 40 * 86_400, "done"));
-    updateflow::prune(&mut many, now);
-    assert_eq!(many.len(), 200);
-    assert!(many.iter().all(|r| r.at >= now - 30 * 86_400));
 }

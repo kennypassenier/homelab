@@ -12,6 +12,8 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::time::Duration;
 
+use chassis::Error;
+use chassis::storage::rusqlite::{Connection, Transaction, params};
 use homelab_core::ops::pins::StackRuntime;
 use homelab_proto::{Command, RpcResponse};
 
@@ -53,9 +55,9 @@ impl Actions {
         let _ = self.inner.committer.set(c);
     }
 
-    /// Where the undo records live (mount: beside the notifications file).
-    pub fn set_flow_store(&self, path: std::path::PathBuf) {
-        let _ = self.inner.flow_store.set(path);
+    /// Where the undo records live (mount: the app database).
+    pub fn set_flow_store(&self, db: chassis::storage::AppDb) {
+        let _ = self.inner.flow_store.set(db);
     }
 
     /// How often the verify reads the host, and how long it waits for a
@@ -71,31 +73,35 @@ impl Actions {
         ))
     }
 
-    /// The updates still offered to undo (`GET /data/update-flows`).
-    pub fn update_records(&self, stack: Option<&str>) -> Vec<UpdateRecord> {
-        let all = self.read_records();
+    /// The updates still offered to undo (`GET /data/update-flows`): the
+    /// finished ones of the last [`updateflow::UNDO_DAYS`] days, newest
+    /// first, at most [`RECORDS_SHOWN`]. Older rows stay in the database
+    /// until the Storage page deletes them.
+    pub async fn update_records(&self, stack: Option<&str>) -> Vec<UpdateRecord> {
+        let all = self.read_records().await;
         updateflow::undoable(&all, stack, self.now())
     }
 
-    fn read_records(&self) -> Vec<UpdateRecord> {
-        let Some(path) = self.inner.flow_store.get() else {
+    async fn read_records(&self) -> Vec<UpdateRecord> {
+        let Some(db) = self.inner.flow_store.get() else {
             return Vec::new();
         };
-        super::super::actions_state::read_json::<Vec<UpdateRecord>>(path)
-            .ok()
-            .flatten()
-            .unwrap_or_default()
+        let since = self.now() - (updateflow::UNDO_DAYS as i64) * 86_400;
+        match db.read(move |c| records_since(c, since)).await {
+            Ok(rows) => rows,
+            Err(e) => {
+                tracing::warn!("the update records were not read: {}", e.message);
+                Vec::new()
+            }
+        }
     }
 
-    fn keep_record(&self, rec: UpdateRecord) {
-        let Some(path) = self.inner.flow_store.get() else {
+    async fn keep_record(&self, rec: UpdateRecord) {
+        let Some(db) = self.inner.flow_store.get() else {
             return;
         };
-        let mut all = self.read_records();
-        all.push(rec);
-        updateflow::prune(&mut all, self.now());
-        if let Err(e) = super::super::actions_state::write_json(path, &all) {
-            tracing::warn!("the update record was not kept: {e}");
+        if let Err(e) = db.write(move |tx| put_record(tx, &rec)).await {
+            tracing::warn!("the update record was not kept: {}", e.message);
         }
     }
 
@@ -268,7 +274,7 @@ impl Actions {
             if let Some(why) = why {
                 flow.fail("backup", why.clone(), self.now());
                 self.show_flow(view, &flow);
-                self.keep_flow_record(view, &flow, "failed");
+                self.keep_flow_record(view, &flow, "failed").await;
                 return Ok(done(false, why));
             }
         }
@@ -332,7 +338,7 @@ impl Actions {
                 );
                 flow.fail(row, why.clone(), self.now());
                 self.show_flow(view, &flow);
-                self.keep_flow_record(view, &flow, "failed");
+                self.keep_flow_record(view, &flow, "failed").await;
                 return Ok(done(false, why));
             }
         }
@@ -375,7 +381,7 @@ impl Actions {
             if let Some(why) = why {
                 flow.fail("deploy", why.clone(), self.now());
                 self.show_flow(view, &flow);
-                self.keep_flow_record(view, &flow, "failed");
+                self.keep_flow_record(view, &flow, "failed").await;
                 return Ok(done(false, why));
             }
         }
@@ -396,7 +402,7 @@ impl Actions {
             );
             flow.step = 6;
             self.show_flow(view, &flow);
-            self.keep_flow_record(view, &flow, "done");
+            self.keep_flow_record(view, &flow, "done").await;
             return Ok(done(
                 true,
                 format!(
@@ -424,7 +430,7 @@ impl Actions {
             flow.failed = Some(why.clone());
             flow.step = 6;
             self.show_flow(view, &flow);
-            self.keep_flow_record(view, &flow, "failed");
+            self.keep_flow_record(view, &flow, "failed").await;
             return Ok(done(false, why));
         }
         flow.add_rollback();
@@ -480,11 +486,12 @@ impl Actions {
         flow.failed = Some(why.clone());
         flow.step = 6;
         self.show_flow(view, &flow);
-        self.keep_flow_record(view, &flow, if back_ok { "rolled back" } else { "failed" });
+        self.keep_flow_record(view, &flow, if back_ok { "rolled back" } else { "failed" })
+            .await;
         Ok(done(false, why))
     }
 
-    fn keep_flow_record(&self, view: &JobView, flow: &FlowView, outcome: &str) {
+    async fn keep_flow_record(&self, view: &JobView, flow: &FlowView, outcome: &str) {
         self.keep_record(UpdateRecord {
             job: view.job,
             at: view.started_at.unwrap_or_else(|| self.now()),
@@ -492,6 +499,79 @@ impl Actions {
             items: flow.items.clone(),
             commits: flow.commits.clone(),
             outcome: outcome.into(),
-        });
+        })
+        .await;
     }
+}
+
+/// The most records one read returns: the undo list is a short list, and
+/// a year of updates must not make the page read a year.
+pub const RECORDS_SHOWN: i64 = 200;
+
+fn stored(what: &str, e: impl std::fmt::Display) -> Error {
+    Error::internal(
+        format!("a stored update record does not read: {what}: {e}"),
+        "the database file may be damaged; restore the pre-update copy or the last backup",
+    )
+}
+
+/// The finished records since `since` (unix seconds), newest first.
+pub(crate) fn records_since(c: &Connection, since: i64) -> Result<Vec<UpdateRecord>, Error> {
+    let mut stmt = c.prepare(
+        "SELECT job, at, by_whom, outcome, items, commits FROM update_records \
+         WHERE at >= ?1 AND outcome = 'done' ORDER BY at DESC, job DESC LIMIT ?2",
+    )?;
+    let rows = stmt
+        .query_map(params![since, RECORDS_SHOWN], |r| {
+            Ok((
+                r.get::<_, i64>(0)?,
+                r.get::<_, i64>(1)?,
+                r.get::<_, String>(2)?,
+                r.get::<_, String>(3)?,
+                r.get::<_, String>(4)?,
+                r.get::<_, String>(5)?,
+            ))
+        })?
+        .collect::<Result<Vec<_>, _>>()?;
+    rows.into_iter()
+        .map(|(job, at, by, outcome, items, commits)| {
+            Ok(UpdateRecord {
+                job: job as u64,
+                at,
+                by,
+                items: serde_json::from_str(&items).map_err(|e| stored("items", e))?,
+                commits: serde_json::from_str(&commits).map_err(|e| stored("commits", e))?,
+                outcome,
+            })
+        })
+        .collect()
+}
+
+/// Store one record (a job id is stored once; a repeat replaces it), in the
+/// caller's transaction. `stacks` is the touched stacks as `,a,b,`, which the
+/// Storage page filters by.
+pub(crate) fn put_record(tx: &Transaction, r: &UpdateRecord) -> Result<(), Error> {
+    let json = |e: serde_json::Error| stored("a record to store", e);
+    tx.execute(
+        "INSERT OR REPLACE INTO update_records (job, at, by_whom, outcome, stacks, items, commits) \
+         VALUES (?1,?2,?3,?4,?5,?6,?7)",
+        params![
+            r.job as i64,
+            r.at,
+            r.by,
+            r.outcome,
+            stacks_cell(r),
+            serde_json::to_string(&r.items).map_err(json)?,
+            serde_json::to_string(&r.commits).map_err(json)?,
+        ],
+    )?;
+    Ok(())
+}
+
+/// The `stacks` column: the touched stacks, sorted, as `,a,b,`.
+pub(crate) fn stacks_cell(r: &UpdateRecord) -> String {
+    let mut stacks: Vec<&str> = r.items.iter().map(|i| i.stack.as_str()).collect();
+    stacks.sort_unstable();
+    stacks.dedup();
+    format!(",{},", stacks.join(","))
 }

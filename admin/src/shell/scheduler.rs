@@ -1,10 +1,10 @@
-//! feat-stacks-8 (arch-schedule): the scheduler task. Schedules live in
-//! `schedules.json` under the data dir (arch-state); every tick the task
+//! feat-stacks-8 (arch-schedule): the scheduler task. Schedules live in the
+//! `schedules` table of the app database (feat-kpadopt-2; they were
+//! `schedules.json`), every operation one transaction; every tick the task
 //! asks `core::schedule::tick` what is due, queues it as an ordinary job
 //! (the same queue a press uses), and turns every slot that passed without a
 //! run into a notice. A missed slot is never caught up.
 
-use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
@@ -15,20 +15,18 @@ use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post, put};
 use axum::{Json, Router};
-use tokio::sync::Mutex;
 
 use super::actions::{Actions, Clock, Origin, Publish};
 use super::actions_notify::NotifyCenter;
-use super::actions_state::{StateError, read_json, write_json};
 use crate::core::actions::Refusal;
 use crate::core::notify::{Draft, Kind};
-use crate::core::schedule::{
-    self, LastRun, Missed, MissedWhy, Schedule, ScheduleFile, ScheduleInput,
-};
+use crate::core::schedule::{self, LastRun, Missed, MissedWhy, Schedule, ScheduleInput};
+use chassis::Error;
+use chassis::storage::AppDb;
+use chassis::storage::rusqlite::{Connection, Row, Transaction, params};
 
 pub struct Scheduler {
-    path: PathBuf,
-    state: Mutex<ScheduleFile>,
+    db: AppDb,
     actions: Actions,
     notify: Arc<NotifyCenter>,
     publish: Arc<dyn Publish>,
@@ -37,30 +35,126 @@ pub struct Scheduler {
     counter: AtomicU64,
 }
 
+// ── the rows (feat-kpadopt-2: the `schedules` table) ────────────────────
+
+const COLS: &str = "id, stack, action, enabled, note, created_at, handled_until, paused_until, \
+     args, when_json, last_run, last_missed";
+
+fn unreadable(what: &str, e: impl std::fmt::Display) -> Error {
+    Error::internal(
+        format!("a stored schedule does not read: {what}: {e}"),
+        "the database file may be damaged; restore the pre-update copy or the last backup",
+    )
+}
+
+fn parse<T: serde::de::DeserializeOwned>(what: &str, text: &str) -> Result<T, Error> {
+    serde_json::from_str(text).map_err(|e| unreadable(what, e))
+}
+
+fn schedule_of(r: &Row) -> chassis::storage::rusqlite::Result<Result<Schedule, Error>> {
+    let (args, when, last_run, last_missed): (String, String, Option<String>, Option<String>) =
+        (r.get(8)?, r.get(9)?, r.get(10)?, r.get(11)?);
+    let build = || -> Result<Schedule, Error> {
+        Ok(Schedule {
+            id: r.get(0)?,
+            stack: r.get(1)?,
+            action: r.get(2)?,
+            enabled: r.get::<_, i64>(3)? != 0,
+            note: r.get(4)?,
+            created_at: r.get(5)?,
+            handled_until: r.get(6)?,
+            paused_until: r.get(7)?,
+            args: parse("args", &args)?,
+            when: parse("when", &when)?,
+            last_run: last_run
+                .as_deref()
+                .map(|t| parse("last_run", t))
+                .transpose()?,
+            last_missed: last_missed
+                .as_deref()
+                .map(|t| parse("last_missed", t))
+                .transpose()?,
+        })
+    };
+    Ok(build())
+}
+
+/// Every schedule, in the order they were created.
+pub(crate) fn all(c: &Connection) -> Result<Vec<Schedule>, Error> {
+    let mut stmt = c.prepare(&format!("SELECT {COLS} FROM schedules ORDER BY rowid"))?;
+    let rows = stmt
+        .query_map([], schedule_of)?
+        .collect::<Result<Vec<_>, _>>()?;
+    rows.into_iter().collect()
+}
+
+fn find(c: &Connection, id: &str) -> Result<Option<Schedule>, Error> {
+    let mut stmt = c.prepare(&format!("SELECT {COLS} FROM schedules WHERE id = ?1"))?;
+    let row = stmt
+        .query_map(params![id], schedule_of)?
+        .next()
+        .transpose()?;
+    row.transpose()
+}
+
+/// Insert or replace one schedule (its row keeps its place in the list).
+pub(crate) fn put_schedule(tx: &Transaction, s: &Schedule) -> Result<(), Error> {
+    let json = |e: serde_json::Error| unreadable("a schedule to store", e);
+    tx.execute(
+        "INSERT INTO schedules (id, stack, action, enabled, note, created_at, handled_until, \
+         paused_until, args, when_json, last_run, last_missed) \
+         VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12) \
+         ON CONFLICT(id) DO UPDATE SET stack = excluded.stack, action = excluded.action, \
+         enabled = excluded.enabled, note = excluded.note, created_at = excluded.created_at, \
+         handled_until = excluded.handled_until, paused_until = excluded.paused_until, \
+         args = excluded.args, when_json = excluded.when_json, last_run = excluded.last_run, \
+         last_missed = excluded.last_missed",
+        params![
+            s.id,
+            s.stack,
+            s.action,
+            s.enabled as i64,
+            s.note,
+            s.created_at,
+            s.handled_until,
+            s.paused_until,
+            serde_json::to_string(&s.args).map_err(json)?,
+            serde_json::to_string(&s.when).map_err(json)?,
+            s.last_run
+                .as_ref()
+                .map(serde_json::to_string)
+                .transpose()
+                .map_err(json)?,
+            s.last_missed
+                .as_ref()
+                .map(serde_json::to_string)
+                .transpose()
+                .map_err(json)?,
+        ],
+    )?;
+    Ok(())
+}
+
 impl Scheduler {
+    /// Nothing is read here: the database opens at start and every call
+    /// finds its rows.
     pub fn load(
-        path: PathBuf,
+        db: AppDb,
         actions: Actions,
         notify: Arc<NotifyCenter>,
         publish: Arc<dyn Publish>,
         clock: Clock,
         grace_s: u64,
-    ) -> Result<Arc<Self>, StateError> {
-        let state: ScheduleFile = read_json(&path)?.unwrap_or_default();
-        state.check().map_err(|why| StateError::Parse {
-            path: path.display().to_string(),
-            why,
-        })?;
-        Ok(Arc::new(Scheduler {
-            path,
-            state: Mutex::new(state),
+    ) -> Arc<Self> {
+        Arc::new(Scheduler {
+            db,
             actions,
             notify,
             publish,
             clock,
             grace_s: grace_s as i64,
             counter: AtomicU64::new(0),
-        }))
+        })
     }
 
     /// Tick every `every` until the process ends.
@@ -75,47 +169,74 @@ impl Scheduler {
         });
     }
 
-    fn save(&self, f: &ScheduleFile) -> Result<(), StateError> {
-        write_json(&self.path, f)
+    /// Change one schedule in its own transaction; a vanished one is left.
+    async fn amend(&self, id: &str, f: impl FnOnce(&mut Schedule) + Send + 'static) {
+        let id = id.to_string();
+        let done = self
+            .db
+            .write(move |tx| {
+                if let Some(mut s) = find(tx, &id)? {
+                    f(&mut s);
+                    put_schedule(tx, &s)?;
+                }
+                Ok(())
+            })
+            .await;
+        if let Err(e) = done {
+            tracing::warn!(error = %e.message, "schedules not saved");
+        }
     }
 
-    /// One look: queue what is due, notify what was missed.
+    /// One look: queue what is due, notify what was missed. The whole look
+    /// at the stored schedules is ONE transaction.
     pub async fn tick(&self) {
         let now = (self.clock)();
-        let mut runs: Vec<(Schedule, i64)> = Vec::new();
-        let mut missed: Vec<(Schedule, i64, bool)> = Vec::new();
-        {
-            let mut f = self.state.lock().await;
-            for s in f.schedules.iter_mut() {
-                let busy = s
-                    .last_run
-                    .as_ref()
-                    .and_then(|l| self.actions.job(l.job))
-                    .is_some_and(|j| !j.state.finished());
-                let plan = schedule::tick(s, now, self.grace_s, busy);
-                s.handled_until = plan.handled_until;
-                if let Some(slot) = plan.run {
-                    runs.push((s.clone(), slot));
+        let (actions, grace_s) = (self.actions.clone(), self.grace_s);
+        let looked = self
+            .db
+            .write(move |tx| {
+                let mut runs: Vec<(Schedule, i64)> = Vec::new();
+                let mut missed: Vec<(Schedule, i64, bool)> = Vec::new();
+                for mut s in all(tx)? {
+                    let before = s.clone();
+                    let busy = s
+                        .last_run
+                        .as_ref()
+                        .and_then(|l| actions.job(l.job))
+                        .is_some_and(|j| !j.state.finished());
+                    let plan = schedule::tick(&s, now, grace_s, busy);
+                    s.handled_until = plan.handled_until;
+                    if let Some(slot) = plan.run {
+                        runs.push((s.clone(), slot));
+                    }
+                    for slot in plan.missed {
+                        // The newest slot was skipped because a run was going.
+                        let was_busy = busy && now - slot <= grace_s;
+                        // redesign-schedules-3: the page names the newest one.
+                        s.last_missed = Some(Missed {
+                            slot,
+                            why: if was_busy {
+                                MissedWhy::Busy
+                            } else {
+                                MissedWhy::Down
+                            },
+                        });
+                        missed.push((s.clone(), slot, was_busy));
+                    }
+                    if s != before {
+                        put_schedule(tx, &s)?;
+                    }
                 }
-                for slot in plan.missed {
-                    // The newest slot was skipped because a run was going.
-                    let was_busy = busy && now - slot <= self.grace_s;
-                    // redesign-schedules-3: the page names the newest one.
-                    s.last_missed = Some(Missed {
-                        slot,
-                        why: if was_busy {
-                            MissedWhy::Busy
-                        } else {
-                            MissedWhy::Down
-                        },
-                    });
-                    missed.push((s.clone(), slot, was_busy));
-                }
+                Ok((runs, missed))
+            })
+            .await;
+        let (runs, missed) = match looked {
+            Ok(v) => v,
+            Err(e) => {
+                tracing::warn!(error = %e.message, "schedules not saved");
+                (Vec::new(), Vec::new())
             }
-            if let Err(e) = self.save(&f) {
-                tracing::warn!(error = %e, "schedules not saved");
-            }
-        }
+        };
         for (s, slot) in runs {
             let input = ScheduleInput {
                 stack: s.stack.clone(),
@@ -134,27 +255,18 @@ impl Scheduler {
                             slot,
                         },
                     );
-                    let mut f = self.state.lock().await;
-                    if let Some(x) = f.schedules.iter_mut().find(|x| x.id == s.id) {
-                        x.last_run = Some(LastRun { slot, job: job.job });
-                    }
-                    if let Err(e) = self.save(&f) {
-                        tracing::warn!(error = %e, "schedules not saved");
-                    }
+                    let job = job.job;
+                    self.amend(&s.id, move |x| x.last_run = Some(LastRun { slot, job }))
+                        .await;
                 }
                 Err(r) => {
-                    {
-                        let mut f = self.state.lock().await;
-                        if let Some(x) = f.schedules.iter_mut().find(|x| x.id == s.id) {
-                            x.last_missed = Some(Missed {
-                                slot,
-                                why: MissedWhy::Refused,
-                            });
-                        }
-                        if let Err(e) = self.save(&f) {
-                            tracing::warn!(error = %e, "schedules not saved");
-                        }
-                    }
+                    self.amend(&s.id, move |x| {
+                        x.last_missed = Some(Missed {
+                            slot,
+                            why: MissedWhy::Refused,
+                        })
+                    })
+                    .await;
                     self.missed_notice(&s, slot, &format!("{}: {}", r.what, r.why))
                         .await
                 }
@@ -240,10 +352,16 @@ impl Scheduler {
 
     pub async fn list(&self) -> serde_json::Value {
         let now = (self.clock)();
-        let f = self.state.lock().await;
+        let rows = match self.db.read(all).await {
+            Ok(rows) => rows,
+            Err(e) => {
+                tracing::warn!(error = %e.message, "schedules not read");
+                Vec::new()
+            }
+        };
         serde_json::json!({
-            "zone": f.zone,
-            "schedules": f.schedules.iter().map(|s| self.view(s, now)).collect::<Vec<_>>(),
+            "zone": schedule::ZONE,
+            "schedules": rows.iter().map(|s| self.view(s, now)).collect::<Vec<_>>(),
         })
     }
 
@@ -275,14 +393,39 @@ impl Scheduler {
             last_missed: None,
             paused_until: None,
         };
-        let view = {
-            let mut f = self.state.lock().await;
-            f.schedules.push(s.clone());
-            self.save(&f).map_err(saved)?;
-            self.view(&s, now)
-        };
+        let stored = s.clone();
+        self.db
+            .write(move |tx| put_schedule(tx, &stored))
+            .await
+            .map_err(saved)?;
+        let view = self.view(&s, now);
         self.publish_list().await;
         Ok(view)
+    }
+
+    /// Change the stored schedule `id` in one transaction. `f` returns the
+    /// refusal when the change is not allowed.
+    async fn change(
+        &self,
+        id: &str,
+        f: impl FnOnce(&mut Schedule) -> Result<(), Refusal> + Send + 'static,
+    ) -> Result<Schedule, Refusal> {
+        let key = id.to_string();
+        let done = self
+            .db
+            .write(move |tx| {
+                let Some(mut s) = find(tx, &key)? else {
+                    return Ok(Err(unknown(&key)));
+                };
+                if let Err(r) = f(&mut s) {
+                    return Ok(Err(r));
+                }
+                put_schedule(tx, &s)?;
+                Ok(Ok(s))
+            })
+            .await
+            .map_err(saved)??;
+        Ok(done)
     }
 
     pub async fn update(
@@ -292,26 +435,24 @@ impl Scheduler {
     ) -> Result<serde_json::Value, Refusal> {
         let req = schedule::check_input(&input)?;
         let now = (self.clock)();
-        let view = {
-            let mut f = self.state.lock().await;
-            let Some(s) = f.schedules.iter_mut().find(|s| s.id == id) else {
-                return Err(unknown(id));
-            };
-            s.stack = req.stack;
-            s.action = req.action.slug().to_string();
-            s.args = req.args;
-            if s.when != input.when || (!s.enabled && input.enabled) {
-                // A changed time (or switching it back on) starts from now:
-                // slots of the old plan are not "missed" by the new one.
-                s.handled_until = now;
-            }
-            s.when = input.when;
-            s.enabled = input.enabled;
-            s.note = input.note;
-            let s = s.clone();
-            self.save(&f).map_err(saved)?;
-            self.view(&s, now)
-        };
+        let s = self
+            .change(id, move |s| {
+                s.stack = req.stack;
+                s.action = req.action.slug().to_string();
+                s.args = req.args;
+                if s.when != input.when || (!s.enabled && input.enabled) {
+                    // A changed time (or switching it back on) starts from
+                    // now: slots of the old plan are not "missed" by the new
+                    // one.
+                    s.handled_until = now;
+                }
+                s.when = input.when;
+                s.enabled = input.enabled;
+                s.note = input.note;
+                Ok(())
+            })
+            .await?;
+        let view = self.view(&s, now);
         self.publish_list().await;
         Ok(view)
     }
@@ -320,22 +461,20 @@ impl Scheduler {
     /// must be the next run the page showed; the schedule stays on.
     pub async fn skip(&self, id: &str, slot: i64) -> Result<serde_json::Value, Refusal> {
         let now = (self.clock)();
-        let view = {
-            let mut f = self.state.lock().await;
-            let Some(s) = f.schedules.iter_mut().find(|s| s.id == id) else {
-                return Err(unknown(id));
-            };
-            s.handled_until = schedule::skip(s, slot, now).map_err(|why| {
-                Refusal::new(
-                    format!("skipping a run of schedule {id}"),
-                    why,
-                    "reload the schedules page and skip the run it shows next",
-                )
-            })?;
-            let s = s.clone();
-            self.save(&f).map_err(saved)?;
-            self.view(&s, now)
-        };
+        let name = id.to_string();
+        let s = self
+            .change(id, move |s| {
+                s.handled_until = schedule::skip(s, slot, now).map_err(|why| {
+                    Refusal::new(
+                        format!("skipping a run of schedule {name}"),
+                        why,
+                        "reload the schedules page and skip the run it shows next",
+                    )
+                })?;
+                Ok(())
+            })
+            .await?;
+        let view = self.view(&s, now);
         self.publish_list().await;
         Ok(view)
     }
@@ -351,29 +490,26 @@ impl Scheduler {
                 "pick a moment between now and a year from now",
             )
         })?;
-        let view = {
-            let mut f = self.state.lock().await;
-            let Some(s) = f.schedules.iter_mut().find(|s| s.id == id) else {
-                return Err(unknown(id));
-            };
-            s.paused_until = until;
-            let s = s.clone();
-            self.save(&f).map_err(saved)?;
-            self.view(&s, now)
-        };
+        let s = self
+            .change(id, move |s| {
+                s.paused_until = until;
+                Ok(())
+            })
+            .await?;
+        let view = self.view(&s, now);
         self.publish_list().await;
         Ok(view)
     }
 
     pub async fn delete(&self, id: &str) -> Result<(), Refusal> {
-        {
-            let mut f = self.state.lock().await;
-            let before = f.schedules.len();
-            f.schedules.retain(|s| s.id != id);
-            if f.schedules.len() == before {
-                return Err(unknown(id));
-            }
-            self.save(&f).map_err(saved)?;
+        let key = id.to_string();
+        let gone = self
+            .db
+            .write(move |tx| Ok(tx.execute("DELETE FROM schedules WHERE id = ?1", params![key])?))
+            .await
+            .map_err(saved)?;
+        if gone == 0 {
+            return Err(unknown(id));
         }
         self.publish_list().await;
         Ok(())
@@ -388,10 +524,10 @@ fn unknown(id: &str) -> Refusal {
     )
 }
 
-fn saved(e: StateError) -> Refusal {
+fn saved(e: Error) -> Refusal {
     Refusal::new(
         "saving the schedules",
-        e.to_string(),
+        e.message,
         "check the dashboard's data directory (HOMELAB_ADMIN_DATA_DIR)",
     )
 }

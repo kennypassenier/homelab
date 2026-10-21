@@ -152,9 +152,9 @@ pub struct LinkConfig {
     /// (`UiAttach`). fix-158: never for one running `dev_without_locks`.
     pub ui_attach: bool,
     /// fix-trend-restart: where the Stacks page's last day of fleet
-    /// snapshots is kept, so a restart (a rollout) does not wipe it;
-    /// `None`: kept in memory only.
-    pub trend_file: Option<std::path::PathBuf>,
+    /// snapshots is kept (the app database, feat-kpadopt-2), so a restart (a
+    /// rollout) does not wipe it; `None`: kept in memory only.
+    pub trend_db: Option<chassis::storage::AppDb>,
 }
 
 impl LinkConfig {
@@ -169,11 +169,82 @@ impl LinkConfig {
             // fix-158: a developer's dashboard on the same host token took
             // the steps over from CT 120's, and on exit left it detached.
             ui_attach: !c.dev_without_locks,
-            trend_file: crate::core::actions_config::from_env(&|k| std::env::var(k).ok())
-                .ok()
-                .map(|a| a.data_dir.join("fleet-trend.json")),
+            trend_db: None,
         }
     }
+}
+
+/// The stored buckets from `oldest_at` (unix seconds) on, oldest first, each
+/// with its stacks.
+pub(crate) fn trend_since(
+    c: &chassis::storage::rusqlite::Connection,
+    oldest_at: i64,
+) -> Result<Vec<crate::core::trend::Bucket>, chassis::Error> {
+    use crate::core::trend::{Bucket, Mean};
+    let mean = |sum: i64, n: i64| Mean {
+        sum: sum as u64,
+        n: n as u64,
+    };
+    let mut out = Vec::new();
+    let mut stmt = c.prepare(
+        "SELECT slot, host_cpu_sum, host_cpu_n, load_sum, load_n FROM trend_buckets \
+         WHERE at >= ?1 ORDER BY slot",
+    )?;
+    let rows = stmt
+        .query_map([oldest_at], |r| {
+            Ok(Bucket {
+                slot: r.get::<_, i64>(0)? as u64,
+                host_cpu: mean(r.get(1)?, r.get(2)?),
+                load_x100: mean(r.get(3)?, r.get(4)?),
+                stacks: Default::default(),
+            })
+        })?
+        .collect::<Result<Vec<_>, _>>()?;
+    let mut stacks = c.prepare("SELECT stack, sum, n FROM trend_stacks WHERE slot = ?1")?;
+    for mut b in rows {
+        let found = stacks
+            .query_map([b.slot as i64], |r| {
+                Ok((r.get::<_, String>(0)?, mean(r.get(1)?, r.get(2)?)))
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+        b.stacks = found.into_iter().collect();
+        out.push(b);
+    }
+    Ok(out)
+}
+
+/// Store one finished bucket and its stacks, replacing a bucket of the same
+/// slot (a restart inside a bucket stores it again), in the caller's
+/// transaction.
+pub(crate) fn put_bucket(
+    tx: &chassis::storage::rusqlite::Transaction,
+    b: &crate::core::trend::Bucket,
+) -> Result<(), chassis::Error> {
+    use chassis::storage::rusqlite::params;
+    // The stacks go with the bucket (ON DELETE CASCADE).
+    tx.execute(
+        "DELETE FROM trend_buckets WHERE slot = ?1",
+        params![b.slot as i64],
+    )?;
+    tx.execute(
+        "INSERT INTO trend_buckets (slot, at, host_cpu_sum, host_cpu_n, load_sum, load_n) \
+         VALUES (?1,?2,?3,?4,?5,?6)",
+        params![
+            b.slot as i64,
+            b.slot.saturating_mul(crate::core::trend::STEP_S) as i64,
+            b.host_cpu.sum as i64,
+            b.host_cpu.n as i64,
+            b.load_x100.sum as i64,
+            b.load_x100.n as i64
+        ],
+    )?;
+    for (name, m) in &b.stacks {
+        tx.execute(
+            "INSERT INTO trend_stacks (slot, stack, sum, n) VALUES (?1,?2,?3,?4)",
+            params![b.slot as i64, name, m.sum as i64, m.n as i64],
+        )?;
+    }
+    Ok(())
 }
 
 /// The first host release that knows `UiAttach` (feat-platform-10); an
@@ -218,14 +289,17 @@ pub async fn run(
 ) {
     // fix-trend-restart: the day the last run saw, back before the first
     // snapshot lands.
-    if let Some(path) = &cfg.trend_file {
-        match crate::shell::actions_state::read_json::<crate::core::trend::Saved>(path) {
-            Ok(Some(saved)) => {
-                shared.write().await.trend = crate::core::trend::Trend::restored(saved, now_s());
+    if let Some(db) = &cfg.trend_db {
+        let now = now_s();
+        let oldest_at = (now / crate::core::trend::STEP_S)
+            .saturating_sub(crate::core::trend::POINTS as u64 - 1)
+            * crate::core::trend::STEP_S;
+        match db.read(move |c| trend_since(c, oldest_at as i64)).await {
+            Ok(buckets) => {
+                shared.write().await.trend = crate::core::trend::Trend::from_buckets(buckets, now);
             }
-            Ok(None) => {}
             Err(e) => {
-                tracing::warn!(error = %e, "the saved fleet trend could not be read; starting an empty one")
+                tracing::warn!(error = %e.message, "the saved fleet trend could not be read; starting an empty one")
             }
         }
     }
@@ -362,15 +436,15 @@ async fn session_loop(
                             s.trend.record(&view, now_s());
                             s.fleet = Some(view.clone());
                             s.home_address = state.host.home_address.clone();
-                            (s.trend.newest_slot() != before).then(|| s.trend.saved())
+                            (s.trend.newest_slot() != before).then(|| s.trend.finished().cloned()).flatten()
                         };
-                        // fix-trend-restart: saved once per bucket (every
-                        // five minutes), so a restart loses at most the one
-                        // being filled.
-                        if let (Some(saved), Some(path)) = (started, cfg.trend_file.clone()) {
-                            tokio::task::spawn_blocking(move || {
-                                if let Err(e) = crate::shell::actions_state::write_json(&path, &saved) {
-                                    tracing::warn!(error = %e, "the fleet trend could not be saved");
+                        // fix-trend-restart: the bucket that just finished is
+                        // stored once per bucket (every five minutes), so a
+                        // restart loses at most the one being filled.
+                        if let (Some(done), Some(db)) = (started, cfg.trend_db.clone()) {
+                            tokio::spawn(async move {
+                                if let Err(e) = db.write(move |tx| put_bucket(tx, &done)).await {
+                                    tracing::warn!(error = %e.message, "the fleet trend could not be saved");
                                 }
                             });
                         }

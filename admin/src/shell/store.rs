@@ -16,15 +16,17 @@
 //! | `notices` | `notifications.json` | `at` | yes |
 //! | `notify_state` | `notifications.json` (settings, cursors) | | yes |
 //! | `inbox_snoozes` | `inbox-snoozes.json` | `set_at` | yes |
-//! | `schedules` | `schedules.json` | `created_at` | not yet |
-//! | `update_records` | `update-flows.json` | `at` | not yet |
-//! | `uptime_cells` | `uptime-history.json` | `hour_at` | not yet |
-//! | `trend_buckets`, `trend_stacks` | `fleet-trend.json` | `at` | not yet |
+//! | `schedules` | `schedules.json` | `created_at` | yes |
+//! | `update_records` | `update-flows.json` | `at` | yes |
+//! | `uptime_cells` | `uptime-history.json` | `hour_at` | yes |
+//! | `trend_buckets`, `trend_stacks` | `fleet-trend.json` | `at` | yes |
 //!
-//! "Not yet" stores are copied into their tables by the import and still
-//! run on their JSON files, which the import therefore leaves where they
-//! are; when a store moves, its file name joins [`MOVED`] so the import
-//! renames it to `*.migrated` too.
+//! All six stores run on their tables; the import copies the six JSON files
+//! in and renames each to `*.migrated` ([`MOVED`]). Nothing deletes a row on
+//! its own except what is finished by definition (ended snoozes): the budget
+//! only warns, and old rows go through the Storage page (Kenny, 2026-10-21).
+//! `hour_at` and `at` are unix SECONDS, the unit [`TimeFormat::UnixSeconds`]
+//! reads.
 //!
 //! Power loss: sqlite runs in WAL mode with `synchronous=FULL` (chassis),
 //! every write here is one transaction, and the import commits its marker
@@ -50,9 +52,15 @@ use crate::core::updateflow::UpdateRecord;
 use crate::core::uptime;
 
 /// The files whose store lives in the database and nowhere else: the import
-/// renames them to `*.migrated` once it committed. A store that still runs on
-/// its JSON file is not here (see the module docs).
-pub const MOVED: [&str; 2] = [FILE_NOTICES, FILE_SNOOZES];
+/// renames them to `*.migrated` once it committed (all six).
+pub const MOVED: [&str; 6] = [
+    FILE_NOTICES,
+    FILE_SNOOZES,
+    FILE_SCHEDULES,
+    FILE_FLOWS,
+    FILE_UPTIME,
+    FILE_TREND,
+];
 
 pub const FILE_NOTICES: &str = "notifications.json";
 pub const FILE_SNOOZES: &str = "inbox-snoozes.json";
@@ -162,6 +170,8 @@ pub fn migrations() -> Vec<Migration> {
         ),
         // 6 · the minute watch's hourly cells. `hour_at` is the unix second
         // the hour starts at (the old file counted hours since the epoch).
+        // A rowid table on purpose: the Storage page's preview orders by
+        // `rowid`, which a WITHOUT ROWID table does not have.
         Migration::sql(
             "CREATE TABLE uptime_cells (
                 cell_key TEXT    NOT NULL,
@@ -173,7 +183,7 @@ pub fn migrations() -> Vec<Migration> {
                 ms_n     INTEGER NOT NULL DEFAULT 0,
                 ms_max   INTEGER NOT NULL DEFAULT 0,
                 PRIMARY KEY (cell_key, hour_at)
-            ) STRICT, WITHOUT ROWID;
+            ) STRICT;
             CREATE INDEX uptime_cells_hour ON uptime_cells (hour_at);",
         ),
         // 7 · the fleet's last day, one row per five-minute bucket and one
@@ -231,6 +241,48 @@ pub fn kinds() -> Vec<DataKind> {
             .time_column("set_at", TimeFormat::UnixSeconds)
             .filter(Filter::flag("remind", "Remind me", "remind"))
             .finished_by_definition("until < :now - 2592000"),
+        DataKind::new("schedules", "Schedules")
+            .description(
+                "The planned actions (backups, updates) of the Schedules page. \
+                 Deleting one here removes the plan itself, so it stops running.",
+            )
+            .unit("schedules")
+            .table("schedules")
+            .time_column("created_at", TimeFormat::UnixSeconds)
+            .filter(Filter::text("stack", "Stack", "stack")),
+        DataKind::new("update_records", "Update records")
+            .description(
+                "The Update flow's undo records: what each update changed and \
+                 whether it worked. The History page offers the last 7 days to undo; \
+                 older ones only take space.",
+            )
+            .unit("records")
+            .table("update_records")
+            .time_column("at", TimeFormat::UnixSeconds)
+            .filter(Filter::text("stack", "Stack", "stacks"))
+            .filter(Filter::choice(
+                "outcome",
+                "Outcome",
+                "outcome",
+                ["done", "failed", "rolled back"],
+            )),
+        DataKind::new("uptime", "Uptime history")
+            .description(
+                "What the minute watch measured, one cell per hour and tile. \
+                 The Apps strips draw the last 90 days; older cells only take space.",
+            )
+            .unit("hours")
+            .table("uptime_cells")
+            .time_column("hour_at", TimeFormat::UnixSeconds)
+            .filter(Filter::text("key", "Tile or ping", "cell_key")),
+        DataKind::new("cpu_lines", "CPU lines")
+            .description(
+                "The fleet's CPU and load, one point per five minutes. The Stacks \
+                 sparklines draw the last 24 hours; older points only take space.",
+            )
+            .unit("points")
+            .table("trend_buckets")
+            .time_column("at", TimeFormat::UnixSeconds),
     ]
 }
 
@@ -376,27 +428,14 @@ pub fn import(tx: &Transaction, data_dir: &Path) -> Result<ImportReport, Error> 
     }
 
     // schedules.json
-    if let Some(f) = lenient::<ScheduleFile>(&at(FILE_SCHEDULES)) {
+    // Strict, as the old loader was: a file of another version or zone stops
+    // the import (and with it the start) instead of being replaced by nothing.
+    if let Some(f) =
+        read_json::<ScheduleFile>(&at(FILE_SCHEDULES)).map_err(|e| refuse(FILE_SCHEDULES, e))?
+    {
+        f.check().map_err(|why| refuse(FILE_SCHEDULES, why))?;
         for s in &f.schedules {
-            tx.execute(
-                "INSERT INTO schedules (id, stack, action, enabled, note, created_at, handled_until, \
-                 paused_until, args, when_json, last_run, last_missed) \
-                 VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12)",
-                params![
-                    s.id,
-                    s.stack,
-                    s.action,
-                    s.enabled as i64,
-                    s.note,
-                    s.created_at,
-                    s.handled_until,
-                    s.paused_until,
-                    to_json(&s.args)?,
-                    to_json(&s.when)?,
-                    s.last_run.as_ref().map(to_json).transpose()?,
-                    s.last_missed.as_ref().map(to_json).transpose()?,
-                ],
-            )?;
+            super::scheduler::put_schedule(tx, s)?;
         }
         note("schedules", f.schedules.len() as u64, &mut expected);
     }
@@ -404,9 +443,6 @@ pub fn import(tx: &Transaction, data_dir: &Path) -> Result<ImportReport, Error> 
     // update-flows.json
     if let Some(all) = lenient::<Vec<UpdateRecord>>(&at(FILE_FLOWS)) {
         for r in &all {
-            let mut stacks: Vec<&str> = r.items.iter().map(|i| i.stack.as_str()).collect();
-            stacks.sort_unstable();
-            stacks.dedup();
             tx.execute(
                 "INSERT INTO update_records (job, at, by_whom, outcome, stacks, items, commits) \
                  VALUES (?1,?2,?3,?4,?5,?6,?7)",
@@ -415,7 +451,7 @@ pub fn import(tx: &Transaction, data_dir: &Path) -> Result<ImportReport, Error> 
                     r.at,
                     r.by,
                     r.outcome,
-                    format!(",{},", stacks.join(",")),
+                    super::actions::stacks_cell(r),
                     to_json(&r.items)?,
                     to_json(&r.commits)?,
                 ],
@@ -587,7 +623,7 @@ mod tests {
     fn the_schema_and_the_kinds_agree() {
         // `memory_db` validates every kind against the tables.
         let db = memory_db();
-        assert_eq!(db.kinds().len(), 2);
+        assert_eq!(db.kinds().len(), 6);
         let tables: Vec<String> = db
             .read_blocking(|c| {
                 let mut s = c.prepare(
@@ -621,7 +657,7 @@ mod tests {
     }
 
     #[test]
-    fn the_six_files_land_in_their_tables_and_only_the_moved_two_are_renamed() {
+    fn the_six_files_land_in_their_tables_and_are_all_renamed() {
         let d = dir("six");
         std::fs::write(
             d.join(FILE_NOTICES),
@@ -653,6 +689,13 @@ mod tests {
         std::fs::write(
             d.join(FILE_UPTIME),
             r#"{"schema_version":1,"keys":{"tile:a":[{"h":10,"up":3},{"h":11,"down":1}]}}"#,
+        )
+        .unwrap();
+        std::fs::write(
+            d.join(FILE_TREND),
+            r#"{"schema_version":1,"trend":{"step_s":300,"cap":288,"buckets":[
+                {"slot":10,"host_cpu":{"sum":40,"n":2},"load_x100":{"sum":10,"n":1},
+                 "stacks":{"media":{"sum":7,"n":1}}}]}}"#,
         )
         .unwrap();
         let db = AppDb::open(&d.join("t.db"), spec(d.clone()), kinds()).unwrap();
@@ -692,12 +735,145 @@ mod tests {
             })
             .unwrap();
         assert_eq!(fresh.id, 9, "next_id of the file is the next id handed out");
-        // The two moved files are renamed; the four still on JSON stay.
-        assert!(!d.join(FILE_NOTICES).exists() && d.join("notifications.json.migrated").exists());
-        assert!(!d.join(FILE_SNOOZES).exists() && d.join("inbox-snoozes.json.migrated").exists());
-        for stays in [FILE_SCHEDULES, FILE_FLOWS, FILE_UPTIME] {
-            assert!(d.join(stays).exists(), "{stays} still runs on JSON");
+        // Every file that was imported is renamed, none is left to run on.
+        for name in [
+            FILE_NOTICES,
+            FILE_SNOOZES,
+            FILE_SCHEDULES,
+            FILE_FLOWS,
+            FILE_UPTIME,
+            FILE_TREND,
+        ] {
+            assert!(
+                !d.join(name).exists() && d.join(format!("{name}.migrated")).exists(),
+                "{name} is renamed to .migrated"
+            );
         }
+        let (buckets, stacks): (i64, i64) = db
+            .read_blocking(|c| {
+                Ok((
+                    c.query_row("SELECT COUNT(*) FROM trend_buckets", [], |r| r.get(0))?,
+                    c.query_row("SELECT COUNT(*) FROM trend_stacks", [], |r| r.get(0))?,
+                ))
+            })
+            .unwrap();
+        assert_eq!((buckets, stacks), (1, 1));
+    }
+
+    #[test]
+    fn stored_rows_are_never_dropped_by_age_or_count() {
+        use crate::core::trend::{Bucket, Mean};
+        use crate::core::updateflow::UpdateRecord;
+        use crate::core::uptime::{Cell, Sample, Store};
+        let db = memory_db();
+        // 300 update records over 400 days: all stay, the read shows 7 days.
+        let now = 400 * 86_400i64;
+        db.write_blocking(|tx| {
+            for i in 0..300i64 {
+                crate::shell::actions::put_test_record(
+                    tx,
+                    &UpdateRecord {
+                        job: i as u64,
+                        at: now - i * 86_400 * 4 / 3,
+                        by: "x".into(),
+                        items: vec![],
+                        commits: vec![],
+                        outcome: "done".into(),
+                    },
+                )?;
+            }
+            Ok(())
+        })
+        .unwrap();
+        let stored: i64 = db
+            .read_blocking(|c| {
+                Ok(c.query_row("SELECT COUNT(*) FROM update_records", [], |r| r.get(0))?)
+            })
+            .unwrap();
+        assert_eq!(stored, 300);
+        let shown = db
+            .read_blocking(|c| crate::shell::actions::records_since_test(c, now - 7 * 86_400))
+            .unwrap();
+        assert_eq!(shown.len(), 6, "the undo list reads the last 7 days only");
+
+        // Uptime: a flush writes the cells that changed; a reload reads the
+        // 90-day window and nothing older, while the old cell stays stored.
+        let mut s = Store::default();
+        s.record("tile:a", 100 * 3600, Sample::Up);
+        s.record("tile:a", 100 * 3600 + 5, Sample::Down);
+        let cells = s.take_dirty();
+        db.write_blocking(|tx| crate::shell::watch::put_cells(tx, &cells))
+            .unwrap();
+        let again = s.take_dirty();
+        assert!(again.is_empty());
+        let mut s2 = Store::default();
+        s2.record("tile:a", 100 * 3600 + 9, Sample::Up);
+        db.write_blocking(|tx| crate::shell::watch::put_cells(tx, &s2.take_dirty()))
+            .unwrap();
+        let back = db
+            .read_blocking(|c| crate::shell::watch::cells_since(c, 0))
+            .unwrap();
+        assert_eq!(back.len(), 1, "one cell per key and hour, replaced");
+        assert_eq!((back[0].1.up, back[0].1.h), (1, 100));
+        let none = db
+            .read_blocking(|c| crate::shell::watch::cells_since(c, 101 * 3600))
+            .unwrap();
+        assert!(none.is_empty(), "older than the window is not read");
+        let _ = Cell::default();
+
+        // The CPU lines: a bucket with its stacks, stored again without
+        // doubling, read back with its stacks.
+        let mut b = Bucket {
+            slot: 5,
+            host_cpu: Mean { sum: 30, n: 3 },
+            ..Default::default()
+        };
+        b.stacks.insert("media".into(), Mean { sum: 9, n: 3 });
+        for _ in 0..2 {
+            db.write_blocking(|tx| crate::shell::host_link::put_bucket(tx, &b))
+                .unwrap();
+        }
+        let got = db
+            .read_blocking(|c| crate::shell::host_link::trend_since(c, 0))
+            .unwrap();
+        assert_eq!(got, vec![b]);
+    }
+
+    #[test]
+    fn schedules_keep_their_order_and_their_records() {
+        use crate::core::schedule::{LastRun, Schedule, When};
+        let db = memory_db();
+        let mk = |id: &str, h: &str| Schedule {
+            id: id.into(),
+            stack: "media".into(),
+            action: "backup".into(),
+            args: Default::default(),
+            when: When::Day { at: h.into() },
+            enabled: true,
+            note: String::new(),
+            created_at: 1,
+            handled_until: 2,
+            last_run: None,
+            last_missed: None,
+            paused_until: None,
+        };
+        db.write_blocking(|tx| {
+            crate::shell::scheduler::put_schedule(tx, &mk("b", "01:00"))?;
+            crate::shell::scheduler::put_schedule(tx, &mk("a", "02:00"))?;
+            let mut again = mk("b", "03:00");
+            again.last_run = Some(LastRun { slot: 9, job: 4 });
+            again.paused_until = Some(77);
+            crate::shell::scheduler::put_schedule(tx, &again)
+        })
+        .unwrap();
+        let all = db.read_blocking(crate::shell::scheduler::all).unwrap();
+        assert_eq!(
+            all.iter().map(|s| s.id.as_str()).collect::<Vec<_>>(),
+            ["b", "a"]
+        );
+        assert_eq!(all[0].last_run, Some(LastRun { slot: 9, job: 4 }));
+        assert_eq!(all[0].paused_until, Some(77));
+        assert_eq!(all[0].when, When::Day { at: "03:00".into() });
     }
 
     #[test]

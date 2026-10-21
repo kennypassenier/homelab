@@ -40,6 +40,9 @@ use tokio::sync::{broadcast, mpsc, oneshot};
 #[path = "actions_flow.rs"]
 mod flow;
 pub use flow::ImageCommitter;
+pub(crate) use flow::stacks_cell;
+#[cfg(test)]
+pub(crate) use flow::{put_record as put_test_record, records_since as records_since_test};
 
 use super::actions_notify::NotifyCenter;
 use super::host_link::{HostClient, Shared};
@@ -674,7 +677,7 @@ struct Inner {
     /// redesign-flows-6: the stack editor's commit, the undo records' file
     /// and the verify's timing (mount and tests set them).
     committer: std::sync::OnceLock<Arc<dyn ImageCommitter>>,
-    flow_store: std::sync::OnceLock<PathBuf>,
+    flow_store: std::sync::OnceLock<chassis::storage::AppDb>,
     flow_timing: std::sync::OnceLock<(Duration, Duration)>,
     /// fix-stale-refresh-1: told the stack of every deploy, update or
     /// restart that finished well (the fleet check forgets its stale rows).
@@ -2822,7 +2825,7 @@ async fn update_flows(
     Query(q): Query<FlowsQuery>,
 ) -> Json<serde_json::Value> {
     Json(serde_json::json!({
-        "updates": a.update_records(q.stack.as_deref()),
+        "updates": a.update_records(q.stack.as_deref()).await,
         "days": crate::core::updateflow::UNDO_DAYS,
         "now": a.now(),
     }))
@@ -2864,7 +2867,7 @@ pub fn mount(
     shared: Shared,
     demo_host: bool,
     hooks: super::actions_notify::HookSlot,
-) -> Result<(), String> {
+) -> Result<chassis::storage::AppDb, String> {
     let cfg = crate::core::actions_config::from_env(&|k| std::env::var(k).ok())?;
     let clock = system_clock();
     let live_for_parity = live.clone();
@@ -2946,9 +2949,10 @@ pub fn mount(
     // replace-kuma: the minute watch, and what it holds for the start page.
     let shared_for_watch = shared.clone();
     let watched: super::watch::Watched = Default::default();
-    // ask-kp11be-2: the capped watch/ping history survives a restart.
+    // ask-kp11be-2: the watch/ping history survives a restart (its last 90
+    // days are read back from the app database).
     if let Ok(mut w) = watched.try_lock() {
-        super::watch::load_history(&mut w, cfg.uptime_file(), clock().max(0));
+        super::watch::load_history(&mut w, db.clone(), clock().max(0));
     }
     app.dashboard_routes(super::watch::router(watched.clone()));
     let actions = Actions::start(ActionsDeps {
@@ -2967,14 +2971,13 @@ pub fn mount(
         digest_late_s: cfg.notify_digest_late_s,
     });
     let scheduler = super::scheduler::Scheduler::load(
-        cfg.schedules_file(),
+        db.clone(),
         actions.clone(),
         notify.clone(),
         publish.clone(),
         clock.clone(),
         cfg.schedule_grace_s,
-    )
-    .map_err(|e| e.to_string())?;
+    );
     let edit_ctx = super::edit::EditCtx {
         wc: wc.clone(),
         actions: actions.clone(),
@@ -2986,7 +2989,7 @@ pub fn mount(
     // redesign-flows-6: the Update flow commits through the stack editor
     // and keeps its undo records beside the notifications.
     actions.set_committer(Arc::new(super::edit::EditCommitter(edit_ctx.clone())));
-    actions.set_flow_store(cfg.data_dir.join(super::store::FILE_FLOWS));
+    actions.set_flow_store(db.clone());
     // feat-backup-1/3: the Backups page's read-only routes.
     app.dashboard_routes(super::backups::router(host.clone()));
     // feat-retired-1: the Retired page's one read-only route.
@@ -3080,6 +3083,7 @@ pub fn mount(
         })
     });
     let git = cfg.git.clone();
+    let db_for_link = db.clone();
     app.on_start(move || {
         // A failed import means the notices and snoozes were NOT moved into
         // the database; running on would start a second, empty history that
@@ -3146,5 +3150,6 @@ pub fn mount(
         }
         super::actions_notify::spawn_incident_poll(host, notify, poll);
     });
-    Ok(())
+    // The trend of the fleet (host_link) lives in the same database.
+    Ok(db_for_link)
 }

@@ -186,7 +186,7 @@ fn arch_config_act_settings_from_the_environment() {
         "{e}"
     );
     let c = from_env(&env(&[("HOMELAB_ADMIN_STATE_DIR", "/tmp/a")])).unwrap();
-    assert_eq!(c.schedules_file().to_str(), Some("/tmp/a/schedules.json"));
+    assert_eq!(c.data_dir.to_str(), Some("/tmp/a"));
     let c = from_env(&env(&[
         ("HOMELAB_ADMIN_DATA_DIR", "/d"),
         ("HOMELAB_ADMIN_STATE_DIR", "/s"),

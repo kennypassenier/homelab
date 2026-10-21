@@ -230,19 +230,24 @@ async fn main() -> std::process::ExitCode {
             .filter(|j| !j.trim().is_empty()),
     }));
     // milestone act: actions, schedules and notifications.
-    if config.is_some()
-        && let Err(e) = homelab_admin::shell::actions::mount(
+    let app_db = if config.is_some() {
+        match homelab_admin::shell::actions::mount(
             &mut app,
             host_client.clone(),
             live.clone(),
             shared.clone(),
             demo_host,
             hooks.clone(),
-        )
-    {
-        eprintln!("homelab-admin: {e}");
-        return std::process::ExitCode::FAILURE;
-    }
+        ) {
+            Ok(db) => Some(db),
+            Err(e) => {
+                eprintln!("homelab-admin: {e}");
+                return std::process::ExitCode::FAILURE;
+            }
+        }
+    } else {
+        None
+    };
     app.dashboard_routes(routes::router(
         shared.clone(),
         host_client,
@@ -302,12 +307,14 @@ async fn main() -> std::process::ExitCode {
                     "dev_without_locks is set: this dashboard does not attach for `homelab ui` steps"
                 );
             }
+            let mut link = LinkConfig::from_admin(&c);
+            link.trend_db = app_db;
             tokio::spawn(host_link::run(
                 HostTarget {
                     addr: c.host.clone(),
                     token: c.host_token.clone(),
                 },
-                LinkConfig::from_admin(&c),
+                link,
                 shared,
                 live,
                 host_asks,

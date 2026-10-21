@@ -50,12 +50,7 @@ fn check_yaml(text: &str) -> Option<Problem> {
                 .location()
                 .map(|l| (l.line(), l.column()))
                 .unwrap_or((1, 1));
-            let said = e.to_string();
-            // The text ends with " at line N column M"; the field says that itself.
-            let message = said
-                .rfind(" at line ")
-                .map_or(said.as_str(), |i| &said[..i])
-                .to_string();
+            let message = without_locations(&e.to_string());
             return Some(Problem {
                 line,
                 column,
@@ -64,6 +59,32 @@ fn check_yaml(text: &str) -> Option<Problem> {
         }
     }
     None
+}
+
+/// The sentence without its " at line N column M" parts (the field names the
+/// place itself): "did not find expected ',' at line 3 column 5, while parsing
+/// a flow sequence at line 2 column 8" reads "did not find expected ',', while
+/// parsing a flow sequence".
+fn without_locations(said: &str) -> String {
+    let mut out = String::new();
+    let mut rest = said;
+    while let Some(i) = rest.find(" at line ") {
+        out.push_str(&rest[..i]);
+        let after = &rest[i + " at line ".len()..];
+        let digits = |t: &str| t.len() - t.trim_start_matches(|c: char| c.is_ascii_digit()).len();
+        let line_end = digits(after);
+        let tail = &after[line_end..];
+        rest = match tail.strip_prefix(" column ") {
+            Some(t) if line_end > 0 => &t[digits(t)..],
+            _ => {
+                // Not a place after all: the words stay.
+                out.push_str(" at line ");
+                after
+            }
+        };
+    }
+    out.push_str(rest);
+    out
 }
 
 fn check_toml(text: &str) -> Option<Problem> {
@@ -111,6 +132,18 @@ mod tests {
         assert!(p.line >= 2, "the flow list starts on line 2: {p:?}");
         assert!(p.column >= 1);
         assert!(!p.message.contains(" at line "), "{p:?}");
+    }
+
+    #[test]
+    fn the_places_leave_the_sentence() {
+        assert_eq!(
+            without_locations(
+                "did not find expected ',' at line 3 column 5, while parsing a flow sequence at line 2 column 8"
+            ),
+            "did not find expected ',', while parsing a flow sequence"
+        );
+        assert_eq!(without_locations("no place here"), "no place here");
+        assert_eq!(without_locations("odd at line x"), "odd at line x");
     }
 
     #[test]

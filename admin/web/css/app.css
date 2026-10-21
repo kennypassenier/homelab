@@ -2821,3 +2821,12 @@ details.nx-card--fold[open] > summary::before {
     grid-auto-columns: minmax(0, 1fr);
   }
 }
+
+/* A form grid that holds a refresh control: the control track is as wide as
+   the chooser's six choices (kp's 3fr gave 459 px of the 570 they need, so
+   "Other…" stood under the read line; found by the layout walk,
+   kp-gaps/homelab.md 144). Past the grid's room the chooser scrolls, as the
+   package intends. Settings places its own bar (settings.css). */
+.kp-formgrid:has(.kp-refresh):not(.st-working) {
+  --kp-formgrid-control: max-content;
+}

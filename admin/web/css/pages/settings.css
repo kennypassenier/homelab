@@ -83,14 +83,20 @@
   grid-template-columns: subgrid;
   column-gap: inherit;
 }
+/* The chooser is wider than the control track alone (its six choices need
+   about 36 rem): it stands on the control and value tracks, the read line
+   under it on the same two, "Refresh now" in the actions column. */
 .st-working .kp-refresh__bar > .kp-refresh__chooser {
-  grid-column: 1;
+  grid-column: 1 / span 2;
+  grid-row: 1;
 }
 .st-working .kp-refresh__bar > .kp-refresh__line {
-  grid-column: 2;
+  grid-column: 1 / span 2;
+  grid-row: 2;
 }
 .st-working .kp-refresh__bar > .kp-refresh__now {
   grid-column: 3;
+  grid-row: 1;
   justify-self: stretch;
 }
 .st-working .kp-refresh > :not(.kp-refresh__bar) {
@@ -120,14 +126,19 @@
   max-inline-size: 24rem;
 }
 
+/* The same fold on a phone, by the window as well as by the container; the
+   three placements above are more specific than `> *`, so each is named. */
 @container kp-formgrid (max-width: 36rem) {
   .st-working .kp-formgrid__control:has(> .kp-refresh),
   .st-working .kp-refresh,
   .st-working .kp-refresh__bar {
     grid-template-columns: minmax(0, 1fr);
   }
-  .st-working .kp-refresh__bar > * {
+  .st-working .kp-refresh__bar > .kp-refresh__chooser,
+  .st-working .kp-refresh__bar > .kp-refresh__line,
+  .st-working .kp-refresh__bar > .kp-refresh__now {
     grid-column: 1;
+    grid-row: auto;
     justify-self: stretch;
   }
 }

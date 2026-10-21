@@ -74,62 +74,6 @@ export function hubOf(topo) {
   return best;
 }
 
-/**
- * Where every node sits in a W×H box (the demo's layout): the hub in the
- * middle, the others on an ellipse around it in a stable order — the
- * fleet's stacks sorted by name, then the addresses outside it — so the
- * same fleet always draws the same picture.
- * @param {Topology} topo
- * @param {number} W
- * @param {number} H
- * @returns {Map<string, [number, number]>}
- */
-export function layout(topo, W, H) {
-  /** @type {Map<string, [number, number]>} */
-  const pos = new Map();
-  const hub = hubOf(topo);
-  const cx = W / 2;
-  const cy = H / 2 - 10;
-  const R = Math.min(W, H) * 0.36;
-  const sx = W > 600 ? 1.35 : 1;
-  if (hub) pos.set(hub, [cx, cy]);
-  const ring = topo.nodes
-    .filter((n) => n.stack !== hub)
-    .sort(
-      (a, b) =>
-        Number(a.kind === "external") - Number(b.kind === "external") ||
-        a.stack.localeCompare(b.stack),
-    );
-  ring.forEach((n, i) => {
-    const a = -Math.PI / 2 + (i / Math.max(1, ring.length)) * Math.PI * 2;
-    pos.set(n.stack, [cx + Math.cos(a) * R * sx, cy + Math.sin(a) * R]);
-  });
-  return pos;
-}
-
-/**
- * Each edge's bend: edges between the same two nodes fan out (0, +26,
- * −26, +52, …) so two kinds of connection never draw on top of each
- * other; a named address always bends.
- * @param {TopoEdge[]} edges
- * @returns {number[]}
- */
-export function bends(edges) {
-  /** @type {Map<string, number>} */
-  const seen = new Map();
-  return edges.map((e) => {
-    const key = [e.from, e.to].sort().join("\u0000");
-    const k = seen.get(key) ?? 0;
-    seen.set(key, k + 1);
-    const step = e.kind === "named" ? k + 1 : k;
-    if (step === 0) return 0;
-    const mag = Math.ceil(step / 2) * 26;
-    // The same bend reads opposite ways for a → b and b → a.
-    const dir = (step % 2 ? 1 : -1) * (e.from < e.to ? 1 : -1);
-    return mag * dir;
-  });
-}
-
 /** @param {TopoNode} n */
 export const isStack = (n) => n.kind !== "external";
 
@@ -357,17 +301,4 @@ export function trafficByStack(panels) {
       m.set(s.label, (m.get(s.label) ?? 0) + s.points[s.points.length - 1][1]);
     }
   return m;
-}
-
-/**
- * A node's radius: 14 px, or with measured traffic on, 10 to 24 px by the
- * square root of its share of the busiest stack's traffic.
- * @param {TopoNode} n
- * @param {Map<string, number> | null} traffic
- */
-export function radius(n, traffic) {
-  if (!isStack(n)) return 9;
-  if (!traffic) return 14;
-  const max = Math.max(1, ...traffic.values());
-  return 10 + 14 * Math.sqrt((traffic.get(n.stack) ?? 0) / max);
 }

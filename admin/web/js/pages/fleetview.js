@@ -19,7 +19,6 @@ import { fetchJson, h, slowRead } from "../dom.js";
 import { declare, declareField, drivable } from "../drivable.js";
 import { formatDateTime } from "../format.js";
 import {
-  EDGE_KINDS,
   capacityRows,
   firewallOf,
   hubOf,
@@ -53,6 +52,7 @@ import {
 } from "../ui.js";
 import { attachSwitches } from "/static/kp/js/forms.js";
 import { attachCardStates, setCardState } from "/static/kp/js/card-state.js";
+import { usesOf } from "../mapparts.js";
 import { mapGraph } from "./mapgraph.js";
 
 // fix-239: Live view reaches every stale image's Update (`homelab ui click
@@ -72,13 +72,6 @@ const VIEW = declare({
   opens: "view",
   row: "graph|list|matrix",
   what: "show the topology as a graph, as a list or as a matrix of who reaches whom",
-});
-const KIND = declare({
-  id: "map-edge-kind",
-  page: "fleetview",
-  opens: "view",
-  row: "declared|planned|open|named|route",
-  what: "show or hide one kind of connection on the topology",
 });
 // review M5: every page field Live view may set is declared (drivable.js
 // `declareField`); the client and the dashboard refuse any other.
@@ -322,8 +315,6 @@ export function mount(root) {
   let topology = null;
   /** @type {any} */
   let staleBody = null;
-  /** @type {ReturnType<typeof mapGraph> | null} */
-  let graph = null;
   /** @type {Map<string, number> | null} */
   let traffic = null;
   /** @param {string} n */
@@ -368,6 +359,64 @@ export function mount(root) {
   const listBox = h("div", { class: "mp-list", hidden: "" });
   const matrixBox = h("div", { class: "mp-matrix", hidden: "" }, matrix.el);
   const topoGrid = h("div", { class: "mp-graphcell" });
+  /**
+   * The graph's details panel for a picked stack: what it is, its firewall,
+   * what it uses and who uses it, and a link to its own page.
+   * @param {string} id
+   */
+  const detailOf = (id) => {
+    const t = topology;
+    const n = t?.nodes.find((x) => x.stack === id);
+    if (!t || !n) return null;
+    const { uses, usedBy } = usesOf(t, id);
+    const names = (/** @type {{other: string}[]} */ xs) =>
+      [...new Set(xs.map((x) => x.other))].join(", ") || "nothing";
+    const rows = isStack(n)
+      ? [
+          ["Address", `CT ${n.vmid} · ${n.ip}`],
+          ["Firewall", firewallOf(n).text],
+          ["Uses", names(uses)],
+          ["Used by", names(usedBy)],
+        ]
+      : [
+          ["What it is", "An address outside the fleet"],
+          ["Reached by", names(usedBy)],
+        ];
+    return h(
+      "div",
+      { class: "mp-facts" },
+      h(
+        "dl",
+        { class: "mp-facts__list" },
+        rows.map(([k, v]) => [h("dt", null, k), h("dd", null, v)]),
+      ),
+      isStack(n)
+        ? drivable(
+            h(
+              "a",
+              {
+                class: "kp-button kp-button--sm",
+                href: stackHref(id),
+                title: `Open ${id}'s own page`,
+              },
+              "Open stack",
+            ),
+            OPEN_STACK,
+            `detail:${id}`,
+          )
+        : null,
+    );
+  };
+  // The graph exists from the first frame: its loading is the theme's own
+  // picture, and the topology is handed to it once it is read.
+  const graph = mapGraph({
+    traffic: () => (input.checked ? traffic : null),
+    detail: detailOf,
+    onChange: (sel, hover) => onGraph(sel, hover),
+  });
+  stops.push(graph.stop);
+  topoGrid.append(graph.el);
+  topoData.replaceChildren(topoGrid, listBox, matrixBox);
   topoRow.append(side);
   /** The side panel has nothing to say when the topology could not be read or is empty. */
   let sideOff = false;
@@ -429,7 +478,7 @@ export function mount(root) {
     if (v === "graph") url.searchParams.delete("view");
     else url.searchParams.set("view", v);
     history.replaceState(history.state, "", url);
-    if (v === "graph") graph?.draw();
+    if (v === "graph") graph.draw();
   }
 
   /** @param {string[]} sel @param {string | null} hover */
@@ -457,52 +506,9 @@ export function mount(root) {
       });
       return;
     }
-    graph?.stop();
     const want = (params.get("select") ?? "")
       .split(",")
       .filter((s) => t.nodes.some((n) => n.stack === s));
-    graph = mapGraph(t, {
-      traffic: input.checked ? traffic : null,
-      selected: want,
-      onChange: onGraph,
-    });
-    const kinds = EDGE_KINDS.filter((k) =>
-      t.edges.some((e) => e.kind === k.kind),
-    );
-    const legend = h("div", {
-      class: "mp-kinds",
-      role: "group",
-      "aria-label": "Connection kinds: click to hide or show",
-    });
-    for (const k of kinds) {
-      const b = h(
-        "button",
-        {
-          type: "button",
-          class: "mp-kind",
-          "data-kind": k.kind,
-          "aria-pressed": "true",
-          title: `${k.hint}; click to hide or show these lines`,
-        },
-        h("i", {
-          class: `mp-kind__line mp-kind__line--${k.kind}`,
-          "aria-hidden": "true",
-        }),
-        k.label,
-      );
-      drivable(b, KIND, k.kind);
-      b.addEventListener("click", () => {
-        const hide = b.getAttribute("aria-pressed") === "true";
-        b.setAttribute("aria-pressed", String(!hide));
-        graph?.hideKind(k.kind, hide);
-      });
-      legend.append(b);
-    }
-    graph.onKindsReset(() => {
-      for (const b of legend.querySelectorAll("button"))
-        b.setAttribute("aria-pressed", "true");
-    });
-    topoGrid.replaceChildren(graph.el);
     sideOff = false;
     panel.set(t, "ready");
     matrix.set(t, "ready");
@@ -549,17 +555,11 @@ export function mount(root) {
       }),
     );
     listBox.replaceChildren(tbl.wrap);
-    topoData.replaceChildren(
-      h("div", { class: "mp-legends" }, legend),
-      topoGrid,
-      listBox,
-      matrixBox,
-    );
     setCardState(topoStage, "ready");
     listTable.attach(listBox);
     showView(viewSeg.value());
-    graph.draw();
-    onGraph(want, null);
+    graph.show(t, want);
+    onGraph(graph.selected(), null);
   };
 
   const ensureTraffic = async () => {
@@ -571,7 +571,7 @@ export function mount(root) {
     );
     if (abort.signal.aborted || !r.ok) return;
     traffic = trafficByStack(r.body.panels ?? []);
-    graph?.setTraffic(input.checked ? traffic : null);
+    graph.setTraffic();
   };
   input.addEventListener("change", () => {
     const url = new URL(location.href);
@@ -579,13 +579,19 @@ export function mount(root) {
     else url.searchParams.delete("traffic");
     history.replaceState(history.state, "", url);
     if (input.checked) void ensureTraffic().catch(() => {});
-    else graph?.setTraffic(null);
+    else graph.setTraffic();
   });
 
   /** Reads the topology; the matrix's failed plate calls it again. */
   const readTopology = async () => {
     if (topology === null) {
-      setCardState(topoStage, "loading", { words: "Reading the topology" });
+      // The graph view loads with the theme's own picture of the coming
+      // network; the list and the matrix have the card's busy state.
+      if (viewSeg.value() === "graph") {
+        setCardState(topoStage, "ready");
+        graph.loading("Reading the topology");
+      } else
+        setCardState(topoStage, "loading", { words: "Reading the topology" });
       matrix.set(null, "loading");
     }
     const r = await fetchJson("/data/topology", "the topology", abort.signal);
@@ -694,7 +700,6 @@ export function mount(root) {
 
   return () => {
     abort.abort();
-    graph?.stop();
     for (const s of stops) s();
     root.classList.remove("mk-page", "mp-page");
   };

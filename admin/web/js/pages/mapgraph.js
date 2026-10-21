@@ -1,8 +1,13 @@
-// redesign-371-map (3.71.0): the Map's ONE topology (fix-215, invariant
-// 24), drawn as the approved demo draws it (fleetview.html/.js): the hub in
-// the middle, every other stack on a ring round it, the addresses outside
-// the fleet dashed, one colour per stack (invariant 16), the connection
-// kinds told apart by line style.
+// The Map's ONE topology (fix-215, invariant 24) on kp-themes' network graph
+// (11.2.0, gap 102, graph-1020: Kenny chose "Volledig" on 2026-10-20). The
+// drawing itself is the package's: the hub in the middle, every other stack
+// on a ring round it, the addresses outside the fleet dashed, one fixed
+// colour per stack (invariant 16), the connection kinds told apart by line
+// style, an arrowhead where a connection goes to, names whole under their
+// nodes, Show all and the hint inside the drawing, wheel/pinch zoom and
+// drag pan, and a details panel for a picked stack. This module only turns
+// the Map's topology into the graph's data, names the graph's controls for
+// Live view and carries the Map's selection in and out.
 //
 //   hover / focus a node                       isolate its connections
 //   click / Enter                              turn the node on or off in
@@ -13,15 +18,22 @@
 //
 // A hover only toggles classes, never rebuilds a node (invariant 56: a
 // click right after the pointer moved must land on the node under it);
-// only a resize, the traffic switch and the data itself redraw.
+// that is the graph's own rule. Only a resize, the traffic switch and the
+// data itself draw it again.
 
 import { h } from "../dom.js";
+import {
+  GRAPH_CHANGE_EVENT,
+  attachGraphs,
+  graphHideKind,
+  graphSelect,
+  setGraphData,
+  setGraphState,
+} from "/static/kp/js/graph.js";
 import { registerShortcuts } from "/static/kp/js/shortcuts.js";
 import { GROUP_MAP, unlessDialog } from "../shortcuts.js";
 import { declare, drivable } from "../drivable.js";
-import { bends, hues, isStack, layout, radius } from "../mapview.js";
-
-const NS = "http://www.w3.org/2000/svg";
+import { EDGE_KINDS, hubOf, hues, isStack } from "../mapview.js";
 
 const NODE = declare({
   id: "map-node",
@@ -38,270 +50,193 @@ const SHOW_ALL = declare({
   shows: "while a node is selected",
   reach: [{ do: "click", control: "map-node", row: "*" }],
 });
+const KIND = declare({
+  id: "map-edge-kind",
+  page: "fleetview",
+  opens: "view",
+  row: "declared|planned|open|named|route",
+  what: "show or hide one kind of connection on the topology",
+});
 
 /**
- * @param {string} tag
- * @param {Record<string, string | number>} [attrs]
- * @returns {SVGElement}
+ * The Map's connection kinds as the graph draws them: the line style and
+ * colour each kind has always had on the Map.
+ * @type {Record<string, {style: "solid" | "dash" | "dot" | "long-dash", colour: string}>}
  */
-function svg(tag, attrs = {}) {
-  const e = /** @type {SVGElement} */ (document.createElementNS(NS, tag));
-  for (const [k, v] of Object.entries(attrs)) e.setAttribute(k, String(v));
-  return e;
-}
+const LOOK = {
+  declared: { style: "solid", colour: "var(--chart-3)" },
+  planned: { style: "dash", colour: "var(--muted-foreground)" },
+  open: { style: "long-dash", colour: "var(--mk-warn)" },
+  named: { style: "dot", colour: "var(--chart-2)" },
+  route: { style: "solid", colour: "var(--chart-1)" },
+};
 
 /**
  * @typedef {import("../topology.js").Topology} Topology
+ * @typedef {import("/static/kp/js/graph.js").GraphData} GraphData
  */
 
 /**
+ * The topology as the graph's data. A node's weight is its share of the
+ * busiest stack's measured traffic (the graph sizes it 10 to 24 px by the
+ * square root, 14 px without), an address outside the fleet is the graph's
+ * own smaller dashed node, a stack whose live firewall differs from the
+ * repository carries the graph's mismatch ring.
  * @param {Topology} topo
- * @param {{traffic: Map<string, number> | null, selected?: Iterable<string>,
+ * @param {Map<string, number> | null} traffic
+ * @returns {GraphData}
+ */
+export function graphData(topo, traffic) {
+  const hue = hues(topo);
+  const max = traffic ? Math.max(1, ...traffic.values()) : 1;
+  return {
+    ...(hubOf(topo) ? { hub: /** @type {string} */ (hubOf(topo)) } : {}),
+    nodes: topo.nodes.map((n) => ({
+      id: n.stack,
+      label: n.stack,
+      description: isStack(n)
+        ? `CT ${n.vmid}, ${n.ip}`
+        : "an address outside the fleet",
+      ...(isStack(n)
+        ? {
+            hue: hue.get(n.stack) ?? 0,
+            ...(traffic ? { weight: (traffic.get(n.stack) ?? 0) / max } : {}),
+          }
+        : { external: true }),
+      ...(n.live_enforced != null && n.live_matches_repo === false
+        ? { flag: /** @type {const} */ ("mismatch") }
+        : {}),
+    })),
+    edges: topo.edges.map((e) => ({
+      from: e.from,
+      to: e.to,
+      kind: e.kind,
+      detail: e.detail.join(", ") || e.kind,
+    })),
+    kinds: EDGE_KINDS.map((k) => ({
+      kind: k.kind,
+      label: k.label,
+      hint: k.hint,
+      ...(LOOK[k.kind] ?? LOOK.declared),
+    })),
+  };
+}
+
+/**
+ * The graph, one per Map page. It exists from the first frame (loading
+ * with the theme's own picture), gets the topology with `show`, and keeps
+ * the Map's selection, hover and hidden kinds across a redraw.
+ * @param {{traffic: () => Map<string, number> | null,
+ *   detail: (id: string) => Node | null,
  *   onChange: (selected: string[], hover: string | null) => void}} opts
  */
-export function mapGraph(topo, opts) {
-  const hue = hues(topo);
+export function mapGraph(opts) {
+  /** @type {Topology | null} */
+  let topo = null;
+  /** @type {string[]} */
+  let selected = [];
+  /** @type {string[]} */
+  let hiddenKinds = [];
   /** @type {(() => void) | null} */
-  let kindsChanged = null;
-  let drawnWidth = -1;
-  /** @type {Set<string>} */
-  const pinned = new Set(opts.selected ?? []);
-  /** @type {string | null} */
-  let hover = null;
-  /** @type {Set<string>} */
-  const hiddenKinds = new Set();
-  let traffic = opts.traffic;
+  let detach = null;
 
-  const root = /** @type {SVGSVGElement} */ (
-    svg("svg", {
-      class: "mp-svg",
-      role: "group",
-      "aria-label":
-        "Topology: Tab to a stack, Enter to add it to the selection or take it out",
-    })
-  );
-  const reset = h(
-    "button",
-    {
-      type: "button",
-      class: "kp-button kp-button--sm mp-graph__reset",
-      hidden: "",
-      title: "Clear the selection and show every connection kind again (Esc)",
-    },
-    "Show all",
-  );
-  drivable(reset, SHOW_ALL);
-  const box = h(
-    "div",
-    { class: "mp-graph", id: "map-graph" },
-    reset,
-    root,
-    h(
-      "p",
-      { class: "mp-graph__hint" },
-      h("span", null, "Hover a stack to see only its connections"),
-      h(
-        "span",
-        null,
-        "Click a stack to add it to the selection, click again to remove it",
-      ),
-      h("span", null, "Esc shows all"),
-    ),
-  );
+  // The graph's options are its attributes (kp-themes 11.2.0): names under
+  // the nodes, Show all and the hint inside, one fixed colour per stack,
+  // arrowheads, zoom and pan, the details panel, and the Map's own radii
+  // (the ring a share of the picture, the node in px).
+  const el = h("figure", {
+    class: "kp-graph",
+    id: "map-graph",
+    "data-kp-graph": true,
+    "data-kp-key": "map-graph",
+    "data-kp-labels": "below",
+    "data-kp-chrome": "inside",
+    "data-kp-colour": "fixed",
+    "data-kp-direction": "arrows",
+    "data-kp-zoom": true,
+    "data-kp-detail": true,
+    "data-kp-ring-radius": "0.38",
+    "data-kp-node-radius": "14",
+    "aria-label":
+      "Topology: Tab to a stack, Enter to add it to the selection or take it out",
+  });
+  let hover = /** @type {string | null} */ (null);
+  el.addEventListener(GRAPH_CHANGE_EVENT, (e) => {
+    const d = /** @type {CustomEvent} */ (e).detail;
+    selected = d.selected;
+    hiddenKinds = d.hiddenKinds;
+    hover = d.hover;
+    opts.onChange(selected, hover);
+  });
 
-  /** @param {string} id */
-  const toggle = (id) => {
-    if (pinned.has(id)) pinned.delete(id);
-    else pinned.add(id);
-    restyle();
-    opts.onChange([...pinned], hover);
+  /** Name the graph's controls for Live view; it calls this on every draw. */
+  const decorate = (
+    /** @type {Element} */ part,
+    /** @type {import("/static/kp/js/graph.js").GraphDecorateInfo} */ info,
+  ) => {
+    const p = /** @type {HTMLElement} */ (part);
+    if (info.kind === "node" && info.value) drivable(p, NODE, info.value);
+    else if (info.kind === "kind" && info.value) drivable(p, KIND, info.value);
+    else if (info.kind === "show-all") drivable(p, SHOW_ALL);
   };
-  /** @param {string | null} id */
-  const setHover = (id) => {
-    hover = id;
-    restyle();
-    opts.onChange([...pinned], hover);
-  };
-
-  function draw() {
-    drawnWidth = box.clientWidth;
-    const W = Math.max(280, box.clientWidth || 800);
-    const H = W < 600 ? 480 : Math.max(420, Math.min(560, Math.round(W * 0.6)));
-    root.setAttribute("viewBox", `0 0 ${W} ${H}`);
-    root.setAttribute("height", String(H));
-    root.replaceChildren();
-    const pos = layout(topo, W, H);
-    const bend = bends(topo.edges);
-    const eg = svg("g", { class: "mp-edges" });
-    topo.edges.forEach((e, i) => {
-      const a = pos.get(e.from);
-      const b = pos.get(e.to);
-      if (!a || !b) return;
-      const len = Math.hypot(b[0] - a[0], b[1] - a[1]) || 1;
-      const mx = (a[0] + b[0]) / 2 - ((b[1] - a[1]) / len) * bend[i];
-      const my = (a[1] + b[1]) / 2 + ((b[0] - a[0]) / len) * bend[i];
-      const p = svg("path", {
-        d: `M${a[0].toFixed(1)},${a[1].toFixed(1)} Q${mx.toFixed(1)},${my.toFixed(1)} ${b[0].toFixed(1)},${b[1].toFixed(1)}`,
-        class: `mp-edge mp-edge--${e.kind}`,
-        "data-from": e.from,
-        "data-to": e.to,
-        "data-kind": e.kind,
-      });
-      const t = svg("title");
-      t.textContent = `${e.from} → ${e.to}: ${e.detail.join(", ") || e.kind}`;
-      p.append(t);
-      eg.append(p);
+  const attach = () => {
+    detach ??= attachGraphs(el, {
+      decorate,
+      detail: ({ id }) => opts.detail(id),
     });
-    root.append(eg);
-    for (const n of topo.nodes) {
-      const at = pos.get(n.stack);
-      if (!at) continue;
-      const [x, y] = at;
-      const r = radius(n, traffic);
-      const ext = !isStack(n);
-      const g = svg("g", {
-        class: `mp-node${ext ? " mp-node--ext" : ""}`,
-        "data-stack": n.stack,
-        tabindex: 0,
-        role: "button",
-        "aria-pressed": String(pinned.has(n.stack)),
-        "aria-label": ext
-          ? `${n.stack}, an address outside the fleet`
-          : `${n.stack}, vmid ${n.vmid}, ${n.ip}`,
-      });
-      if (!ext)
-        g.style.setProperty("--stack-hue", String(hue.get(n.stack) ?? 0));
-      if (traffic && !ext)
-        g.setAttribute(
-          "data-traffic",
-          String(Math.round(traffic.get(n.stack) ?? 0)),
-        );
-      g.append(
-        svg("circle", {
-          class: `mp-ring${traffic && !ext ? " mp-ring--traffic" : ""}`,
-          cx: x,
-          cy: y,
-          r,
-        }),
-      );
-      if (!ext)
-        g.append(
-          svg("circle", {
-            class: "mp-core",
-            cx: x,
-            cy: y,
-            r: Math.max(4, r - 6),
-          }),
-        );
-      if (n.live_enforced != null && n.live_matches_repo === false)
-        g.append(svg("circle", { class: "mp-fwring", cx: x, cy: y, r: r + 5 }));
-      const t = svg("text", { x, y: y + r + 16, "text-anchor": "middle" });
-      t.textContent = n.stack;
-      g.append(t);
-      drivable(/** @type {any} */ (g), NODE, n.stack);
-      g.addEventListener("pointerenter", () => setHover(n.stack));
-      g.addEventListener("pointerleave", () => setHover(null));
-      g.addEventListener("focus", () => setHover(n.stack));
-      g.addEventListener("blur", () => setHover(null));
-      g.addEventListener("click", () => toggle(n.stack));
-      g.addEventListener("keydown", (e) => {
-        if (e.key === "Enter" || e.key === " ") {
-          e.preventDefault();
-          toggle(n.stack);
-        }
-      });
-      root.append(g);
-    }
-    restyle();
-  }
-
-  /** Selection, hover and hidden kinds change classes only, never the DOM. */
-  function restyle() {
-    const focus = new Set(pinned);
-    if (hover) focus.add(hover);
-    box.toggleAttribute("data-focus", focus.size > 0);
-    const on = new Set(focus);
-    for (const p of root.querySelectorAll(".mp-edge")) {
-      const a = p.getAttribute("data-from") ?? "";
-      const b = p.getAttribute("data-to") ?? "";
-      const hidden = hiddenKinds.has(p.getAttribute("data-kind") ?? "");
-      const lit = !hidden && (focus.has(a) || focus.has(b));
-      p.classList.toggle("is-hidden", hidden);
-      p.classList.toggle("is-on", lit);
-      p.classList.toggle("is-dim", focus.size > 0 && !lit && !hidden);
-      if (lit) {
-        on.add(a);
-        on.add(b);
-      }
-    }
-    for (const g of root.querySelectorAll(".mp-node")) {
-      const id = g.getAttribute("data-stack") ?? "";
-      g.classList.toggle("is-on", on.has(id));
-      g.classList.toggle("is-dim", focus.size > 0 && !on.has(id));
-      g.classList.toggle("is-pinned", pinned.has(id));
-      g.setAttribute("aria-pressed", String(pinned.has(id)));
-    }
-    reset.hidden = pinned.size === 0 && hiddenKinds.size === 0;
-  }
+  };
 
   const clear = () => {
-    pinned.clear();
-    hiddenKinds.clear();
-    restyle();
-    opts.onChange([], hover);
-    return true;
+    for (const k of hiddenKinds) graphHideKind(el, k, false);
+    graphSelect(el, []);
   };
-  reset.addEventListener("click", () => {
-    clear();
-    kindsChanged?.();
-  });
   const stopKeys = registerShortcuts("page:map", [
     {
       keys: "Escape",
       what: "Unpin the stacks and show every kind again",
       group: GROUP_MAP,
-      when: () => pinned.size > 0 || hiddenKinds.size > 0,
+      when: () => selected.length > 0 || hiddenKinds.length > 0,
       reason: "Nothing is pinned or hidden",
       run: unlessDialog(() => {
-        if (pinned.size === 0 && hiddenKinds.size === 0) return false;
+        if (selected.length === 0 && hiddenKinds.length === 0) return false;
         clear();
-        kindsChanged?.();
         return undefined;
       }),
     },
   ]);
-  const ro =
-    typeof ResizeObserver === "function"
-      ? // Only a new width redraws: the box grows taller when the side
-        // panel beside it does (a hover fills it), and that must never
-        // rebuild a node (invariant 56).
-        new ResizeObserver(() => {
-          if (box.clientWidth !== drawnWidth) draw();
-        })
-      : null;
-  ro?.observe(box);
+
+  const paint = () => {
+    if (topo) setGraphData(el, graphData(topo, opts.traffic()));
+  };
   return {
-    el: box,
-    draw,
-    /** @param {Map<string, number> | null} t */
-    setTraffic: (t) => {
-      traffic = t;
-      draw();
+    el,
+    /** The theme's own loading picture, at the final height. @param {string} words */
+    loading: (words) => {
+      attach();
+      setGraphState(el, "loading", words);
     },
+    /**
+     * Draw the topology; `pick` is the selection to start with (the
+     * address's `select`), used only the first time.
+     * @param {Topology} t @param {string[]} [pick]
+     */
+    show: (t, pick = []) => {
+      const first = topo === null;
+      topo = t;
+      attach();
+      paint();
+      if (first && pick.length) graphSelect(el, pick);
+    },
+    /** The view came back on screen or the data moved: draw it again. */
+    draw: paint,
     /** @param {string} kind @param {boolean} hide */
-    hideKind: (kind, hide) => {
-      if (hide) hiddenKinds.add(kind);
-      else hiddenKinds.delete(kind);
-      restyle();
-    },
-    hidden: () => new Set(hiddenKinds),
-    /** @param {() => void} f */
-    onKindsReset: (f) => {
-      kindsChanged = f;
-    },
-    selected: () => [...pinned],
+    hideKind: (kind, hide) => graphHideKind(el, kind, hide),
+    selected: () => [...selected],
+    /** The traffic switch moved: the nodes are sized again. */
+    setTraffic: paint,
     stop: () => {
-      ro?.disconnect();
+      detach?.();
+      detach = null;
       stopKeys();
     },
   };

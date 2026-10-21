@@ -1,5 +1,5 @@
 // The fleet topology's shared types and one pure helper. The drawing lives in
-// pages/mapgraph.js and mapview.js; the two renderers that used to be here
+// pages/mapgraph.js (kp-themes' graph); the two renderers that used to be here
 // (topologyEl, topologyFigure) had no caller left.
 //
 // fix-207 (Kenny, Dutch): "gebruik voor elke stack een andere kleur" - every

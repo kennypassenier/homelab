@@ -1,17 +1,14 @@
-// redesign-371-map: the Map's pure half (js/mapview.js) — the layout of
+// redesign-371-map: the Map's pure half (js/mapview.js) — the hub of
 // the one topology, its KPI tiles, firewall words, capacity rows and the
 // stale images grouped per image.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
-  bends,
   capacityRows,
   firewallOf,
   hubOf,
-  layout,
   mapFigures,
   neighbours,
-  radius,
   shortDate,
   staleGroups,
 } from "../js/mapview.js";
@@ -72,17 +69,8 @@ const topo = {
   ],
 };
 
-test("redesign-371-map: the hub sits in the middle, the rest on a ring, the same picture every time", () => {
+test("redesign-371-map: the gateway is the hub, else the busiest node", () => {
   assert.equal(hubOf(topo), "edge");
-  const pos = layout(topo, 1000, 600);
-  const [cx, cy] = /** @type {[number, number]} */ (pos.get("edge"));
-  assert.equal(cx, 500);
-  assert.equal(cy, 290);
-  assert.equal(pos.size, 5);
-  // Stacks first in name order, the outside address last: admin at the top.
-  const [ax, ay] = /** @type {[number, number]} */ (pos.get("admin"));
-  assert.ok(Math.abs(ax - 500) < 0.001 && ay < cy);
-  assert.deepEqual(layout(topo, 1000, 600), pos);
   // Without a gateway the busiest node is the hub.
   assert.equal(
     hubOf({
@@ -91,14 +79,6 @@ test("redesign-371-map: the hub sits in the middle, the rest on a ring, the same
     }),
     "alpha",
   );
-});
-
-test("redesign-371-map: two connections between the same pair fan out, a named address always bends", () => {
-  const b = bends(topo.edges);
-  assert.equal(b[0], 0);
-  assert.equal(b[2], 0);
-  assert.notEqual(b[3], 0);
-  assert.notEqual(b[4], 0);
 });
 
 test("redesign-371-map: the tiles count stacks, connections, firewalls and stale images", () => {
@@ -205,12 +185,4 @@ test("redesign-371-map: capacity is one row per stack, busiest first, amber from
     { stack: "a", cpu: 13, mem: null, disk: null },
     { stack: "b", cpu: 6, mem: 78, disk: null },
   ]);
-  assert.equal(radius(topo.nodes[0], null), 14);
-  assert.equal(radius(topo.nodes[4], null), 9);
-  const t = new Map([
-    ["admin", 100],
-    ["alpha", 25],
-  ]);
-  assert.equal(radius(topo.nodes[0], t), 24);
-  assert.equal(radius(topo.nodes[1], t), 17);
 });

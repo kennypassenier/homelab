@@ -718,7 +718,7 @@ test("invariants: only one topology exists, on the Fleet view, and the traffic t
     await page.goto(`${BASE}/firewall`);
     await page.waitForSelector("table", { timeout: 10000 });
     assert.equal(
-      await page.locator(".topology__svg, .mp-svg").count(),
+      await page.locator(".topology__svg, .kp-graph__svg").count(),
       0,
       "the firewall page must draw no topology of its own any more",
     );
@@ -732,22 +732,37 @@ test("invariants: only one topology exists, on the Fleet view, and the traffic t
     assert.ok(href?.includes("traffic=1"), `link missing traffic=1: ${href}`);
 
     await page.goto(`${BASE}/fleetview`);
-    // redesign-371-map: the Map's own renderer (js/pages/mapgraph.js).
-    await page.waitForSelector(".mp-svg", { timeout: 10000 });
+    // gap 102: the Map draws kp-themes' graph (js/pages/mapgraph.js).
+    await page.waitForSelector(".kp-graph__svg", { timeout: 10000 });
     assert.equal(
-      await page.locator(".mp-svg, .topology__svg").count(),
+      await page.locator(".kp-graph__svg, .topology__svg").count(),
       1,
       "the Map must draw exactly one topology",
     );
     const toggle = page.locator("#fleetview-traffic");
+    // The graph sizes a node by its weight (its share of the busiest
+    // stack's traffic): every stack ring is the base radius until then.
+    const ringRadii = () =>
+      page
+        .locator(
+          ".kp-graph__node:not(.kp-graph__node--external) .kp-graph__ring",
+        )
+        .evaluateAll((els) => els.map((el) => Number(el.getAttribute("r"))));
     assert.equal(
-      await page.locator(".mp-ring--traffic").count(),
-      0,
+      new Set(await ringRadii()).size,
+      1,
       "a traffic ring is drawn before the toggle is on",
     );
     await toggle.check();
     await page.waitForFunction(
-      () => document.querySelectorAll(".mp-ring--traffic").length > 0,
+      () => {
+        const r = [
+          ...document.querySelectorAll(
+            ".kp-graph__node:not(.kp-graph__node--external) .kp-graph__ring",
+          ),
+        ].map((el) => el.getAttribute("r"));
+        return new Set(r).size > 1;
+      },
       { timeout: 5000 },
     );
   } finally {
@@ -765,7 +780,9 @@ test("invariants: fleet view shows a legend and an edge for a stack whose own fi
     const page = await freshPage(context);
     await page.goto(`${BASE}/fleetview`);
     await page.waitForTimeout(600);
-    const legendItems = await page.locator(".mp-kinds .mp-kind").count();
+    const legendItems = await page
+      .locator(".kp-graph__kinds .kp-graph__kind")
+      .count();
     assert.ok(legendItems > 0, "the topology has no legend");
     // scripts/invariants-run.sh's fixture working copy: alpha-demo names
     // beta-demo's address (10.10.10.91:8080) directly in its own manifest,
@@ -775,10 +792,12 @@ test("invariants: fleet view shows a legend and an edge for a stack whose own fi
     // other on the circle layout draw a dead-straight vertical curve) —
     // present in the DOM is what matters here, not CSS visibility.
     await page.waitForFunction(
-      () => document.querySelectorAll(".mp-edge--named").length > 0,
+      () =>
+        document.querySelectorAll('.kp-graph__edge[data-kp-kind="named"]')
+          .length > 0,
       { timeout: 5000 },
     );
-    const named = page.locator(".mp-edge--named");
+    const named = page.locator('.kp-graph__edge[data-kp-kind="named"]');
     assert.ok(
       (await named.count()) > 0,
       "no named edge for alpha-demo -> beta-demo",
@@ -881,13 +900,16 @@ test("invariants: the topology gives every stack its own colour", async () => {
     const context = await browser.newContext();
     const page = await freshPage(context);
     await page.goto(`${BASE}/fleetview`);
-    await page.waitForSelector(".mp-node:not(.mp-node--ext)", {
-      timeout: 10000,
-    });
+    await page.waitForSelector(
+      ".kp-graph__node:not(.kp-graph__node--external)",
+      {
+        timeout: 10000,
+      },
+    );
     const nodeHues = await page
-      .locator(".mp-node:not(.mp-node--ext)")
+      .locator(".kp-graph__node:not(.kp-graph__node--external)")
       .evaluateAll((els) =>
-        els.map((el) => el.style.getPropertyValue("--stack-hue")),
+        els.map((el) => el.style.getPropertyValue("--kp-graph-hue")),
       );
     assert.ok(
       nodeHues.length >= 2,
@@ -914,28 +936,36 @@ test("invariants: hovering a stack in the topology isolates its own edges, leavi
     const context = await browser.newContext();
     const page = await freshPage(context);
     await page.goto(`${BASE}/fleetview`);
-    await page.waitForSelector(".mp-node:not(.mp-node--ext)", {
-      timeout: 10000,
-    });
+    await page.waitForSelector(
+      ".kp-graph__node:not(.kp-graph__node--external)",
+      {
+        timeout: 10000,
+      },
+    );
     const stacks = await page
-      .locator(".mp-node:not(.mp-node--ext)")
-      .evaluateAll((els) => els.map((el) => el.getAttribute("data-stack")));
+      .locator(".kp-graph__node:not(.kp-graph__node--external)")
+      .evaluateAll((els) => els.map((el) => el.getAttribute("data-kp-id")));
     assert.ok(
       stacks.length >= 2,
       "need at least two stacks to prove isolation",
     );
     const target = stacks[0];
-    const before = await page.locator(".mp-edge.is-dim").count();
+    const before = await page.locator(".kp-graph__edge.is-dim").count();
     assert.equal(before, 0, "nothing is dimmed before any hover");
-    await page.locator(`.mp-node[data-stack="${target}"]`).first().hover();
+    await page
+      .locator(`.kp-graph__node[data-kp-id="${target}"]`)
+      .first()
+      .hover();
     await page.waitForTimeout(50);
-    const edgeStates = await page.locator(".mp-edge").evaluateAll((els) =>
-      els.map((el) => ({
-        from: el.getAttribute("data-from"),
-        to: el.getAttribute("data-to"),
-        dim: el.classList.contains("is-dim"),
-      })),
-    );
+    const edgeStates = await page
+      .locator(".kp-graph__edge")
+      .evaluateAll((els) =>
+        els.map((el) => ({
+          from: el.getAttribute("data-kp-from"),
+          to: el.getAttribute("data-kp-to"),
+          dim: el.classList.contains("is-dim"),
+        })),
+      );
     for (const e of edgeStates) {
       const touches = e.from === target || e.to === target;
       assert.equal(
@@ -948,7 +978,7 @@ test("invariants: hovering a stack in the topology isolates its own edges, leavi
     await page.mouse.move(0, 0);
     await page.waitForTimeout(50);
     assert.equal(
-      await page.locator(".mp-edge.is-dim").count(),
+      await page.locator(".kp-graph__edge.is-dim").count(),
       0,
       "leaving the stack must restore every edge",
     );
@@ -967,8 +997,10 @@ test("invariants: a stack whose firewall the host enforces is shown as enforced 
     // that the first such stack is enforced on pve anyway, with the
     // mismatch flagged — Kenny's own "5 van de 11" case.
     await page.goto(`${BASE}/fleetview`);
-    await page.waitForSelector(".mp-node", { timeout: 10000 });
-    const mismatchRings = await page.locator(".mp-node .mp-fwring").count();
+    await page.waitForSelector(".kp-graph__node", { timeout: 10000 });
+    const mismatchRings = await page
+      .locator(".kp-graph__node .kp-graph__flag")
+      .count();
     assert.ok(
       mismatchRings > 0,
       "no node shows a host/repository firewall mismatch on the topology",
@@ -2546,25 +2578,27 @@ test("invariants: hovering the Fleet view topology never redraws a node, so a cl
     });
     const page = await freshPage(context);
     await page.goto(`${BASE}/fleetview`);
-    await page.locator(".mp-node").nth(1).waitFor({ timeout: 10000 });
+    await page.locator(".kp-graph__node").nth(1).waitFor({ timeout: 10000 });
     await page.waitForTimeout(500);
     const stacks = await page.evaluate(() => {
       /** @type {any} */ (window).__clicks = [];
-      const nodes = [...document.querySelectorAll(".mp-node")];
+      const nodes = [...document.querySelectorAll(".kp-graph__node")];
       /** @type {any} */ (window).__nodes = nodes;
       document.addEventListener(
         "click",
         (e) => {
-          const g = /** @type {Element} */ (e.target).closest?.(".mp-node");
+          const g = /** @type {Element} */ (e.target).closest?.(
+            ".kp-graph__node",
+          );
           /** @type {any} */ (window).__clicks.push(
-            g ? g.getAttribute("data-stack") : null,
+            g ? g.getAttribute("data-kp-id") : null,
           );
         },
         true,
       );
-      return nodes.map((n) => n.getAttribute("data-stack"));
+      return nodes.map((n) => n.getAttribute("data-kp-id"));
     });
-    const dots = page.locator(".mp-node .mp-ring");
+    const dots = page.locator(".kp-graph__node .kp-graph__ring");
     const a = await dots.nth(0).boundingBox();
     const b = await dots.nth(1).boundingBox();
     assert.ok(a && b, "no node to point at");
@@ -2575,7 +2609,7 @@ test("invariants: hovering the Fleet view topology never redraws a node, so a cl
     await page.mouse.click(b.x + b.width / 2, b.y + b.height / 2);
     const out = await page.evaluate(() => ({
       clicks: /** @type {any} */ (window).__clicks,
-      same: [...document.querySelectorAll(".mp-node")].every(
+      same: [...document.querySelectorAll(".kp-graph__node")].every(
         (n, i) => n === /** @type {any} */ (window).__nodes[i],
       ),
     }));
@@ -6397,7 +6431,7 @@ test("invariants: the Map is laid out as the approved demo, and a plain click on
     });
     const page = await freshPage(context);
     await page.goto(`${BASE}/map`);
-    await page.waitForSelector(".mp-node", { timeout: 10000 });
+    await page.waitForSelector(".kp-graph__node", { timeout: 10000 });
     const layout = await page.evaluate(() => ({
       title: document.querySelector("#page h1")?.textContent,
       tiles: [...document.querySelectorAll(".kp-kpis .kp-kpi__label")].map(
@@ -6431,8 +6465,8 @@ test("invariants: the Map is laid out as the approved demo, and a plain click on
       "Capacity and Disk growth do not share one column",
     );
 
-    const node = page.locator('.mp-node[data-stack="gateway"]');
-    await node.locator(".mp-ring").click();
+    const node = page.locator('.kp-graph__node[data-kp-id="gateway"]');
+    await node.locator(".kp-graph__ring").click();
     assert.equal(await node.getAttribute("aria-pressed"), "true");
     assert.match(page.url(), /select=gateway/);
     assert.match(
@@ -6441,11 +6475,11 @@ test("invariants: the Map is laid out as the approved demo, and a plain click on
       /gateway/,
     );
     // A second node joins the selection with a plain click.
-    const other = page.locator('.mp-node[data-stack="admin"]');
-    await other.locator(".mp-ring").click();
+    const other = page.locator('.kp-graph__node[data-kp-id="admin"]');
+    await other.locator(".kp-graph__ring").click();
     assert.equal(await other.getAttribute("aria-pressed"), "true");
     assert.equal(await node.getAttribute("aria-pressed"), "true");
-    await other.locator(".mp-ring").click();
+    await other.locator(".kp-graph__ring").click();
     assert.equal(await other.getAttribute("aria-pressed"), "false");
     await page.mouse.move(5, 5);
     await page.keyboard.press("Escape");

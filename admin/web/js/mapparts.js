@@ -2,7 +2,7 @@
 // panel, the matrix, capacity, disk growth and stale images were redone
 // after the first review: every part loads, empties and fails with the
 // theme's own states, and nothing is taller than its content). The network
-// graph itself is never touched (the owner's rule: its look never changes);
+// graph itself is kp-themes' own (gap 102);
 // js/pages/mapgraph.js draws it, this module draws what stands around it.
 //
 // Pure helpers first (tested without a browser), the DOM builders after.

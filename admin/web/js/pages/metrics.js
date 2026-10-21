@@ -596,8 +596,9 @@ export function mount(root, ctx) {
           el.dataset.kpTone = next.tone === "bad" ? "destructive" : "warning";
         else el.removeAttribute("data-kp-tone");
         setTrendData(fig, {
-          points: (next.points ?? []).map(([t, v]) => [t * 1000, v]),
-          step: (next.step ?? 600) * 1000,
+          timeUnit: "s",
+          points: next.points ?? [],
+          step: next.step ?? 600,
           unitKind: s.unit,
         });
       },

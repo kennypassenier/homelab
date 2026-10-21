@@ -96,9 +96,6 @@
   border-block-end: 1px solid var(--border);
 }
 .sh-tabbar .kp-tabs__list {
-  /* kp's visually hidden ", " between a tab's count and unit is absolute; without
-     a positioned scroller it widened the whole page to 600px at 390 (gap 134). */
-  position: relative;
   margin: 0;
   border-block-end: 0;
 }

@@ -101,9 +101,6 @@ const CHART_OPTIONS = { decorate };
 /** The dash of the `i`-th source's line — kp's own (0 = solid). */
 export const dashOf = kpDashOf;
 
-/** @param {number} s unix seconds */
-const toMs = (s) => Math.round(s * 1000);
-
 /** A moment's clock, as every page already prints it (js/format.js, rule 52). @param {number} t unix seconds */
 export const hhmm = (t) => formatClock(t);
 
@@ -146,11 +143,11 @@ const TONE = { bad: "critical", warn: "warning", info: "info" };
  * @returns {import("/static/kp/js/chart.js").ChartEvent}
  */
 const toKpEvent = (a) => ({
-  at: toMs(a.at),
+  at: a.at,
   label: a.label,
   tone: TONE[a.tone ?? "info"],
   ...(a.kind ? { kind: a.kind } : {}),
-  ...(a.until != null && a.until > a.at ? { until: toMs(a.until) } : {}),
+  ...(a.until != null && a.until > a.at ? { until: a.until } : {}),
   ...(a.href ? { href: a.href } : {}),
 });
 
@@ -163,20 +160,22 @@ const toKpEvent = (a) => ({
  * @returns {ChartData}
  */
 export const chartData = (opt) => ({
+  // Every time the dashboard holds is unix seconds (kp 11.2.0 timeUnit).
+  timeUnit: "s",
   label: opt.label,
   key: opt.key,
   unitKind: opt.unit,
   series: opt.series.map((s) => ({
     label: s.label,
-    points: s.points.map(([t, v]) => [toMs(t), v]),
+    points: s.points.map(([t, v]) => [t, v]),
     colour: s.colour,
     total: s.n,
   })),
   events: (opt.annotations ?? []).map(toKpEvent),
   kinds: EVENT_KINDS,
   band: "hatch",
-  from: toMs(opt.from),
-  to: toMs(opt.to),
+  from: opt.from,
+  to: opt.to,
   yMax: opt.yMax,
   threshold: opt.threshold,
   stacked: opt.stacked,

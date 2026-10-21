@@ -168,6 +168,7 @@ export function presetsCompare(deps) {
     "section",
     {
       class: "kp-card ps-compare-card",
+      "data-kp-card": "plain",
       "data-kp-state": "loading",
       "aria-label": "The presets side by side",
     },

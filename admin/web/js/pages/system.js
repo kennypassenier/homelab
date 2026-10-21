@@ -391,6 +391,7 @@ export function mount(root) {
     "section",
     {
       class: "kp-card sy-card",
+      "data-kp-card": "plain",
       "data-kp-state": "loading",
       "aria-label": "Versions",
     },

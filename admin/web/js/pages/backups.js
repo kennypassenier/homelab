@@ -677,6 +677,7 @@ export function mount(root) {
     "section",
     {
       class: "kp-card bk-card",
+      "data-kp-card": "plain",
       "data-kp-state": "loading",
       "aria-label": "Backups per night",
     },
@@ -835,7 +836,11 @@ export function mount(root) {
   );
   const nightFrame = h(
     "section",
-    { class: "kp-card bk-card", "aria-label": "One night" },
+    {
+      class: "kp-card bk-card",
+      "data-kp-card": "plain",
+      "aria-label": "One night",
+    },
     h(
       "div",
       { class: "bk-night__cols" },

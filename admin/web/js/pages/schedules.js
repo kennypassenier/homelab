@@ -21,7 +21,7 @@ import { schedulableActions } from "../actionforms.js";
 import { agoEl, setAgo } from "../ago.js";
 import { refusalCallout } from "../actui.js";
 import { fetchJson, h, patchKeyed, tableBlock } from "../dom.js";
-import { longCountdown } from "../longcountdown.js";
+import { attachCountdowns } from "/static/kp/js/countdown.js";
 import { declare, declareField, drivable } from "../drivable.js";
 import { openJobDialog } from "../jobpanel.js";
 import {
@@ -93,6 +93,7 @@ import {
   SELECTION_ACTION_EVENT,
   attachSelectionBars,
   setSelectionBusy,
+  setSelectionProgress,
   setSelectionResult,
 } from "/static/kp/js/selection-bar.js";
 import {
@@ -102,7 +103,6 @@ import {
   setSnoozeBusy,
   setSnoozedUntil,
 } from "/static/kp/js/snooze.js";
-import { getStrings, setStrings } from "/static/kp/js/strings.js";
 import { undoToast } from "/static/kp/js/undo-toast.js";
 import { attachUptimes, setUptime } from "/static/kp/js/uptime.js";
 import {
@@ -199,15 +199,6 @@ const END_PAUSE = declare({
   shows: "while the schedule is paused",
   reach: [{ do: "click", control: "edit-schedule", row: "*" }],
 });
-/** The picker's words on this page: a pause, not a reminder. */
-const PAUSE_WORDS = {
-  snoozeTrigger: "Pause until…",
-  snoozeChange: "Paused: change",
-  snoozeSaving: "Pausing…",
-  snoozeNone: "Running",
-  snoozeEnd: "Resume now",
-  snoozeUntil: (/** @type {string} */ moment) => `Paused until ${moment}`,
-};
 const UNDO_CHANGE = declare({
   id: "undo-schedule-change",
   page: "schedules",
@@ -294,16 +285,6 @@ export function mount(root, opts = {}) {
   /** @type {number | null | undefined} undefined: not read (yet) */
   let nightly;
   let alive = true;
-  // kp's strings are one set for the document: the pause words last for this
-  // page and the reminder words come back when it closes.
-  const kpWords = getStrings();
-  const wordsBefore = Object.fromEntries(
-    Object.keys(PAUSE_WORDS).map((k) => [
-      k,
-      /** @type {Record<string, unknown>} */ (kpWords)[k],
-    ]),
-  );
-  setStrings(PAUSE_WORDS);
   /** Deletes waiting out their Undo: the rows are hidden meanwhile. */
   /** @type {Set<string>} */
   const removed = new Set();
@@ -392,10 +373,9 @@ export function mount(root, opts = {}) {
   });
 
   // ── 2 · the next run ──
-  // gap 124: more than a day away reads in days (js/longcountdown.js), the
-  // last day is kp's own countdown again.
+  // More than a day away reads in days (kp 11.2.0 countdown).
   const countdown = h("div", { class: "sch-clock", id: "sched-countdown" });
-  /** @type {{stop: () => void} | null} */
+  /** @type {(() => void) | null} */
   let clockNow = null;
   const heroTitle = h("b", { id: "sched-hero-title" });
   const heroWhen = h("span", { id: "sched-hero-when" });
@@ -880,14 +860,19 @@ export function mount(root, opts = {}) {
     const s = next.schedule;
     heroTitle.textContent = titleOf(s);
     heroWhen.textContent = `${withWeekday(next.next_run, zone())} · ${cadenceWords(s.when)}`;
-    clockNow?.stop();
-    const clock = longCountdown(
-      Math.max(next.next_run, now() + 1) * 1000,
-      "Next run in",
-      { now: () => now() * 1000 },
+    clockNow?.();
+    // kp's countdown reads days past 24 hours (11.2.0).
+    countdown.replaceChildren(
+      h("div", {
+        class: "kp-countdown",
+        "data-kp-countdown-until": String(
+          Math.max(next.next_run, now() + 1) * 1000,
+        ),
+        "data-kp-countdown-name": "Next run in",
+        "data-kp-countdown-controls": "none",
+      }),
     );
-    clockNow = clock;
-    countdown.replaceChildren(clock.el);
+    clockNow = attachCountdowns(countdown);
     setRuns(
       thenEl,
       runsWithClash(
@@ -1525,6 +1510,11 @@ export function mount(root, opts = {}) {
   const pauseEl = h("div", {
     class: "kp-snooze sch-pause__picker",
     "data-kp-snooze": "",
+    // The picker is a pause here (kp's own word set), not a reminder.
+    "data-kp-snooze-words": "pause",
+    "data-kp-snooze-change": "Paused: change",
+    "data-kp-snooze-none": "Running",
+    "data-kp-snooze-saving": "Pausing…",
     "data-kp-snooze-choices": "tomorrow monday next-week pick",
     "data-kp-snooze-morning": "09:00",
     "data-kp-snooze-max": "30d",
@@ -1782,6 +1772,7 @@ export function mount(root, opts = {}) {
       );
       /** @type {{key: string, reason: string}[]} */
       const refused = [];
+      let handled = 0;
       for (const it of items) {
         const v = viewOf(it.key);
         if (!v) continue;
@@ -1792,6 +1783,11 @@ export function mount(root, opts = {}) {
           "the schedule",
         );
         if (!r.ok) refused.push({ key: it.key, reason: r.error.why });
+        // "3 of 7 done" beside the busy words (kp 11.2.0).
+        setSelectionProgress(selectionBar, {
+          done: ++handled,
+          total: items.length,
+        });
       }
       setSelectionBusy(selectionBar, null);
       setSelectionResult(selectionBar, {
@@ -1875,26 +1871,20 @@ export function mount(root, opts = {}) {
         return undefined;
       }),
     },
+    {
+      keys: "Space",
+      what: "Turn the focused schedule on or off",
+      group: GROUP_SCHEDULES,
+      when: () => focusedView() != null,
+      reason: rowReason,
+      run: unlessDialog(() => {
+        const v = focusedView();
+        if (!v) return false;
+        void setOn(v.schedule, !v.schedule.enabled);
+        return undefined;
+      }),
+    },
   ]);
-  // Space is the one key kp's engine cannot take (its key names are split on
-  // spaces; kp-gaps/homelab.md), so it stays a small listener of its own.
-  /** @param {KeyboardEvent} e */
-  const onSpace = (e) => {
-    if (
-      e.key !== " " ||
-      e.ctrlKey ||
-      e.metaKey ||
-      e.altKey ||
-      e.defaultPrevented
-    )
-      return;
-    if (!noDialog()) return;
-    const v = focusedView();
-    if (!v) return;
-    e.preventDefault();
-    void setOn(v.schedule, !v.schedule.enabled);
-  };
-  document.addEventListener("keydown", onSpace);
 
   // ── the whole page, from what the dashboard holds ──
   let lastSig = "";
@@ -1953,14 +1943,12 @@ export function mount(root, opts = {}) {
   first();
   render();
   return () => {
-    setStrings(wordsBefore);
     alive = false;
     offAct();
     offJobs();
     offStore();
     window.clearTimeout(heroTimer);
-    clockNow?.stop();
-    document.removeEventListener("keydown", onSpace);
+    clockNow?.();
     stopKeys();
     form?.destroy();
     for (const d of detach) d();

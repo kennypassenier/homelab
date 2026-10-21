@@ -2175,22 +2175,6 @@ details.nx-card--fold[open] > summary::before {
 .nx-card + .nx-card {
   margin-block-start: var(--section-gap);
 }
-/* Gap 72 (queued for the next kp-themes release: a state host that draws no
-   frame inside a section card). A `.kp-card[data-kp-state]` is a framed card,
-   so these four, each inside a section's card, made a card in a card. They
-   draw flat until the package has `data-kp-card="plain"`; the section card is
-   the frame. Drop this rule then. */
-.nx-card :is(.bk-card, .sy-card, .hk-checkscard, .ps-compare-card) {
-  border: 0;
-  box-shadow: none;
-  background: transparent;
-  padding: 0;
-}
-.nx-card :is(.bk-card, .sy-card, .hk-checkscard, .ps-compare-card)::before,
-.nx-card :is(.bk-card, .sy-card, .hk-checkscard, .ps-compare-card)::after {
-  display: none;
-}
-
 /* `section({plain: true})`: a flat card, drawn without kp-card (no
    corner cut or glow in the dark themes) — next.css's card; `.nx-ops`
    restates its padding, rows and line for the ops-kit look. */
@@ -2826,20 +2810,4 @@ details.nx-card--fold[open] > summary::before {
 }
 .boot-stage {
   min-block-size: 24rem;
-}
-
-/* A time left in days (js/longcountdown.js, gap 124), on the Update flow's undo
-   window and the Schedules hero: a name and the time left on one grid, like
-   kp's countdown name over its digits. */
-.uf-clock__words {
-  display: grid;
-  gap: var(--kp-space-xs, 0.25rem);
-  margin: 0;
-}
-.uf-clock__name {
-  color: var(--muted-foreground);
-}
-.uf-clock__time {
-  font-variant-numeric: tabular-nums;
-  font-size: var(--kp-text-lg, 1.25rem);
 }

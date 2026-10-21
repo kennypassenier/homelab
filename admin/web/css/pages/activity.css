@@ -303,8 +303,6 @@
 /* The lines are kp's log viewer; it keeps one height in every state. */
 .hl-viewer {
   --kp-logviewer-height: min(34rem, 60vh);
-  inline-size: auto;
-  min-inline-size: 0;
   margin: var(--kp-space-sm, 0.5rem) var(--nx-pad);
 }
 /* The chosen line's details: one slot under the lines, a fixed height
@@ -561,15 +559,4 @@
 }
 .con-pane .kp-console__output {
   white-space: pre-wrap;
-}
-/* A phone: a command's four tools share the block's width instead of
-   standing on three tracks as wide as their words (kp-gaps line 132). */
-@media (max-width: 40rem) {
-  .con-pane .kp-console__tools {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-  }
-  .con-pane .kp-console__tool {
-    white-space: normal;
-    min-inline-size: 0;
-  }
 }

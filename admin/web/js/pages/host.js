@@ -255,10 +255,11 @@ function trendTile(fig) {
         ...(t.now ? ["now ", h("b", null, t.now), " · "] : []),
         t.rest,
       );
-      // The points are unix seconds; kp's trend takes milliseconds.
+      // The points are unix seconds (kp's timeUnit).
       setTrendData(figure, {
-        points: t.points.map(([s, v]) => [s * 1000, v]),
-        step: 600_000,
+        timeUnit: "s",
+        points: t.points,
+        step: 600,
         // The reading chip and tooltip print the figure's own unit.
         ...(fig.rate
           ? { unitKind: "bytes/s" }
@@ -1508,6 +1509,7 @@ export function mount(root, ctx) {
     "section",
     {
       class: "kp-card hk-checkscard",
+      "data-kp-card": "plain",
       "data-kp-state": "empty",
       "aria-label": "Host checks",
     },

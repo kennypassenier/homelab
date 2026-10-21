@@ -414,6 +414,8 @@ export function mount(root) {
     return {
       key: t.host,
       name: t.name,
+      // The typed part of the name is marked (kp 11.2.0 `match`).
+      ...(q.trim() ? { match: q.trim() } : {}),
       href: t.url,
       external: true,
       starred: stars.has(t.host),
@@ -756,8 +758,7 @@ export function mount(root) {
       ...all.slice(0, i + (same ? 1 : 0)),
     ];
     const pick = order.find((c) => {
-      const n =
-        c.querySelector(".kp-entity__name")?.firstChild?.textContent ?? "";
+      const n = c.querySelector(".kp-entity__name")?.textContent ?? "";
       return n.toLowerCase().startsWith(same ? typed[0] : typed);
     });
     if (pick) {

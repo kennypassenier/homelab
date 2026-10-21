@@ -38,7 +38,7 @@ import {
 } from "../dom.js";
 import { declare, drivable } from "../drivable.js";
 import { diffBlocks } from "../editui.js";
-import { longCountdown } from "../longcountdown.js";
+import { attachCountdowns } from "/static/kp/js/countdown.js";
 import { formatDateTime, humanDuration } from "../format.js";
 import { inboxNow } from "../inboxlist.js";
 import { jobLogViewer } from "../joblog.js";
@@ -1411,15 +1411,23 @@ export function mount(root, scope) {
           : `${i.stack}'s apps on a moving tag run what their tags point at now`,
       )
       .join("; ");
-    // gap 124: a 7-day window reads in days (js/longcountdown.js).
+    // kp's countdown reads a 7-day window in days (11.2.0).
     stopUndoClock();
     /** @type {(() => void)[]} */
     const clocks = [];
     /** @param {number} until @param {string} name */
     const undoClock = (until, name) => {
-      const c = longCountdown(until, name);
-      clocks.push(c.stop);
-      return c.el;
+      const el = h("div", { class: "uf-clock" });
+      el.append(
+        h("div", {
+          class: "kp-countdown",
+          "data-kp-countdown-until": String(until),
+          "data-kp-countdown-name": name,
+          "data-kp-countdown-controls": "none",
+        }),
+      );
+      clocks.push(attachCountdowns(el));
+      return el;
     };
     doneCard.replaceChildren(
       h(

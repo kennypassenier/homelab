@@ -27,12 +27,6 @@
 .rs-step.kp-formgrid {
   align-content: start;
 }
-/* kp-gaps/homelab.md line 129: a fieldset in a form-grid control keeps the
-   grid's own `label-start / -1` span, so on a phone it starts a column in
-   (x 106 of a control that starts at 58). It fills the control. */
-.rs-card .kp-formgrid__control > .kp-fieldset {
-  grid-column: 1 / -1;
-}
 /* On a phone Back and Next stand one above the other, each the width of the
    card, so both start where the form above starts. */
 @media (max-width: 48rem) {

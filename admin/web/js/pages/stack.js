@@ -60,10 +60,10 @@ import { openRollback } from "../rollbackdialog.js";
 import { STACK_TABS, stackHref } from "../router.js";
 import { incidentRows } from "../activity.js";
 import { addDays } from "../backupsview.js";
+import { setProblems } from "/static/kp/js/problems.js";
 import { resourcesTab } from "../hubresources.js";
 import {
   depItems,
-  paintProblems,
   problemItems,
   statusBlock,
   statusRows,
@@ -1247,7 +1247,7 @@ function overviewTab(panel, c) {
       });
     else {
       setCardState(needsStage, "ready");
-      paintProblems(
+      setProblems(
         needsList,
         problemItems(probs, name, (p) => problemAction(c, p)),
         { mode: "fold", foldFrom: 3 },
@@ -1908,7 +1908,7 @@ function logsTab(panel, c) {
 
   const paintFoot = () => {
     footLeft.textContent = failed
-      ? `Loki did not answer: ${failed.why}${failed.fix ? ` — ${failed.fix}` : ""}`
+      ? "Loki did not answer"
       : readAt
         ? `Loki, read ${humanDuration(nowS() - readAt)} ago${logql ? ` · ${logql}` : ""}`
         : "Asking Loki for the lines";
@@ -1935,6 +1935,11 @@ function logsTab(panel, c) {
     setLogViewer(viewer, {
       lines: loading || failed ? [] : kpLines(passing(lines)),
       state: loading ? "loading" : failed ? "error" : "ready",
+      ...(failed
+        ? {
+            message: `Loki did not answer: ${failed.why}${failed.fix ? ` — ${failed.fix}` : ""}`,
+          }
+        : {}),
     });
     paintFoot();
   };

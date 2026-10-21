@@ -11,7 +11,6 @@ import {
   countStatus,
   setStatus,
 } from "/static/kp/js/statusrow.js";
-import { setProblems } from "/static/kp/js/problems.js";
 
 /**
  * @typedef {import("./stackhub.js").Health} Health
@@ -248,37 +247,4 @@ export function statusBlock(host, opts) {
     list: () => list,
     stop: detach,
   };
-}
-
-/** @type {WeakMap<HTMLElement, string>} What each problems host last drew. */
-const DRAWN = new WeakMap();
-
-/**
- * `setProblems`, skipped when the problems are the ones already drawn.
- * Gap 89 (queued for the next kp-themes release): while a row is still
- * arriving, problems.js counts it as leaving and does not find it by key, so
- * every repaint in that window (the hub repaints on each fleet read) adds
- * another copy of the same row (the same problem 6 to 11 times). Painting
- * only a changed list keeps the row count right; drop this wrapper when the
- * package finds an arriving row.
- * @param {HTMLElement} host
- * @param {import("/static/kp/js/problems.js").Problem[]} items
- * @param {Parameters<typeof setProblems>[2]} [options]
- */
-export function paintProblems(host, items, options) {
-  const sig = JSON.stringify([
-    items.map((p) => [
-      p.key,
-      p.what,
-      p.why,
-      p.remedy,
-      p.command,
-      p.severity,
-      /** @type {any} */ (p.action)?.textContent ?? "",
-    ]),
-    options ?? null,
-  ]);
-  if (DRAWN.get(host) === sig && host.querySelector(".kp-problem")) return;
-  DRAWN.set(host, sig);
-  setProblems(host, items, options);
 }

@@ -491,13 +491,8 @@ export function mountHostLog(root, opts) {
 
   const paintDetail = () => {
     if (failure) {
-      detail.replaceChildren(
-        h(
-          "p",
-          { class: "hl-detail__note", role: "alert" },
-          `The host's lines could not be read: ${failure}`,
-        ),
-      );
+      // The reason stands in the viewer's failed plate (kp 11.2.0 `message`).
+      detail.replaceChildren(h("p", { class: "hl-detail__note" }, ""));
       return;
     }
     const l = open == null ? null : lines.find((x) => x.seq === open);
@@ -672,6 +667,9 @@ export function mountHostLog(root, opts) {
     setLogViewer(viewer, {
       lines: loaded && !failure ? lines.filter(visible).map(kpLine) : [],
       state: viewState(),
+      ...(failure
+        ? { message: `The host's lines could not be read: ${failure}` }
+        : {}),
     });
     markCurrent();
     paintDetail();

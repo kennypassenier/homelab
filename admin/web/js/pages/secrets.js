@@ -181,8 +181,6 @@ const RETRY_STACK = declare({
 
 /** How long Write waits for an Undo before it sends anything. */
 const UNDO_MS = 5000;
-/** The clipboard is cleared this long after a copy. */
-const CLIPBOARD_MS = 30_000;
 
 /**
  * A plain message at the foot of the screen (ui.js `toast`, drawn the
@@ -631,7 +629,7 @@ export function mount(root, opts = {}) {
     return `<div class="kp-formgrid sx-keys st-lines" data-kp-anchors="rows" data-kp-formgrid-label="wide" data-kp-formgrid-lines="lines" style="--kp-secret-min: 9rem">${rows
       .map(
         (r, i) =>
-          `<div class="kp-formgrid__row" data-sx-row="${i}" data-key="${esc(r.key)}" data-kp-anchor="${esc(r.key)}" data-kp-anchor-label="${esc(r.name)}"><div class="kp-formgrid__label"><span class="sx-what"><span class="kp-idmark kp-idmark--sm" data-kp-idmark="${esc(r.name)}" aria-hidden="true"></span><b>${esc(r.name)}</b></span><small>${esc(r.note)}</small></div><div class="kp-formgrid__control"><div class="kp-secret" data-kp-secret data-kp-secret-ttl="30" data-kp-secret-mask="12" data-kp-secret-label="${esc(s)}/${esc(r.name)}" data-sx-i="${i}"></div></div><p class="kp-formgrid__value" data-audit></p><div class="kp-formgrid__actions"><button type="button" class="kp-button kp-button--sm" data-sx-change="${i}" title="Stage a new value for this secret">Change…</button></div></div>`,
+          `<div class="kp-formgrid__row" data-sx-row="${i}" data-key="${esc(r.key)}" data-kp-anchor="${esc(r.key)}" data-kp-anchor-label="${esc(r.name)}"><div class="kp-formgrid__label"><span class="sx-what"><span class="kp-idmark kp-idmark--sm" data-kp-idmark="${esc(r.name)}" aria-hidden="true"></span><b>${esc(r.name)}</b></span><small>${esc(r.note)}</small></div><div class="kp-formgrid__control"><div class="kp-secret" data-kp-secret data-kp-secret-ttl="30" data-kp-secret-clear="30" data-kp-secret-mask="12" data-kp-secret-label="${esc(s)}/${esc(r.name)}" data-sx-i="${i}"></div></div><p class="kp-formgrid__value" data-audit></p><div class="kp-formgrid__actions"><button type="button" class="kp-button kp-button--sm" data-sx-change="${i}" title="Stage a new value for this secret">Change…</button></div></div>`,
       )
       .join("")}</div>`;
   }
@@ -735,11 +733,6 @@ export function mount(root, opts = {}) {
         purpose === "copy" ? "copied" : "revealed",
         `${s}/${row.name}`,
       );
-      if (purpose === "copy")
-        setTimeout(() => {
-          if (document.hasFocus())
-            navigator.clipboard?.writeText("").catch(() => {});
-        }, CLIPBOARD_MS);
     });
   });
 
@@ -1054,13 +1047,13 @@ export function mount(root, opts = {}) {
     }),
   );
 
-  // Esc hides every revealed secret and closes the change form. kp's engine
-  // leaves a field alone, so inside a field the page's root hears it: there
-  // Esc only closes the change form.
+  // Esc hides every revealed secret and closes the change form, in a field
+  // too (kp 11.2.0 `inFields`).
   stops.push(
     registerShortcuts("page:secrets", [
       {
         keys: "Escape",
+        inFields: true,
         what: "Hide every secret and close the change form",
         group: GROUP_SECRETS,
         run: unlessDialog(() => {
@@ -1070,13 +1063,6 @@ export function mount(root, opts = {}) {
       },
     ]),
   );
-  /** @param {KeyboardEvent} e */
-  const onFieldEsc = (e) => {
-    if (e.key !== "Escape" || !S.change || !noDialog()) return;
-    const t = /** @type {HTMLElement | null} */ (e.target);
-    if (t?.closest("input, textarea, select")) closeChange();
-  };
-  root.addEventListener("keydown", onFieldEsc);
   const off = subscribe(() => {
     if (!S.summary) return;
     if (one == null && !chosen && current().fleet) {
@@ -1101,7 +1087,6 @@ export function mount(root, opts = {}) {
   return () => {
     abort.abort();
     hideAll();
-    root.removeEventListener("keydown", onFieldEsc);
     off();
     offJobs();
     for (const s of stops) s();

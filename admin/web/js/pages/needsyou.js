@@ -58,7 +58,7 @@ import {
 import { current, rereadStore, subscribe } from "../store.js";
 import { stage } from "../stage.js";
 import { countOf, pageHeader } from "../ui.js";
-import { ALERT_DISMISS_EVENT } from "/static/kp/js/overlays.js";
+import { paintRemembered } from "/static/kp/js/remember.js";
 import { legacyUpdateHref, updateHref } from "../updateflow.js";
 import { attachCardStates, setCardState } from "/static/kp/js/card-state.js";
 import { attachRowKeys, removeRow, setRowBusy } from "/static/kp/js/actions.js";
@@ -270,16 +270,11 @@ export function mount(root) {
   head.el.classList.add("inbox-head");
 
   // A dismissible explanation: kp's info alert; once closed it stays closed
-  // in this browser (kp's alert has no memory of its own).
-  const NOTE_KEY = "homelab-inbox-explained";
+  // in this browser (`data-kp-remember`, kp 11.2.0).
   /** @type {{el: HTMLElement, close: HTMLElement} | null} */
-  let note = null;
-  try {
-    if (localStorage.getItem(NOTE_KEY)) note = null;
-    else note = explainNote();
-  } catch {
-    note = explainNote();
-  }
+  let note = explainNote();
+  paintRemembered(note.el, "alert");
+  if (note.el.hidden) note = null;
   function explainNote() {
     const close = h(
       "button",
@@ -293,7 +288,11 @@ export function mount(root) {
     );
     const el = h(
       "div",
-      { class: "kp-alert kp-alert--info", role: "note" },
+      {
+        class: "kp-alert kp-alert--info",
+        role: "note",
+        "data-kp-remember": "inbox-explained",
+      },
       h("span", { class: "kp-alert__icon", "aria-hidden": "true" }, "ⓘ"),
       h(
         "div",
@@ -303,13 +302,6 @@ export function mount(root) {
       ),
       close,
     );
-    el.addEventListener(ALERT_DISMISS_EVENT, () => {
-      try {
-        localStorage.setItem(NOTE_KEY, "1");
-      } catch {
-        /* fine: it comes back next time */
-      }
-    });
     return { el, close };
   }
   if (note) drivable(note.close, EXPLAIN);

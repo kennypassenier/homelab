@@ -200,14 +200,14 @@ export function fieldEl(f, value, choices = []) {
     return { wrap, input };
   }
   // A name typed to confirm is kp's own block: the rule, the field and the
-  // match line in one footprint. Its input takes the field's id, so a Live
-  // view step and the label find it as before (gap 123: no `id` option).
+  // match line in one footprint. Its input takes the field's id and name
+  // (kp 11.2.0), so a Live view step and the label find it as before.
   if (f.kind === "typed" && f.expect) {
-    const { block, input } = buildTypeConfirm(document, { name: f.expect });
-    const label = block.querySelector("label");
-    input.id = f.id;
-    input.name = f.name;
-    if (label) label.htmlFor = f.id;
+    const { block, input } = buildTypeConfirm(document, {
+      name: f.expect,
+      id: f.id,
+      fieldName: f.name,
+    });
     input.value = typeof value === "string" ? value : "";
     block.dataset.field = f.name;
     return { wrap: block, input };

@@ -41,7 +41,7 @@ import {
   attachEntityCards,
   setEntityGrid,
 } from "/static/kp/js/entity-card.js";
-import { nextTile, tileStop } from "/static/kp/js/tiles.js";
+import { attachTileKeys, tileStop } from "/static/kp/js/tiles.js";
 import {
   FACET_EVENT,
   attachFacets,
@@ -279,9 +279,14 @@ export function mount(root) {
     },
     h("ul", { class: "kp-facets__list" }),
   );
+  // kp-themes 11.2.0's tile keys span every stack's grid below, in reading
+  // order: arrows, Home, End and Page keys by place on screen, first letters
+  // of an app's name, and Up from the first row to the search box.
   const body = h("div", {
     class: "ap-stacks",
     "data-kp-idmark-set": "apps",
+    "data-kp-tiles-keys": "letters",
+    "data-kp-tiles-keys-exit": ".ap-search",
   });
   const refreshEl = h("div", {
     class: "kp-refresh ap-refresh",
@@ -316,6 +321,7 @@ export function mount(root) {
   const detachFacets = attachFacets(root);
   const detachCards = attachCardStates(root);
   const detachEntities = attachEntityCards(root);
+  const detachTileKeys = attachTileKeys(body);
   const detachRefresh = attachRefresh(root);
   const detachConnection = attachConnection(root);
   setFacetItems(
@@ -523,18 +529,10 @@ export function mount(root) {
     /** @type {HTMLElement[]} */ ([
       ...body.querySelectorAll("[data-kp-entity]"),
     ]);
-  /** The tile that holds the board's one tab stop. @type {Element | null} */
-  let stop = null;
-  /** One tab stop for the whole board; the star is reached with its key. */
-  const rove = () => {
-    const all = cardsOf();
-    if (!stop || !all.includes(/** @type {HTMLElement} */ (stop)))
-      stop = all[0] ?? null;
-    for (const c of all) {
-      const el = tileStop(c);
-      if (el) el.tabIndex = c === stop ? 0 : -1;
-      c.querySelector(".kp-entity__star")?.setAttribute("tabindex", "-1");
-    }
+  /** The star is reached with its key, not with Tab: the tile is the stop. */
+  const quietStars = () => {
+    for (const star of body.querySelectorAll(".kp-entity__star"))
+      star.setAttribute("tabindex", "-1");
   };
 
   const paintBody = () => {
@@ -579,7 +577,7 @@ export function mount(root) {
     cardsOf().forEach((c, i) =>
       c.toggleAttribute("data-ap-first", q.trim() !== "" && i === 0),
     );
-    rove();
+    quietStars();
     if (!groups.length) {
       const all = h(
         "button",
@@ -680,93 +678,19 @@ export function mount(root) {
     if (tiles) paintBody();
   };
   search.addEventListener("input", () => setQuery(search.value));
-  /** Focus the tile at `i` (and make it the board's tab stop). @param {HTMLElement | undefined} c */
-  const focusTile = (c) => {
-    if (!c) return;
-    stop = c;
-    rove();
-    tileStop(c)?.focus();
-  };
   search.addEventListener("keydown", (e) => {
     if (e.key === "Enter") {
       const f = visible()[0];
       if (f) window.open(f.url, "_blank", "noopener");
     } else if (e.key === "ArrowDown") {
       e.preventDefault();
-      focusTile(cardsOf()[0]);
+      const first = cardsOf()[0];
+      if (first) tileStop(first)?.focus();
     } else if (e.key === "Escape" && search.value) {
       e.stopPropagation();
       setQuery("");
     }
   });
-  body.addEventListener("focusin", (e) => {
-    const c =
-      e.target instanceof Element ? e.target.closest("[data-kp-entity]") : null;
-    if (c && c !== stop) {
-      stop = c;
-      rove();
-    }
-  });
-
-  // Arrows, Home and End move over the tiles by their place on screen (kp's
-  // `nextTile`); a letter jumps to the next app whose name starts with the
-  // letters typed in the last second. The star's key is "." so that every
-  // letter is free. [gap kp-gaps/homelab.md: tiles-keys does not know entity
-  // tiles]
-  let typed = "";
-  let typedAt = 0;
-  body.addEventListener("keydown", (e) => {
-    if (e.defaultPrevented || e.altKey || e.ctrlKey || e.metaKey) return;
-    const target = e.target;
-    if (
-      !(target instanceof Element) ||
-      target.closest("input, textarea, select, .kp-menu")
-    )
-      return;
-    const all = cardsOf();
-    const i = all.findIndex((c) => c.contains(target));
-    if (i < 0) return;
-    /** @type {Record<string, "left" | "right" | "up" | "down" | "first" | "last">} */
-    const ways = {
-      ArrowLeft: "left",
-      ArrowRight: "right",
-      ArrowUp: "up",
-      ArrowDown: "down",
-      Home: "first",
-      End: "last",
-    };
-    const way = ways[e.key];
-    if (way) {
-      e.preventDefault();
-      const to = nextTile(
-        all.map((c) => c.getBoundingClientRect()),
-        i,
-        way,
-      );
-      if (to !== null) focusTile(all[to]);
-      else if (way === "up") search.focus();
-      return;
-    }
-    if (e.key.length !== 1 || /[\s.]/.test(e.key)) return;
-    const now = Date.now();
-    typed =
-      now - typedAt > 1000 ? e.key.toLowerCase() : typed + e.key.toLowerCase();
-    typedAt = now;
-    const same = [...typed].every((ch) => ch === typed[0]);
-    const order = [
-      ...all.slice(i + (same ? 1 : 0)),
-      ...all.slice(0, i + (same ? 1 : 0)),
-    ];
-    const pick = order.find((c) => {
-      const n = c.querySelector(".kp-entity__name")?.textContent ?? "";
-      return n.toLowerCase().startsWith(same ? typed[0] : typed);
-    });
-    if (pick) {
-      e.preventDefault();
-      focusTile(pick);
-    }
-  });
-
   /** The capped 90-day history behind the hover card's strip. */
   const readHistory = async () => {
     const r = await fetchJson(
@@ -835,6 +759,7 @@ export function mount(root) {
     detachFacets();
     detachCards();
     detachEntities();
+    detachTileKeys();
     detachRefresh();
     detachConnection();
     detachHover();

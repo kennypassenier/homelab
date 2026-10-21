@@ -22,7 +22,7 @@
 //! | `trend_buckets`, `trend_stacks` | `fleet-trend.json` | `at` | yes |
 //!
 //! All six stores run on their tables; the import copies the six JSON files
-//! in and renames each to `*.migrated` ([`MOVED`]). Nothing deletes a row on
+//! in and renames each to `*.migrated` (a store reported `moved`, chassis 3.12.0). Nothing deletes a row on
 //! its own except what is finished by definition (ended snoozes): the budget
 //! only warns, and old rows go through the Storage page (Kenny, 2026-10-21).
 //! `hour_at` and `at` are unix SECONDS, the unit [`TimeFormat::UnixSeconds`]
@@ -38,7 +38,7 @@ use std::path::{Path, PathBuf};
 use chassis::Error;
 use chassis::storage::rusqlite::{Connection, Transaction, params};
 use chassis::storage::{
-    AppDb, AppDbSpec, DataKind, Filter, ImportReport, Level as BudgetLevel, Migration,
+    AppDb, AppDbSpec, DataKind, Filter, ImportReport, ImportStore, Level as BudgetLevel, Migration,
     StorageReport, TimeFormat,
 };
 
@@ -50,17 +50,6 @@ use crate::core::schedule::ScheduleFile;
 use crate::core::trend;
 use crate::core::updateflow::UpdateRecord;
 use crate::core::uptime;
-
-/// The files whose store lives in the database and nowhere else: the import
-/// renames them to `*.migrated` once it committed (all six).
-pub const MOVED: [&str; 6] = [
-    FILE_NOTICES,
-    FILE_SNOOZES,
-    FILE_SCHEDULES,
-    FILE_FLOWS,
-    FILE_UPTIME,
-    FILE_TREND,
-];
 
 pub const FILE_NOTICES: &str = "notifications.json";
 pub const FILE_SNOOZES: &str = "inbox-snoozes.json";
@@ -170,8 +159,8 @@ pub fn migrations() -> Vec<Migration> {
         ),
         // 6 · the minute watch's hourly cells. `hour_at` is the unix second
         // the hour starts at (the old file counted hours since the epoch).
-        // A rowid table on purpose: the Storage page's preview orders by
-        // `rowid`, which a WITHOUT ROWID table does not have.
+        // WITHOUT ROWID: chassis 3.12.0 previews such a kind by its primary
+        // key (it used to order by `rowid`, which this table lacks).
         Migration::sql(
             "CREATE TABLE uptime_cells (
                 cell_key TEXT    NOT NULL,
@@ -183,7 +172,7 @@ pub fn migrations() -> Vec<Migration> {
                 ms_n     INTEGER NOT NULL DEFAULT 0,
                 ms_max   INTEGER NOT NULL DEFAULT 0,
                 PRIMARY KEY (cell_key, hour_at)
-            ) STRICT;
+            ) STRICT, WITHOUT ROWID;
             CREATE INDEX uptime_cells_hour ON uptime_cells (hour_at);",
         ),
         // 7 · the fleet's last day, one row per five-minute bucket and one
@@ -358,12 +347,10 @@ fn count(tx: &Transaction, table: &str) -> Result<u64, Error> {
 /// number fails the whole import (chassis then rolls everything back).
 pub fn import(tx: &Transaction, data_dir: &Path) -> Result<ImportReport, Error> {
     let at = |name: &str| data_dir.join(name);
-    let mut expected = 0u64;
-    let mut checks: Vec<(&str, u64)> = Vec::new();
-    let mut files: Vec<PathBuf> = Vec::new();
-    let mut note = |table: &'static str, n: u64, expected: &mut u64| {
-        *expected += n;
-        checks.push((table, n));
+    // (file, table, records the file held for that table)
+    let mut checks: Vec<(&'static str, &'static str, u64)> = Vec::new();
+    let mut note = |file: &'static str, table: &'static str, n: u64| {
+        checks.push((file, table, n));
     };
 
     // notifications.json: strict, as the old loader was.
@@ -399,7 +386,7 @@ pub fn import(tx: &Transaction, data_dir: &Path) -> Result<ImportReport, Error> 
                 last_digest: f.last_digest,
             },
         )?;
-        note("notices", f.notices.len() as u64, &mut expected);
+        note(FILE_NOTICES, "notices", f.notices.len() as u64);
     }
 
     // inbox-snoozes.json: a file that does not read is set aside, the rows
@@ -418,7 +405,7 @@ pub fn import(tx: &Transaction, data_dir: &Path) -> Result<ImportReport, Error> 
                 )?;
                 n += 1;
             }
-            note("inbox_snoozes", n, &mut expected);
+            note(FILE_SNOOZES, "inbox_snoozes", n);
         }
         Ok(None) => {}
         Err(e) => {
@@ -437,7 +424,7 @@ pub fn import(tx: &Transaction, data_dir: &Path) -> Result<ImportReport, Error> 
         for s in &f.schedules {
             super::scheduler::put_schedule(tx, s)?;
         }
-        note("schedules", f.schedules.len() as u64, &mut expected);
+        note(FILE_SCHEDULES, "schedules", f.schedules.len() as u64);
     }
 
     // update-flows.json
@@ -457,7 +444,7 @@ pub fn import(tx: &Transaction, data_dir: &Path) -> Result<ImportReport, Error> 
                 ],
             )?;
         }
-        note("update_records", all.len() as u64, &mut expected);
+        note(FILE_FLOWS, "update_records", all.len() as u64);
     }
 
     // uptime-history.json
@@ -482,7 +469,7 @@ pub fn import(tx: &Transaction, data_dir: &Path) -> Result<ImportReport, Error> 
                 n += 1;
             }
         }
-        note("uptime_cells", n, &mut expected);
+        note(FILE_UPTIME, "uptime_cells", n);
     }
 
     // fleet-trend.json
@@ -511,13 +498,15 @@ pub fn import(tx: &Transaction, data_dir: &Path) -> Result<ImportReport, Error> 
                 stacks += 1;
             }
         }
-        note("trend_buckets", buckets, &mut expected);
-        note("trend_stacks", stacks, &mut expected);
+        note(FILE_TREND, "trend_buckets", buckets);
+        note(FILE_TREND, "trend_stacks", stacks);
     }
 
-    // The count check: what each table holds is what its file held.
-    let mut imported = 0u64;
-    for (table, want) in &checks {
+    // The count check, per store (chassis 3.12.0): what each table holds is
+    // what its file held, and every store here lives in the database, so
+    // each of its files is renamed once the import committed.
+    let mut stores: Vec<ImportStore> = Vec::new();
+    for (file, table, want) in &checks {
         let have = count(tx, table)?;
         if have != *want {
             return Err(Error::internal(
@@ -525,16 +514,21 @@ pub fn import(tx: &Transaction, data_dir: &Path) -> Result<ImportReport, Error> 
                 "nothing was kept; report this, the next start tries again",
             ));
         }
-        imported += have;
-    }
-
-    for name in MOVED {
-        let p = at(name);
-        if p.exists() {
-            files.push(p);
+        match stores.iter_mut().find(|s| s.name == *file) {
+            Some(s) => {
+                s.expected += want;
+                s.imported += have;
+            }
+            None => {
+                let mut s = ImportStore::new(file, *want, have);
+                if at(file).exists() {
+                    s = s.moved(vec![at(file)]);
+                }
+                stores.push(s);
+            }
         }
     }
-    Ok(ImportReport::new(expected, imported, files))
+    Ok(ImportReport::from_stores(stores))
 }
 
 fn to_json<T: serde::Serialize>(v: &T) -> Result<String, Error> {
@@ -553,17 +547,8 @@ fn mb(bytes: u64) -> String {
 /// budget. Chassis only warns, and so does this: the notice says nothing was
 /// refused or deleted, and where to look.
 pub fn warn_draft(r: &StorageReport) -> Draft {
-    warn_notice(
-        r.total_bytes,
-        r.warn_bytes,
-        r.budget_bytes,
-        r.level == BudgetLevel::Over,
-    )
-}
-
-/// [`warn_draft`] from the figures (chassis' report is not buildable in a
-/// test).
-pub fn warn_notice(total: u64, warn: u64, budget: u64, over: bool) -> Draft {
+    let (total, warn, budget) = (r.total_bytes, r.warn_bytes, r.budget_bytes);
+    let over = r.level == BudgetLevel::Over;
     let mut d = Draft::new(
         Kind::StorageWarn,
         "storage-warn",
@@ -611,6 +596,7 @@ pub fn read<T>(db: &AppDb, f: impl FnOnce(&Connection) -> Result<T, Error>) -> R
 #[cfg(test)]
 mod tests {
     use super::*;
+    use chassis::storage::{FileReport, FileSizes, Now};
 
     fn dir(tag: &str) -> PathBuf {
         let p = std::env::temp_dir().join(format!("homelab-store-{tag}-{}", std::process::id()));
@@ -893,6 +879,23 @@ mod tests {
         assert_eq!(db.read_blocking(notice_store::total).unwrap(), 0);
     }
 
+    /// A report built by hand (chassis 3.12.0, gap 139).
+    fn test_report(total: u64, warn: u64, budget: u64, level: BudgetLevel) -> StorageReport {
+        StorageReport::new(
+            vec![FileReport::new(
+                "app",
+                "homelab-admin.db",
+                FileSizes::new(total, 0, 0),
+                true,
+            )],
+            total,
+            budget,
+            warn,
+            level,
+            0,
+        )
+    }
+
     #[test]
     fn only_snoozes_that_ended_long_ago_are_finished_by_definition() {
         let db = memory_db();
@@ -914,7 +917,7 @@ mod tests {
             Ok(())
         })
         .unwrap();
-        let removed = db.prune_finished().unwrap();
+        let removed = db.prune_finished_at(&Now::at(now)).unwrap();
         assert_eq!(removed, vec![("snoozes".to_string(), 1)]);
         let left: Vec<String> = db
             .read_blocking(|c| {
@@ -927,7 +930,12 @@ mod tests {
 
     #[test]
     fn the_warning_notice_says_nothing_was_deleted_and_where_to_look() {
-        let d = warn_notice(42_000_000, 40_000_000, 50_000_000, false);
+        let d = warn_draft(&test_report(
+            42_000_000,
+            40_000_000,
+            50_000_000,
+            BudgetLevel::Warn,
+        ));
         assert_eq!(d.kind, Kind::StorageWarn);
         assert_eq!(d.detail.link.as_deref(), Some("/storage"));
         assert!(d.title.contains("42.0 of 50.0 MB"));

@@ -460,7 +460,20 @@ async fn an_open_down_and_an_open_storage_warning_are_refreshed_not_repeated() {
         "a refresh tells no page"
     );
     // The warning for a budget past its warn line.
-    let warn = homelab_admin::shell::store::warn_notice(42_000_000, 40_000_000, 50_000_000, false);
+    let report = chassis::storage::StorageReport::new(
+        vec![chassis::storage::FileReport::new(
+            "app",
+            "homelab-admin.db",
+            chassis::storage::FileSizes::new(42_000_000, 0, 0),
+            true,
+        )],
+        42_000_000,
+        50_000_000,
+        40_000_000,
+        chassis::storage::Level::Warn,
+        0,
+    );
+    let warn = homelab_admin::shell::store::warn_draft(&report);
     let w1 = c.notify(warn.clone()).await;
     let w2 = c.notify(warn.clone()).await;
     assert_eq!(w1.id, w2.id, "a restart does not stack a second warning");

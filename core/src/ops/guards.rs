@@ -187,30 +187,104 @@ pub const PRUNE_SERVICE: &str = "[Unit]\nDescription=Prune stale Docker data (ho
 /// Where [`IMAGE_PRUNE_SCRIPT`] is installed.
 pub const IMAGE_PRUNE_PATH: &str = "/usr/local/sbin/homelab-image-prune";
 
-/// feat-imageprune-1 (Kenny, 2026-10-12, form image-prune "Bouwen"): old
-/// versions of an app's image piled up (CT 106: 6.5 GB of 13.2 GB
-/// reclaimable, CT 104: 1.15 of 2.2 GB) because `docker system prune`
-/// without `-a` removes only untagged images. This keeps every image a
-/// container uses and, per repository, the newest one no container uses
-/// (the version a rollback goes back to), and removes every other unused
-/// image. An image another tag still holds is left, and said so.
+/// feat-imageprune-1 (Kenny, 2026-10-12, form image-prune "Bouwen"; widened
+/// 2026-10-21: "Mee in 4.0.0"). Old versions of an app's image piled up
+/// (CT 106: 6.5 of 13.2 GB reclaimable, CT 104: 1.15 of 2.2 GB) because
+/// `docker system prune` without `-a` removes only untagged images, and the
+/// first version of this script (newest unused image per repository)
+/// reclaimed 0 B twice: one app sits under several repository names
+/// (jellyfin under three), so every old image was "the newest of its own
+/// repository" and nothing qualified.
+///
+/// Rule now: for every container, running or stopped, keep the image it
+/// uses now and the one it used before (the way back for a rollback).
+/// Everything else no container uses goes, whatever its name.
+///
+/// How the previous image is found: the homelab records no per-container
+/// image history on the CT (`pins.rs` keeps only the current digest of
+/// `manual` containers, in host state), so it is derived from docker. The
+/// previous image is the newest image that is OLDER than the one in use and
+/// shares the container's configured image name (`Config.Image`) with one of
+/// its RepoTags or RepoDigests. Names are compared without registry host,
+/// `docker.io/` and `library/` prefix, tag and digest, so a mirror or
+/// registry-cache copy of the same repository counts as the same app.
+/// Older-than-current matters: an image pulled but never deployed is newer
+/// and must not displace the real way back. A stopped container counts like
+/// a running one.
+///
+/// `--dry-run` only prints what would go, with sizes and a total (a sum of
+/// image sizes; layers two images share are counted twice, so it is an upper
+/// bound of what is freed). An image docker still refuses to remove is left,
+/// and said so.
 pub const IMAGE_PRUNE_SCRIPT: &str = r#"#!/bin/sh
-# homelab runaway guard: keep what runs, plus per
-# repository the newest image nothing runs; remove the other unused images.
+# homelab runaway guard: keep per container the image in use and the one it
+# used before; remove every other image no container uses.
 set -u
-used=$(mktemp)
-trap 'rm -f "$used"' EXIT
-docker ps -aq | xargs -r docker inspect -f '{{.Image}}' | sort -u > "$used"
-docker image ls --no-trunc --format '{{.Repository}} {{.ID}} {{.CreatedAt}}'   | grep -v '^<none> '   | sort -k1,1 -k3,4r   | awk 'NR == FNR { keep[$1] = 1; next }
-         ($2 in keep) { next }
-         !($1 in spare) { spare[$1] = 1; next }
-         { print $2 }' "$used" -   | sort -u   | while read -r id; do
-      if docker rmi "$id" >/dev/null 2>&1; then
-        echo "removed $id"
-      else
-        echo "kept $id (another tag or container still holds it)"
-      fi
-    done
+dry=0
+[ "${1:-}" = "--dry-run" ] && dry=1
+tmp=$(mktemp -d)
+trap 'rm -rf "$tmp"' EXIT
+# <image id> <configured image name>, one line per container, stopped too.
+docker ps -aq | xargs -r docker inspect -f '{{.Image}} {{.Config.Image}}' > "$tmp/containers"
+# id|created|bytes|repo tags|repo digests, newest first.
+docker image ls -q --no-trunc | sort -u \
+  | xargs -r docker image inspect -f '{{.Id}}|{{.Created}}|{{.Size}}|{{join .RepoTags ","}}|{{join .RepoDigests ","}}' \
+  | sort -t'|' -k2,2r > "$tmp/images"
+awk -v dry="$dry" -v out="$tmp/remove" '
+function norm(n) {
+  sub(/@.*/, "", n)
+  if (match(n, /:[^\/:]*$/)) n = substr(n, 1, RSTART - 1)
+  sub(/^(docker\.io|index\.docker\.io|registry-1\.docker\.io)\//, "", n)
+  if (index(n, "/")) {
+    first = substr(n, 1, index(n, "/") - 1)
+    if (first ~ /[.:]/ || first == "localhost") n = substr(n, index(n, "/") + 1)
+  }
+  sub(/^library\//, "", n)
+  return n
+}
+function hum(b,  u, i) {
+  split("B KB MB GB TB", u, " ")
+  i = 1
+  while (b >= 1000 && i < 5) { b /= 1000; i++ }
+  return i == 1 ? sprintf("%d B", b) : sprintf("%.1f %s", b, u[i])
+}
+part == "c" { nc++; cur[nc] = $1; cfg[nc] = norm($2); next }
+part == "i" {
+  id = $1; order[++ni] = id; created[id] = $2; size[id] = $3; names[id] = $4
+  all = $4 "," $5
+  k = split(all, a, ",")
+  while (k > 0) { if (a[k] != "") has[id, norm(a[k])] = 1; k-- }
+}
+END {
+  for (c = 1; c <= nc; c++) {
+    keep[cur[c]] = 1
+    if (!(cur[c] in created)) continue
+    for (i = 1; i <= ni; i++) {
+      id = order[i]
+      if (id == cur[c] || created[id] >= created[cur[c]]) continue
+      if ((id, cfg[c]) in has) { keep[id] = 1; break }
+    }
+  }
+  for (i = 1; i <= ni; i++) {
+    id = order[i]
+    if (id in keep) continue
+    n++; total += size[id]
+    print id "|" names[id] > out
+    if (dry) printf "would remove %s  %s\n", (names[id] == "" ? id : names[id]), hum(size[id])
+  }
+  if (dry) printf "would remove %d images, %s in total\n", n, hum(total)
+}' FS=' ' part=c "$tmp/containers" FS='|' part=i "$tmp/images"
+[ "$dry" = 1 ] && exit 0
+[ -f "$tmp/remove" ] || exit 0
+while IFS='|' read -r id names; do
+  targets=$(echo "$names" | tr ',' ' ')
+  [ -n "$targets" ] || targets=$id
+  if docker rmi $targets >/dev/null 2>&1; then
+    echo "removed $targets"
+  else
+    echo "kept $targets (another tag or container still holds it)"
+  fi
+done < "$tmp/remove"
 "#;
 
 pub const PRUNE_TIMER: &str = "[Unit]\nDescription=Weekly Docker prune (homelab runaway guard)\n\n[Timer]\nOnCalendar=weekly\nRandomizedDelaySec=1h\nPersistent=true\n\n[Install]\nWantedBy=timers.target\n";

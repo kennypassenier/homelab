@@ -1978,6 +1978,48 @@ async fn fix_63_empty_data_dirs_are_not_backed_up_over_a_repository_with_history
     assert!(report.ok, "{:?}", report.error);
 }
 
+/// fix-guard-stopped-1 (2026-10-21): a stopped container's data directory
+/// cannot be read, and the emptiness guard took that for an empty one:
+/// "SAFETY ABORT: /var/lib/inbox holds no files" for CT 118, which was only
+/// stopped after the 2026-10-20 host crash. It refuses still, but says why.
+/// covers: fix-guard-stopped-1
+#[tokio::test]
+async fn fix_guard_stopped_1_a_stopped_container_is_named_not_called_empty() {
+    use homelab_core::ops::backup::BackupCfg;
+    use homelab_core::ops::native::backup_native;
+    let history = r#"[{"short_id":"abcd1234","time":"2026-09-26T04:00:00Z"}]"#;
+    let exec = MockExecutor::new();
+    adopt_mocks(&exec);
+    exec.respond_always("pct status 109", CmdOutput::ok("status: stopped\n"));
+    exec.respond_always("snapshots --json", CmdOutput::ok(history));
+    exec.respond_always("-type f", CmdOutput::ok(""));
+    let sink = VecSink::new();
+    let j = NullJournal;
+    let report = backup_native(
+        &ctx(&exec, &sink, &j),
+        &kyu_manifest(),
+        &BackupCfg::default(),
+    )
+    .await;
+    assert!(!report.ok, "a stopped container must not be archived");
+    let why = format!("{:?}", report.error);
+    assert!(
+        why.contains("container 109 is stopped; its data cannot be read, nothing archived"),
+        "{why}"
+    );
+    assert!(!why.contains("holds no files"), "{why}");
+    assert!(
+        exec.calls_containing("-type f").is_empty(),
+        "the data directory was probed in a stopped container: {:?}",
+        exec.calls()
+    );
+    assert!(
+        exec.calls_containing("restic backup").is_empty(),
+        "{:?}",
+        exec.calls()
+    );
+}
+
 /// fix-164: re-adopting a native service (install-native re-adopts every
 /// time) rebuilt the stack's record from scratch and dropped what a deploy
 /// had recorded. Measured 2026-09-29: after install-native of admin at 18:47

@@ -1265,6 +1265,20 @@ pub async fn backup_native(
         if own_copy.is_some() || m.data_dirs.is_empty() {
             return Ok(StepOutcome::Unchanged);
         }
+        // fix-guard-stopped-1: a stopped container has no readable data
+        // directory, which looked exactly like an empty one ("SAFETY ABORT:
+        // /var/lib/inbox holds no files" for CT 118 after the 2026-10-20
+        // host crash). Asked first, so the refusal names the real reason.
+        let status = exec
+            .run(&Cmd::new("pct", &["status", &m.vmid.to_string()], 30))
+            .await?;
+        if status.stdout.contains("stopped") {
+            return Err(CoreError::SafetyAbort(format!(
+                "container {} is stopped; its data cannot be read, nothing archived :: \
+                 start it (pct start {}) and the next backup runs",
+                m.vmid, m.vmid
+            )));
+        }
         let dirs = m
             .data_dirs
             .iter()

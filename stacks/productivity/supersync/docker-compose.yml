@@ -30,7 +30,11 @@ services:
     # Debian 13 rebuild failed and supersync was down until this repin. This
     # is the digest of `latest` = `master-8861a63`, read from the registry
     # on 2026-09-28 06:56; upstream publishes no version tags.
-    image: ghcr.io/super-productivity/supersync@sha256:d12077be6c00545e71b50ba01831ec48af1e60458111888af699a2b76234ccde
+    # 2026-10-23: that digest is gone from ghcr.io as well (404; upstream
+    # keeps only its last 17 master-<sha> builds), so a rebuild would fail
+    # again. Repinned to the digest of `latest` read from the registry on
+    # 2026-10-23 01:38.
+    image: ghcr.io/super-productivity/supersync@sha256:925e8a85569acccf81ca6e8232ed07b1d0d126b1a84e5e371b042b18ffa9dba0
     container_name: supersync
     restart: unless-stopped
     env_file:

@@ -1009,6 +1009,7 @@ Numbers are permanent and are never reused, including after a row closes.
 | percent-overlap-1 | **Percent and date overlap in the backups table** (Kenny, 2026-10-22: "10.5 %21/10/2026 04:07", "10.7 %no backup yet") | To do: the % sign directly after the number, nothing overlaps the next column at any width | later: Kenny 2026-10-22, the next homelab release |
 | deploy-all-dialog-1 | **Deploy all changes opens as a panel on the right** (Kenny, 2026-10-22: "ipv een normale dialoog") | To do: Deploy all changes opens as a normal centred dialog like every other action | later: Kenny 2026-10-22, the next homelab release |
 
+| steps-total-known-1 | **A running batch shows "Steps done 0 of" with no total** (Kenny, 2026-10-22, Deploy all changes on kitchen and gateway, job 458933073926: "we weten toch altijd hoeveel stappen iets moet doorlopen?") | To do: the total is known before the first step (the plan of every stack in the batch is made before it runs) and shown from the first frame; a total that can still grow says so in words instead of a blank | later: Kenny 2026-10-22, the next homelab release |
 ## Tasks (T)
 
 | # | Task | Depends on | Status |

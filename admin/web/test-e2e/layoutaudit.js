@@ -705,7 +705,8 @@ export function pageChecks() {
 /**
  * redesign-final-45: the action dialog's field grid (folded from its own
  * case): labels on one edge, controls on another, each control beside its
- * label, at desktop width. Run on the audited dialog.
+ * label, at desktop width; on a phone each control sits under its label
+ * (row 44, folded from its own slices). Run on the audited dialog.
  * @param {string} rootSel the dialog
  * @returns {{faults: string[], fields: number}}
  */
@@ -713,7 +714,8 @@ export function dialogGrid(rootSel) {
   /** @type {string[]} */
   const out = [];
   const d = document.querySelector(rootSel);
-  if (!d || window.innerWidth <= 800) return { faults: out, fields: 0 };
+  if (!d) return { faults: out, fields: 0 };
+  const phone = window.innerWidth <= 800;
   const step = [...d.querySelectorAll("[data-kp-step]")].find(
     (s) => !(/** @type {HTMLElement} */ (s).hidden),
   );
@@ -727,10 +729,21 @@ export function dialogGrid(rootSel) {
       const l = label.getBoundingClientRect();
       const c = ctl.getBoundingClientRect();
       if (c.width === 0 || c.height === 0) return null;
-      return { label: Math.round(l.left), ctl: Math.round(c.left) };
+      return {
+        label: Math.round(l.left),
+        ctl: Math.round(c.left),
+        // On a phone a field reads label first, then its control (row 44).
+        inverted: c.top < l.top - 2,
+        name: (label.textContent ?? "").trim(),
+      };
     })
     .filter((e) => e != null);
   if (!edges.length) return { faults: out, fields: 0 };
+  if (phone) {
+    for (const e of edges)
+      if (e.inverted) out.push(`"${e.name}": the control sits above its label`);
+    return { faults: out, fields: edges.length };
+  }
   const labels = new Set(edges.map((e) => e.label));
   const ctls = new Set(edges.map((e) => e.ctl));
   if (labels.size > 1) out.push(`labels start at ${[...labels].join(", ")}`);

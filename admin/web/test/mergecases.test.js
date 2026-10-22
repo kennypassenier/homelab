@@ -42,7 +42,7 @@ test("redesign-final-12: a page module's change reaches its own page's cases and
   const fw = await plan(["admin/web/js/pages/firewall.js"]);
   assert.deepEqual(fw.pages, ["firewall"]);
   assert.ok(
-    fw.cases.some((c) => c.includes("redesign-final-c4")),
+    fw.cases.some((c) => c.includes("redesign-config Firewall")),
     "the Firewall row case is not chosen",
   );
   assert.ok(
@@ -93,19 +93,11 @@ test("redesign-final-49: a commit's page file runs its page's cases; a shared fi
   assert.ok(css.cases.some(isWalk));
 });
 
-test("redesign-final-48: the contrast case runs on a stylesheet or kp-themes change, never because a shared script changed", async () => {
-  const isContrast = (/** @type {string} */ c) =>
+test("redesign-final-48: a case marked `merge-cases: on style change` runs only on a stylesheet or kp-themes change (the WCAG contrast case itself is gone, Kenny 2026-10-22: contrast is advice)", async () => {
+  const isStyle = (/** @type {string} */ c) =>
     c.includes("redesign-final-contrast");
   const ui = await plan(["admin/web/js/ui.js"]);
-  assert.ok(!ui.cases.some(isContrast), "contrast chosen for ui.js");
-  const page = await plan(["admin/web/js/pages/firewall.js"]);
-  assert.ok(!page.cases.some(isContrast));
-  const css = await plan(["admin/web/css/app.css"]);
-  assert.ok(css.cases.some(isContrast), "contrast not chosen for app.css");
-  const pageCss = await plan(["admin/web/css/pages/firewall.css"], "commit");
-  assert.ok(pageCss.cases.some(isContrast), "a page stylesheet at commit");
-  const kp = await plan([], "merge", { kp: true });
-  assert.deepEqual(kp.cases.filter(isContrast).length, 1, "a kp-themes bump");
+  assert.ok(!ui.cases.some(isStyle), "a style case chosen for ui.js");
   const cs = casesOf(`
 test("invariants: themes", async () => {
   // merge-cases: on style change

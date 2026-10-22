@@ -569,7 +569,9 @@ test("invariants: a stack with nothing to back up is named at once, never left p
   }
 });
 
-test("invariants: the Month view's calendar and grid use at least 75% of the content area at 1920px", async () => {
+test("invariants: the Month view uses 75% of the content area at 1920px, shows a month heading with working prev/next, never draws more than 6 week rows, and pressing a day pins its night", async () => {
+  // feat-kpadopt-2 (Kenny's prune choice of 2026-10-22): four cases on the
+  // same page, one browser, became one.
   const browser = await launch();
   try {
     const context = await browser.newContext();
@@ -586,19 +588,6 @@ test("invariants: the Month view's calendar and grid use at least 75% of the con
       ratio >= 0.75,
       `the month grid is ${Math.round(ratio * 100)}% of the content area at 1920px, Kenny measured it at roughly a third`,
     );
-  } finally {
-    await browser.close();
-  }
-});
-
-// ── fix-214: the backup calendar is a month view (a date picker) ─────────
-
-test("invariants: the Month view shows a month heading, and prev/next change the month", async () => {
-  const browser = await launch();
-  try {
-    const context = await browser.newContext();
-    const page = await freshPage(context);
-    await page.goto(`${BASE}/backups?view=month`);
     const heading = page.locator(".kp-calendar__title");
     const before = await heading.textContent();
     assert.ok(
@@ -611,17 +600,6 @@ test("invariants: the Month view shows a month heading, and prev/next change the
     await page.getByRole("button", { name: "Next month" }).click();
     const back = await heading.textContent();
     assert.equal(back, before, "Next did not return to the original month");
-  } finally {
-    await browser.close();
-  }
-});
-
-test("invariants: the Month view's calendar is never more than 6 week rows, in every month", async () => {
-  const browser = await launch();
-  try {
-    const context = await browser.newContext();
-    const page = await freshPage(context);
-    await page.goto(`${BASE}/backups?view=month`);
     await page.waitForSelector(".kp-calendar__grid");
     for (let i = 0; i < 12; i++) {
       // kp-themes' calendar always draws six week rows (42 cells).
@@ -634,17 +612,6 @@ test("invariants: the Month view's calendar is never more than 6 week rows, in e
       await page.getByRole("button", { name: "Next month" }).click();
       await page.waitForTimeout(50);
     }
-  } finally {
-    await browser.close();
-  }
-});
-
-test("invariants: pressing a day in the Month view pins its night and lists the stacks of that night", async () => {
-  const browser = await launch();
-  try {
-    const context = await browser.newContext();
-    const page = await freshPage(context);
-    await page.goto(`${BASE}/backups?view=month`);
     await page
       .locator(".bk-card .kp-calendar")
       .getByRole("button", { name: "Today" })
@@ -673,6 +640,8 @@ test("invariants: pressing a day in the Month view pins its night and lists the 
     await browser.close();
   }
 });
+
+// ── fix-214: the backup calendar is a month view (a date picker) ─────────
 
 // ── fix-224: a stuck per-stack read is named and offers a Retry ──────────
 
@@ -865,100 +834,6 @@ test("invariants: fleet view shows a legend and an edge for a stack whose own fi
     await browser.close();
   }
 });
-
-eachSlice(
-  "invariants: every page keeps clear vertical spacing between its top-level sections and is drawn in kp-themes styling",
-  DRIVABLE_PATHS.filter(
-    (p) => !["apply", "shell", "console", "log", "passkeys"].includes(p),
-  ),
-  8,
-  async (part) => {
-    const browser = await launch();
-    try {
-      const context = await browser.newContext();
-      const page = await freshPage(context);
-      await page.setViewportSize({ width: 1920, height: 1080 });
-
-      // The token itself (admin/web/css/app.css: `--section-gap`, default
-      // `--kp-space-xl`), measured through the cascade rather than hard-coded
-      // here, so a themed override of the space scale still has to meet it.
-      const tokenPx = await page.evaluate(() => {
-        const probe = document.createElement("div");
-        probe.style.marginTop = "var(--section-gap)";
-        document.body.append(probe);
-        const px = parseFloat(getComputedStyle(probe).marginTop);
-        probe.remove();
-        return px;
-      });
-      assert.ok(tokenPx > 0, "--section-gap did not resolve to a length");
-
-      // `apply`'s plan can take a few seconds to read on a cold demo host and
-      // `shell`/`log` open a live connection; `passkeys` is the kit's own
-      // page (chassis-rs `kit_pages_in_webapp`) and, found while writing this
-      // test, 404s as `route=unmatched` even against a demo host with
-      // `HOMELAB_ADMIN_PUBLIC_URL` set — a separate, pre-existing gap outside
-      // fix-206's UI-rules scope (noted in the fix-206 register row, not
-      // fixed here). Every other drivable path (the stack pages have their
-      // own fixture-heavy tests already) is swept.
-      // `console` is `shell` at its 3.71.0 address (feat-shell-1).
-      for (const p of part) {
-        await page.goto(`${BASE}/${p}`, { waitUntil: "load" });
-        await page.waitForTimeout(400);
-
-        // fix-206: Metrics' page was registered at `/metrics`, a path
-        // chassis always answers itself (Prometheus scrape text) — the SPA
-        // never mounted there. Any drivable path must land on the actual
-        // app shell, not a route the kit intercepted first.
-        await page.locator("#bar").waitFor({ state: "visible", timeout: 5000 });
-        const kpStyled = await page.locator('#page [class*="kp-"]').count();
-        assert.ok(
-          kpStyled > 0,
-          `/${p}: no kp-themes-styled element in #page — an unstyled or misrouted page`,
-        );
-
-        const gaps = await page.evaluate(() => {
-          // A zero-height placeholder (a slot filled in later, once its own
-          // read answers) collapses its own margins through to its
-          // neighbours — CSS's normal behaviour for an empty block, and not
-          // a section a person can see, so it is not one of the "top-level
-          // sections" the rule is about. Only sections with visible height
-          // are compared, pairwise.
-          // Out-of-flow children (kp's visually hidden live region for the
-          // heading anchors sits last in #page) are not sections either.
-          const kids = [...document.getElementById("page").children].filter(
-            (k) =>
-              k.getBoundingClientRect().height > 0 &&
-              !["absolute", "fixed"].includes(getComputedStyle(k).position),
-          );
-          const out = [];
-          for (let i = 1; i < kids.length; i++) {
-            // fix-244: a page's one-sentence description belongs to its
-            // title (it sits 6 px under it, invariant 40) — title and
-            // description are one header block, not two sections.
-            const before = kids[i - 1];
-            const isTitle =
-              before.tagName === "H1" ||
-              (before.classList.contains("kp-page-header__heading") &&
-                !!before.querySelector(":scope > h1"));
-            if (isTitle && kids[i].tagName === "P") continue;
-            const prev = kids[i - 1].getBoundingClientRect();
-            const cur = kids[i].getBoundingClientRect();
-            out.push(cur.top - prev.bottom);
-          }
-          return out;
-        });
-        for (const [i, gap] of gaps.entries()) {
-          assert.ok(
-            gap >= tokenPx - 1,
-            `/${p}: gap #${i + 1} between top-level sections is ${gap}px, under the ${tokenPx}px --section-gap token`,
-          );
-        }
-      }
-    } finally {
-      await browser.close();
-    }
-  },
-);
 
 // Review of redesign-371-map (2026-10-03): the demo has no per-stack chip
 // row, so each stack's colour lives on its own node (and its mark in the
@@ -1788,270 +1663,11 @@ test("invariants: a stale-image row offers Update with the from/to versions, and
   }
 });
 
-// fix-236: an action button's label never wraps onto a second line and is
-// never cut off, at desktop and at phone width.
-test("invariants: every action button's label fits on one line, uncut, on desktop and phone", async () => {
-  const browser = await launch();
-  try {
-    const bad = [];
-    for (const width of [1894, 390]) {
-      const context = await browser.newContext({
-        viewport: { width, height: 1000 },
-      });
-      const page = await freshPage(context);
-      for (const path of ["stacks/kp-soft", "host"]) {
-        await page.goto(`${BASE}/${path}`);
-        await page
-          .locator(":is(.actions-row, .nx-head-actions) .kp-button")
-          .first()
-          .waitFor({ timeout: 15000 });
-        const found = await page.evaluate(() =>
-          [
-            ...document.querySelectorAll(
-              ":is(.actions-row, .nx-head-actions) .kp-button",
-            ),
-          ]
-            .filter((b) => /** @type {HTMLElement} */ (b).offsetParent)
-            .filter((b) => {
-              const el = /** @type {HTMLElement} */ (b);
-              const lh = parseFloat(getComputedStyle(el).lineHeight) || 20;
-              const pad =
-                parseFloat(getComputedStyle(el).paddingTop) +
-                parseFloat(getComputedStyle(el).paddingBottom);
-              return (
-                el.scrollWidth > el.clientWidth + 1 ||
-                el.clientHeight - pad > lh * 1.5
-              );
-            })
-            .map((b) => (b.textContent ?? "").trim()),
-        );
-        for (const f of found) bad.push(`${width}px /${path}: "${f}"`);
-      }
-      await context.close();
-    }
-    assert.deepEqual(bad, [], `labels that wrap or are cut: ${bad.join("; ")}`);
-  } finally {
-    await browser.close();
-  }
-});
-
 // fix-239 / drive-reach: that every button is reachable through Live view
 // is checked statically from the declarations (admin/web/test/
 // drivecatalog.test.js: no drivable mark without a declaration, every
 // declaration in the catalog); the walk and the press-every-control sweep
 // are gone (Kenny, 2026-10-04: know every control, do not press them all).
-
-// ui-pass-3 (Kenny, 2026-10-02: "vraag jezelf af of het next-level
-// frontend werk is of het nog beter kan, en verbeter het dan"): the shared
-// walk the cases below use — every drivable page plus a stack page.
-const UI_PASS_3_PATHS = [...DRIVABLE_PATHS, "stacks/kp-soft"];
-
-/** The page's actions, shared out over slices (the host has many dialogs). */
-const ACTION_DIALOG_SLICES = [
-  { path: "stacks/kp-soft", k: 0, of: 1 },
-  { path: "host", k: 0, of: 2 },
-  { path: "host", k: 1, of: 2 },
-];
-/** What the per-page slices of the two dialog cases measured between them. */
-const DIALOGS = {
-  phone: { measured: 0, pages: 0 },
-  once: { seen: 0, pages: 0 },
-};
-
-/**
- * Opens every action dialog on a stack page and on the host page, calls
- * `measure` with each open dialog's locator, and closes it again.
- * @param {import("playwright").Page} page
- * @param {(action: string, dialog: import("playwright").Locator) => Promise<void>} measure
- */
-async function eachActionDialog(page, measure, slice) {
-  for (const path of [slice.path]) {
-    await page.goto(`${BASE}/${path}`);
-    const buttons = page.locator("button[data-action]");
-    await buttons.first().waitFor({ timeout: 15000 });
-    const actions = (
-      await buttons.evaluateAll((bs) => [
-        ...new Set(
-          bs.map((b) => b.getAttribute("data-action")).filter(Boolean),
-        ),
-      ])
-    ).filter((_, i) => i % slice.of === slice.k);
-    for (const action of actions) {
-      const btn = page.locator(`button[data-action="${action}"]`).first();
-      // redesign-stackhub: the hub keeps most actions in its More ▾.
-      if (!(await btn.isVisible())) await openStackMore(page);
-      if (!(await btn.isVisible()) || !(await btn.isEnabled())) continue;
-      await btn.click({ timeout: 5000 });
-      const dialog = page.locator("dialog#action-dialog[open]");
-      await dialog.waitFor({ timeout: 1500 }).catch(() => {});
-      if (await dialog.isVisible().catch(() => false))
-        await measure(`${path} ${action}`, dialog);
-      for (const close of await page
-        .locator("dialog[open] .kp-dialog__close")
-        .all())
-        await close.click({ timeout: 2000 }).catch(() => {});
-      await page
-        .locator("dialog[open]")
-        .first()
-        .waitFor({ state: "detached", timeout: 5000 })
-        .catch(() => {});
-    }
-  }
-}
-
-// fix-247: a link drawn as a button looks like every other button — no
-// underline on one ("Export bundle") beside a plain one ("Compare with the
-// files") in the same row.
-eachSlice(
-  "invariants: a link drawn as a button is never underlined",
-  UI_PASS_3_PATHS,
-  8,
-  async (part) => {
-    const browser = await launch();
-    try {
-      const bad = [];
-      const context = await browser.newContext({
-        viewport: { width: 1894, height: 1000 },
-      });
-      const page = await freshPage(context);
-      for (const path of part) {
-        await page.goto(`${BASE}/${path}`);
-        await page.waitForTimeout(900);
-        const found = await page.evaluate(() =>
-          [...document.querySelectorAll("a.kp-button")]
-            .filter((a) => /** @type {HTMLElement} */ (a).offsetParent)
-            .filter((a) =>
-              getComputedStyle(a).textDecorationLine.includes("underline"),
-            )
-            .map(
-              (a) => (a.textContent ?? "").trim() || a.outerHTML.slice(0, 60),
-            ),
-        );
-        for (const f of found) bad.push(`/${path}: "${f}"`);
-      }
-      assert.deepEqual(bad, [], `underlined button links: ${bad.join("; ")}`);
-    } finally {
-      await browser.close();
-    }
-  },
-);
-
-// fix-248: on a phone, every action dialog field reads label first, then
-// its control — never the control above the label it belongs to.
-eachSlice(
-  "invariants: on a phone every action dialog field shows its label above its control",
-  ACTION_DIALOG_SLICES,
-  1,
-  async ([slice]) => {
-    const browser = await launch();
-    try {
-      const context = await browser.newContext({
-        viewport: { width: 390, height: 844 },
-      });
-      const page = await freshPage(context);
-      const bad = [];
-      let measured = 0;
-      await eachActionDialog(
-        page,
-        async (action, dialog) => {
-          const r = await dialog.evaluate((d) => {
-            const step = [...d.querySelectorAll("[data-kp-step]")].find(
-              (s) => !(/** @type {HTMLElement} */ (s).hidden),
-            );
-            if (!step) return { n: 0, inverted: [] };
-            const pairs = [...step.querySelectorAll(":scope > .kp-field")]
-              .filter((f) => /** @type {HTMLElement} */ (f).offsetParent)
-              .map((f) => {
-                const l = f.querySelector(".kp-field__label");
-                const c = f.querySelector(".kp-field__input, .kp-field__check");
-                if (!l || !c) return null;
-                const cb = c.getBoundingClientRect();
-                if (!cb.height) return null;
-                return {
-                  label: (l.textContent ?? "").trim(),
-                  inverted: cb.top < l.getBoundingClientRect().top - 2,
-                };
-              })
-              .filter((p) => p !== null);
-            return {
-              n: pairs.length,
-              inverted: pairs.filter((p) => p.inverted).map((p) => p.label),
-            };
-          });
-          measured += r.n;
-          for (const l of r.inverted) bad.push(`${action}: "${l}"`);
-        },
-        slice,
-      );
-      assert.deepEqual(
-        bad,
-        [],
-        `controls above their label: ${bad.join("; ")}`,
-      );
-      DIALOGS.phone.measured += measured;
-      DIALOGS.phone.pages += 1;
-    } finally {
-      await browser.close();
-    }
-  },
-);
-
-// The two pages' slices together must have measured enough: a walk that
-// finds no dialog proves nothing (kept from the single case it was split from).
-test("invariants: on a phone every action dialog field shows its label above its control (enough fields measured)", (t) => {
-  if (DIALOGS.phone.pages < ACTION_DIALOG_SLICES.length)
-    return t.skip("the slices did not all run in this process");
-  assert.ok(
-    DIALOGS.phone.measured >= 5,
-    `only ${DIALOGS.phone.measured} fields measured`,
-  );
-});
-
-// fix-249: an action dialog says what it does once — its own description
-// at the top — and the review step does not repeat it in other words.
-eachSlice(
-  "invariants: an action dialog describes what it does once, never twice",
-  ACTION_DIALOG_SLICES,
-  1,
-  async ([slice]) => {
-    const browser = await launch();
-    try {
-      const context = await browser.newContext({
-        viewport: { width: 1894, height: 1000 },
-      });
-      const page = await freshPage(context);
-      const bad = [];
-      let seen = 0;
-      await eachActionDialog(
-        page,
-        async (action, dialog) => {
-          const r = await dialog.evaluate((d) => ({
-            intro: !!d.querySelector(".act-intro"),
-            what: d.querySelectorAll(".act-what").length,
-          }));
-          if (r.intro) seen++;
-          if (r.intro && r.what > 0)
-            bad.push(`${action}: its description and a second "what" line`);
-        },
-        slice,
-      );
-      assert.deepEqual(bad, [], bad.join("; "));
-      DIALOGS.once.seen += seen;
-      DIALOGS.once.pages += 1;
-    } finally {
-      await browser.close();
-    }
-  },
-);
-
-test("invariants: an action dialog describes what it does once, never twice (enough dialogs seen)", (t) => {
-  if (DIALOGS.once.pages < ACTION_DIALOG_SLICES.length)
-    return t.skip("the slices did not all run in this process");
-  assert.ok(
-    DIALOGS.once.seen >= 5,
-    `only ${DIALOGS.once.seen} dialogs with a description`,
-  );
-});
 
 // fix-250: a collapsible block's chevron sits beside its heading at every
 // width — at phone width it wrapped onto a line of its own above the
@@ -2449,41 +2065,63 @@ test("invariants: every red action button belongs to an action the catalog marks
 // path the kit reserves, even the pages `kit_pages_in_webapp` hands to the
 // web app. Every address the router knows, retired ones included, renders
 // a page or redirects to one.
-eachSlice(
-  "invariants: every address the router knows renders a page or redirects to one, never no such route",
-  Object.keys(PATH_TO_PAGE),
-  10,
-  async (part) => {
-    const browser = await launch();
-    try {
-      const context = await browser.newContext({
-        viewport: { width: 1600, height: 1000 },
-      });
-      const page = await freshPage(context);
-      const bad = [];
-      for (const key of part) {
-        const path = `/${key}`;
-        const res = await page.goto(`${BASE}${path}`);
-        await page.waitForTimeout(500);
-        const status = res?.status() ?? 0;
-        const text = await page.evaluate(() => document.body?.innerText ?? "");
-        const landed = new URL(page.url()).pathname;
-        const h1 = await page.locator("main h1").count();
-        if (status >= 400 || /no such route/i.test(text) || h1 === 0)
-          bad.push(`${path} → ${landed} (HTTP ${status}, h1 ${h1})`);
-        else if (route(landed).page === "notfound")
-          bad.push(`${path} → ${landed}, which is no page`);
-      }
-      assert.deepEqual(
-        bad,
-        [],
-        `addresses that render no page:\n${bad.join("\n")}`,
-      );
-    } finally {
-      await browser.close();
+// feat-kpadopt-2 (Kenny's prune choice of 2026-10-22): seven slices of two
+// cases became one. The router's own redirect table is owned by the unit
+// tests (router.test.js, drivecatalog.test.js); here every address is asked
+// of the server without a render (no "no such route", no error status), and
+// the pre-3.71.0 addresses are followed once in the browser.
+test("invariants: every address the router knows answers a page and every pre-3.71.0 address lands on its new home", async () => {
+  const browser = await launch();
+  try {
+    const context = await browser.newContext({
+      viewport: { width: 1600, height: 1000 },
+    });
+    const page = await freshPage(context);
+    const bad = [];
+    for (const key of Object.keys(PATH_TO_PAGE)) {
+      const path = `/${key}`;
+      const res = await page.request.get(`${BASE}${path}`);
+      const text = await res.text();
+      if (res.status() >= 400 || /no such route/i.test(text))
+        bad.push(`${path} (HTTP ${res.status()})`);
     }
-  },
-);
+    assert.deepEqual(
+      bad,
+      [],
+      `addresses that render no page:\n${bad.join("\n")}`,
+    );
+    const { redirectFor: target } = await import("../js/router.js");
+    const stacks = await page.evaluate(async () => {
+      const r = await fetch("/data/fleet", {
+        headers: { accept: "application/json" },
+      });
+      const b = await r.json();
+      return (b.fleet?.stacks ?? []).map((/** @type {any} */ s) => s.name);
+    });
+    for (const from of OLD_ADDRESSES) {
+      const [path, q = ""] = from.split("?");
+      const want = target(route(path), q ? `?${q}` : "", { stacks });
+      await page.goto(`${BASE}${from}`, { waitUntil: "commit" });
+      // `/` (from /start) is the landing, which goes on to the Inbox or
+      // Apps by itself (Kenny, 2026-10-03).
+      const landed = (/** @type {URL} */ u) =>
+        want === "/"
+          ? ["/inbox", "/apps"].includes(u.pathname)
+          : u.pathname + u.search === want;
+      await page.waitForURL(landed, { timeout: 5000 }).catch(() => {});
+      const u = new URL(page.url());
+      if (!landed(u))
+        bad.push(`${from} → ${u.pathname}${u.search} (wanted ${want})`);
+    }
+    assert.deepEqual(
+      bad,
+      [],
+      `old addresses that did not land:\n${bad.join("\n")}`,
+    );
+  } finally {
+    await browser.close();
+  }
+});
 
 // fix-257 (design review, 2026-10-03): Settings' token read failed with
 // "invalid type: map, expected a sequence" — the demo host answered
@@ -2799,56 +2437,6 @@ const OLD_ADDRESSES = [
   "/secrets?stack=gateway",
 ];
 
-eachSlice(
-  "invariants: every pre-3.71.0 address lands on its new home",
-  OLD_ADDRESSES,
-  9,
-  async (old) => {
-    const browser = await launch();
-    try {
-      const context = await browser.newContext({
-        viewport: { width: 1600, height: 1000 },
-      });
-      const page = await freshPage(context);
-      const { redirectFor: target } = await import("../js/router.js");
-      const stacks = await page.evaluate(async () => {
-        const r = await fetch("/data/fleet", {
-          headers: { accept: "application/json" },
-        });
-        const b = await r.json();
-        return (b.fleet?.stacks ?? []).map((/** @type {any} */ s) => s.name);
-      });
-      const bad = [];
-      for (const from of old) {
-        const [path, q = ""] = from.split("?");
-        const want = target(route(path), q ? `?${q}` : "", { stacks });
-        await page.goto(`${BASE}${from}`);
-        // `/` (from /start) is the landing, which goes on to the Inbox or
-        // Apps by itself (Kenny, 2026-10-03).
-        const landed = (/** @type {URL} */ u) =>
-          want === "/"
-            ? ["/inbox", "/apps"].includes(u.pathname)
-            : u.pathname + u.search === want;
-        await page.waitForURL(landed, { timeout: 5000 }).catch(() => {});
-        await page.waitForTimeout(200);
-        const u = new URL(page.url());
-        const h1 = await page.locator("main h1").count();
-        if (!landed(u) || h1 === 0)
-          bad.push(
-            `${from} → ${u.pathname}${u.search} (wanted ${want}, h1 ${h1})`,
-          );
-      }
-      assert.deepEqual(
-        bad,
-        [],
-        `old addresses that did not land:\n${bad.join("\n")}`,
-      );
-    } finally {
-      await browser.close();
-    }
-  },
-);
-
 test("invariants: Ctrl K finds an action by intent, in any word order, and Enter opens its dialog", async () => {
   const browser = await launch();
   try {
@@ -2920,51 +2508,6 @@ test("invariants: Ctrl K finds an action by intent, in any word order, and Enter
     await browser.close();
   }
 });
-
-eachSlice(
-  "invariants: the kp-themes theme picker is in the bar on every page, desktop and phone",
-  [1894, 390].flatMap((width) => {
-    const pages = [...DRIVABLE_PATHS, "stacks/kp-soft", "stacks/kp-soft/logs"];
-    return [0, 1, 2, 3, 4, 5, 6, 7, 8, 9].map((k) => ({
-      width,
-      pages: pages.filter((_, i) => i % 10 === k),
-    }));
-  }),
-  1,
-  async ([{ width, pages }]) => {
-    const browser = await launch();
-    try {
-      const bad = [];
-      {
-        const context = await browser.newContext({
-          viewport: { width, height: 900 },
-        });
-        const page = await freshPage(context);
-        for (const p of pages) {
-          await page.goto(`${BASE}/${p}`);
-          await page.waitForTimeout(300);
-          const ok = await page.evaluate(() => {
-            const b = document.querySelector(
-              "#bar .kp-theme-menu > button[popovertarget]",
-            );
-            if (!b) return false;
-            const r = b.getBoundingClientRect();
-            return r.width > 0 && r.height > 0 && r.top < 120;
-          });
-          if (!ok) bad.push(`${width}px /${p}`);
-        }
-        await context.close();
-      }
-      assert.deepEqual(
-        bad,
-        [],
-        `no theme picker in the bar: ${bad.join(", ")}`,
-      );
-    } finally {
-      await browser.close();
-    }
-  },
-);
 
 test("invariants: the Inbox counter shows the exact number, never 9+, and equals the Inbox's rows", async () => {
   const browser = await launch();
@@ -4017,83 +3560,6 @@ test("invariants: ? opens Help with the six areas, the words and the keys, and i
   }
 });
 
-test("invariants: Deploy all changes lists every stack of the plan as a table row with its action, and its sentence and bar say what Apply will do (feat-kp11demo-13)", async () => {
-  const browser = await launch();
-  try {
-    const context = await browser.newContext();
-    const page = await freshPage(context);
-    // A fixed plan, so every kind of row is there.
-    await page.route("**/data/apply/plan", (route) =>
-      route.fulfill({
-        contentType: "application/json",
-        body: JSON.stringify({
-          plan: {
-            deploy: ["alpha", "beta"],
-            new: ["beta"],
-            destroy: ["gone"],
-            broken: [["gamma", "compose.yaml did not parse :: fix line 3"]],
-            unchanged: ["delta"],
-            ephemeral: [],
-          },
-          pending: 3,
-          measured_at: clockNowS(),
-        }),
-      }),
-    );
-    await page.goto(`${BASE}/stacks?deploy-all=1`);
-    const rows = page.locator("#ap-plan tbody tr[data-kp-row-key]");
-    await rows.first().waitFor({ timeout: 10000 });
-    assert.equal(await rows.count(), 5, "not a row per stack of the plan");
-    const actions = await rows.evaluateAll((els) =>
-      els.map((e) => e.querySelector(".kp-badge")?.textContent?.trim()),
-    );
-    assert.deepEqual(actions, [
-      "deploy",
-      "new",
-      "destroy",
-      "cannot be planned",
-      "unchanged",
-    ]);
-    const words = () => page.locator("#ap-plan-words").innerText();
-    assert.match(await words(), /Will deploy 2 stacks \(1 new\), destroy 0/);
-    // The stack that cannot be planned and an unchanged one cannot be ticked.
-    assert.equal(await page.getByLabel("Select gamma").isDisabled(), true);
-    assert.equal(await page.getByLabel("Select delta").isDisabled(), true);
-    await page.getByLabel("Select alpha").uncheck();
-    await page.waitForFunction(
-      () =>
-        /Will deploy 1 stack /.test(
-          document.querySelector("#ap-plan-words")?.textContent ?? "",
-        ),
-      null,
-      { timeout: 5000 },
-    );
-    // A destroy never rides along with a deploy: Apply turns off and says so.
-    await page.getByLabel("Select gone").check();
-    await page.waitForFunction(
-      () =>
-        document.querySelector("#apply-open")?.getAttribute("aria-disabled") ===
-        "true",
-      null,
-      { timeout: 5000 },
-    );
-    assert.match(
-      (await page
-        .locator("#apply-open")
-        .getAttribute("data-kp-disabled-reason")) ?? "",
-      /never rides along/,
-    );
-    // The destroy alone: Apply gives way to "Apply the destroy alone".
-    await page.getByLabel("Select beta").uncheck();
-    await page
-      .locator("#apply-destroy")
-      .waitFor({ state: "visible", timeout: 5000 });
-    assert.equal(await page.locator("#apply-open").isVisible(), false);
-  } finally {
-    await browser.close();
-  }
-});
-
 // ── redesign-stacks (3.71.0, the approved Stacks and Apps demos:
 // redesign-3.71/overview.html under FLOWS.md §1 row 3, and apps.html) ──
 
@@ -4405,45 +3871,10 @@ test("invariants: Stacks has the host strip, Deploy all changes and New stack; N
   }
 });
 
-test("invariants: Stacks and Apps fit a 390 px phone with no sideways scroll, in light and dark (feat-kp11demo-12)", async () => {
-  const browser = await launch();
-  try {
-    const context = await browser.newContext({
-      viewport: { width: 390, height: 844 },
-    });
-    const page = await freshPage(context);
-    /** @type {string[]} */
-    const bad = [];
-    for (const theme of ["formal", "dark"])
-      for (const path of ["/stacks", "/stacks?view=cards", "/apps"]) {
-        await page.evaluate((t) => localStorage.setItem("theme", t), theme);
-        await page.goto(`${BASE}${path}`);
-        await page.waitForSelector(
-          path === "/apps"
-            ? ".ap-stacks .ap-group, .ap-card[data-kp-state=empty]"
-            : ".fl-table tbody tr[data-kp-row-key], .fl-cards > .kp-card--entity",
-          { timeout: 10000 },
-        );
-        const over = await page.evaluate(
-          () => document.documentElement.scrollWidth - window.innerWidth,
-        );
-        if (over > 1) bad.push(`${path} in ${theme}: ${over}px`);
-        // No box scrolls sideways inside the page either.
-        const inner = await page.$$eval(".kp-table-wrap", (els) =>
-          els
-            .filter((e) => e.getClientRects().length > 0)
-            .map((e) => e.scrollWidth - e.clientWidth),
-        );
-        for (const d of inner)
-          if (d > 1) bad.push(`${path} in ${theme}: a table scrolls ${d}px`);
-      }
-    assert.deepEqual(bad, [], `sideways scroll: ${bad.join("; ")}`);
-  } finally {
-    await browser.close();
-  }
-});
-
-test("invariants: Deploy all changes marks its steps, shows the plan as a table and a stack that cannot be planned with its fix (feat-kp11demo-13)", async () => {
+test("invariants: Deploy all changes marks its steps, lists every stack of the plan as a table row with its action and says what Apply will do, and shows a stack that cannot be planned with its fix (feat-kp11demo-13)", async () => {
+  // feat-kpadopt-2 (Kenny's prune choice of 2026-10-22): the demo plan's
+  // steps and its broken stack first, then a fixed plan with every kind of
+  // row, in one browser.
   const browser = await launch();
   try {
     const context = await browser.newContext({
@@ -4500,51 +3931,73 @@ test("invariants: Deploy all changes marks its steps, shows the plan as a table 
       .click();
     await panel.locator(".ap-broken").first().waitFor({ timeout: 5000 });
     assert.match(await panel.locator(".ap-broken").first().innerText(), /Fix:/);
-  } finally {
-    await browser.close();
-  }
-});
-
-test("invariants: the batch Update… opens the one Update flow for the ticked stacks, never a link-free blind batch (feat-kp11demo-12)", async () => {
-  const browser = await launch();
-  try {
-    const context = await browser.newContext({
-      viewport: { width: 1600, height: 1000 },
-    });
-    const page = await freshPage(context);
-    const names = await fleetNames(page);
-    await page.goto(`${BASE}/stacks?view=table`);
-    await page
-      .locator(".fl-table tbody tr[data-kp-row-key]")
-      .first()
-      .waitFor({ timeout: 8000 });
-    // invariant 149: whichever Update opened it, it is the one flow.
-    await page
-      .locator(
-        `.fl-table [data-drive="stacks-tick"][data-drive-row="${names[0]}"]`,
-      )
-      .check();
-    await page
-      .locator(
-        `.fl-table [data-drive="stacks-tick"][data-drive-row="${names[1]}"]`,
-      )
-      .check();
-    const upd = page.locator('#fl-bar [data-batch="update"]');
-    assert.equal((await upd.innerText()).trim(), "Update…");
-    await upd.click();
-    await page.waitForURL("**/update?**", { timeout: 5000 });
-    const q = new URL(page.url()).searchParams;
-    assert.equal(q.get("all"), "1");
-    assert.deepEqual(
-      (q.get("only") ?? "").split(",").sort(),
-      [names[0], names[1]].sort(),
+    // A fixed plan, so every kind of row is there.
+    await page.route("**/data/apply/plan", (route) =>
+      route.fulfill({
+        contentType: "application/json",
+        body: JSON.stringify({
+          plan: {
+            deploy: ["alpha", "beta"],
+            new: ["beta"],
+            destroy: ["gone"],
+            broken: [["gamma", "compose.yaml did not parse :: fix line 3"]],
+            unchanged: ["delta"],
+            ephemeral: [],
+          },
+          pending: 3,
+          measured_at: clockNowS(),
+        }),
+      }),
     );
-    await page.locator("#page ol.uf-steps").waitFor({ timeout: 10000 });
+    await page.goto(`${BASE}/stacks?deploy-all=1`);
+    const rows = page.locator("#ap-plan tbody tr[data-kp-row-key]");
+    await rows.first().waitFor({ timeout: 10000 });
+    assert.equal(await rows.count(), 5, "not a row per stack of the plan");
+    const actions = await rows.evaluateAll((els) =>
+      els.map((e) => e.querySelector(".kp-badge")?.textContent?.trim()),
+    );
+    assert.deepEqual(actions, [
+      "deploy",
+      "new",
+      "destroy",
+      "cannot be planned",
+      "unchanged",
+    ]);
+    const words = () => page.locator("#ap-plan-words").innerText();
+    assert.match(await words(), /Will deploy 2 stacks \(1 new\), destroy 0/);
+    // The stack that cannot be planned and an unchanged one cannot be ticked.
+    assert.equal(await page.getByLabel("Select gamma").isDisabled(), true);
+    assert.equal(await page.getByLabel("Select delta").isDisabled(), true);
+    await page.getByLabel("Select alpha").uncheck();
+    await page.waitForFunction(
+      () =>
+        /Will deploy 1 stack /.test(
+          document.querySelector("#ap-plan-words")?.textContent ?? "",
+        ),
+      null,
+      { timeout: 5000 },
+    );
+    // A destroy never rides along with a deploy: Apply turns off and says so.
+    await page.getByLabel("Select gone").check();
+    await page.waitForFunction(
+      () =>
+        document.querySelector("#apply-open")?.getAttribute("aria-disabled") ===
+        "true",
+      null,
+      { timeout: 5000 },
+    );
     assert.match(
-      await page.locator("#page .nx-crumbs").innerText(),
-      /Stacks/,
-      "the batch's flow does not lead back to Stacks",
+      (await page
+        .locator("#apply-open")
+        .getAttribute("data-kp-disabled-reason")) ?? "",
+      /never rides along/,
     );
+    // The destroy alone: Apply gives way to "Apply the destroy alone".
+    await page.getByLabel("Select beta").uncheck();
+    await page
+      .locator("#apply-destroy")
+      .waitFor({ state: "visible", timeout: 5000 });
+    assert.equal(await page.locator("#apply-open").isVisible(), false);
   } finally {
     await browser.close();
   }
@@ -4969,7 +4422,9 @@ async function onSchedules(run) {
   }
 }
 
-test("invariants: Schedules page: Live view reaches the form and its fields (open, close, open again)", () =>
+// feat-kpadopt-2 (Kenny's prune choice of 2026-10-22): four cases of one or
+// two Live view steps each became two, the form and the row.
+test("invariants: Schedules page: Live view reaches the form and its fields (open, close, open again, pick)", () =>
   onSchedules(async ({ page, step }) => {
     let r = await step({ do: "click", control: "new-schedule" });
     assert.ok(r.ok, `new-schedule: ${JSON.stringify(r.refusal)}`);
@@ -4986,33 +4441,20 @@ test("invariants: Schedules page: Live view reaches the form and its fields (ope
     await page
       .locator("#sched-pane-body form.sch-form")
       .waitFor({ timeout: 3000 });
-  }));
-
-test("invariants: Schedules page: Live view reaches the form's fields", () =>
-  onSchedules(async ({ page, step }) => {
-    let r = await step({ do: "click", control: "new-schedule" });
-    assert.ok(r.ok, `new-schedule: ${JSON.stringify(r.refusal)}`);
-    await page
-      .locator("#sched-pane-body form.sch-form")
-      .waitFor({ timeout: 3000 });
     r = await step({ do: "pick", field: "sched-every", value: "once" });
     assert.ok(r.ok, `pick sched-every: ${JSON.stringify(r.refusal)}`);
     assert.equal(await page.locator("#sched-every").inputValue(), "once");
   }));
 
-test("invariants: Schedules page: Live view reaches the row's delete button and Undo", () =>
-  onSchedules(async ({ id, step, row }) => {
+test("invariants: Schedules page: Live view reaches the row's delete button, switch and Undo", () =>
+  onSchedules(async ({ page, id, row, step }) => {
     let r = await step({ do: "click", control: "delete-schedule", row: id });
     assert.ok(r.ok, `delete: ${JSON.stringify(r.refusal)}`);
     await row.waitFor({ state: "hidden", timeout: 5000 });
     r = await step({ do: "click", control: "undo-schedule-change" });
     assert.ok(r.ok, `undo: ${JSON.stringify(r.refusal)}`);
     await row.waitFor({ timeout: 3000 });
-  }));
-
-test("invariants: Schedules page: Live view reaches the row's switch and Undo", () =>
-  onSchedules(async ({ page, id, row, step }) => {
-    let r = await step({ do: "click", control: "toggle-schedule", row: id });
+    r = await step({ do: "click", control: "toggle-schedule", row: id });
     assert.ok(r.ok, `toggle: ${JSON.stringify(r.refusal)}`);
     await page.waitForTimeout(500);
     assert.equal(await row.evaluate((x) => x.classList.contains("off")), true);
@@ -5086,78 +4528,6 @@ async function phonePage(browser, theme) {
   }, theme);
   return { context, page: await freshPage(context) };
 }
-
-test("invariants: redesign-kit: a narrow page header reads the title with its live status, the description, then the actions", async () => {
-  // redesign-kit-16: both header shapes a page shows at 390 px — the
-  // plain one (Backups) and the meta one (Host; Schedules, drawn as
-  // Activity's Planned view: the live status in the meta row under the
-  // description) — read title, description, actions.
-  const browser = await launch();
-  try {
-    for (const theme of ["formal", "dark"])
-      for (const path of ["/backups", "/host", "/schedules"]) {
-        const { context, page } = await phonePage(browser, theme);
-        await page.goto(`${BASE}${path}`);
-        // Schedules sits under Activity's own title since the 3.71.0 merge:
-        // its header is the one inside `.sch-root`, its title an h2.
-        const sel =
-          path === "/schedules" ? "main .sch-root .nx-head" : "main .nx-head";
-        await page
-          .locator(`${sel} :is(h1, h2)`)
-          .first()
-          .waitFor({ timeout: 10000 });
-        const order = await page.evaluate((sel) => {
-          const head = /** @type {HTMLElement} */ (document.querySelector(sel));
-          const top = (/** @type {string} */ q) =>
-            head.querySelector(q)?.getBoundingClientRect().top ?? -1;
-          return {
-            meta: head.classList.contains("nx-head--meta"),
-            title: top(":is(h1, h2)"),
-            titleBottom:
-              head.querySelector(":is(h1, h2)")?.getBoundingClientRect()
-                .bottom ?? -1,
-            live: top(".nx-live"),
-            desc: top(".nx-head-desc"),
-            metaRow: top(".nx-head-meta"),
-            actions: top(".nx-head-actions"),
-          };
-        }, sel);
-        const where = `${theme} ${path}`;
-        // A meta header may carry its freshness as a chip of its own
-        // (Schedules' "read 4 s ago") instead of a live status.
-        for (const k of [
-          "title",
-          "titleBottom",
-          "desc",
-          "actions",
-          ...(order.meta ? [] : ["live"]),
-        ])
-          assert.ok(
-            /** @type {Record<string, number>} */ (order)[k] >= 0,
-            `${where}: the header has no ${k}`,
-          );
-        assert.ok(
-          order.titleBottom <= order.desc && order.desc < order.actions,
-          `${where}: the narrow header is not title, description, actions: ${JSON.stringify(order)}`,
-        );
-        if (order.meta)
-          assert.ok(
-            order.desc < order.metaRow && order.metaRow < order.actions,
-            `${where}: the meta row is not between the description and the actions: ${JSON.stringify(order)}`,
-          );
-        // redesign-final X1: the live status has one slot on every page,
-        // beside the title (a meta header's too).
-        if (order.live >= 0)
-          assert.ok(
-            order.title <= order.live && order.live < order.titleBottom,
-            `${where}: the live status is not beside the title: ${JSON.stringify(order)}`,
-          );
-        await context.close();
-      }
-  } finally {
-    await browser.close();
-  }
-});
 
 test("invariants: redesign-kit: a bad attention item is a soft red tint with a red border and the page's text colour", async () => {
   const browser = await launch();
@@ -5500,6 +4870,15 @@ async function liveGo(page, path, landed) {
  *   default: its first row on screen
  */
 async function liveClick(path, id, want = null) {
+  return (await liveClicks([[path, id, want]]))[0];
+}
+
+/**
+ * Several Live view presses in one browser and one driven session, one
+ * after the other (feat-kpadopt-2: the four Update presses share it).
+ * @param {[string, string, (string | null)?][]} presses path, id, want
+ */
+async function liveClicks(presses) {
   const browser = await launch();
   try {
     const context = await browser.newContext({
@@ -5511,36 +4890,39 @@ async function liveClick(path, id, want = null) {
     await drawn(page);
     await page.check("#live-view");
     const { all } = await catalogOf(page);
-    const entry = all.find((c) => c.id === id) ?? null;
     /** @type {Map<string, string>} */
     const landed = new Map();
-    const g = await liveGo(page, path, landed);
-    assert.ok(g.ok, `ui goto ${path}: ${g.refusal?.why}`);
-    const row = want ?? (entry?.row ? await firstRow(page, id) : null);
-    const t0 = performance.now();
-    const r = await reachStep(page, {
-      do: "click",
-      control: id,
-      ...(row == null ? {} : { row }),
-    });
-    const ms = performance.now() - t0;
-    await page.waitForTimeout(800);
-    const out = {
-      r,
-      ms,
-      entry,
-      row,
-      url: new URL(page.url()),
-      dialogs: await page.$$eval("dialog[open]", (d) => d.length),
-      focused: await page.evaluate(() => document.activeElement?.id ?? ""),
-      pressed: await page.$$eval(
-        `[data-drive="${id}"][aria-pressed="true"]`,
-        (e) => e.length,
-      ),
-    };
+    const outs = [];
+    for (const [path, id, want = null] of presses) {
+      const entry = all.find((c) => c.id === id) ?? null;
+      const g = await liveGo(page, path, landed);
+      assert.ok(g.ok, `ui goto ${path}: ${g.refusal?.why}`);
+      const row = want ?? (entry?.row ? await firstRow(page, id) : null);
+      const t0 = performance.now();
+      const r = await reachStep(page, {
+        do: "click",
+        control: id,
+        ...(row == null ? {} : { row }),
+      });
+      const ms = performance.now() - t0;
+      await page.waitForTimeout(800);
+      outs.push({
+        r,
+        ms,
+        entry,
+        row,
+        url: new URL(page.url()),
+        dialogs: await page.$$eval("dialog[open]", (d) => d.length),
+        focused: await page.evaluate(() => document.activeElement?.id ?? ""),
+        pressed: await page.$$eval(
+          `[data-drive="${id}"][aria-pressed="true"]`,
+          (e) => e.length,
+        ),
+      });
+    }
     await reachStep(page, { do: "done" });
     await restore();
-    return out;
+    return outs;
   } finally {
     await browser.close();
   }
@@ -5550,46 +4932,39 @@ async function liveClick(path, id, want = null) {
 // into the one Update flow (an address) were still declared as opening a
 // dialog, so Live view waited 3 s for a dialog that never came and the
 // sweep failed them; each now is a control that opens a view.
-test("invariants: redesign-integrate-8: Live view's press of a failed update's Run it again opens the Update flow for its stack, no dialog", async () => {
-  const x = await liveClick("/activity", "activity-update-again");
-  assert.equal(x.entry?.opens, "view", "declared as opening a view");
-  assert.ok(x.r.ok, `refused: ${x.r.refusal?.why}`);
-  assert.equal(x.url.pathname, "/update");
-  assert.ok(x.url.searchParams.get("stack"), `${x.url}`);
-  assert.equal(x.dialogs, 0);
-});
-
-test("invariants: redesign-integrate-8: Live view's press of a Stacks row's Update opens the Update flow for that stack, no dialog", async () => {
-  const x = await liveClick("/stacks?view=cards", "stacks-row-update");
-  assert.equal(x.entry?.opens, "view", "declared as opening a view");
-  assert.ok(x.r.ok, `refused: ${x.r.refusal?.why}`);
-  assert.equal(x.url.pathname, "/update");
-  assert.equal(x.url.searchParams.get("stack"), x.row);
-  assert.equal(x.dialogs, 0);
-});
-
-test("invariants: redesign-integrate-8: Live view's press of the Map's stale-image Update opens the Update flow with that app picked, no dialog", async () => {
-  const x = await liveClick("/map", "pin-update");
-  assert.equal(x.entry?.opens, "view", "declared as opening a view");
-  assert.ok(x.r.ok, `refused: ${x.r.refusal?.why}`);
-  assert.equal(x.url.pathname, "/update");
-  const [stack, ...app] = String(x.row).split("/");
-  assert.equal(x.url.searchParams.get("stack"), stack);
-  assert.equal(x.url.searchParams.get("app"), app.join("/"));
-  assert.equal(x.dialogs, 0);
-});
-
-// redesign-openpoints-1: the hub header's Update is the one Update flow (an
-// address) like every other Update press, but stack-head (whose Back up and
-// Deploy rows do open dialogs) is declared as opening a dialog, so Live
-// view waited 3 s for one before it answered.
-test("invariants: redesign-openpoints-1: Live view's press of the stack hub header's Update opens the stack's Update flow and answers at once, no 3 s wait for a dialog", async () => {
-  const x = await liveClick("/stacks/gateway", "stack-head", "gateway/update");
-  assert.ok(x.r.ok, `refused: ${x.r.refusal?.why}`);
-  assert.equal(x.url.pathname, "/update");
-  assert.equal(x.url.searchParams.get("stack"), "gateway");
-  assert.equal(x.dialogs, 0);
-  assert.ok(x.ms < 2000, `Live view answered after ${x.ms} ms`);
+// feat-kpadopt-2 (Kenny's prune choice of 2026-10-22): the four presses share
+// one browser; each keeps its own assertions, including the no-3-s-wait one.
+test("invariants: Live view's presses of the four Update controls (a failed update's Run it again, a Stacks row, the Map's stale image, the stack hub header) open the Update flow with no dialog", async () => {
+  const [again, row, pin, head] = await liveClicks([
+    ["/activity", "activity-update-again"],
+    ["/stacks?view=cards", "stacks-row-update"],
+    ["/map", "pin-update"],
+    ["/stacks/gateway", "stack-head", "gateway/update"],
+  ]);
+  for (const [name, x] of /** @type {const} */ ([
+    ["Run it again", again],
+    ["Stacks row", row],
+    ["Map stale image", pin],
+    ["hub header", head],
+  ])) {
+    assert.ok(x.r.ok, `${name}: refused: ${x.r.refusal?.why}`);
+    assert.equal(x.url.pathname, "/update", name);
+    assert.equal(x.dialogs, 0, `${name}: a dialog opened`);
+  }
+  for (const [name, x] of /** @type {const} */ ([
+    ["Run it again", again],
+    ["Stacks row", row],
+    ["Map stale image", pin],
+  ]))
+    assert.equal(x.entry?.opens, "view", `${name}: declared as opening a view`);
+  assert.ok(again.url.searchParams.get("stack"), `${again.url}`);
+  assert.equal(row.url.searchParams.get("stack"), row.row);
+  const [stack, ...app] = String(pin.row).split("/");
+  assert.equal(pin.url.searchParams.get("stack"), stack);
+  assert.equal(pin.url.searchParams.get("app"), app.join("/"));
+  assert.equal(head.url.searchParams.get("stack"), "gateway");
+  // redesign-openpoints-1: answers at once, no 3 s wait for a dialog.
+  assert.ok(head.ms < 2000, `Live view answered after ${head.ms} ms`);
 });
 
 // redesign-integrate-8: a Map node is an SVG <g>, which has no click();
@@ -8172,89 +7547,93 @@ test("invariants: stack hub — Apps and Backups are kp datatables; Backups draw
 
 eachSlice(
   "invariants: stack hub — every tab fits 390 and 1894 px in light and dark, no sideways scroll, nothing clipped inside a card",
-  ["formal", "dark"].flatMap((theme) =>
-    [1894, 390].map((width) => ({ theme, width })),
-  ),
+  // feat-kpadopt-2 (Kenny's prune choice of 2026-10-22): four cases, one
+  // per theme and width, became one per theme with both widths side by side.
+  ["formal", "dark"],
   1,
-  async ([{ theme, width }]) => {
+  async ([theme]) => {
     const browser = await launch();
     try {
       const bad = [];
-      {
-        const context = await browser.newContext({
-          viewport: { width, height: 900 },
-        });
-        const page = await freshPage(context);
-        await page.evaluate((t) => localStorage.setItem("theme", t), theme);
-        for (const tab of [
-          "",
-          "/logs",
-          "/apps",
-          "/backups",
-          "/history",
-          "/settings",
-        ]) {
-          for (const stack of tab === "/apps"
-            ? ["gateway", "kp-soft"]
-            : ["gateway"]) {
-            await page.goto(`${BASE}/stacks/${stack}${tab}`);
-            await page.waitForTimeout(1200);
-            const over = await page.evaluate(
-              () => document.documentElement.scrollWidth - innerWidth,
-            );
-            if (over > 0)
-              bad.push(`${theme} ${width}px ${tab || "/"}: ${over}px`);
-            // Review 3: nothing clipped INSIDE a card either — no table that
-            // scrolls sideways in its own box, no button past its card's
-            // edge; on a phone the KPI tiles are one or two columns (kp's count)
-            // and their words wrap, and a table as cards opens sorted by something.
-            const inside = await page.evaluate((w) => {
-              const out = [];
-              for (const t of document.querySelectorAll("main .kp-table-wrap"))
-                if (t.checkVisibility() && t.scrollWidth > t.clientWidth + 1)
-                  out.push(`table ${t.scrollWidth} > ${t.clientWidth}`);
-              for (const b of document.querySelectorAll(
-                "main button, main a.kp-button",
-              )) {
-                const card = b.closest(".kp-card, .nx-card, .kp-kpi");
-                if (!card || !b.checkVisibility()) continue;
-                const r = b.getBoundingClientRect();
-                const c = card.getBoundingClientRect();
-                if (r.right > c.right + 1 || r.left < c.left - 1)
-                  out.push(`"${b.textContent?.trim()}" past its card`);
-              }
-              if (w === 390) {
-                const lefts = new Set(
-                  [...document.querySelectorAll("main .kp-kpis > *")].map((t) =>
-                    Math.round(t.getBoundingClientRect().left),
-                  ),
-                );
-                // kp-themes' strip picks its own count by its width ("all 3
-                // 2 1": two 9 rem tiles fit a phone); the old home-made
-                // strip was always one column. Two is kp's look, more is not.
-                if (lefts.size > 2) out.push(`${lefts.size} KPI columns`);
-                for (const e of document.querySelectorAll(
-                  "main .kp-kpi__label, main .kp-kpi__trend",
+      await Promise.all(
+        [1894, 390].map(async (width) => {
+          const context = await browser.newContext({
+            viewport: { width, height: 900 },
+          });
+          const page = await freshPage(context);
+          await page.evaluate((t) => localStorage.setItem("theme", t), theme);
+          for (const tab of [
+            "",
+            "/logs",
+            "/apps",
+            "/backups",
+            "/history",
+            "/settings",
+          ]) {
+            for (const stack of tab === "/apps"
+              ? ["gateway", "kp-soft"]
+              : ["gateway"]) {
+              await page.goto(`${BASE}/stacks/${stack}${tab}`);
+              await page.waitForTimeout(800);
+              const over = await page.evaluate(
+                () => document.documentElement.scrollWidth - innerWidth,
+              );
+              if (over > 0)
+                bad.push(`${theme} ${width}px ${tab || "/"}: ${over}px`);
+              // Review 3: nothing clipped INSIDE a card either — no table that
+              // scrolls sideways in its own box, no button past its card's
+              // edge; on a phone the KPI tiles are one or two columns (kp's count)
+              // and their words wrap, and a table as cards opens sorted by something.
+              const inside = await page.evaluate((w) => {
+                const out = [];
+                for (const t of document.querySelectorAll(
+                  "main .kp-table-wrap",
                 ))
-                  if (e.scrollWidth > e.clientWidth + 1)
-                    out.push(`KPI text cut: ${e.textContent}`);
-                for (const sel of document.querySelectorAll(
-                  "main .kp-datatable__card-sort select",
-                ))
-                  if (
-                    /** @type {HTMLElement} */ (sel).checkVisibility() &&
-                    /** @type {HTMLSelectElement} */ (sel).value === ""
-                  )
-                    out.push("a card sort reads None");
-              }
-              return out;
-            }, width);
-            for (const x of inside)
-              bad.push(`${theme} ${width}px ${stack}${tab || "/"}: ${x}`);
+                  if (t.checkVisibility() && t.scrollWidth > t.clientWidth + 1)
+                    out.push(`table ${t.scrollWidth} > ${t.clientWidth}`);
+                for (const b of document.querySelectorAll(
+                  "main button, main a.kp-button",
+                )) {
+                  const card = b.closest(".kp-card, .nx-card, .kp-kpi");
+                  if (!card || !b.checkVisibility()) continue;
+                  const r = b.getBoundingClientRect();
+                  const c = card.getBoundingClientRect();
+                  if (r.right > c.right + 1 || r.left < c.left - 1)
+                    out.push(`"${b.textContent?.trim()}" past its card`);
+                }
+                if (w === 390) {
+                  const lefts = new Set(
+                    [...document.querySelectorAll("main .kp-kpis > *")].map(
+                      (t) => Math.round(t.getBoundingClientRect().left),
+                    ),
+                  );
+                  // kp-themes' strip picks its own count by its width ("all 3
+                  // 2 1": two 9 rem tiles fit a phone); the old home-made
+                  // strip was always one column. Two is kp's look, more is not.
+                  if (lefts.size > 2) out.push(`${lefts.size} KPI columns`);
+                  for (const e of document.querySelectorAll(
+                    "main .kp-kpi__label, main .kp-kpi__trend",
+                  ))
+                    if (e.scrollWidth > e.clientWidth + 1)
+                      out.push(`KPI text cut: ${e.textContent}`);
+                  for (const sel of document.querySelectorAll(
+                    "main .kp-datatable__card-sort select",
+                  ))
+                    if (
+                      /** @type {HTMLElement} */ (sel).checkVisibility() &&
+                      /** @type {HTMLSelectElement} */ (sel).value === ""
+                    )
+                      out.push("a card sort reads None");
+                }
+                return out;
+              }, width);
+              for (const x of inside)
+                bad.push(`${theme} ${width}px ${stack}${tab || "/"}: ${x}`);
+            }
           }
-        }
-        await context.close();
-      }
+          await context.close();
+        }),
+      );
       assert.deepEqual(bad, [], `clipped: ${bad.join("; ")}`);
     } finally {
       await browser.close();
@@ -8296,48 +7675,6 @@ test("invariants: stack hub review — Update and the u key open the stack's Upd
         `${how}: not gateway's Update flow`,
       );
     }
-  } finally {
-    await browser.close();
-  }
-});
-
-// redesign-openpoints-2: an app's Update… in the hub's Apps tab opened the
-// Update flow for the whole stack (openAction dropped the app it was
-// given); it opens the flow with only that app picked.
-test("invariants: redesign-openpoints-2: an app's Update… in the stack hub opens the Update flow with only that app picked", async () => {
-  const browser = await launch();
-  try {
-    const context = await browser.newContext({
-      viewport: { width: 1894, height: 1000 },
-    });
-    const page = await freshPage(context);
-    await page.goto(`${BASE}/stacks/gateway/apps`);
-    const btn = page.locator('[data-drive="stack-app-pull"]').first();
-    await btn.waitFor({ timeout: 10000 });
-    const row = String(await btn.getAttribute("data-drive-row"));
-    const app = row.split("/").slice(1).join("/");
-    assert.ok(app, `no app in the row ${row}`);
-    await btn.click();
-    await page.waitForURL("**/update?**", { timeout: 5000 });
-    const u = new URL(page.url());
-    assert.equal(u.searchParams.get("stack"), "gateway");
-    assert.equal(u.searchParams.get("app"), app, "the flow names the app");
-    await page.locator("#page ol.uf-steps").waitFor({ timeout: 10000 });
-    await page
-      .locator('#page [data-drive="update-pick"]')
-      .first()
-      .waitFor({ timeout: 10000 });
-    const ticked = await page.$$eval('#page [data-drive="update-pick"]', (bs) =>
-      bs
-        .filter((b) => /** @type {HTMLInputElement} */ (b).checked)
-        .map((b) => b.closest("tr")?.getAttribute("data-kp-row-label")),
-    );
-    assert.equal(ticked.length, 1, `ticked: ${ticked.join(" | ")}`);
-    assert.equal(ticked[0], `gateway/${app}`);
-    assert.match(
-      await page.locator("#page h1").innerText(),
-      new RegExp(`Update gateway/${app}`),
-    );
   } finally {
     await browser.close();
   }
@@ -8755,60 +8092,12 @@ test("invariants: Deploy all changes marks Compare done only once the compare ra
   }
 });
 
-test("invariants: on a phone the Deploy all changes table never scrolls sideways and the Inbox header reads title, sentence, then its button", async () => {
+test("invariants: the Inbox's Worth a look carries a one-sentence description, and is a fold with a chevron whose count is the rows it holds", async () => {
   const browser = await launch();
   try {
     const context = await browser.newContext({
-      viewport: { width: 390, height: 900 },
+      viewport: { width: 1894, height: 1000 },
     });
-    const page = await freshPage(context);
-    await page.goto(`${BASE}/stacks?deploy-all=1`);
-    await page
-      .locator("#ap-plan tbody tr[data-kp-row-key]")
-      .first()
-      .waitFor({ timeout: 15000 });
-    assert.ok(
-      await page.evaluate(
-        () => document.documentElement.scrollWidth <= window.innerWidth + 1,
-      ),
-      "the page scrolls sideways",
-    );
-    assert.ok(
-      await page
-        .locator("#ap-plan .kp-table-wrap")
-        .evaluate((e) => e.scrollWidth <= e.clientWidth + 1),
-      "the plan table scrolls sideways",
-    );
-    await page.goto(`${BASE}/needs-you`);
-    const head = page.locator("#page .nx-head").first();
-    await head.waitFor({ timeout: 10000 });
-    const box = async (/** @type {string} */ sel) =>
-      /** @type {{x: number, y: number, width: number, height: number}} */ (
-        await head.locator(sel).first().boundingBox()
-      );
-    const title = await box("h1");
-    const desc = await box(".nx-head-desc");
-    const again = await box("[data-drive=inbox-check-again]");
-    assert.ok(
-      title.y < desc.y && desc.y < again.y,
-      "the header does not read title, sentence, button",
-    );
-    // kp-themes' narrow page header lays its actions across the header's
-    // width, under the sentence (the demo's phone header): the button
-    // stays inside the header and never past the screen.
-    assert.ok(
-      again.x >= 0 && again.x + again.width <= 390 - 8,
-      "Check again leaves the screen",
-    );
-  } finally {
-    await browser.close();
-  }
-});
-
-test("invariants: the Inbox's Worth a look carries a one-sentence description", async () => {
-  const browser = await launch();
-  try {
-    const context = await browser.newContext();
     const page = await freshPage(context);
     await page.goto(`${BASE}/needs-you`);
     // Both folds under the list (Snoozed, Worth a look) say what they hold.
@@ -8825,6 +8114,34 @@ test("invariants: the Inbox's Worth a look carries a one-sentence description", 
       const t = (await d.innerText()).trim();
       assert.ok(/^[A-Z].*\.$/.test(t), `not one sentence: ${t}`);
     }
+    // redesign-final-m5, folded in (feat-kpadopt-2): the same page's fold.
+    const sum = page.locator(".inbox-worth > summary", {
+      hasText: "Worth a look",
+    });
+    await page.waitForFunction(
+      () =>
+        /· \d+/.test(
+          [...document.querySelectorAll(".inbox-worth > summary")].find((s) =>
+            (s.textContent ?? "").startsWith("Worth a look"),
+          )?.textContent ?? "",
+        ),
+      null,
+      { timeout: 10000 },
+    );
+    const chevron = await sum.evaluate((s) => {
+      const b = getComputedStyle(s, "::before");
+      return b.content !== "none" && parseFloat(b.width) > 0;
+    });
+    assert.ok(chevron, "the fold has no chevron");
+    await sum.click();
+    const n = Number(
+      /· (\d+)/.exec((await sum.innerText()) ?? "")?.[1] ?? "-1",
+    );
+    const rows = await page
+      .locator(".inbox-worth .ib-worth-list > li:visible")
+      .count();
+    assert.ok(rows > 0, "the open fold shows no rows");
+    assert.equal(n, rows, "the count is not the rows the fold holds");
   } finally {
     await browser.close();
   }
@@ -8989,67 +8306,6 @@ test("invariants: Help's close button stays inside its panel, the bar's ? is the
   }
 });
 
-// redesign-integrate-1 (the 3.71.0 consolidation's open item from the
-// kit's review): at 390 px the Firewall's Inbound and Outbound rules
-// tables scrolled sideways inside their card and cut off Ports. On a phone
-// each rule is a card with its cells labelled (kp-themes' card layout),
-// never a table to scroll.
-test("invariants: redesign-integrate-1: on a 390 px phone the Firewall's rules table never scrolls sideways, every rule's Ports in view", async () => {
-  const browser = await launch();
-  try {
-    const context = await browser.newContext({
-      viewport: { width: 390, height: 844 },
-    });
-    const page = await freshPage(context);
-    await page.goto(`${BASE}/firewall`);
-    await page
-      .locator("#fw-rule-table tr[data-kp-group-of]")
-      .first()
-      .waitFor({ timeout: 10000 });
-    const r = await page.evaluate(() => {
-      const wrap = document.querySelector("#fw-rule-table .kp-table-wrap");
-      return {
-        sideways: wrap ? wrap.scrollWidth - wrap.clientWidth : 0,
-        portsOff: [
-          ...document.querySelectorAll("#fw-rule-table tr[data-kp-group-of]"),
-        ]
-          .filter((tr) => tr.getClientRects().length)
-          .map((tr) => {
-            const td = /** @type {HTMLElement} */ (
-              tr.querySelector("td[data-label=Ports]")
-            );
-            const b = td.getBoundingClientRect();
-            return b.width === 0 || b.right > innerWidth + 1
-              ? (tr.getAttribute("data-kp-row-key") ?? "?")
-              : null;
-          })
-          .filter(Boolean),
-        unlabelled: [
-          ...document.querySelectorAll(
-            "#fw-rule-table tr[data-kp-group-of] > td",
-          ),
-        ]
-          .filter(
-            (td) =>
-              !td.getAttribute("data-label") &&
-              (td.textContent ?? "").trim() !== "▸",
-          )
-          .map((td) => td.textContent ?? ""),
-        page: document.documentElement.scrollWidth - innerWidth,
-      };
-    });
-    assert.ok(
-      r.sideways <= 1,
-      `the rules table scrolls sideways by ${r.sideways}px`,
-    );
-    assert.deepEqual(r.portsOff, [], "rules whose Ports are cut off");
-    assert.deepEqual(r.unlabelled, [], "rule cells without their column name");
-    assert.ok(r.page <= 1, `the page scrolls sideways by ${r.page} px`);
-  } finally {
-    await browser.close();
-  }
-});
-
 // ── redesign-final-gen (3.71.0's final review, 2026-10-04): one generic
 // whole-screen check per finding class, over every page and every action
 // dialog or drawer at 1894 and 390 px (test-e2e/layoutaudit.js says what
@@ -9066,13 +8322,9 @@ const AUDIT_PAGES = [
   "/stacks",
   "/stacks?deploy-all=1",
   "/activity",
-  "/activity?view=running",
   "/activity?view=host-log",
   "/activity?view=planned",
-  "/activity?view=timeline",
   "/backups",
-  "/backups?section=coverage",
-  "/backups?section=removed",
   "/backups/restore?stack=kp-soft",
   "/system",
   "/host",
@@ -9081,20 +8333,12 @@ const AUDIT_PAGES = [
   "/map",
   "/firewall",
   "/settings",
-  "/settings?section=sign-in",
   "/presets",
-  "/system/notifications",
-  "/console",
-  "/update?all=1",
   "/update?stack=kp-soft",
   "/stacks/kp-soft/overview",
   "/stacks/kp-soft/logs",
   "/stacks/kp-soft/apps",
-  "/stacks/kp-soft/backups",
-  "/stacks/kp-soft/history",
   "/stacks/kp-soft/settings",
-  "/stacks/films/overview",
-  "/stacks/films/settings",
   // redesign-final M8: the stack whose last night failed (its incident).
   "/stacks/oldstack/history",
 ];
@@ -9107,21 +8351,9 @@ const AUDIT_PAGES = [
  */
 const AUDIT_DIALOGS = [
   { path: "/inbox", drive: "inbox-fix" },
-  { path: "/inbox", drive: "inbox-push-envs" },
   { path: "/stacks", drive: "stacks-new" },
-  { path: "/activity", drive: "activity-run-again" },
-  { path: "/activity", drive: "activity-open-incident" },
-  { path: "/backups", text: /^Back up now/ },
-  { path: "/backups", drive: "backups-drill-now" },
-  { path: "/host", text: /^Back up host state/ },
-  { path: "/host", text: /^Back up devices/ },
-  { path: "/host", text: /^Run a command/ },
-  { path: "/host", text: /^Build a template/ },
   { path: "/settings", drive: "issue-token" },
-  { path: "/presets", drive: "presets-import" },
-  { path: "/presets", drive: "presets-new-preset" },
   { path: "/stacks/kp-soft/overview", drive: "stack-head" },
-  { path: "/stacks/kp-soft/overview", drive: "stack-fix" },
   { path: "/stacks/films/overview", drive: "stack-head", text: /^Deploy/ },
   { path: "/stacks/kp-soft/apps", drive: "stack-app-publish" },
   { path: "/stacks/kp-soft/backups", drive: "stack-backups-card" },
@@ -9196,7 +8428,7 @@ const AUDIT_CLASSES = /** @type {const} */ ([
   ],
   [
     "grid",
-    "an action dialog lays its fields on one grid, labels on one edge, controls on another",
+    "an action dialog lays its fields on one grid, labels on one edge, controls on another (on a phone each control sits under its label)",
   ],
   ["picker", "the kp-themes theme picker is in the bar on every page"],
   ["btnlink", "a link drawn as a button is never underlined"],
@@ -9226,6 +8458,8 @@ const GEN = {
   sameSite: new Map(),
   /** Action dialogs whose fields the grid class measured (none measured is no pass). */
   gridDialogs: 0,
+  /** Fields the grid class measured on a phone (label above control). */
+  phoneFields: 0,
   /** Action dialogs with a description the "once" class looked at. */
   onceDialogs: 0,
   /** @type {Set<string>} */
@@ -9284,7 +8518,8 @@ async function genWalk(entry) {
         keep(where, await page.evaluate(layoutAudit, "dialog[data-audit]"));
         const g = await page.evaluate(dialogGrid, "dialog[data-audit]");
         keep(where, { grid: g.faults });
-        if (g.fields) GEN.gridDialogs += 1;
+        if (g.fields && width > 800) GEN.gridDialogs += 1;
+        if (g.fields && width <= 800) GEN.phoneFields += g.fields;
         const o = await page.evaluate(dialogOnce, "dialog[data-audit]");
         keep(where, { once: width > 800 ? o.faults : [] });
         if (o.intro && width > 800) GEN.onceDialogs += 1;
@@ -9446,6 +8681,10 @@ test(
       all.grid.push(
         `only ${GEN.gridDialogs} action dialogs had fields to measure`,
       );
+    if (GEN.phoneFields < 5 && !AUDIT_ONLY)
+      all.grid.push(
+        `only ${GEN.phoneFields} dialog fields were measured on a phone`,
+      );
     if (GEN.onceDialogs < 2 && !AUDIT_ONLY)
       all.once.push(
         `only ${GEN.onceDialogs} action dialogs had a description to measure`,
@@ -9479,101 +8718,6 @@ test(
 
 // ── redesign-final C1–C4, H1–H5 (3.71.0's final review, 2026-10-04): one
 // case per finding, each failing on the reviewed tree (c6334fc9). ───────
-
-// C4: rule 18's stack chips wrapped into row 19 and printed over its
-// address; a rule's row grows with its chips.
-test("invariants: redesign-final-c4: every Firewall rule row grows with its content, never printing into the next rule", async () => {
-  const browser = await launch();
-  try {
-    const context = await browser.newContext({
-      viewport: { width: 1894, height: 1000 },
-    });
-    const page = await freshPage(context);
-    await page.goto(`${BASE}/firewall`);
-    await page
-      .locator("#fw-rule-table tr[data-kp-group-of]")
-      .first()
-      .waitFor({ timeout: 10000 });
-    /** @type {string[]} */
-    const bad = await page.evaluate(() =>
-      [...document.querySelectorAll("#fw-rule-table tr[data-kp-group-of]")]
-        .filter((tr) => tr.getClientRects().length)
-        .flatMap((tr) => {
-          // The next row that is drawn (a closed row's detail is display:none).
-          let next = tr.nextElementSibling;
-          while (next && !next.getClientRects().length)
-            next = next.nextElementSibling;
-          if (!next) return [];
-          const top = next.getBoundingClientRect().top;
-          const low = Math.max(
-            ...[...tr.querySelectorAll("*")].map(
-              (e) => e.getBoundingClientRect().bottom,
-            ),
-          );
-          return low > top + 1
-            ? [
-                `${tr.getAttribute("data-kp-row-key")}: ${Math.round(low - top)} px into the next row`,
-              ]
-            : [];
-        }),
-    );
-    assert.deepEqual(bad, [], "rules whose content runs into the next rule");
-  } finally {
-    await browser.close();
-  }
-});
-
-// C1: Deploy all changes squeezed the whole plan into a ~500 px drawer:
-// "WILL DEPLO Y", KPI numbers cut to "1…", the step text overlapped.
-test("invariants: redesign-final-c1: Deploy all changes opens as a wide sheet whose steps, tiles and columns never break a word per letter or cut a number, at 1894 and 390 px", async () => {
-  const { layoutAudit } = await import("./layoutaudit.js");
-  const browser = await launch();
-  try {
-    for (const width of [1894, 390]) {
-      const context = await browser.newContext({
-        viewport: { width, height: width > 500 ? 1000 : 844 },
-      });
-      const page = await freshPage(context);
-      await page.goto(`${BASE}/stacks?deploy-all=1`);
-      const d = page.locator("dialog[open]").last();
-      await d
-        .locator("#ap-plan tbody tr[data-kp-row-key]")
-        .first()
-        .waitFor({ timeout: 10000 });
-      await page.waitForTimeout(500);
-      const r = await page.evaluate(() => {
-        const d = /** @type {HTMLElement} */ (
-          [...document.querySelectorAll("dialog[open]")].pop()
-        );
-        d.setAttribute("data-audit", "");
-        return {
-          w: d.getBoundingClientRect().width,
-          cut: [...d.querySelectorAll("#ap-plan td")]
-            .filter((v) => v.scrollWidth > v.clientWidth + 1)
-            .map((v) => v.textContent),
-          over: [...d.querySelectorAll(".ap-steps li")].flatMap((li) => {
-            const b = li.getBoundingClientRect();
-            return [...li.querySelectorAll("*")]
-              .filter((e) => e.getBoundingClientRect().right > b.right + 1)
-              .map((e) => (e.textContent ?? "").slice(0, 30));
-          }),
-        };
-      });
-      if (width > 500)
-        assert.ok(
-          r.w >= 960,
-          `the sheet is ${Math.round(r.w)} px wide at ${width}`,
-        );
-      assert.deepEqual(r.cut, [], `@${width}: table cells cut`);
-      assert.deepEqual(r.over, [], `@${width}: step text out of its step`);
-      const a = (await page.evaluate(layoutAudit, "dialog[data-audit]")).a;
-      assert.deepEqual(a, [], `@${width}: words broken or text cut`);
-      await context.close();
-    }
-  } finally {
-    await browser.close();
-  }
-});
 
 // C2: the running pill's drawer reused the inline panel's window-wide
 // grid ("step 3", "no earlier run to go by" cut) and lacked the steps.
@@ -9673,56 +8817,6 @@ test("invariants: redesign-final-h2: an action dialog that cannot run says why i
     assert.doesNotMatch(exec.text, raw, "raw words in Run a command");
     assert.ok(exec.code >= 2, "the description's commands are not code");
     assert.ok(exec.disabled, "Run a command is armed without a container");
-  } finally {
-    await browser.close();
-  }
-});
-
-// H5: Activity › Planned mounted the Schedules page with a second
-// page-sized title and a key badge no other button has; /host?section=
-// doctor mounted the retired Doctor page (H1 "Doctor", "Today block",
-// an old table) inside Host instead of Host's own checks card.
-test("invariants: redesign-final-h5: Planned is a section of Activity and the Doctor's address opens Host on its checks card", async () => {
-  const browser = await launch();
-  try {
-    const context = await browser.newContext({
-      viewport: { width: 1894, height: 1000 },
-    });
-    const page = await freshPage(context);
-    await page.goto(`${BASE}/activity?view=planned`);
-    await page.locator("#sched-new").waitFor();
-    const planned = await page.evaluate(() => {
-      const h1 = /** @type {HTMLElement} */ (document.querySelector("main h1"));
-      const big = parseFloat(getComputedStyle(h1).fontSize) * 0.85;
-      return {
-        h1s: document.querySelectorAll("main h1").length,
-        rivals: [...document.querySelectorAll("main h2")]
-          .filter((x) => parseFloat(getComputedStyle(x).fontSize) >= big)
-          .map((x) => x.textContent),
-        badge: document.querySelectorAll("#sched-new kbd, #sched-new .kp-kbd")
-          .length,
-      };
-    });
-    assert.equal(planned.h1s, 1);
-    assert.deepEqual(planned.rivals, [], "a second page-sized title");
-    assert.equal(planned.badge, 0, "New schedule carries a key badge");
-
-    await page.goto(`${BASE}/host?section=doctor`);
-    const card = page.locator("#host-checks-card");
-    await card.waitFor({ timeout: 10000 });
-    await page.waitForTimeout(800);
-    const host = await page.evaluate(() => ({
-      h1: document.querySelector("main h1")?.textContent ?? "",
-      text: document.querySelector("main")?.textContent ?? "",
-      top: document.querySelector("#host-checks-card")?.getBoundingClientRect()
-        .top,
-    }));
-    assert.match(host.h1, /^Host/);
-    assert.doesNotMatch(host.text, /Today block/);
-    assert.ok(
-      host.top != null && host.top >= -1 && host.top < 1000,
-      `the Host checks card is not in view (top ${host.top})`,
-    );
   } finally {
     await browser.close();
   }
@@ -10256,149 +9350,151 @@ test("invariants: redesign-final-low-settings: the Host settings page, its bread
 const SELECTABLE = JSON.parse(
   readFileSync(new URL("../js/drivecatalog.json", import.meta.url), "utf8"),
 ).controls.filter((/** @type {any} */ c) => c.selects);
-/** @type {Map<string, string[]>} what each control's check found */
-const LIVE_SEL = new Map();
-
 /**
- * One selectable control: tick two rows, focus the first, let the demo host
- * push the fleet twice, and the ticks, the focus and the row nodes are still
- * there. Own case per control (redesign-final-extra-live-selection, split so
- * each stays under the suite's 20 s).
- * @param {any} c a catalog control
+ * Selectable controls, a group at a time (feat-kpadopt-2, Kenny's prune
+ * choice of 2026-10-22: nine controls cost nine browsers that each idled
+ * 10.5 s): one browser, one page per control set up side by side, ONE wait
+ * for the demo host's two pushes, then every page is read. Tick two rows,
+ * focus the first, let the demo host push the fleet twice, and the ticks,
+ * the focus and the row nodes are still there.
+ * @param {any[]} cs catalog controls
+ * @returns {Promise<string[]>} what the check found
  */
-async function liveSelectionOf(c) {
+async function liveSelectionOf(cs) {
   const ROW =
     "tr, li, [role=listitem], [role=row], .sk-card, [data-stack], [data-kp-row-key], label";
   /** @type {string[]} */
   const bad = [];
   const browser = await launch();
   try {
-    const context = await browser.newContext({
-      viewport: { width: 1894, height: 1000 },
-    });
-    const page = await freshPage(context);
-    const home = c.href?.startsWith("/stacks/<stack>")
-      ? c.href.replace("<stack>", "kp-soft").replace(/\/<[^>]+>.*$/, "")
-      : !c.href || /[<{]/.test(c.href)
-        ? `/${c.page}`
-        : c.href;
-    await page.goto(`${BASE}${home}`);
-    // A control that shows only once another is pressed (Deploy all
-    // changes' picks): its declared reach steps first.
-    for (const r of c.reach ?? [])
-      if (r.do === "click")
-        await page
-          .locator(`[data-drive="${r.control}"]:visible`)
-          .first()
-          .click();
-    const rowSel = `[data-drive="${c.id}"]`;
-    await page
-      .waitForFunction(
-        (sel) =>
-          [...document.querySelectorAll(sel)].some((e) => {
-            const b = e.matches("input[type=checkbox]")
-              ? /** @type {HTMLInputElement} */ (e)
-              : e.querySelector("input[type=checkbox]");
+    /** @param {any} c */
+    const prepare = async (c) => {
+      const context = await browser.newContext({
+        viewport: { width: 1894, height: 1000 },
+      });
+      const page = await freshPage(context);
+      const home = c.href?.startsWith("/stacks/<stack>")
+        ? c.href.replace("<stack>", "kp-soft").replace(/\/<[^>]+>.*$/, "")
+        : !c.href || /[<{]/.test(c.href)
+          ? `/${c.page}`
+          : c.href;
+      await page.goto(`${BASE}${home}`);
+      // A control that shows only once another is pressed (Deploy all
+      // changes' picks): its declared reach steps first.
+      for (const r of c.reach ?? [])
+        if (r.do === "click")
+          await page
+            .locator(`[data-drive="${r.control}"]:visible`)
+            .first()
+            .click();
+      const rowSel = `[data-drive="${c.id}"]`;
+      await page
+        .waitForFunction(
+          (sel) =>
+            [...document.querySelectorAll(sel)].some((e) => {
+              const b = e.matches("input[type=checkbox]")
+                ? /** @type {HTMLInputElement} */ (e)
+                : e.querySelector("input[type=checkbox]");
+              return b && !b.disabled && b.offsetParent !== null;
+            }),
+          rowSel,
+          { timeout: 5000 },
+        )
+        .catch(() => {});
+      const rows = await page.evaluate((id) => {
+        const box = (/** @type {Element} */ e) =>
+          /** @type {HTMLInputElement | null} */ (
+            e.matches("input[type=checkbox]")
+              ? e
+              : e.querySelector("input[type=checkbox]")
+          );
+        return [...document.querySelectorAll(`[data-drive="${id}"]`)]
+          .filter((e) => {
+            const b = box(e);
             return b && !b.disabled && b.offsetParent !== null;
-          }),
-        rowSel,
-        { timeout: 5000 },
-      )
-      .catch(() => {});
-    const rows = await page.evaluate((id) => {
-      const box = (/** @type {Element} */ e) =>
-        /** @type {HTMLInputElement | null} */ (
-          e.matches("input[type=checkbox]")
-            ? e
-            : e.querySelector("input[type=checkbox]")
-        );
-      return [...document.querySelectorAll(`[data-drive="${id}"]`)]
-        .filter((e) => {
-          const b = box(e);
-          return b && !b.disabled && b.offsetParent !== null;
-        })
-        .slice(0, 2)
-        .map((e) => /** @type {HTMLElement} */ (e).dataset.driveRow ?? "");
-    }, c.id);
-    if (!rows.length) {
-      bad.push(`${c.id}: no selectable row on ${home}`);
-      return bad;
-    }
-    const sel1 = (/** @type {string} */ r) =>
-      `[data-drive="${c.id}"][data-drive-row="${r}"]`;
-    for (const r of rows) {
-      const e = page.locator(sel1(r)).first();
-      const b = (await e.evaluate((x) => x.matches("input")))
-        ? e
-        : e.locator("input[type=checkbox]").first();
-      if (!(await b.isChecked())) await b.click();
-    }
-    await page.evaluate(
-      ({ ROW, sels }) => {
-        sels.forEach((s, i) => {
-          const e = document.querySelector(s);
-          const b = e?.matches("input")
-            ? e
-            : e?.querySelector("input[type=checkbox]");
-          if (i === 0) /** @type {HTMLElement} */ (b)?.focus();
-          const r = /** @type {any} */ (b?.closest(ROW));
-          if (r) r.__kept = true;
-        });
-      },
-      { ROW, sels: rows.map(sel1) },
+          })
+          .slice(0, 2)
+          .map((e) => /** @type {HTMLElement} */ (e).dataset.driveRow ?? "");
+      }, c.id);
+      if (!rows.length) {
+        bad.push(`${c.id}: no selectable row on ${home}`);
+        return null;
+      }
+      const sel1 = (/** @type {string} */ r) =>
+        `[data-drive="${c.id}"][data-drive-row="${r}"]`;
+      for (const r of rows) {
+        const e = page.locator(sel1(r)).first();
+        const b = (await e.evaluate((x) => x.matches("input")))
+          ? e
+          : e.locator("input[type=checkbox]").first();
+        if (!(await b.isChecked())) await b.click();
+      }
+      await page.evaluate(
+        ({ ROW, sels }) => {
+          sels.forEach((s, i) => {
+            const e = document.querySelector(s);
+            const b = e?.matches("input")
+              ? e
+              : e?.querySelector("input[type=checkbox]");
+            if (i === 0) /** @type {HTMLElement} */ (b)?.focus();
+            const r = /** @type {any} */ (b?.closest(ROW));
+            if (r) r.__kept = true;
+          });
+        },
+        { ROW, sels: rows.map(sel1) },
+      );
+      return { page, home, sels: rows.map(sel1) };
+    };
+    const ready = (await Promise.all(cs.map(prepare))).filter(
+      (r) => r !== null,
     );
     // A live refresh: the demo host pushes the fleet every 5 s and the pages
     // re-read on it; two pushes, so every page's refresh has come.
-    await page.waitForTimeout(10500);
-    const after = await page.evaluate(
-      ({ ROW, sels }) =>
-        sels.map((s) => {
-          const e = document.querySelector(s);
-          const b = /** @type {HTMLInputElement | null} */ (
-            e?.matches("input") ? e : e?.querySelector("input[type=checkbox]")
-          );
-          return {
-            s,
-            ticked: !!b?.checked,
-            kept: !!(/** @type {any} */ (b?.closest(ROW))?.__kept),
-            focus: !!b && document.activeElement === b,
-          };
-        }),
-      { ROW, sels: rows.map(sel1) },
-    );
-    for (const a of after) {
-      if (!a.ticked) bad.push(`${home}: ${a.s} lost its tick`);
-      if (!a.kept) bad.push(`${home}: ${a.s}'s row was rebuilt`);
+    await ready[0]?.page.waitForTimeout(10500);
+    for (const { page, home, sels } of ready) {
+      const after = await page.evaluate(
+        ({ ROW, sels }) =>
+          sels.map((s) => {
+            const e = document.querySelector(s);
+            const b = /** @type {HTMLInputElement | null} */ (
+              e?.matches("input") ? e : e?.querySelector("input[type=checkbox]")
+            );
+            return {
+              s,
+              ticked: !!b?.checked,
+              kept: !!(/** @type {any} */ (b?.closest(ROW))?.__kept),
+              focus: !!b && document.activeElement === b,
+            };
+          }),
+        { ROW, sels },
+      );
+      for (const a of after) {
+        if (!a.ticked) bad.push(`${home}: ${a.s} lost its tick`);
+        if (!a.kept) bad.push(`${home}: ${a.s}'s row was rebuilt`);
+      }
+      if (!after[0].focus) bad.push(`${home}: the focus left ${after[0].s}`);
     }
-    if (!after[0].focus) bad.push(`${home}: the focus left ${after[0].s}`);
   } finally {
     await browser.close();
   }
   return bad;
 }
 
-for (const c of SELECTABLE)
-  test(`invariants: redesign-final-extra-live-selection: ${c.id} keeps its ticks, focus and row nodes over a live refresh`, async () => {
-    const bad = await liveSelectionOf(c);
-    LIVE_SEL.set(c.id, bad);
-    assert.deepEqual(bad, []);
-  });
-
-test(
-  "invariants: redesign-final-extra-live-selection: on every page with selectable rows a live refresh keeps the ticks, the focus and the row nodes",
-  { timeout: 20000 },
-  async (t) => {
-    // The verdict over the per-control cases above it. It walks nothing
-    // itself: one case walking every control ran minutes without a case
-    // ending, and the watchdog killed the whole run.
-    if (!LIVE_SEL.size) return t.skip("no per-control case ran before it");
-    t.diagnostic(
-      `selectable controls checked: ${SELECTABLE.map((c) => c.id).join(", ")}`,
-    );
-    assert.ok(SELECTABLE.length >= 1, "no control declares selectable rows");
-    assert.deepEqual([...LIVE_SEL.values()].flat(), []);
-  },
-);
+// Two cases, each a half of the catalog's selectable controls, set up side
+// by side in one browser; the first also holds that the catalog declares any.
+{
+  const half = Math.ceil(SELECTABLE.length / 2);
+  [SELECTABLE.slice(0, half), SELECTABLE.slice(half)].forEach((cs, i) =>
+    test(`invariants: redesign-final-extra-live-selection: on every page with selectable rows a live refresh keeps the ticks, the focus and the row nodes [${i + 1} of 2]`, async () => {
+      if (i === 0)
+        assert.ok(
+          SELECTABLE.length >= 1,
+          "no control declares selectable rows",
+        );
+      assert.deepEqual(await liveSelectionOf(cs), []);
+    }),
+  );
+}
 
 // Low: Host › Connection's latency strip drew one dot ("last 1 ping")
 // where the demo draws twelve: the dashboard keeps its last twelve.
@@ -10482,186 +9578,9 @@ test("invariants: redesign-final-x7: the Live view switch is in the bar beside H
   }
 });
 
-// Low: in dark, Stacks' amber-on-brown Inbox banner read with too little
-// contrast — a fault class. On every page the layout audit visits, in
-// every theme the dashboard's own theme picker offers (read from the
-// picker), the text of every banner, badge and chip meets WCAG AA: 4.5:1,
-// 3:1 for large text and for an icon glyph.
-test("invariants: redesign-final-contrast: every banner, badge and chip's text meets WCAG AA in every theme the picker offers", async () => {
-  // merge-cases: on style change (redesign-final-48, Kenny 2026-10-04: 22
-  // themes cost minutes; a commit or merge runs this only when a stylesheet
-  // or the kp-themes pin changed, the release gate always).
-  const browser = await launch();
-  try {
-    const context = await browser.newContext({
-      viewport: { width: 1894, height: 1000 },
-    });
-    const page = await freshPage(context);
-    await page.goto(`${BASE}/stacks`);
-    const themes = await page.$$eval(
-      "[data-kp-theme-picker] [data-kp-theme]",
-      (bs) =>
-        [
-          ...new Set(bs.map((b) => b.getAttribute("data-kp-theme") ?? "")),
-        ].filter(Boolean),
-    );
-    assert.ok(themes.length > 1, `the picker offers ${themes.length} themes`);
-    /** @type {Set<string>} */
-    const bad = new Set();
-    // Advice, bounded: as many pages as fit in 12 s (the suite's 20 s per
-    // case), the first ones first; the rest is reported as not looked at.
-    const t0 = performance.now();
-    let looked = 0;
-    for (const path of AUDIT_PAGES) {
-      if (performance.now() - t0 > 12000) break;
-      looked++;
-      await page.goto(`${BASE}${path}`);
-      await page.waitForTimeout(600);
-      const found = await page.evaluate((themes) => {
-        const style = document.createElement("style");
-        style.textContent =
-          "*,*::before,*::after{transition:none!important;animation:none!important}";
-        document.head.append(style);
-        const cv = document.createElement("canvas").getContext("2d", {
-          willReadFrequently: true,
-        });
-        /** Any CSS colour through a canvas pixel. @param {string} c */
-        const rgba = (c) => {
-          if (!cv) return [0, 0, 0, 1];
-          cv.clearRect(0, 0, 1, 1);
-          cv.fillStyle = "rgba(0, 0, 0, 0)";
-          cv.fillStyle = c;
-          cv.fillRect(0, 0, 1, 1);
-          const d = cv.getImageData(0, 0, 1, 1).data;
-          return [d[0], d[1], d[2], d[3] / 255];
-        };
-        /** @param {number[]} c */
-        const lum = (c) => {
-          const [r, g, b] = c.slice(0, 3).map((v) => {
-            const x = v / 255;
-            return x <= 0.03928 ? x / 12.92 : ((x + 0.055) / 1.055) ** 2.4;
-          });
-          return 0.2126 * r + 0.7152 * g + 0.0722 * b;
-        };
-        /** The opaque colour behind an element. @param {Element} el */
-        const behind = (el) => {
-          /** @type {number[][]} */
-          const layers = [];
-          for (
-            let e = /** @type {Element | null} */ (el);
-            e;
-            e = e.parentElement
-          ) {
-            const c = rgba(getComputedStyle(e).backgroundColor);
-            if (c[3] > 0) layers.push(c);
-            if (c[3] >= 1) break;
-          }
-          if (!layers.length || layers[layers.length - 1][3] < 1)
-            layers.push(rgba(getComputedStyle(document.body).backgroundColor));
-          let out = [255, 255, 255];
-          for (const c of layers.reverse())
-            out = out.map((v, i) => v * (1 - c[3]) + c[i] * c[3]);
-          return out;
-        };
-        const SEL =
-          ".kp-alert, .kp-attention__item, .kp-badge, [class*='badge'], .nx-count, [class*='chip']";
-        /** @type {string[]} */
-        const out = [];
-        const html = document.documentElement;
-        const was = html.getAttribute("data-theme");
-        for (const theme of themes) {
-          html.setAttribute("data-theme", theme);
-          for (const box of document.querySelectorAll(SEL)) {
-            if (box.closest(".kp-button, dialog:not([open])")) continue;
-            const w = document.createTreeWalker(box, NodeFilter.SHOW_TEXT);
-            for (let n = w.nextNode(); n; n = w.nextNode()) {
-              const el = /** @type {HTMLElement} */ (n.parentElement);
-              const t = n.textContent?.trim();
-              if (!t || !el.checkVisibility({ visibilityProperty: true }))
-                continue;
-              if (el.closest(".kp-button")) continue;
-              const cs = getComputedStyle(el);
-              const fg = rgba(cs.color);
-              const bg = behind(el);
-              const f = fg
-                .slice(0, 3)
-                .map((v, i) => v * fg[3] + bg[i] * (1 - fg[3]));
-              const l1 = lum(f);
-              const l2 = lum(bg);
-              const r = (Math.max(l1, l2) + 0.05) / (Math.min(l1, l2) + 0.05);
-              const px = parseFloat(cs.fontSize);
-              const large =
-                px >= 24 || (px >= 18.66 && Number(cs.fontWeight) >= 700);
-              const glyph =
-                t.length <= 2 && !!el.closest("[aria-hidden='true']");
-              const need = large || glyph ? 3 : 4.5;
-              if (r < need)
-                out.push(
-                  `${theme}: ${(box.getAttribute("class") ?? "").split(" ")[0]} "${t.slice(0, 30)}" ${r.toFixed(2)}:1 (needs ${need})`,
-                );
-            }
-          }
-        }
-        if (was) html.setAttribute("data-theme", was);
-        else html.removeAttribute("data-theme");
-        style.remove();
-        return out;
-      }, themes);
-      for (const f of found) bad.add(f);
-    }
-    // Contrast is advice (Kenny, form v44): the measurement is reported,
-    // never a gate.
-    if (bad.size)
-      console.log(
-        `contrast advice: ${bad.size} text(s) below WCAG AA in ${themes.length} themes on ${looked} of ${AUDIT_PAGES.length} pages, first: ${[...bad][0]}`,
-      );
-  } finally {
-    await browser.close();
-  }
-});
-
 // M5: the Inbox's "Worth a look · 1" showed no chevron and counted fewer
 // rows than its fold held; the demo's fold has a chevron and its count is
 // what it holds.
-test("invariants: redesign-final-m5: Worth a look is a fold with a chevron, and its count is the rows it holds", async () => {
-  const browser = await launch();
-  try {
-    const context = await browser.newContext({
-      viewport: { width: 1894, height: 1000 },
-    });
-    const page = await freshPage(context);
-    await page.goto(`${BASE}/needs-you`);
-    const sum = page.locator(".inbox-worth > summary", {
-      hasText: "Worth a look",
-    });
-    await page.waitForFunction(
-      () =>
-        /· \d+/.test(
-          [...document.querySelectorAll(".inbox-worth > summary")].find((s) =>
-            (s.textContent ?? "").startsWith("Worth a look"),
-          )?.textContent ?? "",
-        ),
-      null,
-      { timeout: 10000 },
-    );
-    const chevron = await sum.evaluate((s) => {
-      const b = getComputedStyle(s, "::before");
-      return b.content !== "none" && parseFloat(b.width) > 0;
-    });
-    assert.ok(chevron, "the fold has no chevron");
-    await sum.click();
-    const n = Number(
-      /· (\d+)/.exec((await sum.innerText()) ?? "")?.[1] ?? "-1",
-    );
-    const rows = await page
-      .locator(".inbox-worth .ib-worth-list > li:visible")
-      .count();
-    assert.ok(rows > 0, "the open fold shows no rows");
-    assert.equal(n, rows, "the count is not the rows the fold holds");
-  } finally {
-    await browser.close();
-  }
-});
 
 // M2: the Back up confirm dialog was unfinished: an empty bordered box, the
 // command line as its main content, "restic snapshot" jargon, no word on

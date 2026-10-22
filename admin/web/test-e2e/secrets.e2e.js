@@ -215,10 +215,13 @@ test("secrets: a reveal hides itself after 30 s", async () => {
   }
 });
 
-test("secrets: Copy copies a hidden secret, never showing it, and Activity names who copied", async () => {
+// feat-kpadopt-2 (Kenny's prune choice of 2026-10-22): the copy and the reveal
+// case read the same Activity page; one case does both.
+test("secrets: Copy copies a hidden secret, never showing it, and Activity names who copied and who revealed, never the value", async () => {
   const browser = await launch();
   try {
-    const { page, row, value } = await secretsPage(browser);
+    const p = await secretsPage(browser);
+    const { page, row, value } = p;
     // Copy from the masked field: the host is asked, the value goes to the
     // clipboard and never on screen.
     await page
@@ -237,41 +240,25 @@ test("secrets: Copy copies a hidden secret, never showing it, and Activity names
       /^DEMO_VALUE=/,
     );
     assert.doesNotMatch((await value.textContent()) ?? "", /DEMO_VALUE/);
+    await revealRow(p);
     const history = await page.evaluate(async () => {
       const r = await fetch("/data/history?since=0");
       return r.text();
     });
     assert.ok(!history.includes("DEMO_VALUE"), "a value reached the history");
     assert.match(history, /copied gateway\/traefik\/\.env/);
+    assert.match(history, /revealed gateway\/traefik\/\.env/);
     await page.goto(`${BASE}/activity`);
-    await page.waitForFunction(() =>
-      document.body.textContent?.includes("Kenny copied gateway/traefik/.env"),
+    await page.waitForFunction(
+      () =>
+        document.body.textContent?.includes(
+          "Kenny copied gateway/traefik/.env",
+        ) &&
+        document.body.textContent?.includes(
+          "Kenny revealed gateway/traefik/.env",
+        ),
     );
     const activity = (await page.textContent("#page")) ?? "";
-    assert.ok(!activity.includes("DEMO_VALUE"), "Activity shows a value");
-  } finally {
-    await browser.close();
-  }
-});
-
-test("secrets: Activity names who revealed a secret, never the value", async () => {
-  const browser = await launch();
-  try {
-    const p = await secretsPage(browser);
-    await revealRow(p);
-    const history = await p.page.evaluate(async () => {
-      const r = await fetch("/data/history?since=0");
-      return r.text();
-    });
-    assert.ok(!history.includes("DEMO_VALUE"), "a value reached the history");
-    assert.match(history, /revealed gateway\/traefik\/\.env/);
-    await p.page.goto(`${BASE}/activity`);
-    await p.page.waitForFunction(() =>
-      document.body.textContent?.includes(
-        "Kenny revealed gateway/traefik/.env",
-      ),
-    );
-    const activity = (await p.page.textContent("#page")) ?? "";
     assert.ok(!activity.includes("DEMO_VALUE"), "Activity shows a value");
   } finally {
     await browser.close();

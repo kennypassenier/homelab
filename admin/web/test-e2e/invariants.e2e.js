@@ -9198,6 +9198,13 @@ const AUDIT_CLASSES = /** @type {const} */ ([
     "grid",
     "an action dialog lays its fields on one grid, labels on one edge, controls on another",
   ],
+  ["picker", "the kp-themes theme picker is in the bar on every page"],
+  ["btnlink", "a link drawn as a button is never underlined"],
+  [
+    "gap",
+    "a page is drawn in kp markup and keeps the --section-gap between its top-level sections",
+  ],
+  ["once", "an action dialog describes what it does once, never twice"],
   [
     "uni",
     "tiles in one strip or board share one height, cards side by side share one height, a card's foot sits at its bottom",
@@ -9219,6 +9226,8 @@ const GEN = {
   sameSite: new Map(),
   /** Action dialogs whose fields the grid class measured (none measured is no pass). */
   gridDialogs: 0,
+  /** Action dialogs with a description the "once" class looked at. */
+  onceDialogs: 0,
   /** @type {Set<string>} */
   done: new Set(),
 };
@@ -9242,7 +9251,7 @@ const GEN_ENTRIES = [
  * @param {(typeof GEN_ENTRIES)[number]} entry
  */
 async function genWalk(entry) {
-  const { layoutAudit, pageChecks, dialogGrid } =
+  const { layoutAudit, pageChecks, dialogGrid, dialogOnce } =
     await import("./layoutaudit.js");
   /** @type {Record<string, string[]>} */
   const mine = Object.fromEntries(Object.keys(GEN.all).map((k) => [k, []]));
@@ -9276,6 +9285,9 @@ async function genWalk(entry) {
         const g = await page.evaluate(dialogGrid, "dialog[data-audit]");
         keep(where, { grid: g.faults });
         if (g.fields) GEN.gridDialogs += 1;
+        const o = await page.evaluate(dialogOnce, "dialog[data-audit]");
+        keep(where, { once: width > 800 ? o.faults : [] });
+        if (o.intro && width > 800) GEN.onceDialogs += 1;
       };
       const d = entry.dialog;
       if (!d) {
@@ -9434,8 +9446,12 @@ test(
       all.grid.push(
         `only ${GEN.gridDialogs} action dialogs had fields to measure`,
       );
+    if (GEN.onceDialogs < 2 && !AUDIT_ONLY)
+      all.once.push(
+        `only ${GEN.onceDialogs} action dialogs had a description to measure`,
+      );
     t.diagnostic(
-      `grid: ${GEN.gridDialogs} action dialogs with fields measured`,
+      `grid: ${GEN.gridDialogs} action dialogs with fields measured; once: ${GEN.onceDialogs} with a description`,
     );
     t.diagnostic(
       `counts checked per page: ${all.hn.filter((x) => !/: 0$/.test(x)).join("; ")}`,

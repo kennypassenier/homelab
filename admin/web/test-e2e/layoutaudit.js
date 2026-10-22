@@ -443,11 +443,20 @@ export function layoutAudit(rootSel) {
  *             path, a section link a section this page has, and a
  *             repository address shown as text is a link (1894 px; the
  *             same-site paths come back in `hrefs`, resolved by the caller)
+ * Folded in from their own per-page cases (feat-kpadopt-2, Kenny's prune
+ * choice of 2026-10-22):
+ *   picker    the kp-themes theme picker sits in the bar (both widths)
+ *             [INVARIANTS row 59]
+ *   btnlink   a link drawn as a button (a.kp-button) is never underlined
+ *             (1894 px) [row 43]
+ *   gap       the page is drawn in kp markup and its top-level sections
+ *             keep the --section-gap token between them (1894 px) [row 15]
  * @returns {{desc: string[], descgap: string[], titlerow: string[],
- *   mono: string[], sideways: string[], links: string[], hrefs: string[]}}
+ *   mono: string[], sideways: string[], links: string[], hrefs: string[],
+ *   picker: string[], btnlink: string[], gap: string[]}}
  */
 export function pageChecks() {
-  /** @type {{desc: string[], descgap: string[], titlerow: string[], mono: string[], sideways: string[], links: string[], hrefs: string[]}} */
+  /** @type {{desc: string[], descgap: string[], titlerow: string[], mono: string[], sideways: string[], links: string[], hrefs: string[], picker: string[], btnlink: string[], gap: string[]}} */
   const out = {
     desc: [],
     descgap: [],
@@ -456,9 +465,70 @@ export function pageChecks() {
     sideways: [],
     links: [],
     hrefs: [],
+    picker: [],
+    btnlink: [],
+    gap: [],
   };
   const wide = window.innerWidth > 800;
   const h1 = document.querySelector("main h1");
+
+  // ---- picker: the theme picker in the bar ----
+  {
+    const b = document.querySelector(
+      "#bar .kp-theme-menu > button[popovertarget]",
+    );
+    const r = b?.getBoundingClientRect();
+    if (!r || r.width <= 0 || r.height <= 0 || r.top >= 120)
+      out.picker.push("no kp-themes theme picker in the bar");
+  }
+
+  // ---- btnlink: a link drawn as a button is never underlined ----
+  if (wide)
+    for (const a of document.querySelectorAll("a.kp-button")) {
+      if (!(/** @type {HTMLElement} */ (a).offsetParent)) continue;
+      if (getComputedStyle(a).textDecorationLine.includes("underline"))
+        out.btnlink.push(
+          `underlined button link "${(a.textContent ?? "").trim() || a.outerHTML.slice(0, 60)}"`,
+        );
+    }
+
+  // ---- gap: kp markup, and clear space between the top-level sections ----
+  if (wide) {
+    const pageEl = document.getElementById("page");
+    if (!pageEl?.querySelector('[class*="kp-"]'))
+      out.gap.push("no kp-themes-styled element in #page");
+    else {
+      const probe = document.createElement("div");
+      probe.style.marginTop = "var(--section-gap)";
+      document.body.append(probe);
+      const token = parseFloat(getComputedStyle(probe).marginTop);
+      probe.remove();
+      if (!(token > 0))
+        out.gap.push("--section-gap did not resolve to a length");
+      // Zero-height placeholders and out-of-flow children are no sections;
+      // a page's description belongs to its title.
+      const kids = [...pageEl.children].filter(
+        (k) =>
+          k.getBoundingClientRect().height > 0 &&
+          !["absolute", "fixed"].includes(getComputedStyle(k).position),
+      );
+      for (let i = 1; i < kids.length; i++) {
+        const before = kids[i - 1];
+        const isTitle =
+          before.tagName === "H1" ||
+          (before.classList.contains("kp-page-header__heading") &&
+            !!before.querySelector(":scope > h1"));
+        if (isTitle && kids[i].tagName === "P") continue;
+        const g =
+          kids[i].getBoundingClientRect().top -
+          before.getBoundingClientRect().bottom;
+        if (g < token - 1)
+          out.gap.push(
+            `gap #${i} between top-level sections is ${Math.round(g)}px, under the ${token}px --section-gap token`,
+          );
+      }
+    }
+  }
 
   // ---- desc: a description under the title ----
   if (wide && h1) {
@@ -668,4 +738,23 @@ export function dialogGrid(rootSel) {
   if (edges.some((e) => e.ctl <= e.label))
     out.push("a control sits under its label instead of beside it");
   return { faults: out, fields: edges.length };
+}
+
+/**
+ * feat-kpadopt-2 (row 45, folded from its own slices): an action dialog
+ * describes what it does once, in its own description at the top, and the
+ * review step does not repeat it in a second "what" line.
+ * @param {string} rootSel the dialog
+ * @returns {{faults: string[], intro: boolean}}
+ */
+export function dialogOnce(rootSel) {
+  const d = document.querySelector(rootSel);
+  if (!d) return { faults: [], intro: false };
+  const intro = !!d.querySelector(".act-intro");
+  const what = d.querySelectorAll(".act-what").length;
+  return {
+    faults:
+      intro && what > 0 ? ['its description and a second "what" line'] : [],
+    intro,
+  };
 }

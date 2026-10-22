@@ -131,66 +131,96 @@ test("secrets: a stack hub's Secrets lists exactly that stack's secrets beside i
   }
 });
 
-test("secrets: a reveal hides itself after 30 s, Copy copies, and Activity names who did both, never the value", async () => {
+/**
+ * A browser context on the secrets page with the one run clock and a
+ * clipboard that keeps what was written (Firefox has no clipboard
+ * permission to grant). Reduced motion keeps kp's looping animations from
+ * drawing a frame for every fake 16 ms of the 30 s a case runs through.
+ * @param {import("playwright").Browser} browser
+ */
+async function secretsPage(browser) {
+  const context = await browser.newContext({
+    viewport: { width: 1894, height: 1000 },
+    reducedMotion: "reduce",
+  });
+  await context.addInitScript(() => {
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: {
+        writeText: async (/** @type {string} */ v) => {
+          /** @type {any} */ (window).__clip = v;
+        },
+        readText: async () => /** @type {any} */ (window).__clip ?? "",
+      },
+    });
+  });
+  const page = await login(context);
+  // install() alone restarts the page at the REAL time; keep the run's one clock.
+  await page.clock.install({ time: clockNow() });
+  await page.goto(`${BASE}/secrets?stack=gateway`);
+  const row = "gateway/traefik/.env";
+  const reveal = page.locator(
+    `[data-drive=reveal-secret][data-drive-row="${row}"]`,
+  );
+  await reveal.waitFor();
+  return {
+    page,
+    row,
+    reveal,
+    field: page.locator(`[data-key="${row}"] .kp-secret`),
+    value: page.locator(`[data-key="${row}"] .kp-secret .kp-secret__value`),
+  };
+}
+
+/** Reveal the row's secret and wait for it to show. @param {Awaited<ReturnType<typeof secretsPage>>} p */
+async function revealRow({ page, row, reveal, field, value }) {
+  await reveal.click();
+  await page.waitForFunction(
+    (r) =>
+      document
+        .querySelector(`[data-key="${r}"] .kp-secret__value`)
+        ?.textContent?.startsWith("DEMO_VALUE="),
+    row,
+  );
+  const secret = (await value.textContent()) ?? "";
+  assert.match(secret, /^DEMO_VALUE=/);
+  assert.equal(await field.getAttribute("data-kp-secret-state"), "shown");
+  return secret;
+}
+
+test("secrets: a reveal hides itself after 30 s", async () => {
   const browser = await launch();
   try {
-    const context = await browser.newContext({
-      viewport: { width: 1894, height: 1000 },
-    });
-    // Firefox has no clipboard permission to grant: the page's clipboard is
-    // replaced by one that keeps what was written, and the test reads that.
-    await context.addInitScript(() => {
-      Object.defineProperty(navigator, "clipboard", {
-        configurable: true,
-        value: {
-          writeText: async (/** @type {string} */ v) => {
-            /** @type {any} */ (window).__clip = v;
-          },
-          readText: async () => /** @type {any} */ (window).__clip ?? "",
-        },
-      });
-    });
-    const page = await login(context);
-    // install() alone restarts the page at the REAL time; keep the run's one clock.
-    await page.clock.install({ time: clockNow() });
-    await page.goto(`${BASE}/secrets?stack=gateway`);
-    const row = "gateway/traefik/.env";
-    const reveal = page.locator(
-      `[data-drive=reveal-secret][data-drive-row="${row}"]`,
-    );
-    await reveal.waitFor();
-    const field = page.locator(`[data-key="${row}"] .kp-secret`);
-    const value = field.locator(".kp-secret__value");
-    await reveal.click();
-    await page.waitForFunction(
-      (r) =>
-        document
-          .querySelector(`[data-key="${r}"] .kp-secret__value`)
-          ?.textContent?.startsWith("DEMO_VALUE="),
-      row,
-    );
-    const secret = (await value.textContent()) ?? "";
-    assert.match(secret, /^DEMO_VALUE=/);
-    assert.equal(await field.getAttribute("data-kp-secret-state"), "shown");
+    const p = await secretsPage(browser);
+    const secret = await revealRow(p);
     // runFor fires the 1 s countdown every second; fastForward fires a due
     // timer once.
-    await page.clock.runFor(29_000);
-    assert.equal(await value.textContent(), secret, "still shown at 29 s");
-    await page.clock.runFor(1_500);
-    await page.waitForFunction(
+    await p.page.clock.runFor(29_000);
+    assert.equal(await p.value.textContent(), secret, "still shown at 29 s");
+    await p.page.clock.runFor(1_500);
+    await p.page.waitForFunction(
       (r) =>
         !document
           .querySelector(`[data-key="${r}"] .kp-secret__value`)
           ?.textContent?.startsWith("DEMO_VALUE="),
-      row,
+      p.row,
     );
     assert.equal(
-      await field.getAttribute("data-kp-secret-state"),
+      await p.field.getAttribute("data-kp-secret-state"),
       "hidden",
       "hidden after 30 s",
     );
+  } finally {
+    await browser.close();
+  }
+});
 
-    // Copy: on the clipboard, never on screen.
+test("secrets: Copy copies a hidden secret, never showing it, and Activity names who copied", async () => {
+  const browser = await launch();
+  try {
+    const { page, row, value } = await secretsPage(browser);
+    // Copy from the masked field: the host is asked, the value goes to the
+    // clipboard and never on screen.
     await page
       .locator(`[data-drive=copy-secret][data-drive-row="${row}"]`)
       .click();
@@ -202,27 +232,46 @@ test("secrets: a reveal hides itself after 30 s, Copy copies, and Activity names
         ),
       row,
     );
-    assert.equal(
+    assert.match(
       await page.evaluate(() => navigator.clipboard.readText()),
-      secret,
+      /^DEMO_VALUE=/,
     );
-
-    // The audit trail: who and which, never the value.
+    assert.doesNotMatch((await value.textContent()) ?? "", /DEMO_VALUE/);
     const history = await page.evaluate(async () => {
       const r = await fetch("/data/history?since=0");
       return r.text();
     });
     assert.ok(!history.includes("DEMO_VALUE"), "a value reached the history");
-    assert.match(history, /revealed gateway\/traefik\/\.env/);
     assert.match(history, /copied gateway\/traefik\/\.env/);
     await page.goto(`${BASE}/activity`);
     await page.waitForFunction(() =>
+      document.body.textContent?.includes("Kenny copied gateway/traefik/.env"),
+    );
+    const activity = (await page.textContent("#page")) ?? "";
+    assert.ok(!activity.includes("DEMO_VALUE"), "Activity shows a value");
+  } finally {
+    await browser.close();
+  }
+});
+
+test("secrets: Activity names who revealed a secret, never the value", async () => {
+  const browser = await launch();
+  try {
+    const p = await secretsPage(browser);
+    await revealRow(p);
+    const history = await p.page.evaluate(async () => {
+      const r = await fetch("/data/history?since=0");
+      return r.text();
+    });
+    assert.ok(!history.includes("DEMO_VALUE"), "a value reached the history");
+    assert.match(history, /revealed gateway\/traefik\/\.env/);
+    await p.page.goto(`${BASE}/activity`);
+    await p.page.waitForFunction(() =>
       document.body.textContent?.includes(
         "Kenny revealed gateway/traefik/.env",
       ),
     );
-    const activity = (await page.textContent("#page")) ?? "";
-    assert.ok(activity.includes("Kenny copied gateway/traefik/.env"));
+    const activity = (await p.page.textContent("#page")) ?? "";
     assert.ok(!activity.includes("DEMO_VALUE"), "Activity shows a value");
   } finally {
     await browser.close();

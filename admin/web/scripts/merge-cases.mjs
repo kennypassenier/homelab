@@ -82,7 +82,10 @@ export function closure(file, read) {
  * @returns {{name: string, paths: string[], style?: boolean, walk?: boolean}[]}
  */
 export function casesOf(src) {
-  const starts = [...src.matchAll(/^test\(\s*\n?\s*(["`])((?:(?!\1).)+)\1/gm)];
+  // `eachSlice(name, …)` registers one case per slice under the same words.
+  const starts = [
+    ...src.matchAll(/^(?:test|eachSlice)\(\s*\n?\s*(["`])((?:(?!\1).)+)\1/gm),
+  ];
   return starts
     .map((m, i) => {
       const body = src.slice(

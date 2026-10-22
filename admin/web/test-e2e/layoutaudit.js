@@ -99,7 +99,19 @@ export function layoutAudit(rootSel) {
     // its empty plate for the first frames, then it leaves): clipped by the
     // animation, not a settled state.
     const plate = el.closest(".kp-empty, .kp-stateplate");
-    return !!plate && /leave/.test(getComputedStyle(plate).animationName);
+    if (plate && /leave/.test(getComputedStyle(plate).animationName))
+      return true;
+    // Any box on the way up that is playing a package "-leave" animation (a
+    // card or an uptime strip swapping its loading state for its data clips
+    // its children for the length of the animation, about a second): not a
+    // settled layout, so it is audited once it has ended.
+    for (
+      let a = /** @type {Element | null} */ (el);
+      a && a !== document.body;
+      a = a.parentElement
+    )
+      if (/-leave\b/.test(getComputedStyle(a).animationName)) return true;
+    return false;
   };
 
   // ---- a: per-letter wraps, cut and spilling text ----

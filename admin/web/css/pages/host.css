@@ -41,6 +41,15 @@ main.shell.hk-page > [hidden] {
      small-text cell was 11.7 px in the Containers table). */
   font-size: max(0.9em, 12px);
 }
+/* A settings value in kp's card layout sits in a 215 px cell and breaks
+   anywhere; at 14.4 px a 24-character URL left its last character alone on
+   a line of its own ("http://10.10.10.113:909" over "0") in Firefox. The
+   monospace floor is 12 px (fix-246), which fits it whole. */
+@container kp-table (max-width: 40rem) {
+  .hk-page .hk-set-row > td.mono {
+    font-size: 12px;
+  }
+}
 .hk-page .hk-muted {
   color: var(--muted-foreground);
 }

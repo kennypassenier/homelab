@@ -543,7 +543,9 @@
 }
 @media (max-width: 48rem) {
   .hb-strip {
-    grid-template-columns: minmax(0, 1fr) auto;
+    /* The count keeps its whole text (Firefox's buttons are wider and left
+       it 5 px short); the buttons take what is left and wrap. */
+    grid-template-columns: max-content minmax(0, 1fr);
   }
   .hb-strip > .kp-uptime {
     grid-column: 1 / -1;

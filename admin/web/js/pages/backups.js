@@ -895,7 +895,7 @@ export function mount(root) {
   const ret = section({
     id: "bk-retired",
     title: "Kept from retired stacks",
-    desc: "When a stack, app or native unit leaves the files, its backups, /appdata and vault copies stay here until you wipe them (was the Retired page).",
+    desc: "When a stack, app or native unit leaves the files, its backups, /⁠appdata and vault copies stay here until you wipe them (was the Retired page).",
     collapsible: true,
     open: fromUrl.section === "removed",
     badge: retiredCount,
@@ -972,14 +972,17 @@ export function mount(root) {
     // The answered stacks are counted from the rows the grid draws; while kp
     // still shows its loading rows the sentence says so instead of a number
     // no row backs yet.
+    // The grid on show: the Month view never draws the nights grid, which
+    // would stay "drawing" for good and hide the count.
+    const shown = S.view === "month" ? monthHeat : nightsHeat;
     readState.textContent = !current().fleet
       ? "Waiting for the host's report of the fleet…"
-      : nightsHeat.getAttribute("aria-busy") === "true"
+      : shown.getAttribute("aria-busy") === "true"
         ? "Drawing the stacks' nights…"
         : `Read from the host's snapshot cache · ${done - failed.length} of ${names.length} stacks answered${failed.length ? ` · ${failed.join(", ")} could not be read` : ""}`;
     // redesign-final (exact counts): "N of M stacks answered" is the
     // coverage rows of the stacks that answered.
-    countOf(readState, nightsHeat, '.kp-heat__row[data-kp-read="ok"]');
+    countOf(readState, shown, '.kp-heat__row[data-kp-read="ok"]');
     readState.dataset.bkRead =
       names.length > 0 && done === names.length ? "all" : "some";
     setAgo(readAgo, done === names.length && names.length ? readAt : null);
@@ -1138,9 +1141,11 @@ export function mount(root) {
   // attributes, so it never triggers itself.
   const stampRows = new MutationObserver(() => {
     decorateHeat(nightsHeat);
+    decorateHeat(monthHeat);
     paintLive();
   });
   stampRows.observe(nightsHeat, { childList: true, subtree: true });
+  stampRows.observe(monthHeat, { childList: true, subtree: true });
   cleanups.push(() => stampRows.disconnect());
 
   /** The state of the whole coverage card, from what is known. */

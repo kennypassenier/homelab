@@ -1,0 +1,38 @@
+# Traefik routes for Kitchen (CT 121) — both names reach the same container.
+#
+# kitchen.kp-soft.dev: through the Cloudflare tunnel, behind the wildcard
+# Cloudflare Access policy like every kp-soft.dev name (same shape as the
+# admin dashboard's route). No per-name tunnel entry or DNS record is written
+# here; the tunnel's ingress is a wildcard to http://traefik:80.
+#
+# eten.kp-soft.dev: LAN only. Unbound points the name at 10.10.10.4. No
+# Cloudflare record or tunnel entry exists for it, and the allow-list refuses
+# any peer outside 10.10.10.0/24 — which includes tunnel traffic, whose
+# source is docker's 172.18.0.1 on CT 104 — so even a wildcard tunnel cannot
+# serve this name. ipStrategy is left at its default (the TCP peer): the
+# entrypoint trusts X-Forwarded-For from docker's range only, so a LAN client
+# cannot talk its way past the list with a header.
+http:
+  routers:
+    kitchen:
+      rule: "Host(`kitchen.kp-soft.dev`)"
+      entryPoints: [web]
+      service: kitchen
+
+    eten:
+      rule: "Host(`eten.kp-soft.dev`)"
+      entryPoints: [web]
+      middlewares: [eten-lan-only]
+      service: kitchen
+
+  middlewares:
+    eten-lan-only:
+      ipAllowList:
+        sourceRange:
+          - "10.10.10.0/24"
+
+  services:
+    kitchen:
+      loadBalancer:
+        servers:
+          - url: "http://10.10.10.21:8080"

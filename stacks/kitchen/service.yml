@@ -1,0 +1,29 @@
+# C7 native service — kitchen on CT 121, modelled on stacks/almanac/service.yml.
+# Kitchen's own deploy/service.yml put its state in /var/lib/kitchen and its
+# env file in /etc/kitchen; here both live in the bind-mounted state directory
+# (KITCHEN_STATE_DIR is explicit in the unit), so the nightly backup reaches
+# them. update_cmd must reproduce the unit: same user, env file, working
+# directory and one --property=Environment= per Environment= line of the unit
+# (almanac fix-3: otherwise `update --check` looks at the compiled-in default).
+stack_name: kitchen
+vmid: 121
+hostname: 121-app-kitchen
+unit: kitchen
+binary: /opt/kitchen/bin/kitchen
+env_file: /appdata/kitchen/kitchen-config/kitchen.env
+data_dirs:
+  - /appdata/kitchen/kitchen-config
+update_cmd: >-
+  systemd-run --wait --pipe --collect --uid=kitchen --gid=kitchen
+  --property=EnvironmentFile=/appdata/kitchen/kitchen-config/kitchen.env
+  --property=WorkingDirectory=/appdata/kitchen/kitchen-config
+  --property=Environment=KITCHEN_STATE_DIR=/appdata/kitchen/kitchen-config
+  --property=Environment=KITCHEN_TIMEOUT_STOP_SECS=60
+  --property=Environment=KITCHEN_TRUSTED_PROXIES=10.10.10.4
+  --property=Environment=KITCHEN_TRUSTED_ADMINS=10.10.10.10
+  /opt/kitchen/bin/kitchen update
+release_repo: kennypassenier/kitchen
+release_asset: kitchen
+# Same quiesce as almanac: the chassis kit's backup-pause socket
+# (RuntimeDirectory=kitchen in the unit), falling back to a stop.
+backup_pause: chassis

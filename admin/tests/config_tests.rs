@@ -197,6 +197,7 @@ fn trusted_sources_every_unit_and_host_toml_name_the_same_addresses() {
             "HTTP_SWITCHBOARD",
         ),
         ("stacks/almanac/almanac/almanac.service", "ALMANAC"),
+        ("stacks/kitchen/kitchen/kitchen.service", "KITCHEN"),
     ];
     for (path, prefix) in units {
         let unit = std::fs::read_to_string(root.join(path)).unwrap();

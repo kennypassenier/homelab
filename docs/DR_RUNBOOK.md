@@ -381,6 +381,18 @@ One section per directory under `stacks/`, read from its `lxc-compose.yml` and, 
   - re-register a running unit after the daemon lost its state (needs the daemon): `homelab adopt stacks/inbox`. Adoption only records a service that is already active; it never starts one.
 - Rebuild: the native route in Layer 2, then this stack's data by Layer 4 (native services).
 
+### kitchen (vmid 121)
+
+- Container: hostname `121-app-kitchen`, ip `CT 121 (kitchen)` on `vmbr0` VLAN 10, 1 core(s), 512 MiB RAM, 0 MiB swap, 4 GiB disk on `local-lvm`, unprivileged, template `clone:996`, boot order 50.
+- Runs no docker: native systemd services only.
+- Unit `kitchen`:
+  - program `/opt/kitchen/bin/kitchen`, from the GitHub release `kennypassenier/kitchen` (asset `kitchen`); update policy manual.
+  - unit file `stacks/kitchen/kitchen/kitchen.service` in the repository; the container's copy is `/etc/systemd/system/kitchen.service`.
+  - data: repository `rclone:gdrive:homelab-backups/kitchen-config`, archive `/kitchen-data.tar` holding a tar of `/appdata/kitchen/kitchen-config`.
+  - vault copy of kitchen (`/appdata/kitchen/kitchen-config/kitchen.env`): `/var/lib/homelab/secrets/kitchen/kitchen-config/kitchen.env`.
+  - re-register a running unit after the daemon lost its state (needs the daemon): `homelab adopt stacks/kitchen`. Adoption only records a service that is already active; it never starts one.
+- Rebuild: the native route in Layer 2, then this stack's data by Layer 4 (native services).
+
 ### kp-soft (vmid 116)
 
 - Container: hostname `116-app-kp-soft`, ip `CT 116 (kp-soft)` on `vmbr0` VLAN 10, 2 core(s), 2048 MiB RAM, 0 MiB swap, 16 GiB disk on `local-lvm`, unprivileged, template `clone:996`, boot order 75.
@@ -483,4 +495,4 @@ One section per directory under `stacks/`, read from its `lxc-compose.yml` and, 
 4. Put back the `homelab-host` program and its unit file, start it, and check the certificate fingerprint against the pin (Layer 1).
 5. Restore the guests this suite never touches (vmid 100, 101, 102, 103) from Proxmox's own backups: `qmrestore` for a VM, `pct restore` for a container.
 6. Rebuild the templates the stacks clone: `clone:995` (privileged), `clone:996` (unprivileged). `homelab template-build <vmid> <version>` builds an unprivileged one at that vmid, and `homelab template-build <vmid> <version> --privileged` a privileged one.
-7. Rebuild every stack (Layer 2; with the daemon, `homelab deploy stacks/<stack>`), in boot order: gateway (104), registry (117), syncthing (108), kyu (109), almanac (112), metrics (113), admin (120), productivity (111), paperwork (114), kp-soft (116), downloader (105), media (106), inbox (118). A compose stack refills its empty data directories from restic while it deploys; a native stack's data comes back by Layer 4 afterwards.
+7. Rebuild every stack (Layer 2; with the daemon, `homelab deploy stacks/<stack>`), in boot order: gateway (104), registry (117), syncthing (108), kyu (109), almanac (112), kitchen (121), metrics (113), admin (120), productivity (111), paperwork (114), kp-soft (116), downloader (105), media (106), inbox (118). A compose stack refills its empty data directories from restic while it deploys; a native stack's data comes back by Layer 4 afterwards.

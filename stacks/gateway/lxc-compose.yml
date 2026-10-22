@@ -229,6 +229,12 @@ firewall:
       note: almanac route
     - dir: out
       action: ACCEPT
+      dest: 10.10.10.21
+      proto: tcp
+      dport: "8080"
+      note: kitchen route
+    - dir: out
+      action: ACCEPT
       dest: 10.10.10.13
       proto: tcp
       dport: "3100,9090,9093"

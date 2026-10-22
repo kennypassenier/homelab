@@ -1,0 +1,115 @@
+# Stack intent (schema v2 — intent only, no machine-written state).
+#
+# CT 121 holds one native service: kitchen, Kenny's recipe app (a wheel that
+# chooses, cook mode with parallel tracks, backward timing, bad days). It is a
+# chassis-rs single binary run by a systemd unit; `service.yml` beside this
+# file describes the service, this file describes the container around it.
+# Modelled on CT 112 (almanac), the other chassis-rs service with its state
+# bind-mounted from the host.
+#
+# Rebuilding it, in order:
+#   1. this manifest recreates the container (`homelab deploy`);
+#   2. the binary is installed the way C7 installs it (`homelab install-native`,
+#      release kennypassenier/kitchen);
+#   3. the state comes back from the nightly backup of the bind mount below.
+
+stack_name: kitchen
+vmid: 121
+hostname: 121-app-kitchen
+native_only: true
+
+network:
+  ip: 10.10.10.21/24
+  gateway: 10.10.10.1
+  bridge: vmbr0
+  vlan: 10
+
+# Same sizing as almanac (one small Rust binary). Kitchen ships no figure of
+# its own that asks for more; revisit after the first week of measurements.
+# swap_mb: 0 for the reason almanac documents (page cache evicting the program).
+resources:
+  cores: 1
+  memory_mb: 512
+  swap_mb: 0
+  disk_gb: 4
+  storage: local-lvm
+
+lxc:
+  template: clone:996
+  unprivileged: true
+  features: nesting=1
+  protection: true
+
+boot:
+  onboot: true
+  order: 50
+
+# Kitchen's state on the host, bind-mounted in, so destroying the container
+# costs nothing and the normal backup reaches it. Kitchen's own deploy files
+# use /var/lib/kitchen, but the unit sets KITCHEN_STATE_DIR explicitly, so the
+# homelab layout (/appdata/<stack>/<stack>-config, like almanac and kyu) works
+# without a code change. The binary stays at /opt/kitchen/bin.
+storage:
+  - host_path: /appdata/kitchen/kitchen-config
+    mount_point: /appdata/kitchen/kitchen-config
+    # ASSUMPTION to verify on first deploy: the kitchen user is the third one
+    # created (Alloy takes 999 and 998 first), so uid 997 inside, 100997 mapped
+    # out of an unprivileged LXC — the same as CT 120 (admin). If
+    # `id kitchen` says otherwise, fix this line and re-deploy.
+    host_owner_uid: 100997
+    app: kitchen
+
+apps: []
+
+natives: [kitchen]
+
+# One route file with both hostnames (see traefik-routes.yml):
+# kitchen.kp-soft.dev (tunnel + Cloudflare Access) and eten.kp-soft.dev (LAN).
+gateway_route:
+  filename: 121-app-kitchen.yml
+
+firewall:
+  enabled: true
+  comment: |-
+    CT 121 (kitchen), kitchen (native).
+    Modelled on almanac's rules. In: Traefik on CT 104 (both hostnames),
+    Prometheus on CT 113 (kitchen metrics, node exporter). Kenny's desktop is
+    added by the renderer from host.toml `trusted_sources`. Out: Loki push
+    (Alloy) and DNS; the internet stays open for GitHub release updates.
+  rules:
+    - comment: "pve's rescue address: never from a container"
+      dir: out
+      action: DROP
+      dest: 10.10.10.250
+    - comment: "the neighbours it uses"
+      dir: out
+      action: ACCEPT
+      dest: 10.10.10.13
+      proto: tcp
+      dport: "3100"
+      note: Loki push (Alloy)
+    - comment: "every other neighbour in VLAN 10 stays out of reach"
+      dir: out
+      action: DROP
+      dest: 10.10.10.0/24
+    - comment: "who may reach the container"
+      dir: in
+      action: ACCEPT
+      source: 10.10.10.13
+      proto: tcp
+      dport: "8080,9100"
+      note: Prometheus (kitchen metrics, node exporter)
+    - dir: in
+      action: ACCEPT
+      source: 10.10.10.4
+      proto: tcp
+      dport: "8080"
+      note: Traefik routes kitchen and eten
+
+# This stack's tile on the dashboard's start page, keyed by the hostname it opens.
+tiles:
+  kitchen.kp-soft.dev:
+    name: "Kitchen"
+    group: "Own"
+    order: 303
+    description: "Recipes and cook mode"

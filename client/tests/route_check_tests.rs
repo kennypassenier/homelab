@@ -16,7 +16,8 @@ fn stacks() -> PathBuf {
 /// dashboard on CT 120, stacks/admin); retiring Homepage, Uptime Kuma,
 /// GoAccess and Grafana (2026-10-01, stacks/home, stacks/uptime,
 /// stacks/gateway/goaccess, the Grafana app under stacks/metrics) dropped
-/// their four routes, leaving 22.
+/// their four routes, leaving 22; kitchen.kp-soft.dev and eten.kp-soft.dev
+/// (stacks/kitchen, CT 121) make 24.
 /// covers: fix-92
 #[test]
 fn the_routes_in_the_repository_pass_and_cover_every_public_hostname() {
@@ -29,7 +30,7 @@ fn the_routes_in_the_repository_pass_and_cover_every_public_hostname() {
         .collect();
     hosts.sort();
     hosts.dedup();
-    assert_eq!(hosts.len(), 22, "{:?}", hosts);
+    assert_eq!(hosts.len(), 24, "{:?}", hosts);
     for h in [
         "admin.kp-soft.dev",
         "almanac.kp-soft.dev",

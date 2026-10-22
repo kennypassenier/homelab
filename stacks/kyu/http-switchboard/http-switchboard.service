@@ -80,7 +80,7 @@ ProtectHome=yes
 ProtectKernelTunables=yes
 ProtectControlGroups=yes
 RestrictSUIDSGID=yes
-ReadWritePaths=/appdata/kyu/http-switchboard-config /appdata/kyu/http-switchboard-config-pre-update /opt/http-switchboard/bin
+ReadWritePaths=/appdata/kyu/http-switchboard-config -/appdata/kyu/http-switchboard-config-pre-update /opt/http-switchboard/bin
 # S2: the swap needs write access to the binary's OWN directory only; a
 # code-execution bug can then replace this service's binary, not latch or
 # its neighbours. The rest is systemd's free hardening for a network daemon.

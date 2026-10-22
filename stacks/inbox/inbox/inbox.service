@@ -45,7 +45,7 @@ ProtectHome=yes
 ProtectKernelTunables=yes
 ProtectControlGroups=yes
 RestrictSUIDSGID=yes
-ReadWritePaths=/var/lib/inbox /var/lib/inbox-pre-update /opt/inbox/bin
+ReadWritePaths=/var/lib/inbox -/var/lib/inbox-pre-update /opt/inbox/bin
 # S2: the swap needs write access to the binary's OWN directory only; a
 # code-execution bug can then replace this service's binary, not latch or
 # its neighbours. The rest is systemd's free hardening for a network daemon.

@@ -214,3 +214,62 @@ fn trusted_sources_every_unit_and_host_toml_name_the_same_addresses() {
         assert_eq!(in_unit, in_host, "{path}");
     }
 }
+
+/// A fresh CT has none of the paths an update creates later: Kitchen's
+/// first install (2026-10-22) failed twice, once on a missing env file and
+/// once on a missing `-pre-update` directory in `ReadWritePaths`. Every
+/// native unit marks such paths optional with systemd's leading dash, and
+/// only the units whose env file carries secrets put there by hand or by
+/// latch may require it.
+#[test]
+fn native_units_start_on_a_fresh_container() {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
+    // Units whose env file holds secrets: a missing file must stop them.
+    let env_required = [
+        "stacks/admin/admin/admin.service",
+        "stacks/inbox/inbox/inbox.service",
+        "stacks/kyu/kyu/kyu.service",
+        "stacks/kyu/kyu-runner/kyu-runner.service",
+        "stacks/kyu/http-switchboard/http-switchboard.service",
+        "stacks/almanac/almanac/almanac.service",
+    ];
+    let mut seen = 0;
+    for stack in std::fs::read_dir(root.join("stacks")).unwrap() {
+        let stack = stack.unwrap().path();
+        let Ok(units) = std::fs::read_dir(&stack) else {
+            continue;
+        };
+        for unit_dir in units {
+            let unit_dir = unit_dir.unwrap().path();
+            let Ok(files) = std::fs::read_dir(&unit_dir) else {
+                continue;
+            };
+            for f in files {
+                let f = f.unwrap().path();
+                if f.extension().and_then(|e| e.to_str()) != Some("service") {
+                    continue;
+                }
+                seen += 1;
+                let rel = f.strip_prefix(&root).unwrap().to_string_lossy().to_string();
+                let text = std::fs::read_to_string(&f).unwrap();
+                for line in text.lines() {
+                    if let Some(paths) = line.strip_prefix("ReadWritePaths=") {
+                        for p in paths.split_whitespace() {
+                            assert!(
+                                !p.contains("pre-update") || p.starts_with('-'),
+                                "{rel}: {p} does not exist before the first update; write -{p}"
+                            );
+                        }
+                    }
+                    if let Some(p) = line.strip_prefix("EnvironmentFile=") {
+                        assert!(
+                            p.starts_with('-') || env_required.contains(&rel.as_str()),
+                            "{rel}: {p} does not exist on a fresh CT; write -{p}, or list the unit as holding secrets"
+                        );
+                    }
+                }
+            }
+        }
+    }
+    assert!(seen >= 7, "found {seen} native units");
+}

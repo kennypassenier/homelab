@@ -76,7 +76,7 @@ ProtectHome=yes
 ProtectKernelTunables=yes
 ProtectControlGroups=yes
 RestrictSUIDSGID=yes
-ReadWritePaths=/appdata/kyu/kyu-runner-config /appdata/kyu/kyu-runner-config-pre-update /opt/kyu-runner/bin
+ReadWritePaths=/appdata/kyu/kyu-runner-config -/appdata/kyu/kyu-runner-config-pre-update /opt/kyu-runner/bin
 # S2: the swap needs write access to the binary's OWN directory only; a
 # code-execution bug can then replace this service's binary, not latch or
 # its neighbours. The rest is systemd's free hardening for a network daemon.

@@ -49,7 +49,7 @@ PrivateTmp=true
 ProtectSystem=strict
 ProtectHome=true
 # S2: the swap needs write access to the binary's own directory only.
-ReadWritePaths=/appdata/almanac/almanac-config /opt/almanac/bin /opt/almanac-pre-update
+ReadWritePaths=/appdata/almanac/almanac-config /opt/almanac/bin -/opt/almanac-pre-update
 ProtectKernelTunables=true
 ProtectControlGroups=true
 RestrictSUIDSGID=true

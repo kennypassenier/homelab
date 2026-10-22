@@ -70,7 +70,7 @@ ProtectHome=yes
 ProtectKernelTunables=yes
 ProtectControlGroups=yes
 RestrictSUIDSGID=yes
-ReadWritePaths=/appdata/kitchen/kitchen-config /appdata/kitchen/kitchen-config-pre-update /opt/kitchen/bin
+ReadWritePaths=/appdata/kitchen/kitchen-config -/appdata/kitchen/kitchen-config-pre-update /opt/kitchen/bin
 # S2: the swap needs write access to the binary's OWN directory only; a
 # code-execution bug can then replace this service's binary, not latch or
 # its neighbours. The rest is systemd's free hardening for a network daemon.

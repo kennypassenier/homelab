@@ -8389,6 +8389,20 @@ const AUDIT_ONLY = process.env.INVARIANTS_AUDIT_ONLY
   ? new RegExp(process.env.INVARIANTS_AUDIT_ONLY)
   : null;
 
+/** feat-kpadopt-2 (walk-changed): INVARIANTS_WALK_SKIP names a file of walk
+ * entry ids left out of this run because nothing that reaches them changed
+ * since their last green walk (.githooks/gate-carry.sh decides). */
+const WALK_SKIP = new Set(
+  process.env.INVARIANTS_WALK_SKIP
+    ? readFileSync(process.env.INVARIANTS_WALK_SKIP, "utf8")
+        .split("\n")
+        .filter(Boolean)
+    : [],
+);
+/** A walk over some of its entries only: its whole-walk checks (a parked
+ * class that passes, the minimum of dialogs measured) wait for a full one. */
+const PARTIAL_WALK = !!AUDIT_ONLY || WALK_SKIP.size > 0;
+
 /** Every class the walk reports, with what it holds. */
 const AUDIT_CLASSES = /** @type {const} */ ([
   ["a", "no word wraps per letter and no text is cut or spills out of its box"],
@@ -8467,7 +8481,7 @@ const GEN = {
 };
 
 /** Every entry of the walk: each page, each action dialog. */
-const GEN_ENTRIES = [
+const GEN_ENTRIES_ALL = [
   ...AUDIT_PAGES.filter((p) => !AUDIT_ONLY || AUDIT_ONLY.test(p)).map(
     (path) => ({ id: `page ${path}`, path, dialog: null }),
   ),
@@ -8479,6 +8493,7 @@ const GEN_ENTRIES = [
     }),
   ),
 ];
+const GEN_ENTRIES = GEN_ENTRIES_ALL.filter((e) => !WALK_SKIP.has(e.id));
 
 /**
  * Walk ONE entry at 1894 and 390 px: its findings by class, also kept in GEN.
@@ -8677,15 +8692,15 @@ test(
         process.env.INVARIANTS_AUDIT_OUT,
         JSON.stringify(all, null, 1),
       );
-    if (GEN.gridDialogs < 2 && !AUDIT_ONLY)
+    if (GEN.gridDialogs < 2 && !PARTIAL_WALK)
       all.grid.push(
         `only ${GEN.gridDialogs} action dialogs had fields to measure`,
       );
-    if (GEN.phoneFields < 5 && !AUDIT_ONLY)
+    if (GEN.phoneFields < 5 && !PARTIAL_WALK)
       all.grid.push(
         `only ${GEN.phoneFields} dialog fields were measured on a phone`,
       );
-    if (GEN.onceDialogs < 2 && !AUDIT_ONLY)
+    if (GEN.onceDialogs < 2 && !PARTIAL_WALK)
       all.once.push(
         `only ${GEN.onceDialogs} action dialogs had a description to measure`,
       );
@@ -8707,7 +8722,7 @@ test(
         t.diagnostic(
           `parked class ${cls} (${parked.note}): still red, ${found.length} findings, first: ${found[0]}`,
         );
-      else
+      else if (!PARTIAL_WALK)
         bad.push(
           `class ${cls} is parked but passes now: take it off admin/web/test-e2e/parked.json and docs/INVARIANTS.md (${parked.finding})`,
         );

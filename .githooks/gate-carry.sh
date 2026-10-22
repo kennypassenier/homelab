@@ -348,6 +348,61 @@ cmd_node() {
   return "$rc"
 }
 
+# ── The layout walk, changed entries only (feat-kpadopt-2) ──────────────
+#
+# Kenny, 2026-10-22 ("walk-changed: Doen"): the release gate's smoke walks
+# only the walk entries (pages and action dialogs) that the diff since each
+# entry's LAST GREEN WALK affects, and every entry when a shared file changed
+# (app.css, ui.js, chrome.js, Cargo.lock, admin/src, the suite's own files:
+# admin/web/scripts/merge-cases.mjs `walkSkip` holds the rule). The last
+# green walk per entry lives in `.git/gate-carry/invariants/walk-green.tsv`
+# (`<entry id> TAB <tree>`); an entry with no record is always walked.
+
+# walk_green_ids LOG: the entries a smoke run's spec output shows green.
+walk_green_ids() {
+  sed -En 's/^[[:space:]]*✔ invariants: redesign-final-gen: ((page|dialog) .*) at 1894 and 390 px reports every layout class \([0-9.]+ms\)$/\1/p' "$1" | sort -u
+}
+walk_red_ids() {
+  sed -En 's/^[[:space:]]*✖ invariants: redesign-final-gen: ((page|dialog) .*) at 1894 and 390 px reports every layout class \([0-9.]+ms\)$/\1/p' "$1" | sort -u
+}
+
+# walk_record LOG TREE: this run's greens are green at TREE, its reds are
+# forgotten, entries the run did not walk keep their earlier record.
+walk_record() {
+  local log="$1" tree="$2" file="$gitdir/gate-carry/invariants/walk-green.tsv"
+  mkdir -p "$(dirname "$file")"
+  local tmp; tmp=$(mktemp)
+  { walk_green_ids "$log"; walk_red_ids "$log"; } | sort -u > "$tmp.ran"
+  touch "$file"
+  # Earlier records of entries this run did not walk.
+  awk -F'\t' 'NR==FNR{ran[$0]=1; next} !($1 in ran){print}' "$tmp.ran" "$file" > "$tmp"
+  walk_green_ids "$log" | awk -F'\t' -v t="$tree" '{print $0 "\t" t}' >> "$tmp"
+  sort -u "$tmp" > "$file"
+  rm -f "$tmp" "$tmp.ran"
+}
+
+# walk_skip_file WORKDIR: writes the ids of the entries a run may leave out
+# to WORKDIR/walk-skip.txt and prints its path; prints nothing when every
+# entry is to be walked.
+walk_skip_file() {
+  local workdir="$1" green="$gitdir/gate-carry/invariants/walk-green.tsv"
+  [ -s "$green" ] || return 0
+  command -v node >/dev/null 2>&1 || return 0
+  : > "$workdir/walk-green.tsv"; : > "$workdir/walk-changes.tsv"
+  local tree
+  while IFS= read -r tree; do
+    git cat-file -e "${tree}^{tree}" 2>/dev/null || continue
+    awk -F'\t' -v t="$tree" '$2==t' "$green" >> "$workdir/walk-green.tsv"
+    git diff --name-only "$tree" -- admin/web admin/src scripts/invariants-run.sh Cargo.lock 2>/dev/null \
+      | awk -v t="$tree" '{print t "\t" $0}' >> "$workdir/walk-changes.tsv"
+  done < <(cut -f2 "$green" | sort -u)
+  [ -s "$workdir/walk-green.tsv" ] || return 0
+  node "$root/admin/web/scripts/merge-cases.mjs" --walk-skip "$workdir/walk-green.tsv" "$workdir/walk-changes.tsv" \
+    | grep -v '^$' > "$workdir/walk-skip.txt" || true
+  [ -s "$workdir/walk-skip.txt" ] || return 0
+  printf '%s' "$workdir/walk-skip.txt"
+}
+
 # ── Invariants family (docs/INVARIANTS.md) ──────────────────────────────
 #
 # The Playwright smoke in admin/web/test-e2e/invariants.e2e.js, against the
@@ -413,9 +468,18 @@ cmd_invariants() {
     echo "gate-carry: invariants smoke carried — rerunning the $(grep -c $'^invariants\t' "$old_fail") case(s) the last run failed"
     INVARIANTS_ONLY="$only" "$root"/scripts/invariants-run.sh > >(tee "$workdir/out.txt") 2>&1 || rc=$?
   else
+    # feat-kpadopt-2: when only some files changed (not a first run, a
+    # toolchain change or GATE_CARRY_MODE=full), the walk leaves out the
+    # entries whose last green walk is still current.
+    local skip=""
+    [ -z "${reason:-}" ] && skip=$(walk_skip_file "$workdir")
+    if [ -n "$skip" ]; then
+      why="$why; the walk leaves out $(wc -l < "$skip") entries unchanged since their last green walk"
+    fi
     echo "gate-carry: invariants smoke run — $why"
-    "$root"/scripts/invariants-run.sh > >(tee "$workdir/out.txt") 2>&1 || rc=$?
+    INVARIANTS_WALK_SKIP="$skip" "$root"/scripts/invariants-run.sh > >(tee "$workdir/out.txt") 2>&1 || rc=$?
   fi
+  walk_record "$workdir/out.txt" "$(current_tree)"
   : > "$workdir/failing.tsv"
   if [ "$rc" != 0 ]; then
     # node's summary: the cases under "failing tests:", one "✖ name (N ms)" each.
@@ -453,6 +517,7 @@ if [ "${BASH_SOURCE[0]}" = "${0}" ]; then
     rust) timed "rust tests" cmd_rust ;;
     node) timed "node tests" cmd_node ;;
     invariants) timed "invariants smoke" cmd_invariants ;;
+    walk-record) walk_record "${2:?log}" "${3:-$(current_tree)}" ;;
     full) GATE_CARRY_MODE=full; force_full=full; timed "rust tests" cmd_rust; rc1=$?; timed "node tests" cmd_node; rc2=$?; timed "invariants smoke" cmd_invariants; rc3=$?; [ "$rc1" = 0 ] && [ "$rc2" = 0 ] && [ "$rc3" = 0 ] ;;
     *) sed -n '2,40p' "$0" | sed 's/^# \{0,1\}//'; exit 2 ;;
   esac

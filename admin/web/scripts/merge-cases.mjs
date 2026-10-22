@@ -178,6 +178,7 @@ export function affected(changed, x) {
   }
   return {
     pages: [...pages].sort(),
+    shared: sharedHit,
     cases: names,
     pattern: pat(names),
     groups: g.map((x) => pat(x.n)).filter(Boolean),
@@ -238,15 +239,72 @@ export async function plan(changedPaths, mode = "merge", opts = {}) {
     .map((f) => relative(WEB, join(WEB, f)))
     // Only the dashboard's own files reach a case.
     .filter((f) => !f.startsWith(".."));
-  return affected(changed, {
-    modules,
-    closures,
-    shared,
-    cases,
+  return {
+    ...affected(changed, {
+      modules,
+      closures,
+      shared,
+      cases,
+      pageOf,
+      mode: mode === "commit" ? "commit" : "merge",
+      styleChanged: !!opts.kp || changed.some((f) => f.endsWith(".css")),
+    }),
     pageOf,
-    mode: mode === "commit" ? "commit" : "merge",
-    styleChanged: !!opts.kp || changed.some((f) => f.endsWith(".css")),
-  });
+  };
+}
+
+/**
+ * feat-kpadopt-2 (Kenny's choice of 2026-10-22, "walk-changed"): at the
+ * release gate the layout walk walks only the entries (pages and dialogs)
+ * the diff since each entry's last green walk affects, and all of them when
+ * a shared file changed. Which entries may be left out:
+ *   - an entry is carried when it has a recorded green walk at a tree and
+ *     nothing that reaches its page changed since that tree;
+ *   - a shared file (app.css, ui.js, chrome.js, anything in half the pages'
+ *     closure), the Rust side (admin/src), Cargo.lock (a chassis or
+ *     kp-themes bump), the invariants script or the whole-screen suite's own
+ *     files (the walk's definition) change every entry.
+ * @param {{id: string, tree: string}[]} green last green walk per entry
+ * @param {Map<string, string[]>} changes files changed since each tree
+ *   (repository-root paths)
+ * @returns {Promise<string[]>} the ids of the entries to leave out
+ */
+export async function walkSkip(green, changes) {
+  const everything = (/** @type {string} */ f) =>
+    /^(admin\/src\/|Cargo\.lock$|scripts\/invariants-run\.sh$|admin\/web\/test-e2e\/)/.test(
+      f,
+    );
+  /** @type {Map<string, {full: boolean, pages: Set<string>}>} */
+  const byTree = new Map();
+  /** @type {((p: string) => string | null) | null} */
+  let pageOf = null;
+  for (const tree of new Set(green.map((g) => g.tree))) {
+    const files = changes.get(tree);
+    if (!files) {
+      // The tree is not known (garbage collected): walk its entries.
+      byTree.set(tree, { full: true, pages: new Set() });
+      continue;
+    }
+    if (files.some(everything)) {
+      byTree.set(tree, { full: true, pages: new Set() });
+      continue;
+    }
+    const p = await plan(files, "commit");
+    pageOf = p.pageOf;
+    byTree.set(tree, { full: p.shared, pages: new Set(p.pages) });
+  }
+  if (!pageOf) pageOf = (await plan([], "commit")).pageOf;
+  return green
+    .filter((g) => {
+      const t = byTree.get(g.tree);
+      if (!t || t.full) return false;
+      const path =
+        /^page (\S+)$/.exec(g.id)?.[1] ?? /^dialog (\S+) ›/.exec(g.id)?.[1];
+      if (!path) return false;
+      const page = /** @type {(p: string) => string | null} */ (pageOf)(path);
+      return page == null || !t.pages.has(page);
+    })
+    .map((g) => g.id);
 }
 
 const main = async () => {
@@ -255,6 +313,23 @@ const main = async () => {
     args.includes(f) ? ((args = args.filter((a) => a !== f)), true) : false;
   const commit = flag("--commit");
   const kp = flag("--kp");
+  if (flag("--walk-skip")) {
+    // <green.tsv: id TAB tree> <changes.tsv: tree TAB file>; prints the ids to skip.
+    const rows = (/** @type {string} */ f) =>
+      readFileSync(f, "utf8")
+        .split("\n")
+        .filter(Boolean)
+        .map((l) => l.split("\t"));
+    const green = rows(args[0]).map(([id, tree]) => ({ id, tree }));
+    /** @type {Map<string, string[]>} */
+    const changes = new Map();
+    for (const t of new Set(green.map((g) => g.tree))) changes.set(t, []);
+    for (const [tree, file] of rows(args[1]))
+      if (file) changes.get(tree)?.push(file);
+    // A green tree with no row in changes.tsv is one nothing changed since.
+    process.stdout.write(`${(await walkSkip(green, changes)).join("\n")}\n`);
+    return;
+  }
   const out = await plan(args, commit ? "commit" : "merge", { kp });
   process.stdout.write(`${JSON.stringify(out)}\n`);
 };

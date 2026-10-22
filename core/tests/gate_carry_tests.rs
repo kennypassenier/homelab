@@ -227,3 +227,27 @@ fn dir_map_covers_every_workspace_member() {
         );
     }
 }
+
+/// feat-kpadopt-2 (Kenny, 2026-10-22, "walk-changed"): the carry state
+/// records the last green walk per entry, read off the smoke's spec output.
+#[test]
+fn walk_green_ids_reads_the_greens_and_walk_red_ids_the_reds_of_the_layout_walk() {
+    let log = "\
+✔ invariants: redesign-final-gen: page /host at 1894 and 390 px reports every layout class (9695.4ms)\n\
+✖ invariants: redesign-final-gen: page /map at 1894 and 390 px reports every layout class (10102.1ms)\n\
+✔ invariants: redesign-final-gen: dialog /settings › issue-token at 1894 and 390 px reports every layout class (9453.5ms)\n\
+✔ invariants: redesign-final-gen: every same-site link the walk met resolves (2213.0ms)\n\
+✔ invariants: Settings lists the per-machine tokens without a read error (2995.5ms)\n";
+    let path = std::env::temp_dir().join(format!("walk-green-{}.log", std::process::id()));
+    std::fs::write(&path, log).unwrap();
+    let snippet = r#"
+        source .githooks/gate-carry.sh
+        echo GREEN; walk_green_ids "$1"; echo RED; walk_red_ids "$1"
+    "#;
+    let out = run_bash(snippet, path.to_str().unwrap());
+    std::fs::remove_file(&path).ok();
+    assert_eq!(
+        out,
+        "GREEN\ndialog /settings › issue-token\npage /host\nRED\npage /map"
+    );
+}

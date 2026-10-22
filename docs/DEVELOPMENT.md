@@ -133,6 +133,15 @@ tests were failing. On the next `make gate` it reruns:
   sub-test carry — one Playwright run or none) is skipped the same way
   when neither `admin/web` nor `admin/src` moved, and always runs on a
   forced full run.
+  Since 2026-10-22 (Kenny's "walk-changed"), a smoke that does run walks only
+  the layout-walk entries (pages and action dialogs) that the diff since each
+  entry's **last green walk** reaches (`.git/gate-carry/invariants/walk-green.tsv`,
+  one line per entry; `admin/web/scripts/merge-cases.mjs` `walkSkip` holds the
+  rule) and walks all of them when a shared file (`app.css`, `ui.js`, `chrome.js`,
+  anything in half the pages' import closure), `admin/src`, `Cargo.lock` (a
+  chassis or kp-themes bump), `scripts/invariants-run.sh` or the whole-screen
+  suite's own files changed. An entry with no record is always walked. The
+  other whole-screen cases run as before.
 
 A run — full or carried, green or red — always updates its family's
 record, so a red carry still narrows tomorrow's diff; only a run where

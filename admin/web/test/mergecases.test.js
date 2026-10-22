@@ -4,7 +4,12 @@
 // that it finds the pages and the cases a change reaches, and no others.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { casesOf, pageModules, plan } from "../scripts/merge-cases.mjs";
+import {
+  casesOf,
+  pageModules,
+  plan,
+  walkSkip,
+} from "../scripts/merge-cases.mjs";
 
 /** The one layout walk. @param {string} c */
 const isWalk = (c) => c.includes("redesign-final-gen: one walk");
@@ -124,4 +129,55 @@ test("redesign-final-50: a merge's cases split into two groups for the two e2e s
   // One case is one group.
   const one = await plan(["admin/web/js/ui.js"], "commit");
   assert.equal(one.groups.length, 1);
+});
+
+// feat-kpadopt-2 (Kenny's choice of 2026-10-22, "walk-changed"): at the
+// release gate the walk leaves out the entries whose last green walk is
+// still current; a shared file, the Rust side or the suite's own files
+// bring every entry back.
+test("feat-kpadopt-2: walkSkip leaves out only the entries nothing reaches since their last green walk", async () => {
+  const green = [
+    { id: "page /firewall", tree: "t1" },
+    { id: "page /host", tree: "t1" },
+    { id: "dialog /settings › issue-token", tree: "t1" },
+    { id: "page /host", tree: "t2" },
+  ];
+  const only = (/** @type {string[]} */ files) =>
+    walkSkip(green.slice(0, 3), new Map([["t1", files]]));
+  // A change to nothing the dashboard serves: everything is left out.
+  assert.deepEqual(await only(["docs/USER_GUIDE.md"]), [
+    "page /firewall",
+    "page /host",
+    "dialog /settings › issue-token",
+  ]);
+  // The Firewall page's own module: only its entries are walked again.
+  assert.deepEqual(await only(["admin/web/js/pages/firewall.js"]), [
+    "page /host",
+    "dialog /settings › issue-token",
+  ]);
+  // A shared script or stylesheet, the Rust side, the lockfile (a kp-themes
+  // or chassis bump), the suite's own files: all of them are walked.
+  for (const f of [
+    "admin/web/js/ui.js",
+    "admin/web/js/chrome.js",
+    "admin/web/css/app.css",
+    "admin/src/lib.rs",
+    "Cargo.lock",
+    "admin/web/test-e2e/layoutaudit.js",
+  ])
+    assert.deepEqual(await only([f]), [], f);
+  // Each entry is judged against its own tree.
+  assert.deepEqual(
+    await walkSkip(
+      [
+        { id: "page /firewall", tree: "old" },
+        { id: "page /host", tree: "new" },
+      ],
+      new Map([
+        ["old", ["admin/web/js/pages/firewall.js"]],
+        ["new", ["admin/web/js/pages/firewall.js"]],
+      ]),
+    ),
+    ["page /host"],
+  );
 });

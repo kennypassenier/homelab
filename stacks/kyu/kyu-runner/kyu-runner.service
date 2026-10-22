@@ -64,6 +64,11 @@ Environment=KYU_RUNNER_TIMEOUT_STOP_SECS=60
 # 8082 is what Uptime Kuma probes, and it is not localhost: this container
 # holds three services and each binds its own address on 10.10.10.9.
 Environment=KYU_RUNNER_LISTEN=10.10.10.9:8082
+# trusted-sources (Kenny, 2026-10-22: "alle software moet de trusted-admin
+# van 10.10.10.10 opnemen"): a request straight from Kenny's workstation is the
+# admin without a login (chassis-rs 3.13.0 and later; an older build ignores
+# it). Equal to host.toml `trusted_sources`; admin's config_tests hold them so.
+Environment=KYU_RUNNER_TRUSTED_ADMINS=10.10.10.10
 NoNewPrivileges=yes
 PrivateTmp=yes
 ProtectSystem=strict

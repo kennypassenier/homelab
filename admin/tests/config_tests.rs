@@ -169,37 +169,47 @@ fn dashboard_latch_the_unit_gives_latch_its_environment_and_a_writable_home() {
 }
 
 // trusted-sources (Kenny, 2026-10-22: "mijn pc heeft altijd toegang, zonder
-// token"): the unit's chassis knob (login) and host.toml's list (firewalls
-// and the dashboard's own locks) name the same addresses, so one cannot be
-// changed without the other.
+// token"; "alle software moet de trusted-admin van 10.10.10.10 opnemen"):
+// every unit of Kenny's own chassis-rs software in stacks/ names the same
+// trusted admins as host.toml's `trusted_sources` (firewalls and the
+// dashboard's own locks), so one cannot change without the others.
 #[test]
-fn trusted_sources_the_unit_and_host_toml_name_the_same_addresses() {
-    let unit = std::fs::read_to_string(concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/../stacks/admin/admin/admin.service"
-    ))
-    .unwrap();
-    let mut in_unit: Vec<String> = unit
-        .lines()
-        .find_map(|l| l.strip_prefix("Environment=HOMELAB_ADMIN_TRUSTED_ADMINS="))
-        .expect("the unit sets HOMELAB_ADMIN_TRUSTED_ADMINS")
-        .split(',')
-        .map(|s| s.trim().to_string())
-        .filter(|s| !s.is_empty())
-        .collect();
-    let host: toml::Table =
-        std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/../config/host.toml"))
-            .unwrap()
-            .parse()
-            .unwrap();
+fn trusted_sources_every_unit_and_host_toml_name_the_same_addresses() {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
+    let host: toml::Table = std::fs::read_to_string(root.join("config/host.toml"))
+        .unwrap()
+        .parse()
+        .unwrap();
     let mut in_host: Vec<String> = host["trusted_sources"]
         .as_array()
         .expect("host.toml declares trusted_sources")
         .iter()
         .filter_map(|v| v.as_str().map(|s| s.trim().to_string()))
         .collect();
-    in_unit.sort();
     in_host.sort();
-    assert_eq!(in_unit, in_host);
-    assert!(!in_unit.is_empty());
+    assert!(!in_host.is_empty());
+    let units = [
+        ("stacks/admin/admin/admin.service", "HOMELAB_ADMIN"),
+        ("stacks/kyu/kyu/kyu.service", "KYU"),
+        ("stacks/kyu/kyu-runner/kyu-runner.service", "KYU_RUNNER"),
+        (
+            "stacks/kyu/http-switchboard/http-switchboard.service",
+            "HTTP_SWITCHBOARD",
+        ),
+        ("stacks/almanac/almanac/almanac.service", "ALMANAC"),
+    ];
+    for (path, prefix) in units {
+        let unit = std::fs::read_to_string(root.join(path)).unwrap();
+        let key = format!("Environment={prefix}_TRUSTED_ADMINS=");
+        let mut in_unit: Vec<String> = unit
+            .lines()
+            .find_map(|l| l.strip_prefix(key.as_str()))
+            .unwrap_or_else(|| panic!("{path} sets {prefix}_TRUSTED_ADMINS"))
+            .split(',')
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .collect();
+        in_unit.sort();
+        assert_eq!(in_unit, in_host, "{path}");
+    }
 }

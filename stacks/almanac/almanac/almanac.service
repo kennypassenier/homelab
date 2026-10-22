@@ -32,6 +32,11 @@ Environment=ALMANAC_TIMEOUT_STOP_SECS=60
 # shares one rate-limit key, cookies are not Secure and passkeys stay off
 # (the kit's "proxy headers from untrusted peer" warning, 2026-09-30).
 Environment=ALMANAC_TRUSTED_PROXIES=10.10.10.4
+# trusted-sources (Kenny, 2026-10-22: "alle software moet de trusted-admin
+# van 10.10.10.10 opnemen"): a request straight from Kenny's workstation is the
+# admin without a login (chassis-rs 3.13.0 and later; an older build ignores
+# it). Equal to host.toml `trusted_sources`; admin's config_tests hold them so.
+Environment=ALMANAC_TRUSTED_ADMINS=10.10.10.10
 WorkingDirectory=/appdata/almanac/almanac-config
 ExecStartPre=/usr/local/bin/latch run -- /opt/almanac/bin/almanac --check
 ExecStart=/usr/local/bin/latch run -- /opt/almanac/bin/almanac

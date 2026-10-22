@@ -68,6 +68,11 @@ Environment=HTTP_SWITCHBOARD_TIMEOUT_STOP_SECS=60
 # loser would be whichever started second. The 1.x unit carried the same
 # address as a `--listen` argument; the kit takes it from the environment.
 Environment=HTTP_SWITCHBOARD_LISTEN=10.10.10.9:8083
+# trusted-sources (Kenny, 2026-10-22: "alle software moet de trusted-admin
+# van 10.10.10.10 opnemen"): a request straight from Kenny's workstation is the
+# admin without a login (chassis-rs 3.13.0 and later; an older build ignores
+# it). Equal to host.toml `trusted_sources`; admin's config_tests hold them so.
+Environment=HTTP_SWITCHBOARD_TRUSTED_ADMINS=10.10.10.10
 NoNewPrivileges=yes
 PrivateTmp=yes
 ProtectSystem=strict

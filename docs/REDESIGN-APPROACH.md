@@ -94,7 +94,7 @@ defect. Never fix only the one spot.
 - **Release gate:** the full suite, once. Every test run reports its measured
   duration. The whole-screen suite has a budget
   (`admin/web/test-e2e/budget.json`): a full run more than 20 % over its
-  duration or its case count fails; raising it is a commit with a new
+  case count fails (no time limit, Kenny 2026-10-22); raising it is a commit with a new
   reason line.
 - **Iterating:** run the one failing test (`INVARIANTS_ONLY`), never a broad
   set to check one fix; the broad run happens once.

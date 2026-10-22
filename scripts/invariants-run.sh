@@ -303,8 +303,8 @@ else
   fi
   # redesign-final-51 (Kenny, 2026-10-04: tests never balloon): a full run
   # (the release gate's) is held to the suite's budget,
-  # test-e2e/budget.json: more than 20 % over its duration or its case
-  # count fails it.
+  # test-e2e/budget.json: more than 20 % over its case count fails it
+  # (no time limit, Kenny 2026-10-22).
   if [ -z "${INVARIANTS_ONLY:-}" ]; then
     node scripts/e2e-budget.mjs run "$progress" "$(( $(date +%s) - run_t0 ))" \
       || { [ "$rc" = 0 ] && rc=4; }

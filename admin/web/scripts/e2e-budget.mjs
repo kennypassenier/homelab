@@ -17,7 +17,7 @@ if (mode === "run") {
   const b = readBudget();
   const run = measureOf(readFileSync(args[0], "utf8"), Number(args[1]));
   console.log(
-    `invariants: budget: ${run.seconds} s of ${b.seconds} s, ${run.cases} cases of ${b.cases} (fails above +20 %; admin/web/test-e2e/budget.json)`,
+    `invariants: budget: ${run.cases} cases of ${b.cases} (fails above +20 %; no time limit; the run took ${run.seconds} s; admin/web/test-e2e/budget.json)`,
   );
   const over = overBudget(b, run);
   for (const o of over) console.error(`invariants: OVER BUDGET — ${o}`);

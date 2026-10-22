@@ -66,8 +66,8 @@ are not style preferences; ignoring them costs him the ability to steer.
      presses every control.
    - Each page is walked once for all layout classes.
    - Iterate with the one failing test.
-   - The release gate fails when the whole-screen suite outgrows its
-     budget (`admin/web/test-e2e/budget.json`) by more than 20 %.
+   - The release gate fails when the whole-screen suite holds more than
+     20 % more cases than its budget (`admin/web/test-e2e/budget.json`; no time limit).
 
 Both failures look identical from his side: he answered, and then had to
 argue with the answer.

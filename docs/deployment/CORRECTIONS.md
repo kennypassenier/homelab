@@ -402,3 +402,17 @@ summarised here for the corrections record.
 7. **Hoe en wanneer meten we dat het werkt.** Measured 2026-10-04: with M5's fix reverted the check failed naming the Inbox's "· 1" over two rows; with it, 0. Next: the 3.71.0 gate's full run.
 8. **Fallback.** A count that deliberately counts something else (a filter chip's matches) carries no `data-count-of` and says what it counts in its label.
 9. **Wanneer herzien we de maatregel.** At the 3.71.0 retrospective.
+
+## Correction · backup-stall-1 — a backup upload held the media apps paused for 52 minutes
+
+**Approved by Kenny 2026-10-22 ("Klopt"); design chosen the same night: "Eerst lokaal, dan uploaden", "Bestaande map omdraaien".**
+
+1. **Wat ging er mis.** The nightly backup paused the six media apps on CT 106 at 04:11:33 (`backup-media :: quiesce :: changed`), the restic upload of `jellyfin-config` to Google Drive hung when the internet dropped minutes later, and the apps stayed down until the upload was stopped by hand at 05:03:31 (`resume :: changed` at 05:03:33). The snapshot limit was four hours.
+2. **Welke poort liet het door.** No test or drill exercised a backup whose network goes away mid-upload; the tests knew only "succeeds" and "fails at once".
+3. **Waar dezelfde fout nog zit.** Searched for every long restic call with paused apps around it: `grep -rn "snapshot_timeout_s\|restore_timeout_s" core/src`, then each site read for a surrounding quiesce. Only the compose backup's "snapshot" step waits on the network while apps are paused; native backups do not pause their service (fix-113), and a restore pauses the apps by design.
+4. **Hoe voorkomen we herhaling.** The snapshot is written to the local repository set (`second_copy_dataset`) while the apps are paused, and the copy to Google Drive runs after they are started again ("upload" step). A failed upload is a warning, not a failed backup; the nightly offsite pass (`secondcopy::copy_all`, now local → remote for compose stacks) copies whatever the remote lacks. Every snapshot and copy carries a stall watch (`executor::Stall`, `backup_stall_s`, default 600 s): no progress for that long stops the command.
+5. **Kost.** One more step per backup and a reversed direction in the nightly pass; the local set already existed (16.5 GB on HDD4TB, replicated to HDD18TB).
+6. **Handhaving.** Code: `backup.rs` (local base, "upload"), `secondcopy.rs` (`RepoPolicy::local_first`), `executor::Stall` honoured by the host's `run_streaming`. Tests: `a_local_first_backup_snapshots_locally_and_uploads_after_the_apps_are_back`, `a_failed_upload_is_reported_and_does_not_fail_the_backup`, `a_local_first_repository_is_copied_to_the_remote_and_others_come_home`, `a_stalled_streaming_command_is_stopped_and_a_moving_one_is_not`.
+7. **Hoe en wanneer meten we dat het werkt.** The tests in the 4.0.0 release gate; live at the first nightly round after 4.0.0 is installed, reading the time between "quiesce" and "resume" per stack in the host journal; and a drill on the drill stack with its outbound traffic blocked mid-backup (needs Kenny's go for the host change).
+8. **Fallback.** If the measurement fails, a stack with paused apps gets a hard 30-minute snapshot limit instead of four hours.
+9. **Wanneer herzien we de maatregel.** At the next change to the backup step, or when the stall watch stops an upload that was still moving.

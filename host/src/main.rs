@@ -346,6 +346,9 @@ struct FileConfig {
     /// Absent = no second copy (the nightly `restic check` of the Google
     /// Drive copy runs either way).
     second_copy_dataset: Option<String>,
+    /// backup-stall (correction 2026-10-22): seconds a backup snapshot or
+    /// upload may go without progress before it is stopped. Default 600.
+    backup_stall_s: Option<u64>,
     /// fix-96: how often one repository's check also reads a slice of its
     /// data. Default 30 days (Kenny: monthly).
     integrity_data_read_interval_s: Option<u64>,
@@ -795,6 +798,10 @@ fn load_config_from(path: String) -> Config {
                     .unwrap_or(d.staging_cap_mib),
                 tiers: d.tiers,
                 trigger: d.trigger,
+                // backup-local-first: the second repository set is where a
+                // compose stack's snapshot is written first.
+                local_dataset: file.second_copy_dataset.clone(),
+                stall_s: file.backup_stall_s.unwrap_or(d.stall_s),
             }
         },
         metrics_targets_dir: file.metrics_targets_dir,
@@ -1488,6 +1495,50 @@ fn revoke_token_in(raw: &str, name: &str) -> Result<(String, Vec<TokenEntry>), S
 
 #[cfg(test)]
 mod tests {
+    // backup-stall (correction 2026-10-22): a command whose status lines
+    // keep coming while nothing moves is stopped once the watch's limit
+    // passes; one whose progress keeps moving runs to its end.
+    #[tokio::test]
+    async fn a_stalled_streaming_command_is_stopped_and_a_moving_one_is_not() {
+        use homelab_core::executor::{Cmd, Executor, Stall};
+        let ticking = Cmd::new(
+            "sh",
+            &["-c", "while true; do echo tick; sleep 0.2; done"],
+            60,
+        )
+        .stall(Stall::new(2));
+        let started = std::time::Instant::now();
+        let err = super::RealExecutor
+            .run_streaming(&ticking, &|_l: &str| false)
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(
+                err,
+                homelab_core::error::CoreError::Stalled { seconds: 2, .. }
+            ),
+            "{err:?}"
+        );
+        assert!(started.elapsed() < std::time::Duration::from_secs(10));
+
+        let stall = Stall::new(2);
+        let moving = Cmd::new(
+            "sh",
+            &["-c", "for i in 1 2 3 4 5 6; do echo $i; sleep 0.7; done"],
+            60,
+        )
+        .stall(stall.clone());
+        let out = super::RealExecutor
+            .run_streaming(&moving, &|_l: &str| {
+                stall.progressed();
+                false
+            })
+            .await
+            .unwrap();
+        assert_eq!(out.code, 0);
+        assert_eq!(out.stdout.lines().count(), 6);
+    }
+
     /// fix-141 (expert panel 2026-09-27, changes-reach-prod-without-ci): the
     /// Hello every client prints names the build, not only the version.
     #[test]
@@ -5708,8 +5759,45 @@ impl Executor for RealExecutor {
             let status = child.wait().await;
             (kept, status)
         };
-        match tokio::time::timeout(Duration::from_secs(cmd.timeout_s), work).await {
-            Ok((kept, status)) => {
+        // backup-stall: progress that stands still for the watch's limit
+        // ends the command the way a timeout does (its whole group).
+        let stall = cmd.stall.clone();
+        let watch = async {
+            match &stall {
+                Some(s) => loop {
+                    tokio::time::sleep(Duration::from_secs(s.limit_s.clamp(1, 5))).await;
+                    if s.idle_s() >= s.limit_s {
+                        break;
+                    }
+                },
+                None => std::future::pending::<()>().await,
+            }
+        };
+        let raced = async {
+            tokio::select! {
+                r = work => Some(r),
+                () = watch => None,
+            }
+        };
+        let kill_group = || {
+            if let Some(pgid) = group.and_then(|p| i32::try_from(p).ok()) {
+                // SAFETY: as in `run` — a signal to the group this call
+                // created for the child it spawned.
+                #[allow(unsafe_code)]
+                unsafe {
+                    libc::killpg(pgid, libc::SIGKILL);
+                }
+            }
+        };
+        match tokio::time::timeout(Duration::from_secs(cmd.timeout_s), raced).await {
+            Ok(None) => {
+                kill_group();
+                Err(CoreError::Stalled {
+                    rendered,
+                    seconds: stall.map(|s| s.limit_s).unwrap_or(0),
+                })
+            }
+            Ok(Some((kept, status))) => {
                 let status =
                     status.map_err(|e| CoreError::Other(format!("wait {}: {}", rendered, e)))?;
                 let stderr = err_task.await.unwrap_or_default();
@@ -5720,14 +5808,7 @@ impl Executor for RealExecutor {
                 })
             }
             Err(_) => {
-                if let Some(pgid) = group.and_then(|p| i32::try_from(p).ok()) {
-                    // SAFETY: as in `run` — a signal to the group this call
-                    // created for the child it spawned.
-                    #[allow(unsafe_code)]
-                    unsafe {
-                        libc::killpg(pgid, libc::SIGKILL);
-                    }
-                }
+                kill_group();
                 Err(CoreError::Timeout {
                     rendered,
                     seconds: cmd.timeout_s,
@@ -8127,6 +8208,7 @@ async fn scheduler_loop(state: AppState) {
                 .map(|d| d.name.clone())
                 .collect::<Vec<_>>(),
             &tiers,
+            state.config.backup.local_dataset.is_some(),
         );
         let plan = nightly_plan(
             hour,

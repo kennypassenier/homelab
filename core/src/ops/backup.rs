@@ -188,8 +188,18 @@ async fn run_restic_bytes(
     // Right after `env`, with the other variables.
     cmd.args
         .insert(0, format!("RESTIC_PROGRESS_FPS={RESTIC_PROGRESS_FPS}"));
+    // backup-stall: a status line only counts as progress when its byte
+    // count moved; restic keeps printing them while it waits on a dead
+    // remote.
+    let stall = cmd.stall.clone();
+    let last_done = std::sync::atomic::AtomicU64::new(u64::MAX);
     let on_line = |line: &str| match restic_bytes(line) {
         Some(b) => {
+            if let Some(s) = &stall
+                && last_done.swap(b.done, std::sync::atomic::Ordering::Relaxed) != b.done
+            {
+                s.progressed();
+            }
             sink.emit(PipelineEvent::Bytes {
                 op: op.to_string(),
                 label: owner.to_string(),
@@ -208,6 +218,56 @@ async fn run_restic_bytes(
         });
     }
     Ok(out)
+}
+
+/// backup-local-first: how far a `restic copy` is, from the status line it
+/// prints at `RESTIC_PROGRESS_FPS` when no terminal is attached
+/// (`[0:42] 37.50%  3 / 8 packs copied`): the packs done.
+pub fn copy_packs_done(line: &str) -> Option<u64> {
+    let rest = line.trim().strip_suffix("packs copied")?.trim_end();
+    let (done, _total) = rest.rsplit_once('/')?;
+    done.split_whitespace().last()?.parse().ok()
+}
+
+/// backup-local-first: copy every snapshot `local` holds and `remote`
+/// lacks into `remote` (restic skips what is already there), under a stall
+/// watch. Progress lines are consumed, so the kept output is restic's
+/// per-snapshot lines.
+pub(crate) async fn run_restic_copy(exec: &dyn Executor, cmd: Cmd) -> Result<(), CoreError> {
+    let mut cmd = cmd;
+    cmd.args
+        .insert(0, format!("RESTIC_PROGRESS_FPS={RESTIC_PROGRESS_FPS}"));
+    let stall = cmd.stall.clone();
+    let last = std::sync::atomic::AtomicU64::new(u64::MAX);
+    let on_line = |line: &str| {
+        let progressed = match copy_packs_done(line) {
+            Some(n) => last.swap(n, std::sync::atomic::Ordering::Relaxed) != n,
+            // A finished snapshot ("snapshot … saved, copied from …") is
+            // progress too.
+            None => line.contains("copied from"),
+        };
+        if progressed && let Some(s) = &stall {
+            s.progressed();
+        }
+        copy_packs_done(line).is_some()
+    };
+    let out = exec.run_streaming(&cmd, &on_line).await?;
+    if out.code != 0 {
+        return Err(CoreError::Command {
+            rendered: cmd.rendered(),
+            detail: format!("rc={} :: {}", out.code, out.stderr.trim()),
+        });
+    }
+    Ok(())
+}
+
+/// A warning line from inside a step closure, where the scope is borrowed.
+fn scope_log_warn(sink: &dyn crate::sink::Sink, msg: String) {
+    sink.emit(PipelineEvent::Line {
+        level: Level::Warn,
+        source: "HOST".into(),
+        msg,
+    });
 }
 
 /// What `restic init` found (gap-24).
@@ -315,7 +375,20 @@ pub struct BackupCfg {
     /// context here because the same `BackupCfg` is shared across a batch of
     /// stacks whose call sites already know which trigger they are.
     pub trigger: BackupTrigger,
+    /// backup-local-first (Kenny, 2026-10-22: "Eerst lokaal, dan uploaden";
+    /// "Bestaande map omdraaien"): the ZFS dataset (`second_copy_dataset`)
+    /// whose repositories a compose stack's snapshot is written to FIRST,
+    /// while its apps are paused; the copy to `restic_base` follows with the
+    /// apps running again. `None`: straight to `restic_base`, as before.
+    pub local_dataset: Option<String>,
+    /// backup-stall (correction 2026-10-22): how long a snapshot or upload
+    /// may go without progress before it is stopped (`executor::Stall`).
+    pub stall_s: u64,
 }
+
+/// backup-stall: ten minutes without progress (Kenny's "Klopt" on the
+/// correction's 10 minutes).
+pub const DEFAULT_STALL_S: u64 = 600;
 
 impl Default for BackupCfg {
     fn default() -> Self {
@@ -328,6 +401,8 @@ impl Default for BackupCfg {
             staging_dir: Some(DEFAULT_STAGING_DIR.to_string()),
             staging_cap_mib: 10 * 1024,
             trigger: BackupTrigger::default(),
+            local_dataset: None,
+            stall_s: DEFAULT_STALL_S,
         }
     }
 }
@@ -585,6 +660,7 @@ pub const BACKUP_STEPS: &[&str] = &[
     "quiesce",
     "snapshot",
     "resume",
+    "upload",
     "retention",
 ];
 
@@ -809,16 +885,77 @@ pub(crate) async fn backup_impl<'a>(
         Ok(StepOutcome::Unchanged)
     });
 
+    // backup-local-first (Kenny, 2026-10-22, after the night the internet
+    // dropped mid-upload and Jellyfin stayed paused for 52 minutes): the
+    // snapshot is written to the local repository set first, so the apps
+    // are paused only for a disk-to-disk write; the upload to `restic_base`
+    // follows in "upload", with the apps running. A local dataset that is
+    // configured but not usable falls back to the remote, loudly: a backup
+    // straight to the remote beats none.
+    let local_base: Option<String> = match &cfg.local_dataset {
+        Some(ds) => match crate::ops::secondcopy::ensure_dataset(exec, ds, false).await {
+            Ok(path) => Some(path),
+            Err(e) => {
+                scope.log(
+                    Level::Warn,
+                    format!(
+                        "[backup] the local repository set ({ds}) is not usable, so tonight's \
+                         snapshot goes straight to the remote with the apps paused :: {e}"
+                    ),
+                );
+                None
+            }
+        },
+        None => None,
+    };
+    let primary = local_base
+        .clone()
+        .unwrap_or_else(|| cfg.restic_base.clone());
+
     scoped_step!(scope, "init repos", {
         // gap-24: the answer is read. An existing repository says so and is
         // the normal case; a new one is checked against host-meta's password.
         let mut created = false;
         for (owner, _) in &groups {
             let init = restic(&cfg.restic_base, owner, &cfg.password_file, &["init"], 120);
-            if init_repository(exec, &init, owner).await? == InitOutcome::Created {
-                same_password_as_host_meta(exec, &cfg.restic_base, &cfg.password_file, owner)
-                    .await?;
-                created = true;
+            // backup-local-first: with a local set, an unreachable remote
+            // no longer stops the backup; "upload" reports it instead.
+            let remote_ok = match init_repository(exec, &init, owner).await {
+                Ok(InitOutcome::Created) => {
+                    same_password_as_host_meta(exec, &cfg.restic_base, &cfg.password_file, owner)
+                        .await?;
+                    created = true;
+                    true
+                }
+                Ok(InitOutcome::Existed) => true,
+                Err(e) if local_base.is_some() => {
+                    scope_log_warn(
+                        ctx.sink,
+                        format!(
+                            "[backup] the remote repository for {owner} did not answer; the snapshot stays local until it does :: {e}"
+                        ),
+                    );
+                    false
+                }
+                Err(e) => return Err(e),
+            };
+            if let Some(lb) = &local_base {
+                // The local twin shares the remote's chunker parameters, or
+                // the copies between them would deduplicate nothing.
+                let remote = format!("{}/{}-config", cfg.restic_base, owner);
+                let with_params = [
+                    "init",
+                    "--from-repo",
+                    remote.as_str(),
+                    "--from-password-file",
+                    cfg.password_file.as_str(),
+                    "--copy-chunker-params",
+                ];
+                let args: &[&str] = if remote_ok { &with_params } else { &["init"] };
+                let init = restic(lb, owner, &cfg.password_file, args, 300);
+                if init_repository(exec, &init, owner).await? == InitOutcome::Created {
+                    created = true;
+                }
             }
         }
         Ok(if created {
@@ -835,7 +972,7 @@ pub(crate) async fn backup_impl<'a>(
         for (owner, _) in &groups {
             let _ = exec
                 .run(&restic(
-                    &cfg.restic_base,
+                    &primary,
                     owner,
                     &cfg.password_file,
                     &["unlock"],
@@ -922,12 +1059,13 @@ pub(crate) async fn backup_impl<'a>(
                     &format!("backup-{}", m.stack_name),
                     owner,
                     restic(
-                        &cfg.restic_base,
+                        &primary,
                         owner,
                         &cfg.password_file,
                         &args,
                         cfg.snapshot_timeout_s,
-                    ),
+                    )
+                    .stall(crate::executor::Stall::new(cfg.stall_s)),
                 )
                 .await?;
                 // A restic run over a directory that exists and is empty
@@ -991,6 +1129,58 @@ pub(crate) async fn backup_impl<'a>(
         });
     }
 
+    // backup-local-first: the snapshot leaves the house with the apps
+    // running. A failed or stalled upload is reported and does not fail the
+    // backup: the snapshot exists locally, and the nightly offsite pass
+    // (`secondcopy::copy_all`) copies whatever the remote still lacks.
+    scoped_step!(scope, "upload", {
+        let Some(lb) = &local_base else {
+            return Ok(StepOutcome::Unchanged);
+        };
+        let mut failed = Vec::new();
+        for (owner, _) in &groups {
+            let local = format!("{}/{}-config", lb, owner);
+            let _ = exec
+                .run(&restic(
+                    &cfg.restic_base,
+                    owner,
+                    &cfg.password_file,
+                    &["unlock"],
+                    120,
+                ))
+                .await;
+            let copy = restic(
+                &cfg.restic_base,
+                owner,
+                &cfg.password_file,
+                &[
+                    "copy",
+                    "--from-repo",
+                    &local,
+                    "--from-password-file",
+                    &cfg.password_file,
+                ],
+                cfg.snapshot_timeout_s,
+            )
+            .stall(crate::executor::Stall::new(cfg.stall_s));
+            if let Err(e) = run_restic_copy(exec, copy).await {
+                failed.push(format!("{owner} ({e})"));
+            }
+        }
+        if failed.is_empty() {
+            return Ok(StepOutcome::Changed);
+        }
+        scope_log_warn(
+            ctx.sink,
+            format!(
+                "[upload] {} stays local tonight; the nightly offsite copy tries again :: {}",
+                m.stack_name,
+                failed.join("; ")
+            ),
+        );
+        Ok(StepOutcome::Unchanged)
+    });
+
     scoped_step!(scope, "retention", {
         // G8 tiered retention: list snapshots, compute the forget-set with
         // our own engine, forget by explicit id. Per repository, since D25
@@ -1014,10 +1204,12 @@ pub(crate) async fn backup_impl<'a>(
         }
         let mut changed = false;
         for (owner, _) in &groups {
+            // backup-local-first: the repository the snapshot went to; the
+            // remote's own retention runs in the nightly offsite pass.
             let out = run_ok(
                 exec,
                 &restic(
-                    &cfg.restic_base,
+                    &primary,
                     owner,
                     &cfg.password_file,
                     &["snapshots", "--json"],
@@ -1034,7 +1226,7 @@ pub(crate) async fn backup_impl<'a>(
             args.push("--prune");
             run_ok(
                 exec,
-                &restic(&cfg.restic_base, owner, &cfg.password_file, &args, 900),
+                &restic(&primary, owner, &cfg.password_file, &args, 900),
             )
             .await?;
             changed = true;

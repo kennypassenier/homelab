@@ -216,7 +216,7 @@ fn every_repository_is_copied_under_the_retention_its_source_keeps() {
             0,
         ),
     );
-    let p = repo_policies(&st, &["opnsense".to_string()], &fleet());
+    let p = repo_policies(&st, &["opnsense".to_string()], &fleet(), false);
     let names: Vec<&str> = p.iter().map(|r| r.repo.as_str()).collect();
     assert_eq!(
         names,
@@ -270,6 +270,7 @@ async fn an_unmounted_dataset_is_refused_before_anything_is_written() {
     let repos = vec![RepoPolicy {
         repo: "kyu".into(),
         tiers: None,
+        local_first: false,
     }];
     let r = copy_all(&ctx(&exec, &sink, &j), &BackupCfg::default(), DS, &repos).await;
     assert!(!r.ok);
@@ -312,6 +313,7 @@ async fn each_repository_is_copied_from_drive_into_its_twin_on_the_pool() {
     let repos = vec![RepoPolicy {
         repo: "kyu".into(),
         tiers: Some(fleet()),
+        local_first: false,
     }];
     let r = copy_all(&ctx(&exec, &sink, &j), &BackupCfg::default(), DS, &repos).await;
     assert!(r.ok, "{:?}", r.error);
@@ -367,10 +369,12 @@ async fn one_failing_repository_does_not_stop_the_others_and_is_remembered() {
         RepoPolicy {
             repo: "actual".into(),
             tiers: None,
+            local_first: false,
         },
         RepoPolicy {
             repo: "kyu".into(),
             tiers: None,
+            local_first: false,
         },
     ];
     let r = copy_all(&ctx(&exec, &sink, &j), &BackupCfg::default(), DS, &repos).await;
@@ -601,10 +605,12 @@ async fn fix_171_copy_all_reaches_its_announced_plan() {
         RepoPolicy {
             repo: "kyu".into(),
             tiers: None,
+            local_first: false,
         },
         RepoPolicy {
             repo: "almanac".into(),
             tiers: None,
+            local_first: false,
         },
     ];
     let r = copy_all(&ctx(&exec, &sink, &j), &BackupCfg::default(), DS, &repos).await;
@@ -651,4 +657,45 @@ async fn fix_171_check_repo_without_a_second_copy_plans_one_check() {
     let (m, names) = fix171_plan_and_marks(&sink.events());
     assert_eq!(m, 1);
     assert_eq!(names.len(), m);
+}
+
+// backup-local-first (Kenny, 2026-10-22): a compose stack's repository is
+// written locally first, so the nightly pass copies it local → remote (the
+// catch-up for an upload that failed) and prunes the remote; a native unit
+// still flows remote → local.
+#[tokio::test]
+async fn a_local_first_repository_is_copied_to_the_remote_and_others_come_home() {
+    let exec = MockExecutor::new();
+    exec.respond_always("zfs list", CmdOutput::ok("yes\t/HDD4TB/restic\n"));
+    let sink = VecSink::new();
+    let j = NullJournal;
+    let repos = vec![
+        RepoPolicy {
+            repo: "jellyfin".into(),
+            tiers: Some(fleet()),
+            local_first: true,
+        },
+        RepoPolicy {
+            repo: "kyu".into(),
+            tiers: None,
+            local_first: false,
+        },
+    ];
+    let r = copy_all(&ctx(&exec, &sink, &j), &BackupCfg::default(), DS, &repos).await;
+    assert!(r.ok, "{:?}", r.error);
+    let copies = exec.calls_containing("restic copy");
+    assert!(copies.iter().any(|c| {
+        c.contains("RESTIC_REPOSITORY=rclone:gdrive:homelab-backups/jellyfin-config")
+            && c.contains("--from-repo /HDD4TB/restic/jellyfin-config")
+    }));
+    assert!(copies.iter().any(
+        |c| c.contains("RESTIC_REPOSITORY=/HDD4TB/restic/kyu-config")
+            && c.contains("--from-repo rclone:gdrive:homelab-backups/kyu-config")
+    ));
+    assert!(
+        exec.calls_containing("snapshots --json")
+            .iter()
+            .any(|c| c.contains("RESTIC_REPOSITORY=rclone:gdrive:homelab-backups/jellyfin-config")),
+        "the remote copy keeps the local repository's retention"
+    );
 }

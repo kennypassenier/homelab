@@ -52,6 +52,9 @@ const REASON_CAP: usize = 300;
 pub struct RepoPolicy {
     pub repo: String,
     pub tiers: Option<Vec<RetentionTier>>,
+    /// backup-local-first: written to the local set first (a compose
+    /// stack's owner), so the copy runs local → remote.
+    pub local_first: bool,
 }
 
 /// Every repository the nightly round writes to, with the retention its
@@ -64,11 +67,18 @@ pub fn repo_policies(
     state: &HostState,
     devices: &[String],
     fleet: &[RetentionTier],
+    // backup-local-first: whether compose stacks write the local set first
+    // (`BackupCfg::local_dataset` is set).
+    local_first: bool,
 ) -> Vec<RepoPolicy> {
     let mut out: Vec<RepoPolicy> = Vec::new();
-    let mut add = |repo: String, tiers: Option<Vec<RetentionTier>>| {
+    let mut add = |repo: String, tiers: Option<Vec<RetentionTier>>, local_first: bool| {
         if !out.iter().any(|p| p.repo == repo) {
-            out.push(RepoPolicy { repo, tiers });
+            out.push(RepoPolicy {
+                repo,
+                tiers,
+                local_first,
+            });
         }
     };
     for st in state.stacks.values() {
@@ -84,7 +94,7 @@ pub fn repo_policies(
                 .unwrap_or_else(|| fleet.to_vec());
             // fix-115: a stateless unit has no repository to copy.
             for unit in crate::ops::restoredrill::backed_up_units(&st.natives) {
-                add(unit, Some(tiers.clone()));
+                add(unit, Some(tiers.clone()), false);
             }
             continue;
         }
@@ -94,7 +104,7 @@ pub fn repo_policies(
         // W2: the stack file's own policy wins, as in `backup`.
         let tiers = m.retention.clone().unwrap_or_else(|| fleet.to_vec());
         for (owner, _) in owner_groups(m) {
-            add(owner, Some(tiers.clone()));
+            add(owner, Some(tiers.clone()), local_first);
         }
     }
     // fix-111: host-meta is pruned by the fleet-wide tiers.
@@ -102,11 +112,12 @@ pub fn repo_policies(
         add(
             crate::ops::restoredrill::HOST_META_REPO.to_string(),
             Some(fleet.to_vec()),
+            false,
         );
     }
     // The device configurations are never pruned at source.
     for d in devices {
-        add(d.clone(), None);
+        add(d.clone(), None, false);
     }
     out.sort_by(|a, b| a.repo.cmp(&b.repo));
     out
@@ -164,7 +175,11 @@ async fn probe_dataset(exec: &dyn Executor, ds: &str) -> Result<Dataset, CoreErr
 /// there yet. An unmounted dataset is refused: a repository written into the
 /// empty mountpoint of a pool that was not imported lands on the NVMe it is
 /// meant to be independent of, and fills the disk the host runs from.
-async fn ensure_dataset(exec: &dyn Executor, ds: &str, create: bool) -> Result<String, CoreError> {
+pub(crate) async fn ensure_dataset(
+    exec: &dyn Executor,
+    ds: &str,
+    create: bool,
+) -> Result<String, CoreError> {
     if !dataset_name_ok(ds) {
         return Err(CoreError::Validation(format!(
             "second_copy_dataset '{}' is not a dataset name of the form pool/name",
@@ -212,6 +227,13 @@ fn reason(e: &CoreError) -> String {
 }
 
 /// Copy one repository and apply its source's retention to the copy.
+///
+/// backup-local-first (Kenny, 2026-10-22): the direction follows who writes
+/// the repository. A compose stack's snapshot is written to the local set
+/// first (`RepoPolicy::local_first`), so this pass copies local → remote and
+/// is the catch-up for an upload that failed during the backup; every other
+/// writer (native units, host-meta, devices) still writes the remote, which
+/// is copied here into its local twin, as before.
 async fn copy_one(
     exec: &dyn Executor,
     cfg: &BackupCfg,
@@ -220,12 +242,19 @@ async fn copy_one(
     now: u64,
 ) -> Result<StepOutcome, CoreError> {
     let pw = cfg.password_file.as_str();
-    let src = format!("{}/{}-config", cfg.restic_base, p.repo);
+    let (src, dst) = if p.local_first {
+        (
+            format!("{}/{}-config", base, p.repo),
+            cfg.restic_base.as_str(),
+        )
+    } else {
+        (format!("{}/{}-config", cfg.restic_base, p.repo), base)
+    };
     // The copy is made with the source's chunker parameters, or it would
     // store every file in different chunks and deduplicate nothing against
     // its own history.
     let init = restic(
-        base,
+        dst,
         &p.repo,
         pw,
         &[
@@ -241,16 +270,18 @@ async fn copy_one(
     init_repository(exec, &init, &p.repo).await?;
     // A power cut in the middle of last night's copy leaves a lock; restic
     // only removes locks of processes that are gone, so this is always safe.
-    let _ = exec.run(&restic(base, &p.repo, pw, &["unlock"], 120)).await;
-    run_ok(
+    let _ = exec.run(&restic(dst, &p.repo, pw, &["unlock"], 120)).await;
+    // backup-stall: the same watch as the backup's own upload.
+    crate::ops::backup::run_restic_copy(
         exec,
-        &restic(
-            base,
+        restic(
+            dst,
             &p.repo,
             pw,
             &["copy", "--from-repo", &src, "--from-password-file", pw],
             cfg.snapshot_timeout_s,
-        ),
+        )
+        .stall(crate::executor::Stall::new(cfg.stall_s)),
     )
     .await?;
     let Some(tiers) = &p.tiers else {
@@ -258,7 +289,7 @@ async fn copy_one(
     };
     let listing = run_ok(
         exec,
-        &restic(base, &p.repo, pw, &["snapshots", "--json"], 300),
+        &restic(dst, &p.repo, pw, &["snapshots", "--json"], 300),
     )
     .await?;
     let doomed = crate::ops::backup::retention_doomed(&listing.stdout, tiers, now);
@@ -266,7 +297,7 @@ async fn copy_one(
         let mut args: Vec<&str> = vec!["forget"];
         args.extend(doomed.iter().map(|s| s.as_str()));
         args.push("--prune");
-        run_ok(exec, &restic(base, &p.repo, pw, &args, 900)).await?;
+        run_ok(exec, &restic(dst, &p.repo, pw, &args, 900)).await?;
     }
     Ok(StepOutcome::Changed)
 }

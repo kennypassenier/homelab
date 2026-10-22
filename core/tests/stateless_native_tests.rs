@@ -70,7 +70,7 @@ fn a_stateless_unit_has_no_repository_to_copy() {
             route_file: None,
         },
     );
-    let names: Vec<String> = repo_policies(&st, &[], &[])
+    let names: Vec<String> = repo_policies(&st, &[], &[], false)
         .into_iter()
         .map(|p| p.repo)
         .collect();

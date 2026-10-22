@@ -19,6 +19,11 @@ pub enum CoreError {
     #[error("timeout after {seconds}s: {rendered}")]
     Timeout { rendered: String, seconds: u64 },
 
+    /// backup-stall: the command kept running but its progress stood still
+    /// for `seconds` (`executor::Stall`), so it was stopped.
+    #[error("no progress for {seconds}s, stopped: {rendered}")]
+    Stalled { rendered: String, seconds: u64 },
+
     #[error("state error: {0}")]
     State(String),
 
@@ -70,6 +75,13 @@ impl OperatorError {
                 format!("no result within {}s", seconds),
                 "Check host load and network, then re-run the operation — \
                  re-running is always safe (idempotent)."
+                    .to_string(),
+            ),
+            CoreError::Stalled { seconds, .. } => (
+                format!("no progress for {}s, so it was stopped", seconds),
+                "Usually the network or the remote stopped answering. Nothing \
+                 was left half-changed: the next run continues where this one \
+                 stopped."
                     .to_string(),
             ),
             CoreError::Command { detail, .. } => (

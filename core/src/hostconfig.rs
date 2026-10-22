@@ -270,6 +270,16 @@ pub const KEYS: &[KeyInfo] = &[
         Apply::Restart,
     ),
     k(
+        "backup_stall_s",
+        "Nightly round and backups",
+        "Backup stall limit",
+        "Seconds a snapshot or upload may go without progress before it is stopped; the paused apps are then started again.",
+        "600 (10 min)",
+        Kind::Int { min: 60, max: U32 },
+        Access::Browser,
+        Apply::Restart,
+    ),
+    k(
         "restic_restore_timeout_s",
         "Nightly round and backups",
         "Restore time limit",

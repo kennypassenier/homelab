@@ -4563,3 +4563,106 @@ async fn fix_171_self_update_reaches_its_announced_plan() {
     assert_eq!(m, 7);
     assert_eq!(names.len(), m, "n must reach the announced m: {:?}", names);
 }
+
+// backup-local-first (Kenny, 2026-10-22: "Eerst lokaal, dan uploaden",
+// "Bestaande map omdraaien"): with a local set, the snapshot goes to the
+// local repository while the apps are paused, the copy to the remote runs
+// after they are started again, and retention reads the local repository.
+fn local_first_cfg(exec: &MockExecutor) -> BackupCfg {
+    exec.respond_always(
+        "zfs list -H -o mounted,mountpoint HDD4TB/restic",
+        homelab_core::executor::CmdOutput {
+            stdout: "yes\t/HDD4TB/restic\n".into(),
+            stderr: String::new(),
+            code: 0,
+        },
+    );
+    BackupCfg {
+        local_dataset: Some("HDD4TB/restic".into()),
+        ..BackupCfg::default()
+    }
+}
+
+#[tokio::test]
+async fn a_local_first_backup_snapshots_locally_and_uploads_after_the_apps_are_back() {
+    let exec = MockExecutor::new();
+    mock_hostname(&exec, 108, "test");
+    let cfg = local_first_cfg(&exec);
+    let sink = VecSink::new();
+    let j = NullJournal;
+    let report = backup(&ctx(&exec, &sink, &j), &manifest(108, "test"), &cfg).await;
+    assert!(report.ok, "{:?}", report.error);
+    let calls = exec.calls();
+    let pos = |pred: &dyn Fn(&String) -> bool| calls.iter().position(pred).unwrap();
+    let snap = pos(&|c| c.contains("restic backup"));
+    assert!(
+        calls[snap].contains("RESTIC_REPOSITORY=/HDD4TB/restic/test-config"),
+        "{}",
+        calls[snap]
+    );
+    let copy = pos(&|c| c.contains("restic copy"));
+    assert!(
+        calls[copy].contains("RESTIC_REPOSITORY=rclone:gdrive:homelab-backups/test-config")
+            && calls[copy].contains("--from-repo /HDD4TB/restic/test-config"),
+        "{}",
+        calls[copy]
+    );
+    let resume = pos(&|c| c.contains("docker compose up -d"));
+    assert!(
+        snap < resume && resume < copy,
+        "snapshot, then the apps, then the upload"
+    );
+    let listing = pos(&|c| c.contains("snapshots --json"));
+    assert!(calls[listing].contains("RESTIC_REPOSITORY=/HDD4TB/restic/test-config"));
+    // The local twin is made with the remote's chunker parameters.
+    assert!(calls.iter().any(
+        |c| c.contains("RESTIC_REPOSITORY=/HDD4TB/restic/test-config")
+            && c.contains("init --from-repo rclone:gdrive:homelab-backups/test-config")
+            && c.contains("--copy-chunker-params")
+    ));
+}
+
+#[tokio::test]
+async fn a_failed_upload_is_reported_and_does_not_fail_the_backup() {
+    let exec = MockExecutor::new();
+    mock_hostname(&exec, 108, "test");
+    let cfg = local_first_cfg(&exec);
+    exec.respond_first(
+        "restic copy",
+        homelab_core::executor::CmdOutput {
+            stdout: String::new(),
+            stderr: "Fatal: unable to open repository: dial tcp: lookup www.googleapis.com".into(),
+            code: 1,
+        },
+    );
+    let sink = VecSink::new();
+    let j = NullJournal;
+    let report = backup(&ctx(&exec, &sink, &j), &manifest(108, "test"), &cfg).await;
+    assert!(report.ok, "{:?}", report.error);
+    let lines = format!("{:?}", sink.events());
+    assert!(
+        lines.contains("[upload] test stays local tonight"),
+        "{lines}"
+    );
+}
+
+#[test]
+fn a_copy_status_line_says_how_many_packs_are_done() {
+    use homelab_core::ops::backup::copy_packs_done;
+    assert_eq!(
+        copy_packs_done("[0:42] 37.50%  3 / 8 packs copied"),
+        Some(3)
+    );
+    assert_eq!(
+        copy_packs_done("[12:01:09] 100.00%  1204 / 1204 packs copied"),
+        Some(1204)
+    );
+    assert_eq!(
+        copy_packs_done("snapshot 59b8b811 saved, copied from source snapshot ceaa8b9f"),
+        None
+    );
+    assert_eq!(
+        copy_packs_done("copy started, this may take a while..."),
+        None
+    );
+}

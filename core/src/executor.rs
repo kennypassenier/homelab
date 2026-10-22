@@ -20,6 +20,59 @@ pub struct Cmd {
     /// but never its output, so the value reaches no transcript, journal or
     /// incident bundle.
     pub quiet: bool,
+    /// backup-stall (correction 2026-10-22): a command that must keep
+    /// making progress. See [`Stall`].
+    pub stall: Option<Stall>,
+}
+
+/// backup-stall (correction 2026-10-22, Kenny "Klopt"): a backup upload
+/// that hung for 52 minutes when the internet dropped, while its status
+/// lines kept ticking. Restic prints a status line every few seconds
+/// whether bytes move or not, so silence is not the signal; the caller's
+/// line callback calls [`Stall::progressed`] when the reported progress
+/// actually changes, and a streaming executor kills the command (its whole
+/// process group) once `limit_s` passes without that, answering
+/// [`CoreError::Stalled`]. Only [`Executor::run_streaming`] honours it.
+#[derive(Debug, Clone)]
+pub struct Stall {
+    pub limit_s: u64,
+    last: std::sync::Arc<std::sync::atomic::AtomicU64>,
+}
+
+impl Stall {
+    /// A watch that counts from now.
+    pub fn new(limit_s: u64) -> Self {
+        Self {
+            limit_s,
+            last: std::sync::Arc::new(std::sync::atomic::AtomicU64::new(now_s())),
+        }
+    }
+
+    /// The reported progress changed: start counting again.
+    pub fn progressed(&self) {
+        self.last
+            .store(now_s(), std::sync::atomic::Ordering::Relaxed);
+    }
+
+    /// Whole seconds since the last progress.
+    pub fn idle_s(&self) -> u64 {
+        now_s().saturating_sub(self.last.load(std::sync::atomic::Ordering::Relaxed))
+    }
+}
+
+/// Two commands are the same command whatever their watch has seen.
+impl PartialEq for Stall {
+    fn eq(&self, other: &Self) -> bool {
+        self.limit_s == other.limit_s
+    }
+}
+impl Eq for Stall {}
+
+fn now_s() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0)
 }
 
 impl Cmd {
@@ -29,7 +82,14 @@ impl Cmd {
             args: args.iter().map(|s| s.to_string()).collect(),
             timeout_s,
             quiet: false,
+            stall: None,
         }
+    }
+
+    /// Kill the command when its progress stands still for `stall`'s limit.
+    pub fn stall(mut self, stall: Stall) -> Self {
+        self.stall = Some(stall);
+        self
     }
 
     /// Mark the output as secret (fix-39): traced as a command, never echoed.

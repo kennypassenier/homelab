@@ -15,7 +15,7 @@ data_dirs:
   - /appdata/kitchen/kitchen-config
 update_cmd: >-
   systemd-run --wait --pipe --collect --uid=kitchen --gid=kitchen
-  --property=EnvironmentFile=/appdata/kitchen/kitchen-config/kitchen.env
+  --property=EnvironmentFile=-/appdata/kitchen/kitchen-config/kitchen.env
   --property=WorkingDirectory=/appdata/kitchen/kitchen-config
   --property=Environment=KITCHEN_STATE_DIR=/appdata/kitchen/kitchen-config
   --property=Environment=KITCHEN_TIMEOUT_STOP_SECS=60

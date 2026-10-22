@@ -83,6 +83,13 @@ Environment=HOMELAB_ADMIN_LIVE_ANNOUNCE_MS=5000
 # issues.
 Environment=HOMELAB_ADMIN_ACCESS_TEAM_DOMAIN=mendax1.cloudflareaccess.com
 Environment=HOMELAB_ADMIN_ACCESS_AUD=e071551f0cb5f8aeec566a7eeeb336024529688b81e576d58cba64de30810d39
+# trusted-sources (Kenny, 2026-10-22: "mijn pc heeft altijd toegang, zonder
+# token"): chassis-rs 3.13.0 lets a request straight from these addresses in
+# as the admin without a login; the dashboard's own guard lets the same
+# addresses past Access and the home-address lock (host.toml
+# `trusted_sources`, which the host reports). The two lists must be equal; a
+# test holds them so.
+Environment=HOMELAB_ADMIN_TRUSTED_ADMINS=10.10.10.10
 # dashboard-latch (Kenny, 2026-09-29, form "Latch"): a deploy of a stack with
 # latch_secrets runs `latch cat --env $HOMELAB_LATCH_ENV --expand` (the
 # client's spec code, in this process; the child inherits this environment).

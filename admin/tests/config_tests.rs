@@ -167,3 +167,39 @@ fn dashboard_latch_the_unit_gives_latch_its_environment_and_a_writable_home() {
     assert!(unit.contains("ProtectHome=yes"));
     assert!(unit.contains("RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX"));
 }
+
+// trusted-sources (Kenny, 2026-10-22: "mijn pc heeft altijd toegang, zonder
+// token"): the unit's chassis knob (login) and host.toml's list (firewalls
+// and the dashboard's own locks) name the same addresses, so one cannot be
+// changed without the other.
+#[test]
+fn trusted_sources_the_unit_and_host_toml_name_the_same_addresses() {
+    let unit = std::fs::read_to_string(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../stacks/admin/admin/admin.service"
+    ))
+    .unwrap();
+    let mut in_unit: Vec<String> = unit
+        .lines()
+        .find_map(|l| l.strip_prefix("Environment=HOMELAB_ADMIN_TRUSTED_ADMINS="))
+        .expect("the unit sets HOMELAB_ADMIN_TRUSTED_ADMINS")
+        .split(',')
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .collect();
+    let host: toml::Table =
+        std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/../config/host.toml"))
+            .unwrap()
+            .parse()
+            .unwrap();
+    let mut in_host: Vec<String> = host["trusted_sources"]
+        .as_array()
+        .expect("host.toml declares trusted_sources")
+        .iter()
+        .filter_map(|v| v.as_str().map(|s| s.trim().to_string()))
+        .collect();
+    in_unit.sort();
+    in_host.sort();
+    assert_eq!(in_unit, in_host);
+    assert!(!in_unit.is_empty());
+}

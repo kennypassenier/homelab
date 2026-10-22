@@ -81,17 +81,6 @@ async function logIn(context) {
 }
 
 /**
- * A choice made a moment ago is written to the database after 300 ms; a
- * reload right behind it asks the server for the page before the page
- * leaves, so the page would come back with the old value. A case that
- * reloads to see what was kept lets the write finish first.
- * @param {import("playwright").Page} page
- */
-async function settlePrefs(page) {
-  await page.evaluate(() => /** @type {any} */ (window).chassisPrefs?.flush());
-}
-
-/**
  * chassis-rs 3.12.0 keeps the login's browser choices (sort, views, drafts)
  * in the dashboard's database, so a fresh browser context would start from
  * what an earlier case left there. Every case starts as a new person's
@@ -4640,7 +4629,8 @@ test("invariants: redesign-kit-10: Esc on Host shows every container again, and 
     await th("id").click();
     assert.equal(await th("memory").getAttribute("aria-sort"), "ascending");
     assert.equal(await th("id").getAttribute("aria-sort"), "ascending");
-    await settlePrefs(page);
+    // chassis-rs 3.13.0 keeps a choice made just before a reload (the
+    // reload-flush gap), so the reload follows the click at once.
     await page.reload();
     await th("memory").waitFor({ timeout: 10000 });
     assert.equal(

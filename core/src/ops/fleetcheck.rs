@@ -325,6 +325,7 @@ pub fn firewall_live_status(
     state: &HostState,
     files: &[FirewallFact],
     tile_watch_source: Option<&str>,
+    trusted: &[String],
 ) -> std::collections::BTreeMap<String, FirewallLiveStatus> {
     let fleet_targets = crate::ops::tiles::fleet_tile_watch_targets(state);
     files
@@ -344,6 +345,7 @@ pub fn firewall_live_status(
                                 &m.tiles,
                                 tile_watch_source.unwrap_or(""),
                                 &fleet_targets,
+                                trusted,
                             )
                         })
                         .unwrap_or_else(|| d.clone());
@@ -386,6 +388,7 @@ pub fn evaluate_firewalls(
     files: &[FirewallFact],
     boot: &[BootFact],
     tile_watch_source: Option<&str>,
+    trusted: &[String],
 ) -> Vec<Finding> {
     let mut out = Vec::new();
     let mut not_enabled: Vec<String> = Vec::new();
@@ -413,6 +416,7 @@ pub fn evaluate_firewalls(
                             &m.tiles,
                             tile_watch_source.unwrap_or(""),
                             &fleet_targets,
+                            trusted,
                         )
                     })
                     .unwrap_or_else(|| d.clone());
@@ -1946,6 +1950,7 @@ pub fn evaluate(
     backup_max_age_s: u64,
     growth_limits: GrowthLimits,
     tile_watch_source: Option<&str>,
+    trusted_sources: &[String],
     patch_threshold_s: u64,
     host_meta_max_age_s: u64,
     host_capacity_limits: HostCapacityThresholds,
@@ -2235,6 +2240,7 @@ pub fn evaluate(
         &live.firewalls,
         &live.boot,
         tile_watch_source,
+        trusted_sources,
     ));
     out.extend(evaluate_coverage(&live.coverage));
     out.extend(evaluate_boot(state, &live.boot));

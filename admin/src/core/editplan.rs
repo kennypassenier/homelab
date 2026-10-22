@@ -333,6 +333,9 @@ fn firewall_effects(
                 &m.tiles,
                 tile_watch_source.unwrap_or(""),
                 fleet_targets,
+                // trusted-sources: like `tile_watch_source`, a host.toml
+                // setting this pure preview has not fetched.
+                &[],
             );
             firewall::render(&m.stack_name, &effective)
         })

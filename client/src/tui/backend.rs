@@ -298,6 +298,7 @@ fn demo_fleet() -> ServerMsg {
         status_measured_at: None,
         host: HostView {
             home_address: None,
+            trusted_sources: Vec::new(),
             name: "pve-01".into(),
             cpu_pct: Some(18),
             ram_pct: 68,

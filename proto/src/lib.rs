@@ -1270,6 +1270,12 @@ pub struct HostView {
     /// from the router (fix-94). The dashboard answers only from there.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub home_address: Option<String>,
+    /// trusted-sources (Kenny, 2026-10-22: "mijn pc heeft altijd toegang,
+    /// zonder token"): host.toml `trusted_sources`. A request that comes
+    /// straight from one of these, not through the proxy, passes the
+    /// dashboard's locks and its login. Empty from an older host.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub trusted_sources: Vec<String>,
     /// fix-222 (Kenny, 2026-10-02: "root disk van HOST is 48% gebruikt, is
     /// dat de 1TB SSD die erin zit?"): which disk `disk_pct` above is
     /// measuring, the local-lvm thin pool beside it, and the biggest

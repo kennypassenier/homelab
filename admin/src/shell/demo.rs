@@ -830,6 +830,7 @@ pub async fn run_demo(
             cores_total: 16,
             load1_x100: 80,
             home_address: None,
+            trusted_sources: Vec::new(),
             // fix-222 (Kenny, 2026-10-02: "is dat de 1TB SSD die erin
             // zit?"): made-up but realistic — a 1 TB SSD (the whole-disk
             // figure a `blockdev --getsize64` read would give), with root

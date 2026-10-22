@@ -82,6 +82,7 @@ fn ctx<'a>(exec: &'a MockExecutor, sink: &'a VecSink, journal: &'a NullJournal) 
         tile_watch_source: None,
         tile_watch_targets: Vec::new(),
         tile_watch_watcher: None,
+        trusted_sources: Vec::new(),
     }
 }
 
@@ -3048,6 +3049,7 @@ async fn h14_every_destroy_step_is_journaled_running_then_done() {
             tile_watch_source: None,
             tile_watch_targets: Vec::new(),
             tile_watch_watcher: None,
+            trusted_sources: Vec::new(),
         },
         &manifest(108, "test"),
         "test",
@@ -3095,6 +3097,7 @@ async fn h14_failed_step_leaves_running_then_failed_trail() {
             tile_watch_source: None,
             tile_watch_targets: Vec::new(),
             tile_watch_watcher: None,
+            trusted_sources: Vec::new(),
         },
         &manifest(108, "test"),
         "test",

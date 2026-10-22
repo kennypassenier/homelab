@@ -33,6 +33,7 @@ fn ctx<'a>(exec: &'a MockExecutor, sink: &'a VecSink, journal: &'a NullJournal) 
         tile_watch_source: None,
         tile_watch_targets: Vec::new(),
         tile_watch_watcher: None,
+        trusted_sources: Vec::new(),
     }
 }
 

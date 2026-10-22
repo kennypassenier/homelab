@@ -286,6 +286,9 @@ struct FileConfig {
     /// that stack's own container. Absent or empty = feature off, and no
     /// rule is derived.
     tile_watch_source: Option<String>,
+    /// trusted-sources (Kenny, 2026-10-22): addresses every stack firewall
+    /// lets in on every port (`firewall::trusted_rules`). Absent = none.
+    trusted_sources: Option<Vec<String>>,
     /// T69: how long a suspended step waits for an operator before giving
     /// up and answering `Unattended`. Long enough that Kenny can read the
     /// question and decide, short enough that a forgotten window does not
@@ -481,6 +484,9 @@ struct Config {
     /// that stack's own container. Absent or empty = feature off, and no
     /// rule is derived.
     tile_watch_source: Option<String>,
+    /// trusted-sources (Kenny, 2026-10-22): addresses every stack firewall
+    /// lets in on every port (`firewall::trusted_rules`). Absent = none.
+    trusted_sources: Vec<String>,
     /// T69: how long a suspended step waits for an operator before giving
     /// up and answering `Unattended`. Long enough that Kenny can read the
     /// question and decide, short enough that a forgotten window does not
@@ -793,6 +799,12 @@ fn load_config_from(path: String) -> Config {
         },
         metrics_targets_dir: file.metrics_targets_dir,
         tile_watch_source: file.tile_watch_source.filter(|s| !s.trim().is_empty()),
+        trusted_sources: file
+            .trusted_sources
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|s| !s.trim().is_empty())
+            .collect(),
         backup_concurrency: file
             .backup_concurrency
             .unwrap_or_else(default_backup_concurrency),
@@ -7874,6 +7886,7 @@ async fn build_fleet_state(state: &AppState, exec: &RealExecutor) -> homelab_pro
         status_measured_at: reading.as_ref().map(|r| r.measured_at),
         host: homelab_proto::HostView {
             home_address: hs.home_address.clone(),
+            trusted_sources: state.config.trusted_sources.clone(),
             name: "pve-01".into(),
             // fix-175: was a fixed 0; now the `status_loop` /proc/stat
             // delta (None before the first poll has a predecessor).
@@ -8525,6 +8538,7 @@ async fn scheduler_loop(state: AppState) {
                     state.config.backup_max_age_s,
                     homelab_core::ops::fleetcheck::GrowthLimits::default(),
                     state.config.tile_watch_source.as_deref(),
+                    &state.config.trusted_sources,
                     state.config.patch_threshold_s,
                     state.config.host_meta_max_age_s,
                     state.config.capacity_thresholds,
@@ -10242,6 +10256,7 @@ where
         now_unix: now,
         metrics_targets_dir: state.config.metrics_targets_dir.clone(),
         tile_watch_source: state.config.tile_watch_source.clone(),
+        trusted_sources: state.config.trusted_sources.clone(),
         tile_watch_targets,
         tile_watch_watcher,
         // C1/C2: the same Loki the coverage check already asks about, so
@@ -10468,6 +10483,7 @@ async fn gather_today(
                 state.config.backup_max_age_s,
                 homelab_core::ops::fleetcheck::GrowthLimits::default(),
                 state.config.tile_watch_source.as_deref(),
+                &state.config.trusted_sources,
                 state.config.patch_threshold_s,
                 state.config.host_meta_max_age_s,
                 state.config.capacity_thresholds,
@@ -11884,6 +11900,7 @@ async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse {
                 state.config.backup_max_age_s,
                 homelab_core::ops::fleetcheck::GrowthLimits::default(),
                 state.config.tile_watch_source.as_deref(),
+                &state.config.trusted_sources,
                 state.config.patch_threshold_s,
                 state.config.host_meta_max_age_s,
                 state.config.capacity_thresholds,
@@ -12588,6 +12605,7 @@ async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse {
                         &snapshot,
                         &facts,
                         state.config.tile_watch_source.as_deref(),
+                        &state.config.trusted_sources,
                     );
                     // Only what the caller named: the host may track stacks
                     // the dashboard's working copy does not (yet), and

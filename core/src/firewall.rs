@@ -104,12 +104,16 @@ pub fn rule_line(r: &FirewallRule) -> String {
 /// west-control`) — appending it after those would never be reached. The IN
 /// rule stays appended: `policy_in` is DROP fleet-wide, so order among IN
 /// rules never matters the same way.
+///
+/// `trusted` (host.toml `trusted_sources`) goes in front of everything else:
+/// see [`trusted_rules`].
 pub fn with_tile_watch(
     fw: &FirewallSpec,
     own_ip: &str,
     tiles: &std::collections::BTreeMap<String, Tile>,
     source: &str,
     fleet_targets: &FleetTileTargets,
+    trusted: &[String],
 ) -> FirewallSpec {
     let mut fw = fw.clone();
     let out_rules = derive_watcher_out_rules(own_ip, source, fleet_targets);
@@ -118,7 +122,40 @@ pub fn with_tile_watch(
     }
     fw.rules
         .extend(derive_tile_watch_rules(own_ip, tiles, source));
+    let trusted = trusted_rules(trusted);
+    if !trusted.is_empty() {
+        fw.rules = trusted.into_iter().chain(fw.rules).collect();
+    }
     fw
+}
+
+/// trusted-sources (Kenny, 2026-10-22: "die firewall moet ook altijd MIJN
+/// computer binnenlaten"): one inbound ACCEPT on every port per fleet-wide
+/// `trusted_sources` address, first in `[RULES]` so no declared rule can
+/// shadow it. Blank entries are skipped; an empty list derives nothing.
+/// The gateway's port-80 guard ([`gateway_problems`]) is checked against
+/// the declaration without these rules: the owner's own machine is the one
+/// sender that guard was never about.
+pub fn trusted_rules(trusted: &[String]) -> Vec<FirewallRule> {
+    trusted
+        .iter()
+        .map(|s| s.trim())
+        .filter(|s| !s.is_empty())
+        .enumerate()
+        .map(|(i, s)| FirewallRule {
+            disabled: false,
+            dir: FwDir::In,
+            action: FwAction::Accept,
+            source: Some(s.to_string()),
+            dest: None,
+            proto: None,
+            dport: None,
+            comment: (i == 0).then(|| {
+                "trusted source (host.toml trusted_sources): always let in, every port".to_string()
+            }),
+            note: Some("trusted source".into()),
+        })
+        .collect()
 }
 
 /// One fleet stack's own address and the tile-watch ports its own `tiles:`

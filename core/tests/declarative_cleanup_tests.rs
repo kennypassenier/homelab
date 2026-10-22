@@ -125,6 +125,7 @@ fn ctx<'a>(exec: &'a MockExecutor, sink: &'a VecSink, journal: &'a NullJournal) 
         tile_watch_source: None,
         tile_watch_targets: Vec::new(),
         tile_watch_watcher: None,
+        trusted_sources: Vec::new(),
     }
 }
 
@@ -504,6 +505,7 @@ fn the_fleet_check_reports_a_stack_in_state_without_a_stack_file() {
         u64::MAX,
         GrowthLimits::default(),
         None,
+        &[],
         u64::MAX,
         u64::MAX,
         homelab_core::ops::fleetcheck::HostCapacityThresholds::default(),
@@ -535,6 +537,7 @@ fn the_fleet_check_reports_a_stack_in_state_without_a_stack_file() {
             u64::MAX,
             GrowthLimits::default(),
             None,
+            &[],
             u64::MAX,
             u64::MAX,
             homelab_core::ops::fleetcheck::HostCapacityThresholds::default()
@@ -1327,6 +1330,7 @@ fn the_fleet_check_names_what_is_kept_for_every_retired_entry() {
         u64::MAX,
         GrowthLimits::default(),
         None,
+        &[],
         u64::MAX,
         u64::MAX,
         homelab_core::ops::fleetcheck::HostCapacityThresholds::default(),

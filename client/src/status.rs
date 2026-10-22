@@ -86,6 +86,7 @@ mod tests {
                 cores_total: 8,
                 load1_x100: 125,
                 home_address: None,
+                trusted_sources: Vec::new(),
                 disk_detail: None,
                 uptime_s: None,
                 release: None,

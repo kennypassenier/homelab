@@ -371,6 +371,7 @@ fn ctx<'a>(exec: &'a MockExecutor, sink: &'a VecSink, journal: &'a NullJournal) 
         tile_watch_source: None,
         tile_watch_targets: Vec::new(),
         tile_watch_watcher: None,
+        trusted_sources: Vec::new(),
     }
 }
 
@@ -725,12 +726,25 @@ fn the_fleet_check_reports_a_firewall_file_that_differs_from_its_declaration() {
     let st = state_with("kp-soft", 116, Some(decl.clone()));
     // Equal, flag on: nothing to say.
     assert!(
-        evaluate_firewalls(&st, &[fact(Some(&rendered))], &[boot(116, NET0_ON)], None).is_empty()
+        evaluate_firewalls(
+            &st,
+            &[fact(Some(&rendered))],
+            &[boot(116, NET0_ON)],
+            None,
+            &[]
+        )
+        .is_empty()
     );
 
     // A hand edit on pve.
     let edited = rendered.replace("-dport 22", "-dport 2222");
-    let f = evaluate_firewalls(&st, &[fact(Some(&edited))], &[boot(116, NET0_ON)], None);
+    let f = evaluate_firewalls(
+        &st,
+        &[fact(Some(&edited))],
+        &[boot(116, NET0_ON)],
+        None,
+        &[],
+    );
     assert_eq!(f.len(), 1, "{:?}", f);
     assert_eq!(f[0].severity, Severity::Drift);
     assert!(
@@ -740,14 +754,14 @@ fn the_fleet_check_reports_a_firewall_file_that_differs_from_its_declaration() {
     );
 
     // Declared but absent, and a NIC that applies nothing.
-    let f = evaluate_firewalls(&st, &[fact(None)], &[boot(116, NET0_OFF)], None);
+    let f = evaluate_firewalls(&st, &[fact(None)], &[boot(116, NET0_OFF)], None, &[]);
     assert_eq!(f.len(), 2, "{:?}", f);
     assert!(f.iter().any(|x| x.what.contains("absent")));
     assert!(f.iter().any(|x| x.what.contains("firewall=0")));
 
     // A file the repository does not declare.
     let bare = state_with("kp-soft", 116, None);
-    let f = evaluate_firewalls(&bare, &[fact(Some(&rendered))], &[], None);
+    let f = evaluate_firewalls(&bare, &[fact(Some(&rendered))], &[], None, &[]);
     assert_eq!(f.len(), 1, "{:?}", f);
     assert_eq!(f[0].severity, Severity::Drift);
     assert!(f[0].what.contains("does not enable"), "{:?}", f[0]);
@@ -756,7 +770,7 @@ fn the_fleet_check_reports_a_firewall_file_that_differs_from_its_declaration() {
     let mut off = decl.clone();
     off.enabled = false;
     let st = state_with("kp-soft", 116, Some(off));
-    let f = evaluate_firewalls(&st, &[fact(None)], &[boot(116, NET0_OFF)], None);
+    let f = evaluate_firewalls(&st, &[fact(None)], &[boot(116, NET0_OFF)], None, &[]);
     assert_eq!(f.len(), 1, "{:?}", f);
     assert_eq!(f[0].severity, Severity::Noted);
     assert!(f[0].what.contains("kp-soft"), "{:?}", f[0]);
@@ -778,7 +792,7 @@ fn firewall_live_status_reports_enforced_and_match_independently() {
 
     // Declared and enabled, pve matches byte for byte: enforced, matches.
     let st = state_with("kp-soft", 116, Some(decl.clone()));
-    let live = firewall_live_status(&st, &[fact(Some(&rendered))], None);
+    let live = firewall_live_status(&st, &[fact(Some(&rendered))], None, &[]);
     let s = live["kp-soft"];
     assert!(s.enforced, "{:?}", s);
     assert!(s.matches_repo, "{:?}", s);
@@ -788,20 +802,20 @@ fn firewall_live_status_reports_enforced_and_match_independently() {
     // the repository here declares nothing at all. The dashboard must
     // still show it as enforced, with the mismatch flagged.
     let bare = state_with("kp-soft", 116, None);
-    let live = firewall_live_status(&bare, &[fact(Some(&rendered))], None);
+    let live = firewall_live_status(&bare, &[fact(Some(&rendered))], None, &[]);
     let s = live["kp-soft"];
     assert!(s.enforced, "live file has enable: 1 — {:?}", s);
     assert!(!s.matches_repo, "repo declares nothing — {:?}", s);
 
     // Declared and enabled here, but pve has nothing: not enforced, and
     // that disagrees with the repository too.
-    let live = firewall_live_status(&st, &[fact(None)], None);
+    let live = firewall_live_status(&st, &[fact(None)], None, &[]);
     let s = live["kp-soft"];
     assert!(!s.enforced, "{:?}", s);
     assert!(!s.matches_repo, "{:?}", s);
 
     // Neither side has anything: both agree there is nothing in force.
-    let live = firewall_live_status(&bare, &[fact(None)], None);
+    let live = firewall_live_status(&bare, &[fact(None)], None, &[]);
     let s = live["kp-soft"];
     assert!(!s.enforced, "{:?}", s);
     assert!(s.matches_repo, "{:?}", s);
@@ -811,7 +825,7 @@ fn firewall_live_status_reports_enforced_and_match_independently() {
     let mut off = decl.clone();
     off.enabled = false;
     let st_off = state_with("kp-soft", 116, Some(off));
-    let live = firewall_live_status(&st_off, &[fact(None)], None);
+    let live = firewall_live_status(&st_off, &[fact(None)], None, &[]);
     let s = live["kp-soft"];
     assert!(!s.enforced, "{:?}", s);
     assert!(s.matches_repo, "{:?}", s);
@@ -819,7 +833,7 @@ fn firewall_live_status_reports_enforced_and_match_independently() {
     // A hand edit changes the ports but keeps it in force: enforced, but
     // not a match.
     let edited = rendered.replace("-dport 22", "-dport 2222");
-    let live = firewall_live_status(&st, &[fact(Some(&edited))], None);
+    let live = firewall_live_status(&st, &[fact(Some(&edited))], None, &[]);
     let s = live["kp-soft"];
     assert!(s.enforced, "{:?}", s);
     assert!(!s.matches_repo, "{:?}", s);
@@ -987,15 +1001,21 @@ fn tile_watch_rule_is_appended_by_with_tile_watch_and_rendered() {
     tiles.insert("a".into(), tile(Some("http://10.10.10.116:8080/")));
     let base = fw(KP_SOFT_116);
     let n = base.rules.len();
-    let effective =
-        firewall::with_tile_watch(&base, "10.10.10.116", &tiles, "10.10.10.20", &Vec::new());
+    let effective = firewall::with_tile_watch(
+        &base,
+        "10.10.10.116",
+        &tiles,
+        "10.10.10.20",
+        &Vec::new(),
+        &[],
+    );
     assert_eq!(effective.rules.len(), n + 1);
     let rendered = render("kp-soft", &effective);
     assert!(rendered.contains("-source 10.10.10.20"));
     assert!(rendered.contains("tile watch (derived from tiles)"));
 
     // Empty source: unchanged from the plain render.
-    let unchanged = firewall::with_tile_watch(&base, "10.10.10.116", &tiles, "", &Vec::new());
+    let unchanged = firewall::with_tile_watch(&base, "10.10.10.116", &tiles, "", &Vec::new(), &[]);
     assert_eq!(render("kp-soft", &unchanged), render("kp-soft", &base));
 }
 
@@ -1026,6 +1046,7 @@ fn watcher_out_rule_is_prepended_before_declared_out_drop() {
         &std::collections::BTreeMap::new(),
         "10.10.10.20",
         &targets,
+        &[],
     );
     // The derived OUT ACCEPT must come before the hand-declared OUT DROP.
     let out_positions: Vec<usize> = effective
@@ -1202,4 +1223,58 @@ rules:
     // Written back unchanged: `disabled` only when it is on.
     let back = serde_yaml::to_string(&spec).unwrap();
     assert_eq!(back.matches("disabled: true").count(), 1, "{back}");
+}
+
+// trusted-sources (Kenny, 2026-10-22: "die firewall moet ook altijd MIJN
+// computer binnenlaten, 10.10.10.10"): one ACCEPT on every port, first in
+// [RULES], written exactly as the line already applied by hand on pve that
+// night, so the fleet check finds no drift once this release is in.
+#[test]
+fn trusted_source_is_the_first_rule_and_opens_every_port() {
+    let base = fw(KP_SOFT_116);
+    let n = base.rules.len();
+    let trusted = vec!["10.10.10.10".to_string(), "  ".to_string()];
+    let effective = firewall::with_tile_watch(
+        &base,
+        "10.10.10.116",
+        &std::collections::BTreeMap::new(),
+        "",
+        &Vec::new(),
+        &trusted,
+    );
+    assert_eq!(
+        effective.rules.len(),
+        n + 1,
+        "the blank entry derives nothing"
+    );
+    let first = &effective.rules[0];
+    assert_eq!(first.source.as_deref(), Some("10.10.10.10"));
+    assert!(first.proto.is_none() && first.dport.is_none());
+    let rendered = render("kp-soft", &effective);
+    assert!(
+        rendered.contains(
+            "[RULES]\n# trusted source (host.toml trusted_sources): always let in, every port\n\
+             IN ACCEPT -source 10.10.10.10 # trusted source\n"
+        ),
+        "{rendered}"
+    );
+    let own = "10.10.10.116".parse().unwrap();
+    let pc = "10.10.10.10".parse().unwrap();
+    assert!(firewall::permits(
+        &effective,
+        own,
+        FwDir::In,
+        pc,
+        FwProto::Tcp,
+        Some(8090)
+    ));
+    assert!(!firewall::permits(
+        &base,
+        own,
+        FwDir::In,
+        pc,
+        FwProto::Tcp,
+        Some(8090)
+    ));
+    assert!(firewall::trusted_rules(&[]).is_empty());
 }

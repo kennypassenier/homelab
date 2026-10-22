@@ -98,6 +98,7 @@ async fn a_stateless_unit_is_not_backed_up_and_that_is_not_a_failure() {
         tile_watch_source: None,
         tile_watch_targets: Vec::new(),
         tile_watch_watcher: None,
+        trusted_sources: Vec::new(),
     };
     let r = backup_native(&ctx, &unit("drillsvc", true), &BackupCfg::default()).await;
     assert!(r.ok, "{:?}", r.error);

@@ -77,6 +77,7 @@ fn fleet(applied_hash: &str) -> ServerMsg {
         status_measured_at: None,
         host: HostView {
             home_address: None,
+            trusted_sources: Vec::new(),
             name: "pve-01".into(),
             cpu_pct: None,
             ram_pct: 0,

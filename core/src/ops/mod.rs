@@ -204,4 +204,8 @@ pub struct OpCtx<'a> {
     /// None when the watcher is not a currently-applied stack, or
     /// `tile_watch_source` is unset.
     pub tile_watch_watcher: Option<crate::firewall::TileWatcher>,
+    /// trusted-sources (Kenny, 2026-10-22): addresses every stack firewall
+    /// lets in on every port, first in its rules (`firewall::trusted_rules`).
+    /// Fleet-wide setting `trusted_sources` (`core::hostconfig`); empty = none.
+    pub trusted_sources: Vec<String>,
 }

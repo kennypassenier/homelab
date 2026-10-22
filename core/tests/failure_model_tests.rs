@@ -105,6 +105,7 @@ async fn ar14_failed_deploy_writes_replayable_bundle() {
         tile_watch_source: None,
         tile_watch_targets: Vec::new(),
         tile_watch_watcher: None,
+        trusted_sources: Vec::new(),
     };
     let report = deploy(&ctx, &spec(110, "syncthing")).await;
     assert!(!report.ok);

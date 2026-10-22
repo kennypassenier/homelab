@@ -307,6 +307,7 @@ fn fix_83_a_pinned_app_behind_upstream_is_a_noted_finding_and_nothing_else() {
         homelab_core::ops::fleetcheck::DEFAULT_BACKUP_MAX_AGE_S,
         GrowthLimits::default(),
         None,
+        &[],
         homelab_core::ops::fleetcheck::PATCH_THRESHOLD_S,
         homelab_core::ops::fleetcheck::HOST_META_MAX_AGE_S,
         homelab_core::ops::fleetcheck::HostCapacityThresholds::default(),

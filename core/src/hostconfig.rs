@@ -641,6 +641,16 @@ pub const KEYS: &[KeyInfo] = &[
         Access::Browser,
         Apply::Restart,
     ),
+    k(
+        "trusted_sources",
+        "Gateway and network",
+        "Trusted sources",
+        "Addresses every stack firewall always lets in, on every port, ahead of every other rule; requests from them also reach the dashboard without Cloudflare Access or a sign-in. ssh only.",
+        "none",
+        Kind::TextList,
+        Access::SshOnly,
+        Apply::Restart,
+    ),
     // ── Gateway and network ─────────────────────────────────────────────
     k(
         "gateway_vmid",

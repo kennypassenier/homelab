@@ -158,3 +158,18 @@ fn arch_exposure_a_refusal_is_an_alarm_page_with_escaped_words() {
         "the address is escaped"
     );
 }
+
+// trusted-sources (Kenny, 2026-10-22: "mijn pc heeft altijd toegang, zonder
+// token"): only a direct peer on the list passes; the same address behind
+// the proxy, another address, or an empty list does not.
+#[test]
+fn trusted_peer_passes_only_straight_from_a_listed_address() {
+    use homelab_admin::core::access::trusted_peer;
+    let pc: std::net::IpAddr = "10.10.10.10".parse().unwrap();
+    let list = vec!["10.10.10.10".to_string()];
+    assert!(trusted_peer(pc, false, &list));
+    assert!(!trusted_peer(pc, true, &list), "through the proxy");
+    assert!(!trusted_peer("10.10.10.11".parse().unwrap(), false, &list));
+    assert!(!trusted_peer(pc, false, &[]));
+    assert!(!trusted_peer(pc, false, &["not an address".to_string()]));
+}

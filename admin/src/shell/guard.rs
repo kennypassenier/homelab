@@ -123,8 +123,18 @@ impl Guard {
         k.keys.iter().find(|x| x.kid == kid).cloned()
     }
 
+    /// trusted-sources: a request straight from one of host.toml's
+    /// `trusted_sources` passes both locks.
+    async fn trusted(&self, r: &GuardRequest) -> bool {
+        let trusted = self.shared.read().await.trusted_sources.clone();
+        access::trusted_peer(r.peer.ip(), r.from_trusted_proxy, &trusted)
+    }
+
     /// Lock 1.
     pub async fn access(&self, r: &GuardRequest) -> Result<(), Response> {
+        if self.trusted(r).await {
+            return Ok(());
+        }
         let token = r
             .headers
             .get("cf-access-jwt-assertion")
@@ -149,6 +159,9 @@ impl Guard {
 
     /// Lock 2.
     pub async fn home(&self, r: &GuardRequest) -> Result<(), Response> {
+        if self.trusted(r).await {
+            return Ok(());
+        }
         let client = r
             .headers
             .get("cf-connecting-ip")

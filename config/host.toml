@@ -88,6 +88,7 @@ history_max_mib = 16
 # ── Gateway and network ─────────────────────────────────────────────────────
 gateway_vmid = 104
 gateway_routes_dir = "/appdata/gateway/traefik-config/routes"
+trusted_sources = ["10.10.10.10"]
 # registry_cache, zfs_jobs, device_backups and watched_backups are tables, so
 # they are declared at the end of this file (see the note above restic_base).
 

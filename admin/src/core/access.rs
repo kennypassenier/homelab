@@ -231,6 +231,19 @@ pub fn from_home(client: Option<&str>, home: Option<&str>) -> Result<(), Refusal
     }
 }
 
+/// trusted-sources (Kenny, 2026-10-22: "mijn pc heeft altijd toegang"):
+/// whether a request comes straight from one of host.toml's
+/// `trusted_sources`. Only a direct peer counts: a request through the
+/// proxy carries the proxy's address, and what it says in a header about
+/// its sender is not this check's business.
+pub fn trusted_peer(peer: std::net::IpAddr, via_proxy: bool, trusted: &[String]) -> bool {
+    !via_proxy
+        && trusted
+            .iter()
+            .filter_map(|t| t.trim().parse::<std::net::IpAddr>().ok())
+            .any(|t| t == peer)
+}
+
 /// The RS256 signature of `signed` under `key` (PKCS#1 v1.5, SHA-256,
 /// 2048-8192 bit keys). Pure: aws-lc-rs computes, nothing is fetched.
 pub fn verify_rs256(key: &RsaKey, signed: &[u8], signature: &[u8]) -> Result<(), Refusal> {

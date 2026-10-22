@@ -423,6 +423,9 @@ pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
                 &m.tiles,
                 ctx.tile_watch_source.as_deref().unwrap_or(""),
                 &ctx.tile_watch_targets,
+                // trusted-sources: the port-80 guard holds the declaration, not the
+                // owner's own machine (`firewall::trusted_rules`).
+                &[],
             );
             let p = crate::firewall::gateway_problems(&effective);
             if !p.is_empty() {
@@ -875,6 +878,7 @@ pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
                 &m.tiles,
                 ctx.tile_watch_source.as_deref().unwrap_or(""),
                 &ctx.tile_watch_targets,
+                &ctx.trusted_sources,
             );
             let body = crate::firewall::render(&m.stack_name, &effective);
             let old = exec.read_file(&path).await.ok();
@@ -1351,6 +1355,7 @@ pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
                 &m.tiles,
                 ctx.tile_watch_source.as_deref().unwrap_or(""),
                 &ctx.tile_watch_targets,
+                &ctx.trusted_sources,
             );
             let body = crate::firewall::render(&m.stack_name, &effective);
             // Unconditionally: what pmxcfs reports for a vmid it has just
@@ -1404,6 +1409,7 @@ pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
                     &watcher.tiles,
                     source,
                     &fresh_targets,
+                    &ctx.trusted_sources,
                 );
                 let path = crate::firewall::fw_path(watcher.vmid);
                 let body = crate::firewall::render(&watcher.stack, &effective);

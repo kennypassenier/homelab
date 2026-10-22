@@ -47,6 +47,10 @@ pub struct Snapshot {
     /// arch-exposure, lock 2: the house's public address as the host last
     /// read it from the router.
     pub home_address: Option<String>,
+    /// trusted-sources: host.toml `trusted_sources` as the host reported
+    /// them; a request straight from one passes both locks
+    /// (`core::access::trusted_peer`).
+    pub trusted_sources: Vec<String>,
     /// TUI parity: the newest homelab release on GitHub, for the "host
     /// update available" badge, and when it was read.
     pub latest_release: Option<String>,
@@ -436,6 +440,7 @@ async fn session_loop(
                             s.trend.record(&view, now_s());
                             s.fleet = Some(view.clone());
                             s.home_address = state.host.home_address.clone();
+                            s.trusted_sources = state.host.trusted_sources.clone();
                             (s.trend.newest_slot() != before).then(|| s.trend.finished().cloned()).flatten()
                         };
                         // fix-trend-restart: the bucket that just finished is

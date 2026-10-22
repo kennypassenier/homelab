@@ -116,14 +116,14 @@ pub const VERBS: &[Verb] = &[
     v(
         Daily,
         "snapshots",
-        "stacks/<name> [--json]",
-        "every backup snapshot of a stack's repositories, newest first — the id `homelab restore` takes",
+        "stacks/<name> [--json] [--source local|remote]",
+        "every backup snapshot of a stack's repositories, newest first — the id `homelab restore` takes; --source local lists the copy on the host's own disks instead of Google Drive",
         "homelab snapshots stacks/mystack",
     ),
     v(
         Daily,
         "verify-restore",
-        "stacks/<name> [<snapshot>|latest] [--app <app>]",
+        "stacks/<name> [<snapshot>|latest] [--app <app>] [--source local|remote]",
         "prove a snapshot restorable without touching live data: restore it into the restore drill's scratch directory, judge it as the nightly drill does, print the files and the size, empty the scratch again (every app's latest when --app is left out)",
         "homelab verify-restore stacks/mystack latest --app myapp",
     ),
@@ -179,8 +179,8 @@ pub const VERBS: &[Verb] = &[
     v(
         ChangeAStack,
         "restore",
-        "stacks/<name> [snapshot] [--app <app>] [--yes] [--no-safety-copy]",
-        "restore the stack's data, one night across its repositories, from 'latest' unless a snapshot is named; --app restores one app; asks for the stack name and keeps a copy of the current data",
+        "stacks/<name> [snapshot] [--app <app>] [--source local|remote] [--yes] [--no-safety-copy]",
+        "restore the stack's data, one night across its repositories, from 'latest' unless a snapshot is named; --app restores one app; --source local reads the copy on the host's own disks instead of Google Drive; asks for the stack name and keeps a copy of the current data",
         "homelab restore mystack latest",
     ),
     v(
@@ -263,7 +263,7 @@ pub const VERBS: &[Verb] = &[
     v(
         Native,
         "restore-native",
-        "<stack>[/<unit>] [snapshot] [--yes]",
+        "<stack>[/<unit>] [snapshot] [--source local|remote] [--yes]",
         "restore a native service's data from a snapshot ('latest' unless named); a unit restores only that one, otherwise every unit of the stack",
         "homelab restore-native mystack/myunit",
     ),

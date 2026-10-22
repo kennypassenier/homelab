@@ -98,6 +98,12 @@ pub enum Command {
         /// before fix-112) restores the whole stack.
         #[serde(default)]
         app: Option<String>,
+        /// restore-two-sources-1 (Kenny, 2026-10-22: "ik wil ook zelf kunnen
+        /// kiezen welke van de twee terug wordt gezet"): `Some("local")` reads
+        /// the local repository set (`second_copy_dataset`), `Some("remote")`
+        /// or None (every older client) the remote `restic_base`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        source: Option<String>,
     },
     /// D9/B6: managed update with rollback. `app: None` = whole stack.
     UpdateStack {
@@ -616,6 +622,12 @@ pub enum Command {
         stack: String,
         #[serde(default)]
         force: bool,
+        /// restore-two-sources-1 (Kenny, 2026-10-22: "ik wil ook zelf kunnen
+        /// kiezen welke van de twee terug wordt gezet"): `Some("local")` reads
+        /// the local repository set (`second_copy_dataset`), `Some("remote")`
+        /// or None (every older client) the remote `restic_base`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        source: Option<String>,
     },
     /// feat-retired-1: every `HostState::retired` entry, structured for the
     /// dashboard's Retired page — what it was, when and by which kind of
@@ -632,6 +644,12 @@ pub enum Command {
         snapshot: String,
         #[serde(default)]
         path: String,
+        /// restore-two-sources-1 (Kenny, 2026-10-22: "ik wil ook zelf kunnen
+        /// kiezen welke van de twee terug wordt gezet"): `Some("local")` reads
+        /// the local repository set (`second_copy_dataset`), `Some("remote")`
+        /// or None (every older client) the remote `restic_base`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        source: Option<String>,
     },
     /// fix-241: one file of one snapshot, read with `restic dump` and capped
     /// at `ops::backup::SNAPSHOT_FILE_CAP` — no restore, nothing written.
@@ -645,6 +663,12 @@ pub enum Command {
         owner: String,
         snapshot: String,
         path: String,
+        /// restore-two-sources-1 (Kenny, 2026-10-22: "ik wil ook zelf kunnen
+        /// kiezen welke van de twee terug wordt gezet"): `Some("local")` reads
+        /// the local repository set (`second_copy_dataset`), `Some("remote")`
+        /// or None (every older client) the remote `restic_base`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        source: Option<String>,
     },
     /// fix-237: prove one snapshot restorable without touching live data —
     /// restore it into the restore drill's scratch directory
@@ -659,6 +683,12 @@ pub enum Command {
         #[serde(default)]
         app: Option<String>,
         snapshot: String,
+        /// restore-two-sources-1 (Kenny, 2026-10-22: "ik wil ook zelf kunnen
+        /// kiezen welke van de twee terug wordt gezet"): `Some("local")` reads
+        /// the local repository set (`second_copy_dataset`), `Some("remote")`
+        /// or None (every older client) the remote `restic_base`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        source: Option<String>,
     },
     /// feat-backup-2: restore a native (adopted) service from a snapshot
     /// (default "latest"). Unpacks the archive `restic dump` emits straight
@@ -678,6 +708,12 @@ pub enum Command {
         /// behaviour unchanged.
         #[serde(default)]
         unit: Option<String>,
+        /// restore-two-sources-1 (Kenny, 2026-10-22: "ik wil ook zelf kunnen
+        /// kiezen welke van de twee terug wordt gezet"): `Some("local")` reads
+        /// the local repository set (`second_copy_dataset`), `Some("remote")`
+        /// or None (every older client) the remote `restic_base`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        source: Option<String>,
     },
     /// feat-secrets-1: the content of one secret, read from the host's own
     /// vault (the value a deploy last sealed there — `ops::deploy`'s

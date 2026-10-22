@@ -175,6 +175,9 @@ pub enum Arg {
     Snapshot,
     App,
     Unit,
+    /// restore-two-sources-1: which repository set a restore reads, local
+    /// or remote; absent: remote.
+    Source,
     SkipBackup,
     SkipSafetyCopy,
     Commit,
@@ -377,9 +380,15 @@ impl ActionKind {
         match self {
             Deploy => &[Arg::Force],
             DeployCommit => &[Arg::Commit, Arg::Force],
-            Restore => &[Arg::Confirm, Arg::App, Arg::Snapshot, Arg::SkipSafetyCopy],
-            RestoreNative => &[Arg::Confirm, Arg::Snapshot, Arg::Unit],
-            VerifyRestore => &[Arg::App, Arg::Snapshot],
+            Restore => &[
+                Arg::Confirm,
+                Arg::App,
+                Arg::Snapshot,
+                Arg::Source,
+                Arg::SkipSafetyCopy,
+            ],
+            RestoreNative => &[Arg::Confirm, Arg::Snapshot, Arg::Unit, Arg::Source],
+            VerifyRestore => &[Arg::App, Arg::Snapshot, Arg::Source],
             ChangeSecret => &[Arg::SecretRef, Arg::StageToken],
             Update => &[Arg::App],
             RollbackNative => &[Arg::Unit],
@@ -636,6 +645,9 @@ pub struct ActionArgs {
     pub app: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub unit: Option<String>,
+    /// restore-two-sources-1: "local" or "remote".
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source: Option<String>,
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub skip_backup: bool,
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
@@ -715,6 +727,9 @@ impl ActionArgs {
         }
         if self.unit.is_some() {
             v.push(Arg::Unit);
+        }
+        if self.source.is_some() {
+            v.push(Arg::Source);
         }
         if self.skip_backup {
             v.push(Arg::SkipBackup);
@@ -898,6 +913,16 @@ pub fn validate(stack: &str, action: &str, args: ActionArgs) -> Result<ActionReq
             what,
             format!("{s:?} is not a snapshot id"),
             "pick a snapshot from the backup page, or leave it out for 'latest'",
+        ));
+    }
+    if let Some(s) = &args.source
+        && s != "local"
+        && s != "remote"
+    {
+        return Err(Refusal::new(
+            what,
+            format!("{s:?} is not a backup source"),
+            "choose local (the copy on the host's own disks) or remote (Google Drive)",
         ));
     }
     for (field, v) in [("app", &args.app), ("unit", &args.unit)] {
@@ -1249,6 +1274,7 @@ pub fn commands(req: &ActionRequest, material: Material) -> Result<Vec<Command>,
                 snapshot: a.snapshot.clone().unwrap_or_else(|| "latest".into()),
                 confirm: a.confirm.clone(),
                 unit: a.unit.clone(),
+                source: a.source.clone(),
             }]
         }
         (ChangeSecret, Material::Secret { secret, content }) => vec![Command::SetSecret {
@@ -1262,11 +1288,13 @@ pub fn commands(req: &ActionRequest, material: Material) -> Result<Vec<Command>,
             confirm: a.confirm.clone(),
             skip_safety_copy: a.skip_safety_copy,
             app: a.app.clone(),
+            source: a.source.clone(),
         }],
         (VerifyRestore, _) => vec![Command::VerifyRestore {
             stack,
             app: a.app.clone(),
             snapshot: a.snapshot.clone().unwrap_or_else(|| "latest".into()),
+            source: a.source.clone(),
         }],
         (Update, Material::Manifest(m)) => vec![Command::UpdateStack {
             manifest: manifest(&m)?,

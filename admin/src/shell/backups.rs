@@ -30,6 +30,10 @@ fn refusal(status: StatusCode, r: impl ToString) -> Response {
 struct StatusQuery {
     #[serde(default, deserialize_with = "crate::shell::queryflag::flag")]
     refresh: bool,
+    /// restore-two-sources-1: `?source=local` reads the local repository
+    /// set; absent or `remote`, Google Drive.
+    #[serde(default)]
+    source: Option<String>,
 }
 
 async fn status(
@@ -45,6 +49,7 @@ async fn status(
             Command::GetBackups {
                 stack,
                 force: q.refresh,
+                source: q.source,
             },
             ASK_TIMEOUT,
             None,
@@ -64,6 +69,8 @@ async fn status(
 struct LsQuery {
     #[serde(default)]
     path: String,
+    #[serde(default)]
+    source: Option<String>,
 }
 
 /// feat-backup-3: list one snapshot's files under `?path=`, read-only.
@@ -78,6 +85,7 @@ async fn ls(
                 owner,
                 snapshot,
                 path: q.path,
+                source: q.source,
             },
             ASK_TIMEOUT,
             None,
@@ -96,6 +104,8 @@ async fn ls(
 #[derive(Deserialize)]
 struct FileQuery {
     path: String,
+    #[serde(default)]
+    source: Option<String>,
 }
 
 /// fix-241: one file of one snapshot, read-only (`restic dump`, capped by
@@ -116,6 +126,7 @@ async fn file(
                 owner,
                 snapshot,
                 path: q.path,
+                source: q.source,
             },
             // The chassis request guard cuts every request at 30 s; a dump
             // that needs longer is `homelab snapshot-file`'s, which waits.

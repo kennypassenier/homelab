@@ -1495,6 +1495,44 @@ fn revoke_token_in(raw: &str, name: &str) -> Result<(String, Vec<TokenEntry>), S
 
 #[cfg(test)]
 mod tests {
+    // restore-two-sources-1: "local" points the settings at the mounted
+    // local set (and drops its own local_dataset, so a safety copy does not
+    // copy the repository onto itself); none or "remote" leaves them alone;
+    // anything else, or "local" without a local set, is refused.
+    #[tokio::test]
+    async fn a_restore_source_picks_the_repository_set() {
+        use homelab_core::executor::{CmdOutput, MockExecutor};
+        use homelab_core::ops::backup::BackupCfg;
+        let exec = MockExecutor::new();
+        exec.respond_always(
+            "zfs list -H -o mounted,mountpoint HDD4TB/restic",
+            CmdOutput::ok("yes\t/HDD4TB/restic\n"),
+        );
+        let base = BackupCfg {
+            local_dataset: Some("HDD4TB/restic".into()),
+            ..BackupCfg::default()
+        };
+        let local = super::backup_cfg_for_source(&exec, base.clone(), Some("local"))
+            .await
+            .unwrap();
+        assert_eq!(local.restic_base, "/HDD4TB/restic");
+        assert!(local.local_dataset.is_none());
+        let remote = super::backup_cfg_for_source(&exec, base.clone(), None)
+            .await
+            .unwrap();
+        assert_eq!(remote.restic_base, base.restic_base);
+        assert!(
+            super::backup_cfg_for_source(&exec, base, Some("usb"))
+                .await
+                .is_err()
+        );
+        assert!(
+            super::backup_cfg_for_source(&exec, BackupCfg::default(), Some("local"))
+                .await
+                .is_err()
+        );
+    }
+
     // backup-stall (correction 2026-10-22): a command whose status lines
     // keep coming while nothing moves is stopped once the watch's limit
     // passes; one whose progress keeps moving runs to its end.
@@ -5643,6 +5681,40 @@ span_days = 7\n";
 }
 
 // ── Real executor (AR2) ─────────────────────────────────────────────────────
+
+/// restore-two-sources-1 (Kenny, 2026-10-22: "ik wil ook zelf kunnen kiezen
+/// welke van de twee terug wordt gezet"): the backup settings pointed at the
+/// repository set `source` names. "local" is the set a compose stack's
+/// snapshot is written to first (`second_copy_dataset`); "remote" or none is
+/// `restic_base`. The local settings carry no `local_dataset` of their own,
+/// so a safety copy a restore takes first writes straight into the local
+/// repository instead of copying it onto itself.
+async fn backup_cfg_for_source(
+    exec: &dyn Executor,
+    base: homelab_core::ops::backup::BackupCfg,
+    source: Option<&str>,
+) -> Result<homelab_core::ops::backup::BackupCfg, String> {
+    match source.map(str::trim) {
+        None | Some("") | Some("remote") => Ok(base),
+        Some("local") => {
+            let ds = base.local_dataset.clone().ok_or_else(|| {
+                "no local repository set is configured (`second_copy_dataset` in host.toml)"
+                    .to_string()
+            })?;
+            let path = homelab_core::ops::secondcopy::local_base(exec, &ds)
+                .await
+                .map_err(|e| e.to_string())?;
+            Ok(homelab_core::ops::backup::BackupCfg {
+                restic_base: path,
+                local_dataset: None,
+                ..base
+            })
+        }
+        Some(other) => Err(format!(
+            "unknown backup source '{other}': it is local or remote"
+        )),
+    }
+}
 
 struct RealExecutor;
 
@@ -11363,6 +11435,7 @@ async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse {
             confirm,
             skip_safety_copy,
             app,
+            source,
         } => {
             // fix-64: no typed name, no restore — whoever sent the request.
             if let Err(e) = homelab_core::ops::backup::restore_confirmed(
@@ -11377,8 +11450,22 @@ async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse {
                 };
             }
             // The configured target and timeout, not the compiled defaults
-            // (F38, see REGISTER.md).
-            let cfg = state.config.backup.clone();
+            // (F38, see REGISTER.md); restore-two-sources-1: from the set the
+            // operator picked.
+            let cfg =
+                match backup_cfg_for_source(&exec, state.config.backup.clone(), source.as_deref())
+                    .await
+                {
+                    Ok(c) => c,
+                    Err(e) => {
+                        return RpcResponse {
+                            id: req.id,
+                            ok: false,
+                            message: e,
+                            deferred: None,
+                        };
+                    }
+                };
             let stack_name = manifest.stack_name.clone();
             // fix-180: a restore may take a safety-copy backup first (unless
             // `skip_safety_copy`) and always re-tags a `restic forget` pass
@@ -12722,7 +12809,11 @@ async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse {
         // show is read from restic once, not once per page. A repository
         // never read before answers `repo_status_unread` ("not read yet")
         // at once, and a background refresh fills the cache for next time.
-        Rpc::GetBackups { stack, force } => {
+        Rpc::GetBackups {
+            stack,
+            force,
+            source,
+        } => {
             let store =
                 homelab_core::state::StateStore::new(&RealExecutor, &state.config.state_dir);
             let snapshot = store.load().await.unwrap_or_default();
@@ -12749,6 +12840,46 @@ async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse {
             // dropped a native stack's unit repositories (inbox: manifest
             // with `storage: []` since fix-145 → "no repositories").
             let owners = homelab_core::ops::backup::stack_repo_owners(st);
+            let local_available = state.config.backup.local_dataset.is_some();
+            // restore-two-sources-1: the local set is read directly — it is
+            // a disk away, so it needs none of the remote's cache.
+            if source.as_deref() == Some("local") {
+                let cfg = match backup_cfg_for_source(&exec, cfg, Some("local")).await {
+                    Ok(c) => c,
+                    Err(e) => {
+                        return RpcResponse {
+                            id: req.id,
+                            ok: false,
+                            message: e,
+                            deferred: None,
+                        };
+                    }
+                };
+                let mut statuses = Vec::with_capacity(owners.len());
+                for owner in owners {
+                    statuses.push(
+                        homelab_core::ops::backup::repo_status_of(
+                            &exec,
+                            &cfg,
+                            &snapshot.restore_drills,
+                            owner,
+                        )
+                        .await,
+                    );
+                }
+                return RpcResponse {
+                    id: req.id,
+                    ok: true,
+                    message: serde_json::json!({
+                        "native": st.is_native(),
+                        "repos": statuses,
+                        "source": "local",
+                        "local_available": local_available,
+                    })
+                    .to_string(),
+                    deferred: None,
+                };
+            }
             let mut statuses = Vec::with_capacity(owners.len());
             for owner in owners {
                 match state.snapshot_cache.get(&owner) {
@@ -12774,8 +12905,13 @@ async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse {
             RpcResponse {
                 id: req.id,
                 ok: true,
-                message: serde_json::json!({ "native": st.is_native(), "repos": statuses })
-                    .to_string(),
+                message: serde_json::json!({
+                    "native": st.is_native(),
+                    "repos": statuses,
+                    "source": "remote",
+                    "local_available": local_available,
+                })
+                .to_string(),
                 deferred: None,
             }
         }
@@ -12833,6 +12969,7 @@ async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse {
             owner,
             snapshot,
             path,
+            source,
         } => {
             let tiers = state
                 .settings
@@ -12840,9 +12977,20 @@ async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse {
                 .unwrap_or_else(PoisonError::into_inner)
                 .retention
                 .clone();
-            let cfg = homelab_core::ops::backup::BackupCfg {
+            let base = homelab_core::ops::backup::BackupCfg {
                 tiers,
                 ..state.config.backup.clone()
+            };
+            let cfg = match backup_cfg_for_source(&exec, base, source.as_deref()).await {
+                Ok(c) => c,
+                Err(e) => {
+                    return RpcResponse {
+                        id: req.id,
+                        ok: false,
+                        message: e,
+                        deferred: None,
+                    };
+                }
             };
             match homelab_core::ops::backup::browse_snapshot(&exec, &cfg, &owner, &snapshot, &path)
                 .await
@@ -12868,6 +13016,7 @@ async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse {
             owner,
             snapshot,
             path,
+            source,
         } => {
             let store = homelab_core::state::StateStore::new(&exec, &state.config.state_dir);
             let target = match store.load().await {
@@ -12893,9 +13042,20 @@ async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse {
                 .unwrap_or_else(PoisonError::into_inner)
                 .retention
                 .clone();
-            let cfg = homelab_core::ops::backup::BackupCfg {
+            let base = homelab_core::ops::backup::BackupCfg {
                 tiers,
                 ..state.config.backup.clone()
+            };
+            let cfg = match backup_cfg_for_source(&exec, base, source.as_deref()).await {
+                Ok(c) => c,
+                Err(e) => {
+                    return RpcResponse {
+                        id: req.id,
+                        ok: false,
+                        message: e,
+                        deferred: None,
+                    };
+                }
             };
             match homelab_core::ops::backup::read_snapshot_file(
                 &exec, &cfg, &owner, &snapshot, &path,
@@ -12923,6 +13083,7 @@ async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse {
             stack,
             app,
             snapshot,
+            source,
         } => {
             let store = homelab_core::state::StateStore::new(&exec, &state.config.state_dir);
             let owners = match store.load().await {
@@ -12945,7 +13106,20 @@ async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse {
                     };
                 }
             };
-            let cfg = state.config.backup.clone();
+            let cfg =
+                match backup_cfg_for_source(&exec, state.config.backup.clone(), source.as_deref())
+                    .await
+                {
+                    Ok(c) => c,
+                    Err(e) => {
+                        return RpcResponse {
+                            id: req.id,
+                            ok: false,
+                            message: e,
+                            deferred: None,
+                        };
+                    }
+                };
             let scratch = state.config.restore_drill_scratch_dir.clone();
             run_mutating_op_for_stack(
                 state,
@@ -12969,6 +13143,7 @@ async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse {
             snapshot,
             confirm,
             unit,
+            source,
         } => match native_from_state(&state.config.state_dir, &stack).await {
             Ok((services, _)) => {
                 // fix-223: a named unit restricts the restore to that one
@@ -12991,7 +13166,23 @@ async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse {
                     }
                     None => services,
                 };
-                let cfg = state.config.backup.clone();
+                let cfg = match backup_cfg_for_source(
+                    &exec,
+                    state.config.backup.clone(),
+                    source.as_deref(),
+                )
+                .await
+                {
+                    Ok(c) => c,
+                    Err(e) => {
+                        return RpcResponse {
+                            id: req.id,
+                            ok: false,
+                            message: e,
+                            deferred: None,
+                        };
+                    }
+                };
                 let mut resp = RpcResponse {
                     id: req.id,
                     ok: true,

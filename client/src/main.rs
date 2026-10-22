@@ -189,7 +189,10 @@ async fn run(explicit_host: Option<String>) {
         std::io::stdout().is_terminal(),
         std::env::var("NO_COLOR").ok().as_deref(),
     ));
-    let args: Vec<String> = std::env::args().collect();
+    let raw: Vec<String> = std::env::args().collect();
+    // restore-two-sources-1: `--source local|remote` for the restore and
+    // snapshot verbs, out of the way of every verb's own parser.
+    let (args, source) = homelab_client::take_source(&raw).unwrap_or_else(|e| die(&e));
     // fix-68 (see REGISTER.md): bare `homelab` gives the morning answer
     // ("is anything waiting for me?"), the same one `homelab today` gives.
     let cmd = args.get(1).map(|s| s.as_str()).unwrap_or("today");
@@ -820,6 +823,7 @@ async fn run(explicit_host: Option<String>) {
                     snapshot,
                     confirm: Some(confirm),
                     unit,
+                    source: source.clone(),
                 },
             )
             .await;
@@ -1371,6 +1375,7 @@ async fn run(explicit_host: Option<String>) {
                 Command::GetBackups {
                     stack,
                     force: false,
+                    source: source.clone(),
                 },
             )
             .await
@@ -1416,6 +1421,7 @@ async fn run(explicit_host: Option<String>) {
                     stack,
                     app: a.app,
                     snapshot: a.snapshot,
+                    source: source.clone(),
                 },
             )
             .await;
@@ -1434,6 +1440,7 @@ async fn run(explicit_host: Option<String>) {
                     owner: a.app,
                     snapshot: a.snapshot,
                     path: a.path,
+                    source: source.clone(),
                 },
             )
             .await
@@ -1978,6 +1985,7 @@ async fn run(explicit_host: Option<String>) {
                     confirm: Some(confirm),
                     skip_safety_copy,
                     app,
+                    source: source.clone(),
                 },
             )
             .await;

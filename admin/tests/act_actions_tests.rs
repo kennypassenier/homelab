@@ -179,7 +179,9 @@ fn feat_stacks_4_the_commands_are_the_ones_the_cli_sends() {
             app,
             skip_safety_copy,
             manifest,
+            source,
         } => {
+            assert_eq!(source, None, "no source named is the remote, as before");
             assert_eq!(
                 snapshot, "latest",
                 "no snapshot named is latest, as in the CLI"

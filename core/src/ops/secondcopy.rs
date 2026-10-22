@@ -175,6 +175,12 @@ async fn probe_dataset(exec: &dyn Executor, ds: &str) -> Result<Dataset, CoreErr
 /// there yet. An unmounted dataset is refused: a repository written into the
 /// empty mountpoint of a pool that was not imported lands on the NVMe it is
 /// meant to be independent of, and fills the disk the host runs from.
+/// restore-two-sources-1: where the local repository set is mounted, for a
+/// reader that must not create it.
+pub async fn local_base(exec: &dyn Executor, ds: &str) -> Result<String, CoreError> {
+    ensure_dataset(exec, ds, false).await
+}
+
 pub(crate) async fn ensure_dataset(
     exec: &dyn Executor,
     ds: &str,

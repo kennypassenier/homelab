@@ -92,6 +92,7 @@ fn cli_line_bare(command: &Command, force: bool) -> Option<String> {
             snapshot,
             skip_safety_copy,
             app,
+            source,
             ..
         } => {
             push("restore")?;
@@ -100,6 +101,10 @@ fn cli_line_bare(command: &Command, force: bool) -> Option<String> {
             if let Some(app) = app {
                 push("--app")?;
                 push(app)?;
+            }
+            if let Some(s) = source {
+                push("--source")?;
+                push(s)?;
             }
             if *skip_safety_copy {
                 push("--no-safety-copy")?;
@@ -147,6 +152,7 @@ fn cli_line_bare(command: &Command, force: bool) -> Option<String> {
             stack,
             snapshot,
             unit,
+            source,
             ..
         } => {
             push("restore-native")?;
@@ -155,6 +161,10 @@ fn cli_line_bare(command: &Command, force: bool) -> Option<String> {
                 None => push(stack)?,
             }
             push(snapshot)?;
+            if let Some(s) = source {
+                push("--source")?;
+                push(s)?;
+            }
         }
         ApplyGuards { vmid } => {
             push("guards")?;
@@ -198,6 +208,7 @@ fn cli_line_bare(command: &Command, force: bool) -> Option<String> {
             stack,
             app,
             snapshot,
+            source,
         } => {
             push("verify-restore")?;
             push(stack)?;
@@ -205,6 +216,10 @@ fn cli_line_bare(command: &Command, force: bool) -> Option<String> {
             if let Some(a) = app {
                 push("--app")?;
                 push(a)?;
+            }
+            if let Some(s) = source {
+                push("--source")?;
+                push(s)?;
             }
         }
         BackupHostMeta => push("backup-host-meta")?,

@@ -237,6 +237,7 @@ fn feat_stacks_7_every_stack_action_round_trips_through_the_cli_parser() {
                 stack: "media".into(),
                 app: Some("jellyfin".into()),
                 snapshot: "af364ed7".into(),
+                source: None,
             },
             false,
             Invocation::VerifyRestore(homelab_client::snapshots::VerifyRestoreArgs {
@@ -250,6 +251,7 @@ fn feat_stacks_7_every_stack_action_round_trips_through_the_cli_parser() {
                 stack: "media".into(),
                 app: None,
                 snapshot: "latest".into(),
+                source: None,
             },
             false,
             Invocation::VerifyRestore(homelab_client::snapshots::VerifyRestoreArgs {
@@ -278,6 +280,7 @@ fn feat_stacks_7_a_restore_round_trips_with_its_snapshot_app_and_flags() {
         confirm: Some("paperwork".into()),
         skip_safety_copy: true,
         app: Some("paperless".into()),
+        source: None,
     };
     let line = cli_line(&command, false).unwrap();
     assert_eq!(
@@ -407,4 +410,30 @@ fn feat_stacks_7_the_cli_parser_keeps_the_verbs_old_rules() {
     assert!(parse(&split("wipe --yes")).is_err());
     assert!(parse(&split("backup")).unwrap_err().contains("usage"));
     assert_eq!(parse(&split("tui")).unwrap(), None);
+}
+
+// restore-two-sources-1: a restore from the local set says so on its command
+// line, and the client takes `--source local` out before its own parser.
+#[test]
+fn a_restore_from_the_local_set_names_its_source_on_the_command_line() {
+    let command = Command::RestoreStack {
+        manifest: Box::new(named("paperwork")),
+        snapshot: "4f2a9c1e".into(),
+        confirm: Some("paperwork".into()),
+        skip_safety_copy: false,
+        app: Some("paperless".into()),
+        source: Some("local".into()),
+    };
+    let line = cli_line(&command, false).unwrap();
+    assert_eq!(
+        line,
+        "homelab restore paperwork 4f2a9c1e --app paperless --source local"
+    );
+    let words: Vec<String> = line.split(' ').map(str::to_string).collect();
+    let (rest, source) = homelab_client::take_source(&words).unwrap();
+    assert_eq!(source.as_deref(), Some("local"));
+    let args = homelab_client::restore_args(&rest[2..]).unwrap();
+    assert_eq!(args.snapshot, "4f2a9c1e");
+    assert_eq!(args.app.as_deref(), Some("paperless"));
+    assert!(homelab_client::take_source(&["--source".into(), "usb".into()]).is_err());
 }

@@ -59,6 +59,34 @@ pub fn save_pin(fp: &str) {
     let _ = std::fs::write(&path, fp);
 }
 
+/// restore-two-sources-1 (Kenny, 2026-10-22: "ik wil ook zelf kunnen kiezen
+/// welke van de twee terug wordt gezet"): `--source local|remote` taken out
+/// of the command line before any verb's own parser sees it, so a parser
+/// that keeps unknown words as positionals never reads `local` as a
+/// snapshot. Absent: None, which the host reads as remote.
+pub fn take_source(args: &[String]) -> Result<(Vec<String>, Option<String>), String> {
+    let mut out = Vec::with_capacity(args.len());
+    let mut source = None;
+    let mut it = args.iter();
+    while let Some(a) = it.next() {
+        if a == "--source" {
+            match it.next().map(String::as_str) {
+                Some(v @ ("local" | "remote")) => source = Some(v.to_string()),
+                _ => {
+                    return Err(
+                        "--source takes local (the copy on the host's own disks) or remote \
+                         (Google Drive)"
+                            .into(),
+                    );
+                }
+            }
+        } else {
+            out.push(a.clone());
+        }
+    }
+    Ok((out, source))
+}
+
 /// What `homelab restore` was asked for.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RestoreArgs {
@@ -74,8 +102,8 @@ pub struct RestoreArgs {
 /// mixed-nights, 2026-09-27: one app restored without its neighbours); what
 /// remains is the stack directory, then the snapshot (default `latest`).
 pub fn restore_args(rest: &[String]) -> Result<RestoreArgs, String> {
-    const USAGE: &str = "usage: homelab restore stacks/<name> [snapshot] [--app <name>] [--yes] \
-                         [--no-safety-copy]";
+    const USAGE: &str = "usage: homelab restore stacks/<name> [snapshot] [--app <name>] \
+                         [--source local|remote] [--yes] [--no-safety-copy]";
     let mut positional: Vec<String> = Vec::new();
     let mut app = None;
     let mut yes = false;

@@ -1552,6 +1552,7 @@ fn open_snapshots(model: &mut Model) {
     model.outbox.push(Command::GetBackups {
         stack: name,
         force: false,
+        source: None,
     });
 }
 
@@ -1875,6 +1876,7 @@ fn start_stack_op(model: &mut Model, op: StackOp) {
             snapshot: "latest".into(),
             skip_safety_copy: false,
             app: None,
+            source: None,
         },
         StackOp::Update => Command::UpdateStack {
             manifest: Box::new(m),

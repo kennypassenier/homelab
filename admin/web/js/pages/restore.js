@@ -1149,7 +1149,13 @@ export function mount(root, ctx) {
         `${stack}'s backups (${src})`,
         abort.signal,
       ).catch(() => null);
-    const asked = switching ? S.source : (want ?? q.get("source"));
+    // An address with a snapshot and no source comes from a page that read
+    // Google Drive (the Backups page, the stack's history, an older link):
+    // restic numbers the same night differently in each set, so that id
+    // only means something on Google Drive.
+    const asked = switching
+      ? S.source
+      : (want ?? q.get("source") ?? (q.get("snapshot") ? "remote" : null));
     let b = await get(asked === "remote" ? "remote" : "local");
     // No local copy to read (or none answered): fall back to the remote one.
     if (

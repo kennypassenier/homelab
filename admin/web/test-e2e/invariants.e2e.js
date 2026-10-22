@@ -2070,7 +2070,7 @@ test("invariants: every red action button belongs to an action the catalog marks
 // tests (router.test.js, drivecatalog.test.js); here every address is asked
 // of the server without a render (no "no such route", no error status), and
 // the pre-3.71.0 addresses are followed once in the browser.
-test("invariants: every address the router knows answers a page and every pre-3.71.0 address lands on its new home", async () => {
+test("invariants: every address the router knows answers a page, never no such route", async () => {
   const browser = await launch();
   try {
     const context = await browser.newContext({
@@ -2090,38 +2090,73 @@ test("invariants: every address the router knows answers a page and every pre-3.
       [],
       `addresses that render no page:\n${bad.join("\n")}`,
     );
-    const { redirectFor: target } = await import("../js/router.js");
-    const stacks = await page.evaluate(async () => {
-      const r = await fetch("/data/fleet", {
-        headers: { accept: "application/json" },
-      });
-      const b = await r.json();
-      return (b.fleet?.stacks ?? []).map((/** @type {any} */ s) => s.name);
-    });
-    for (const from of OLD_ADDRESSES) {
-      const [path, q = ""] = from.split("?");
-      const want = target(route(path), q ? `?${q}` : "", { stacks });
-      await page.goto(`${BASE}${from}`, { waitUntil: "commit" });
-      // `/` (from /start) is the landing, which goes on to the Inbox or
-      // Apps by itself (Kenny, 2026-10-03).
-      const landed = (/** @type {URL} */ u) =>
-        want === "/"
-          ? ["/inbox", "/apps"].includes(u.pathname)
-          : u.pathname + u.search === want;
-      await page.waitForURL(landed, { timeout: 5000 }).catch(() => {});
-      const u = new URL(page.url());
-      if (!landed(u))
-        bad.push(`${from} → ${u.pathname}${u.search} (wanted ${want})`);
-    }
-    assert.deepEqual(
-      bad,
-      [],
-      `old addresses that did not land:\n${bad.join("\n")}`,
-    );
   } finally {
     await browser.close();
   }
 });
+
+const OLD_ADDRESSES = [
+  ...Object.entries(PATH_TO_PAGE)
+    .filter(([, p]) => p === "retired")
+    .map(([k]) => `/${k}`),
+  "/stacks/kp-soft/checks",
+  "/stacks/kp-soft/firewall",
+  "/overview?section=apply",
+  "/health?block=doctor",
+  "/secrets?stack=gateway",
+];
+
+eachSlice(
+  "invariants: every pre-3.71.0 address lands on its new home",
+  OLD_ADDRESSES,
+  14,
+  async (old) => {
+    const browser = await launch();
+    try {
+      const context = await browser.newContext({
+        viewport: { width: 1600, height: 1000 },
+      });
+      const page = await freshPage(context);
+      const bad = [];
+      const { redirectFor: target } = await import("../js/router.js");
+      const stacks = await page.evaluate(async () => {
+        const r = await fetch("/data/fleet", {
+          headers: { accept: "application/json" },
+        });
+        const b = await r.json();
+        return (b.fleet?.stacks ?? []).map((/** @type {any} */ s) => s.name);
+      });
+      for (const from of old) {
+        const [path, q = ""] = from.split("?");
+        const want = target(route(path), q ? `?${q}` : "", { stacks });
+        await page.goto(`${BASE}${from}`, { waitUntil: "commit" });
+        // `/` (from /start) is the landing, which goes on to the Inbox or
+        // Apps by itself (Kenny, 2026-10-03).
+        // An address that names no stack lands on the first stack the page's
+        // own live fleet lists, which can differ from /data/fleet's order.
+        const anyStack = (/** @type {string} */ x) =>
+          from.includes("stack=")
+            ? x
+            : x.replace(/^\/stacks\/[^/?]+\//, "/stacks/*/");
+        const landed = (/** @type {URL} */ u) =>
+          want === "/"
+            ? ["/inbox", "/apps"].includes(u.pathname)
+            : anyStack(u.pathname + u.search) === anyStack(want);
+        await page.waitForURL(landed, { timeout: 5000 }).catch(() => {});
+        const u = new URL(page.url());
+        if (!landed(u))
+          bad.push(`${from} → ${u.pathname}${u.search} (wanted ${want})`);
+      }
+      assert.deepEqual(
+        bad,
+        [],
+        `old addresses that did not land:\n${bad.join("\n")}`,
+      );
+    } finally {
+      await browser.close();
+    }
+  },
+);
 
 // fix-257 (design review, 2026-10-03): Settings' token read failed with
 // "invalid type: map, expected a sequence" — the demo host answered
@@ -2425,17 +2460,6 @@ test("invariants: hovering the Fleet view topology never redraws a node, so a cl
 // ── feat-shell-1..4 (redesign 3.71.0, Kenny approved 2026-10-03): every old
 // address still lands, Ctrl K finds an action by intent, the theme picker
 // is on every page, and counters are exact ─────────────────────────────
-
-const OLD_ADDRESSES = [
-  ...Object.entries(PATH_TO_PAGE)
-    .filter(([, p]) => p === "retired")
-    .map(([k]) => `/${k}`),
-  "/stacks/kp-soft/checks",
-  "/stacks/kp-soft/firewall",
-  "/overview?section=apply",
-  "/health?block=doctor",
-  "/secrets?stack=gateway",
-];
 
 test("invariants: Ctrl K finds an action by intent, in any word order, and Enter opens its dialog", async () => {
   const browser = await launch();
@@ -4446,7 +4470,7 @@ test("invariants: Schedules page: Live view reaches the form and its fields (ope
     assert.equal(await page.locator("#sched-every").inputValue(), "once");
   }));
 
-test("invariants: Schedules page: Live view reaches the row's delete button, switch and Undo", () =>
+test("invariants: Schedules page: Live view reaches the row's delete button and Undo", () =>
   onSchedules(async ({ page, id, row, step }) => {
     let r = await step({ do: "click", control: "delete-schedule", row: id });
     assert.ok(r.ok, `delete: ${JSON.stringify(r.refusal)}`);
@@ -4454,7 +4478,11 @@ test("invariants: Schedules page: Live view reaches the row's delete button, swi
     r = await step({ do: "click", control: "undo-schedule-change" });
     assert.ok(r.ok, `undo: ${JSON.stringify(r.refusal)}`);
     await row.waitFor({ timeout: 3000 });
-    r = await step({ do: "click", control: "toggle-schedule", row: id });
+  }));
+
+test("invariants: Schedules page: Live view reaches the row's switch and Undo", () =>
+  onSchedules(async ({ page, id, row, step }) => {
+    let r = await step({ do: "click", control: "toggle-schedule", row: id });
     assert.ok(r.ok, `toggle: ${JSON.stringify(r.refusal)}`);
     await page.waitForTimeout(500);
     assert.equal(await row.evaluate((x) => x.classList.contains("off")), true);

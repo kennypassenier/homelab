@@ -21,6 +21,8 @@ update_cmd: >-
   --property=Environment=KITCHEN_TIMEOUT_STOP_SECS=60
   --property=Environment=KITCHEN_TRUSTED_PROXIES=10.10.10.4
   --property=Environment=KITCHEN_TRUSTED_ADMINS=10.10.10.10
+  --property=Environment=KITCHEN_PARENTS_HOST=eten.kp-soft.dev
+  --property=Environment=KITCHEN_PARENTS_ALLOW=0.0.0.0/0,::/0
   /opt/kitchen/bin/kitchen update
 release_repo: kennypassenier/kitchen
 release_asset: kitchen

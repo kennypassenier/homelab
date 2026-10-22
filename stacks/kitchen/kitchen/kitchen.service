@@ -55,6 +55,14 @@ Environment=KITCHEN_TRUSTED_PROXIES=10.10.10.4
 # admin without a login (chassis-rs 3.13.0 and later; an older build ignores
 # it). Equal to host.toml `trusted_sources`; admin's config_tests hold them so.
 Environment=KITCHEN_TRUSTED_ADMINS=10.10.10.10
+# eten (Kenny, 2026-10-22: "geen meldingen, geen loginschermen", never open
+# to the internet): on this host Kitchen shows only the parents' Dutch
+# wheel, without an account. Who may open it is Cloudflare Access's job (its
+# eten app lets only the house's public address through), so Kitchen's own
+# allow-list stays open; its default (10.10.10.0/24) would refuse the
+# house's visits, which arrive through the tunnel from the public address.
+Environment=KITCHEN_PARENTS_HOST=eten.kp-soft.dev
+Environment=KITCHEN_PARENTS_ALLOW=0.0.0.0/0,::/0
 NoNewPrivileges=yes
 PrivateTmp=yes
 ProtectSystem=strict

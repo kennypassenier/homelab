@@ -3480,6 +3480,18 @@
       "twins": false
     },
     {
+      "id": "restore-source",
+      "page": "restore",
+      "what": "pick where the snapshot comes from: the local copy on the host's disks or the remote copy on Google Drive (step 2)",
+      "opens": "view",
+      "row": "<source>",
+      "href": "/backups/restore",
+      "was": [],
+      "shows": null,
+      "reach": [],
+      "twins": false
+    },
+    {
       "id": "restore-stack",
       "page": "restore",
       "what": "restore from another stack",

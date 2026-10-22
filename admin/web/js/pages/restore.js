@@ -21,7 +21,14 @@ import { humanBytes } from "../backupsview.js";
 import { jobSteps } from "../jobs.js";
 import { mountJobPanel } from "../jobpanel.js";
 import { previewGate } from "../previewgate.js";
-import { restoreHref, restoreNights, whatWillHappen } from "../restoreflow.js";
+import {
+  SOURCE_WORDS,
+  defaultSource,
+  restoreHref,
+  restoreNights,
+  restoreParams,
+  whatWillHappen,
+} from "../restoreflow.js";
 import { current, rereadStore, subscribe } from "../store.js";
 import { openAction } from "../actiondialog.js";
 import { pageHeader } from "../ui.js";
@@ -88,6 +95,13 @@ const NIGHT = declare({
   what: "pick the night its data comes back from (step 2)",
   shows: "once an app is picked",
   reach: [{ do: "click", control: "restore-app", row: "*" }],
+});
+const SOURCE = declare({
+  id: "restore-source",
+  page: "restore",
+  opens: "view",
+  row: "<source>",
+  what: "pick where the snapshot comes from: the local copy on the host's disks or the remote copy on Google Drive (step 2)",
 });
 const CONFIRM = declareField({
   id: "restore-confirm",
@@ -163,10 +177,11 @@ export function mount(root, ctx) {
   const vmidOf = (/** @type {string} */ n) =>
     (current().fleet?.stacks ?? []).find((s) => s.name === n)?.vmid ?? null;
   const stack = q.get("stack") ?? names()[0] ?? null;
-  /** @type {{app: string | null, night: string | null, running: boolean, matched: boolean, acked: boolean, via: boolean}} */
+  /** @type {{app: string | null, night: string | null, source: import("../restoreflow.js").RestoreSource | null, running: boolean, matched: boolean, acked: boolean, via: boolean}} */
   const S = {
     app: q.get("app"),
     night: q.get("snapshot"),
+    source: null,
     running: false,
     matched: false,
     acked: false,
@@ -178,6 +193,12 @@ export function mount(root, ctx) {
   let readState = "loading";
   /** @type {"ready" | "loading" | "empty" | "error"} */
   let nightsState = "ready";
+  // restore-two-sources-1: whether the host keeps a local copy at all; only
+  // known once the host has answered.
+  let localAvailable = false;
+  let sourceKnown = false;
+  /** Bumped by every read, so an answer for a source left behind is dropped. */
+  let loadSeq = 0;
   /** @type {null | (() => void)} */
   let stopJob = null;
   /** @type {null | (() => void)} */
@@ -252,9 +273,27 @@ export function mount(root, ctx) {
     "data-kp-dated": "",
     "aria-label": "Night to restore from",
   });
+  const sourceBox = h("fieldset", {
+    class: "kp-fieldset",
+    "data-kp-layout": "tiles",
+    "aria-labelledby": "rs-source-label",
+  });
+  const sourceHint = h(
+    "span",
+    { class: "rs-hint", id: "rs-source-hint" },
+    "Where the snapshots below are read from, and where the data comes back from.",
+  );
+  const nightsLabel = h("span", null, "Nights");
   const step2Body = formGrid([
     gridRow({
-      label: "Night to restore from",
+      label: "Restore from",
+      labelId: "rs-source-label",
+      control: sourceBox,
+      value: sourceHint,
+      cls: "rs-source-row",
+    }),
+    gridRow({
+      label: nightsLabel,
       labelId: "rs-night-label",
       control: dated,
       wide: true,
@@ -313,9 +352,16 @@ export function mount(root, ctx) {
     ),
     CANCEL,
   );
+  const sourceFact = h("p", { class: "kp-formgrid__control rs-point" }, "…");
+  sourceFact.setAttribute("data-kp-formgrid-span", "wide");
   const checkBody = h(
     "div",
     { class: "rs-check kp-formgrid" },
+    gridRow({
+      label: "Source",
+      control: sourceFact,
+      wide: true,
+    }),
     gridRow({
       label: "Restore point",
       control: point,
@@ -499,9 +545,11 @@ export function mount(root, ctx) {
       (/** @type {any} */ x) => x.short_id === S.night,
     ) ?? null;
 
+  const sourceName = () => SOURCE_WORDS[S.source ?? "remote"].title;
+
   /** Keep the address in step with the choice (back and reload land here). */
   const keepUrl = () => {
-    const href = restoreHref(stack, S.app, S.night);
+    const href = restoreHref(stack, S.app, S.night, S.source);
     if (location.pathname + location.search !== href)
       history.replaceState(history.state, "", href);
   };
@@ -535,7 +583,7 @@ export function mount(root, ctx) {
       setCardState(step1Card, "ready");
     } else if (readState === "empty") {
       setCardState(step1Card, "empty", {
-        title: `${stack} has no snapshots yet`,
+        title: `${stack} has no snapshots ${sourceKnown ? `on ${sourceName()}` : "yet"}`,
         text: "Once its first backup has run, its apps and their nights show up here.",
       });
     } else if (readState === "error") {
@@ -592,15 +640,66 @@ export function mount(root, ctx) {
     gateNext();
   };
 
-  const pending = () => nightsState === "loading";
+  /** The source choice: both options always drawn, so nothing moves. */
+  const paintSources = () => {
+    const busy = !sourceKnown;
+    // One label for both sources: a label that names the source changes
+    // width and moves the whole grid sideways when the source flips. The
+    // choice right above it, and the list's accessible name, say the source.
+    nightsLabel.textContent = "Nights";
+    dated.setAttribute(
+      "aria-label",
+      sourceKnown
+        ? `Nights to restore from, read from ${sourceName()}`
+        : "Nights to restore from",
+    );
+    sourceBox.setAttribute("aria-busy", String(busy));
+    sourceBox.replaceChildren(
+      .../** @type {const} */ (["local", "remote"]).map((k) => {
+        const off = busy || (k === "local" && !localAvailable) || S.running;
+        const hint = busy
+          ? "Reading what the host keeps…"
+          : k === "local" && !localAvailable
+            ? "No local copy is set up on this host"
+            : k === "local"
+              ? "This host's own disks, quick to read"
+              : "Remote copy, slower to read";
+        const input = h("input", {
+          class: "kp-field__check",
+          type: "radio",
+          name: "rs-source",
+          value: k,
+          checked: S.source === k ? "" : null,
+          disabled: off ? "" : null,
+        });
+        const label = h(
+          "label",
+          { class: "kp-field__option" },
+          input,
+          h("span", { class: "kp-field__option-title" }, SOURCE_WORDS[k].title),
+          h("span", { class: "kp-field__option-hint" }, hint),
+        );
+        if (k === "local" && !busy && !localAvailable)
+          label.setAttribute("data-kp-disabled-reason", hint);
+        drivable(label, SOURCE, k);
+        return label;
+      }),
+    );
+    attachDisabledReasons(root);
+  };
+
   const paintNights = () => {
+    paintSources();
     const list = nights();
     if (readState !== "ready" || !S.app) {
       setDatedOptions(dated, []);
       setDatedState(dated, readState === "loading" ? "loading" : "empty", {
-        reason: S.app ? `${S.app} has no snapshot yet` : "Pick an app first",
+        reason: S.app
+          ? `${S.app} has no snapshot ${sourceKnown ? `on ${sourceName()}` : "yet"}`
+          : "Pick an app first",
         action: null,
       });
+      if (sourceKnown) keepUrl();
       gateNext();
       return;
     }
@@ -614,7 +713,7 @@ export function mount(root, ctx) {
         take.addEventListener("click", () => void openAction(stack, "backup"));
         setDatedOptions(dated, []);
         setDatedState(dated, "empty", {
-          reason: `${S.app} has no snapshot yet`,
+          reason: `${S.app} has no snapshot on ${sourceName()}`,
           action: take,
         });
       } else {
@@ -728,6 +827,7 @@ export function mount(root, ctx) {
     point.textContent = snap
       ? `Restore point: ${runMoment(snap.time * 1000, "Europe/Brussels", "en-GB")}. ${S.app} stops for about a minute; the rest of ${stack} keeps running.`
       : "Restore point: pick an app and a night first.";
+    sourceFact.textContent = `${sourceName()}: ${SOURCE_WORDS[S.source ?? "remote"].hint.toLowerCase()}. The data comes back from this copy only.`;
     go.textContent = `Restore ${S.app ?? ""}`.trim();
     // a fresh guard for every visit to this step
     ackGate(ack)?.set(false);
@@ -793,6 +893,7 @@ export function mount(root, ctx) {
           : { app: S.app ?? "", snapshot: S.night ?? "" }
       ),
     );
+    /** @type {any} */ (body).source = S.source ?? "remote";
     const r = await send(
       "POST",
       form.previewPath,
@@ -919,9 +1020,13 @@ export function mount(root, ctx) {
     const r = await send(
       "POST",
       form.runPath,
-      native
-        ? { confirm: stack, snapshot: S.night }
-        : { confirm: stack, app: S.app, snapshot: S.night },
+      restoreParams({
+        native,
+        stack,
+        app: S.app,
+        snapshot: S.night,
+        source: S.source ?? "remote",
+      }),
       form.title,
     );
     go.removeAttribute("aria-busy");
@@ -986,13 +1091,19 @@ export function mount(root, ctx) {
     keepUrl();
     paintApps();
   });
+  sourceBox.addEventListener("change", (e) => {
+    const input = /** @type {HTMLInputElement} */ (e.target);
+    if (input.value === S.source) return;
+    if (input.value === "local" || input.value === "remote")
+      void load(input.value);
+  });
   dated.addEventListener(DATED_EVENT, () => {
     const v = datedValue(dated);
     S.night = v && !v.startsWith("missed:") ? v : null;
     keepUrl();
     gateNext();
   });
-  dated.addEventListener(DATED_RETRY_EVENT, () => void load());
+  dated.addEventListener(DATED_RETRY_EVENT, () => void load(S.source));
   root.addEventListener(TYPE_CONFIRM_EVENT, (e) => {
     S.matched = Boolean(/** @type {CustomEvent} */ (e).detail.matched);
     armGo();
@@ -1001,36 +1112,75 @@ export function mount(root, ctx) {
     S.acked = Boolean(/** @type {CustomEvent} */ (e).detail.checked);
     armGo();
   });
-  step1Card.addEventListener(CARD_RETRY_EVENT, () => void load());
+  step1Card.addEventListener(CARD_RETRY_EVENT, () => void load(S.source));
 
   // ── load ─────────────────────────────────────────────────────────────
-  const load = async () => {
-    readState = "loading";
-    nightsState = "loading";
+  /** @param {string} why */
+  const readError = (why) => ({ error: why });
+  const errorOf = (/** @type {any} */ b) =>
+    b && !b.ok
+      ? b.error.fix
+        ? `${b.error.why} — ${b.error.fix}`
+        : b.error.why
+      : "The host did not answer.";
+  /**
+   * Read the backups. The first read picks the source (the address's, else
+   * Local when the host has it); a later one — the owner switching source —
+   * keeps step 1 as it is and puts only the nights into their loading state.
+   * @param {string | null} [want]
+   */
+  const load = async (want = null) => {
+    const seq = ++loadSeq;
+    const switching = sourceKnown && readState !== "error";
+    if (switching) {
+      S.source = want === "local" ? "local" : "remote";
+      S.night = null;
+      nightsState = "loading";
+    } else {
+      readState = "loading";
+      nightsState = "loading";
+    }
     paintApps();
     paintNights();
     const enc = encodeURIComponent(stack);
-    const b = await fetchJson(
-      `/data/backups/${enc}`,
-      `${stack}'s backups`,
-      abort.signal,
-    ).catch(() => null);
-    if (abort.signal.aborted) return;
+    const get = (/** @type {string} */ src) =>
+      fetchJson(
+        `/data/backups/${enc}?source=${src}`,
+        `${stack}'s backups (${src})`,
+        abort.signal,
+      ).catch(() => null);
+    const asked = switching ? S.source : (want ?? q.get("source"));
+    let b = await get(asked === "remote" ? "remote" : "local");
+    // No local copy to read (or none answered): fall back to the remote one.
+    if (
+      !switching &&
+      asked !== "remote" &&
+      (!b || !b.ok) &&
+      !abort.signal.aborted
+    )
+      b = await get("remote");
+    if (abort.signal.aborted || seq !== loadSeq) return;
     if (!b || !b.ok) {
-      read = {
-        error:
-          b && !b.ok
-            ? b.error.fix
-              ? `${b.error.why} — ${b.error.fix}`
-              : b.error.why
-            : "The host did not answer.",
-      };
+      if (switching) {
+        nightsState = "error";
+        paintApps();
+        paintNights();
+        return;
+      }
+      read = readError(errorOf(b));
       readState = "error";
       nightsState = "error";
       paintApps();
       paintNights();
       return;
     }
+    localAvailable = b.body.local_available === true;
+    sourceKnown = true;
+    if (!switching)
+      S.source = defaultSource(
+        localAvailable,
+        b.body.source === "remote" ? "remote" : asked,
+      );
     read = b.body;
     // An address that names an app without its snapshots, or none: the
     // only app is picked; a snapshot the app does not have is dropped.

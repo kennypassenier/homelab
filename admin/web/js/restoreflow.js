@@ -15,16 +15,19 @@ import { formatClock, formatDateTime, formatDay } from "./format.js";
  */
 
 /**
- * The flow's address: `/backups/restore?stack=…[&app=…][&snapshot=…]`.
+ * The flow's address:
+ * `/backups/restore?stack=…[&app=…][&snapshot=…][&source=local|remote]`.
  * @param {string | null} stack
  * @param {string | null} [app]
  * @param {string | null} [snapshot]
+ * @param {string | null} [source] "local" or "remote"; anything else is left out
  */
-export function restoreHref(stack, app = null, snapshot = null) {
+export function restoreHref(stack, app = null, snapshot = null, source = null) {
   const p = new URLSearchParams();
   if (stack) p.set("stack", stack);
   if (app) p.set("app", app);
   if (snapshot) p.set("snapshot", snapshot);
+  if (source === "local" || source === "remote") p.set("source", source);
   const q = p.toString();
   return `/backups/restore${q ? `?${q}` : ""}`;
 }
@@ -113,3 +116,44 @@ export function whatWillHappen(x) {
  */
 export const restoreStep = (s) =>
   s.running ? 4 : !s.app ? 1 : !s.night ? 2 : 3;
+
+/**
+ * restore-two-sources-1 (the owner: "I want to choose myself which of the
+ * two is restored"): the two places a snapshot can come from.
+ * @typedef {"local" | "remote"} RestoreSource
+ */
+
+/** The words for each source, for the choice, the lists and the summary. */
+export const SOURCE_WORDS = /** @type {const} */ ({
+  local: {
+    title: "Local copy",
+    hint: "This host's disks",
+    name: "the local copy",
+  },
+  remote: { title: "Google Drive", hint: "Remote copy", name: "Google Drive" },
+});
+
+/**
+ * The source the flow stands on: the one the address asks for when it can
+ * be used, else Local when the host has a local copy, else Remote.
+ * @param {boolean} localAvailable
+ * @param {string | null | undefined} [requested]
+ * @returns {RestoreSource}
+ */
+export function defaultSource(localAvailable, requested = null) {
+  if (requested === "remote") return "remote";
+  if (requested === "local" && localAvailable) return "local";
+  return localAvailable ? "local" : "remote";
+}
+
+/**
+ * The arguments of the Restore / RestoreNative action: what the host is told,
+ * always with the source the owner chose.
+ * @param {{native: boolean, stack: string, app: string | null,
+ *   snapshot: string | null, source: RestoreSource}} x
+ */
+export function restoreParams(x) {
+  return x.native
+    ? { confirm: x.stack, snapshot: x.snapshot, source: x.source }
+    : { confirm: x.stack, app: x.app, snapshot: x.snapshot, source: x.source };
+}

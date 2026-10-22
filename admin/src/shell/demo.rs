@@ -1191,7 +1191,12 @@ pub async fn run_demo(
                         // snapshots at distinct times so the picker's
                         // newest-first order and "N days ago" are provable
                         // without a real restic repository.
-                        Command::GetBackups { stack, .. } => {
+                        Command::GetBackups { stack, source, .. } => {
+                            // restore-two-sources-1: the local set holds the
+                            // same repositories plus one newer snapshot of
+                            // its own (taken after the last upload), so the
+                            // preview shows the two sources differ.
+                            let local = source.as_deref() == Some("local");
                             let m = homelab_client::spec::build_manifest(
                                 &repo.join("stacks").join(&stack),
                             )
@@ -1207,7 +1212,7 @@ pub async fn run_demo(
                                 .iter()
                                 .enumerate()
                                 .map(|(oi, owner)| {
-                                    let snaps: Vec<serde_json::Value> = demo_nights(&stacks, &stack)
+                                    let mut snaps: Vec<serde_json::Value> = demo_nights(&stacks, &stack)
                                         .map(|i| {
                                             let t = now
                                                 - (oi as u64) * 1_800
@@ -1221,6 +1226,18 @@ pub async fn run_demo(
                                             })
                                         })
                                         .collect();
+                                    if local {
+                                        let t = now - (oi as u64) * 1_800 - 600;
+                                        snaps.insert(
+                                            0,
+                                            serde_json::json!({
+                                                "id": format!("demolocal{oi}snapshotidfortest"),
+                                                "short_id": format!("demol{oi}"),
+                                                "time": t,
+                                                "run": t,
+                                            }),
+                                        );
+                                    }
                                     // redesign-backups (Backups redesign 3.71): a size for
                                     // every repository but a several-app
                                     // stack's last (the real host has none
@@ -1259,7 +1276,23 @@ pub async fn run_demo(
                                     repo
                                 })
                                 .collect();
-                            serde_json::json!({ "native": native, "repos": repos }).to_string()
+                            serde_json::json!({
+                                "native": native,
+                                "repos": repos,
+                                "source": if local { "local" } else { "remote" },
+                                "local_available": true,
+                            })
+                            .to_string()
+                        }
+                        // restore-two-sources-1: a folder listing that says
+                        // which source it was read from.
+                        Command::BrowseSnapshot { source, .. } => {
+                            let from = source.as_deref().unwrap_or("remote");
+                            serde_json::json!([
+                                { "name": "data", "path": "/data", "type": "dir" },
+                                { "name": format!("read-from-{from}.txt"), "path": format!("/read-from-{from}.txt"), "type": "file", "size": 42 },
+                            ])
+                            .to_string()
                         }
                         // fix-257 (design review, 2026-10-03): the real
                         // host answers TokenList with a list

@@ -25,7 +25,7 @@ StartLimitBurst=0
 Type=notify
 User=kitchen
 Group=kitchen
-EnvironmentFile=-/appdata/kitchen/kitchen-config/kitchen.env
+EnvironmentFile=/appdata/kitchen/kitchen-config/kitchen.env
 WorkingDirectory=/appdata/kitchen/kitchen-config
 # feat-backup-1: /run/kitchen/backup.sock, where `kitchen backup-pause`
 # reaches the running service; outside the state root, so never archived.

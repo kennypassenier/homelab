@@ -232,6 +232,9 @@ fn native_units_start_on_a_fresh_container() {
         "stacks/kyu/kyu-runner/kyu-runner.service",
         "stacks/kyu/http-switchboard/http-switchboard.service",
         "stacks/almanac/almanac/almanac.service",
+        // KITCHEN_TOKEN and KITCHEN_SECRET_KEY: without them kitchen
+        // refuses to start, so the file is required on purpose.
+        "stacks/kitchen/kitchen/kitchen.service",
     ];
     let mut seen = 0;
     for stack in std::fs::read_dir(root.join("stacks")).unwrap() {

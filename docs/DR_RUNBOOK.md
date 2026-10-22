@@ -389,6 +389,7 @@ One section per directory under `stacks/`, read from its `lxc-compose.yml` and, 
   - program `/opt/kitchen/bin/kitchen`, from the GitHub release `kennypassenier/kitchen` (asset `kitchen`); update policy manual.
   - unit file `stacks/kitchen/kitchen/kitchen.service` in the repository; the container's copy is `/etc/systemd/system/kitchen.service`.
   - data: repository `rclone:gdrive:homelab-backups/kitchen-config`, archive `/kitchen-data.tar` holding a tar of `/appdata/kitchen/kitchen-config`.
+  - vault copy of kitchen (`/appdata/kitchen/kitchen-config/kitchen.env`): `/var/lib/homelab/secrets/kitchen/kitchen-config/kitchen.env`.
   - re-register a running unit after the daemon lost its state (needs the daemon): `homelab adopt stacks/kitchen`. Adoption only records a service that is already active; it never starts one.
 - Rebuild: the native route in Layer 2, then this stack's data by Layer 4 (native services).
 

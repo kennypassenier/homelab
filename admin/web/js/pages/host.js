@@ -1057,16 +1057,31 @@ export function mount(root, ctx) {
     }
     setAgo(diskAgo, f.host.disk_detail?.measured_at ?? null);
   };
-  const loadGrowth = async () => {
-    const r = await fetchJson("/data/disk-growth", "disk growth", abort.signal);
-    if (abort.signal.aborted) return;
+  /** The last /data/disk-growth answer; null until it arrives. */
+  /** @type {Awaited<ReturnType<typeof fetchJson>> | null} */
+  let growthRes = null;
+  /**
+   * The growth line needs two answers, the fit and the root volume's size
+   * (the fleet read). Whichever arrives last paints it: with the size still
+   * unknown, 0 GB a week would read "Root is not growing", which is wrong.
+   */
+  const paintGrowth = () => {
+    const r = growthRes;
+    if (!r) return;
     const rootGb = current().fleet?.host.disk_detail?.root_lv_size_gb ?? 0;
+    if (r.ok && !(rootGb > 0)) return;
     const line = r.ok ? rootGrowth(r.body.rows ?? [], rootGb) : null;
     growthLine.textContent =
       line ??
       (r.ok
         ? "Growth: not enough history yet to say how fast root fills"
         : `Growth not measured: ${r.error.why}`);
+  };
+  const loadGrowth = async () => {
+    const r = await fetchJson("/data/disk-growth", "disk growth", abort.signal);
+    if (abort.signal.aborted) return;
+    growthRes = r;
+    paintGrowth();
   };
 
   // ── Connection ────────────────────────────────────────────────────────
@@ -1937,6 +1952,7 @@ export function mount(root, ctx) {
     paintDisk();
     paintAbout();
     paintLine();
+    paintGrowth();
   };
 
   // `/` (the dashboard's search key) searches the containers; Esc shows every

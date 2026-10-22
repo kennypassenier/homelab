@@ -16,7 +16,7 @@ import { test as nodeTest } from "node:test";
 import { parkedAware, parkedClass } from "./parked.js";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { launch, settle } from "./harness.js";
+import { launch } from "./harness.js";
 import { clockNow, clockNowS } from "./clock.js";
 // fix-210: this import was missing — the fix-206 spacing sweep below has
 // referenced DRIVABLE_PATHS since it was written without ever importing
@@ -1441,7 +1441,7 @@ test("invariants: chart blocks fill their grid's width, with no empty track left
       // redesign-371-metrics: the cards' 3-column grid.
       const grid = page.locator(".mk-panels").first();
       await grid.waitFor({ timeout: 15000 });
-      await settle(page, 1500);
+      await page.waitForTimeout(1500);
       const gap = await grid.evaluate((g) => {
         const gr = g.getBoundingClientRect();
         const right = Math.max(
@@ -7717,7 +7717,7 @@ test("invariants: stack hub review — the More menu keeps the keyboard focus ac
     const page = await freshPage(context);
     await page.goto(`${BASE}/stacks/gateway`);
     await page.locator(".sh-head__actions").waitFor({ timeout: 10000 });
-    await settle(page, 1500);
+    await page.waitForTimeout(1500);
     await page
       .locator("body")
       .click({ position: { x: 5, y: 500 }, timeout: 5000 });
@@ -7776,7 +7776,7 @@ test("invariants: stack hub review — Settings ▸ Secrets is this stack's pane
     await page.goto(`${BASE}/stacks/gateway/settings`);
     const pane = page.locator("#secrets .sx--one");
     await pane.waitFor({ timeout: 10000 });
-    await settle(page, 1500);
+    await page.waitForTimeout(1500);
     const r = await page.evaluate(() => {
       const sec = /** @type {HTMLElement} */ (
         document.getElementById("secrets")
@@ -8571,7 +8571,7 @@ async function genWalk(entry) {
       if (!d) {
         const path = entry.path;
         await page.goto(BASE + path);
-        await settle(page, 1500);
+        await page.waitForTimeout(1500);
         keep(path, await page.evaluate(layoutAudit, null));
         const pc = await page.evaluate(pageChecks);
         keep(path, pc);
@@ -8589,7 +8589,7 @@ async function genWalk(entry) {
             ].slice(0, 40))
               /** @type {HTMLElement} */ (b).click();
           });
-          await settle(page, 200);
+          await page.waitForTimeout(200);
           const more = await page.evaluate(pageChecks);
           for (const href of [...pc.hrefs, ...more.hrefs])
             if (!GEN.sameSite.has(href)) GEN.sameSite.set(href, path);
@@ -8599,7 +8599,7 @@ async function genWalk(entry) {
         }
       } else {
         await page.goto(BASE + d.path);
-        await settle(page, 1200);
+        await page.waitForTimeout(1200);
         let btn = page.locator(
           d.drive
             ? `main [data-drive="${d.drive}"]:visible`
@@ -8615,7 +8615,7 @@ async function genWalk(entry) {
         const dlg = page.locator("dialog[open]").last();
         await dlg.waitFor({ timeout: 5000 }).catch(() => {});
         if (d.then) await d.then(page);
-        await settle(page, 700);
+        await page.waitForTimeout(700);
         await markDialog();
         await auditDialog(
           `${d.path} › ${d.drive ?? d.text}${d.then ? " › then" : ""}`,
@@ -9324,7 +9324,7 @@ test("invariants: redesign-final-m1: Stacks is the approved demo: no Inbox banne
     await page.waitForSelector(".sk-kpis .kp-kpi:not([data-loading])", {
       timeout: 8000,
     });
-    await settle(page, 800);
+    await page.waitForTimeout(800);
     const f = await page.evaluate(() => {
       const card = document.querySelector("#stack-list");
       return {

@@ -104,6 +104,16 @@
         "install-native": "The service to install; a stack with one service has only that one."
       }
     },
+    "source": {
+      "kind": "choice",
+      "label": "Source",
+      "help": "Where the snapshot is read from: the local copy on the host's own disks, or Google Drive. Empty: Google Drive.",
+      "required": false,
+      "choices": [
+        { "value": "local", "label": "Local copy (this host's disks)" },
+        { "value": "remote", "label": "Google Drive" }
+      ]
+    },
     "skip_backup": {
       "kind": "check",
       "label": "Skip the backup before destroying",

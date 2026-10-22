@@ -156,6 +156,7 @@ fn follow_the_form_description_is_one_file_both_sides_read() {
         [
             "act-app",
             "act-snapshot",
+            "act-source",
             "act-skip-safety-copy",
             "act-confirm"
         ]

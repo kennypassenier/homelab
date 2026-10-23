@@ -43,6 +43,17 @@
 }
 .sh-head__mark {
   border-radius: 10px;
+  /* stack-badge-center-1: kp's page header lead is a flex box, which left
+     the initials in the top-left corner of their plate (Kenny, 2026-10-22:
+     "AL" on almanac, in every theme). The letters centre both ways, and the
+     theme's letter-spacing is not left hanging after the last letter. */
+  justify-content: center;
+  align-items: center;
+  text-align: center;
+  padding: 0;
+}
+.sh-head__mark > .kp-idmark__letters {
+  margin-inline-end: calc(-1 * var(--kp-idmark-tracking, 0.04em));
 }
 .sh-head .kp-page-header__line > h1 {
   overflow-wrap: anywhere;

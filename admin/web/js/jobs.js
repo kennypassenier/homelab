@@ -112,7 +112,17 @@ export function atLeastAsFar(a, b) {
 export function mergeJobLists(server, held, fresh) {
   /** @type {Job[]} */
   let jobs = [];
-  for (const j of server) jobs = upsertJob(jobs, j);
+  // progress-stays-put-1: the server's copy of a running job carries no step
+  // progress, so the held copy's progress rides on it. Without this the
+  // list flipped between "step 15 of 86" and "Starting" at every re-read.
+  for (const j of server)
+    jobs = upsertJob(
+      jobs,
+      keepProgress(
+        j,
+        held.find((x) => x.job === j.job),
+      ),
+    );
   for (const j of held) {
     const s = jobs.find((x) => x.job === j.job);
     if (!s) {
@@ -124,6 +134,31 @@ export function mergeJobLists(server, held, fresh) {
 }
 
 /**
+ * A job's new view with the progress (and byte counter) of the older view
+ * kept when the new one has none or is behind it. Progress only moves
+ * forward: an older snapshot never pulls a run back to an earlier step.
+ * @param {Job} view
+ * @param {Job | undefined} old
+ * @returns {Job}
+ */
+export function keepProgress(view, old) {
+  if (!old) return view;
+  /** @type {Job} */
+  let out = view;
+  const behind =
+    !view.progress ||
+    (old.progress != null &&
+      (view.progress.n < old.progress.n ||
+        (view.progress.n === old.progress.n &&
+          !view.progress.finished &&
+          old.progress.finished)));
+  if (old.progress && behind) out = { ...out, progress: old.progress };
+  if (!view.bytes && old.bytes && !finished(view.state))
+    out = { ...out, bytes: old.bytes };
+  return out;
+}
+
+/**
  * A job's new view in the list, newest first, the oldest dropped past
  * `KEEP_JOBS`. A progress event the page kept is not lost when the job
  * view without it arrives.
@@ -132,11 +167,10 @@ export function mergeJobLists(server, held, fresh) {
  * @returns {Job[]}
  */
 export function upsertJob(jobs, view) {
-  const old = jobs.find((j) => j.job === view.job);
-  const merged =
-    old && !view.progress && old.progress
-      ? { ...view, progress: old.progress }
-      : view;
+  const merged = keepProgress(
+    view,
+    jobs.find((j) => j.job === view.job),
+  );
   const rest = jobs.filter((j) => j.job !== view.job);
   return [merged, ...rest].sort((a, b) => b.job - a.job).slice(0, KEEP_JOBS);
 }
@@ -302,6 +336,7 @@ export function stepText(j) {
     if (j.state === "running") return "starting";
     return "—";
   }
+  if (p.n === 0) return p.m ? `starting, ${p.m} steps planned` : "starting";
   return p.m ? `step ${p.n}/${p.m}` : `step ${p.n}`;
 }
 
@@ -486,26 +521,85 @@ export function jobPanel(j, ctx) {
 }
 
 /**
- * redesign-final-c2 (FLOWS.md §1.2): the running-job drawer's step list
- * (ui.js `checkList` rows) — the steps before the current one ticked, the
- * current one running (failed when the job failed, the rest then
- * skipped), the ones after it waiting. A step is named by what the host
- * sent as it began (`names`, step number → name), "Step N" when this page
- * never saw it. A long job keeps the two steps around the current one and
- * folds the rest into a "Steps a–b" row on either side.
+ * The steps a run has in all, as far as the host has said: its announced
+ * total, never less than the step it is at. `grows` is true while the host
+ * has announced no total (the count can still go up, and says so in words).
+ * @param {Progress | null | undefined} p
+ * @returns {{total: number | null, grows: boolean}}
+ */
+export function stepTotal(p) {
+  if (!p) return { total: null, grows: true };
+  if (p.m) return { total: Math.max(p.m, p.n), grows: false };
+  return { total: Math.max(p.n, 1), grows: true };
+}
+
+/**
+ * progress-stays-put-1, steps-total-known-1: the figures over the step
+ * list, one source for the three of them. `done` counts the steps that
+ * finished; `total` is shown from the first frame; a total that can still
+ * grow reads "at least N" with `note` saying why, never a blank.
+ * @param {Job} j
+ * @param {number | null} [historyLen] the host's own step count for a finished job
+ * @returns {{done: number, total: number | null, of: string, note: string}}
+ */
+export function stepFigures(j, historyLen = null) {
+  const p = j.progress;
+  const ended = finished(j.state);
+  if (historyLen) {
+    const done = j.state === "done" ? historyLen : Math.max(0, historyLen - 1);
+    return { done, total: historyLen, of: String(historyLen), note: "" };
+  }
+  const t = stepTotal(p);
+  const done = !p
+    ? 0
+    : ended
+      ? j.state === "done"
+        ? (t.total ?? p.n)
+        : Math.max(0, p.n - 1)
+      : Math.max(0, p.n - (p.finished ? 0 : 1));
+  if (t.total == null)
+    return {
+      done,
+      total: null,
+      of: "not counted yet",
+      note: "The host counts the steps when it starts.",
+    };
+  if (t.grows && !ended)
+    return {
+      done,
+      total: t.total,
+      of: `at least ${t.total}`,
+      note: "The total grows as the host announces more steps.",
+    };
+  return { done, total: t.total, of: String(t.total), note: "" };
+}
+
+/**
+ * The running job's step list (ui.js `checkList` rows): EVERY step of the
+ * plan, from the first frame to the end, in one fixed order. The steps
+ * before the current one are ticked, the current one runs (failed when the
+ * job failed, the rest then skipped), the ones after it wait. A step is
+ * named by what the host sent as it began (`names`, step number → name),
+ * "Step N" when it has not begun or this page never saw it. A phase
+ * before the first step ("the host is getting ready") is a state of the
+ * list's first row, never a card that replaces the list; the list is never
+ * folded, so no row moves when another changes (Kenny, 2026-10-22/23:
+ * "verschijnen mag, verschuiven niet").
  * @param {Job} j
  * @param {Map<number, string>} names
  * @returns {import("./ui.js").CheckRow[]}
  */
 export function jobSteps(j, names) {
   const p = j.progress;
+  const ended = finished(j.state);
+  const ok = j.state === "done";
   if (!p) {
-    if (finished(j.state))
+    if (ended)
       return [
         {
           title: jobBadge(j.state).label,
           desc: j.message ?? "the job ended",
-          state: j.state === "done" ? "ok" : "bad",
+          state: ok ? "ok" : "bad",
         },
       ];
     return [
@@ -517,41 +611,128 @@ export function jobSteps(j, names) {
           }
         : {
             title: "Starting",
-            desc: "the host is getting ready",
+            desc: "the host is getting ready and will list the steps",
             state: "run",
           },
     ];
   }
-  const total = Math.max(p.m ?? p.n, p.n);
-  const ok = j.state === "done";
-  const ended = finished(j.state);
+  const { total: t, grows } = stepTotal(p);
+  const total = t ?? p.n;
   /** @param {number} i @returns {import("./ui.js").CheckRow} */
   const row = (i) => {
     const title = names.get(i) ?? (i === p.n ? p.step : `Step ${i}`);
-    if (i < p.n || (ok && ended)) return { title, desc: "done", state: "ok" };
+    if (i < p.n || (ok && ended) || (i === p.n && p.finished && !ended))
+      return { title, desc: "done", state: "ok" };
     if (i === p.n)
       return ended
         ? { title, desc: j.message ?? "failed here", state: "bad" }
         : { title, desc: `step ${p.n} of ${total}, running now`, state: "run" };
+    // Nothing has begun yet (n is 0): the first step is the one starting.
+    if (!ended && p.n === 0 && i === 1)
+      return {
+        title,
+        desc: "starting: the host is getting ready",
+        state: "run",
+      };
     return ended
       ? { title, desc: "not run", state: "skip" }
       : { title, desc: "to come", state: "wait" };
   };
-  if (total <= 7) return Array.from({ length: total }, (_, k) => row(k + 1));
-  const from = Math.max(1, p.n - 1);
-  const to = Math.min(total, p.n + 2);
-  /** @type {import("./ui.js").CheckRow[]} */
-  const rows = [];
-  if (from > 1)
-    rows.push({ title: `Steps 1–${from - 1}`, desc: "done", state: "ok" });
-  for (let i = from; i <= to; i++) rows.push(row(i));
-  if (to < total)
+  const rows = Array.from({ length: total }, (_, k) => row(k + 1));
+  if (grows && !ended)
     rows.push({
-      title: `Steps ${to + 1}–${total}`,
-      desc: ended ? "not run" : "to come",
-      state: ended && !ok ? "skip" : ok ? "ok" : "wait",
+      title: "More steps may follow",
+      desc: "the host has not said how many steps there are",
+      state: "wait",
     });
   return rows;
+}
+
+/**
+ * A finished job's median is compared with the time it took only when both
+ * measure the same thing (timebar-after-done-1): a median of one small
+ * operation inside a bigger job ("2 s" against a run of 1 min 4 s) says
+ * nothing about the run, so there the median is named for what it is and no
+ * "slower" badge is drawn.
+ * @param {ReturnType<typeof estimateRange>} est
+ * @param {number | null} ran seconds the job took
+ * @param {JobState} state
+ * @param {string} [op] the operation the median belongs to
+ * @returns {{text: string, delta: {tone: "warning" | "success", text: string} | null,
+ *   comparable: boolean}}
+ */
+export function medianView(est, ran, state, op = "") {
+  if (!est) return { text: "no median yet", delta: null, comparable: false };
+  const comparable =
+    ran == null || ran <= 0 || (ran <= est.median * 4 && ran * 4 >= est.median);
+  const text = `${humanDuration(est.median)}${
+    !comparable && op ? ` (of ${op}, a part of this job)` : ""
+  }`;
+  if (!comparable || ran == null || state !== "done")
+    return { text, delta: null, comparable };
+  const diff = ran - est.median;
+  if (Math.abs(diff) < 1) return { text, delta: null, comparable };
+  return {
+    text,
+    delta: {
+      tone: diff > 0 ? "warning" : "success",
+      text: `${humanDuration(Math.abs(diff))} ${diff > 0 ? "slower" : "faster"}`,
+    },
+    comparable,
+  };
+}
+
+/**
+ * "Where the time went" (timebar-after-done-1, progress-stays-put-1): one
+ * bar split by step, agreeing with the step list. A step the page did not
+ * see begin has no time here, and the words say so instead of "No step has
+ * finished yet" while steps show done; the gap between the bar's sum and
+ * the time the job took is named.
+ * @param {{title: string, state: string}[]} rows the step list
+ * @param {Map<string, number>} times seconds by step title
+ * @param {number | null} medianS
+ * @param {number | null} ran seconds the job took
+ * @param {boolean} ended
+ * @returns {{kind: "empty", message: string} |
+ *   {kind: "bar", parts: {key: string, label: string, value: number,
+ *     bad: boolean}[], sum: number, whole: number, note: string}}
+ */
+export function timeView(rows, times, medianS, ran, ended) {
+  const parts = [];
+  for (const r of rows) {
+    const s = times.get(r.title);
+    if (s != null && s > 0)
+      parts.push({
+        key: r.title,
+        label: r.title,
+        value: s,
+        bad: r.state === "bad",
+      });
+  }
+  if (!parts.length) {
+    const anyDone = rows.some((r) => r.state === "ok");
+    return {
+      kind: "empty",
+      message: ended
+        ? "The host did not record how long each step took."
+        : anyDone
+          ? "The steps are timed as they begin; the first times appear with the next step."
+          : "No step has finished yet.",
+    };
+  }
+  const sum = parts.reduce((a, x) => a + x.value, 0);
+  const whole = Math.max(medianS ?? 0, sum);
+  const gap = ran != null ? Math.round(ran - sum) : 0;
+  return {
+    kind: "bar",
+    parts,
+    sum,
+    whole,
+    note:
+      gap >= 3
+        ? `${humanDuration(sum)} of the ${humanDuration(ran ?? 0)} taken is timed per step; the rest ran before this view saw the steps begin.`
+        : "",
+  };
 }
 
 /**

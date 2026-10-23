@@ -21,7 +21,7 @@
 // `flow`), so a closed tab stops nothing, and the job is in Activity like
 // every other. The log comparison is read here from the job's deploy time.
 
-import { act, onAct, send } from "../act.js";
+import { act, actionLabel, onAct, send } from "../act.js";
 import { refusalCallout } from "../actui.js";
 import { stage } from "../stage.js";
 import { attachCardStates, setCardState } from "/static/kp/js/card-state.js";
@@ -41,7 +41,9 @@ import { diffBlocks } from "../editui.js";
 import { attachCountdowns } from "/static/kp/js/countdown.js";
 import { formatDateTime, humanDuration } from "../format.js";
 import { inboxNow } from "../inboxlist.js";
-import { jobLogViewer } from "../joblog.js";
+import { humanBytes } from "../backupsview.js";
+import { runSpec } from "../runspec.js";
+import { buildRunView } from "../runview.js";
 import { feedUpdates } from "../inboxsources.js";
 import { openPinRollback } from "../pinupdate.js";
 import { planView } from "../plan.js";
@@ -53,6 +55,7 @@ import {
   flowTitle,
   itemsFor,
   lastDeployS,
+  movingApps,
   logVerdict,
   movesOf,
   notesQuery,
@@ -322,7 +325,9 @@ export function mount(root, scope) {
     caption: "Apps with a newer version; tick the ones to update",
     captionHidden: true,
     search: null,
-    nothing: "Everything is up to date.",
+    nothing: scope.all
+      ? "Everything is up to date."
+      : "Nothing to update: every app of this stack is pinned to a version that is current.",
     select: { label: "Select every update", actions: [] },
     columns: [
       { label: "App", sort: "text" },
@@ -559,7 +564,23 @@ export function mount(root, scope) {
     "data-kp-pipeline-share": "false",
     "aria-label": "Updates in progress",
   });
-  const stepsBox = h("div", { class: "uf-steps", hidden: "" });
+  // one-progress-view-1: the run is the shared progress view (runview.js):
+  // the steps with their progress on one side, the log and the result on the
+  // other, each its own scroll area. The board is the other way to see the
+  // same steps and shares the step area with the list; the layout choice
+  // sits in the row above the steps. Nothing in it moves while the job runs.
+  const view = buildRunView({
+    label: "The running update",
+    compact: true,
+    logHeight: "13rem",
+    logOpts: {
+      whole: false,
+      label: "What the host did",
+      hint: "No lines yet. Lines appear here as the host works.",
+    },
+  });
+  view.element.style.setProperty("--rv-steps-h", "18rem");
+  view.slots.alt.append(board);
   /** @type {"board" | "steps"} */
   let layout = "board";
   try {
@@ -594,29 +615,19 @@ export function mount(root, scope) {
     },
     mark: (b, v) => void drivable(b, LAYOUT, v),
   });
-  const runList = h(
-    "div",
-    { class: "uf-run" },
+  view.slots.lead.append(
     h(
       "div",
       { class: "uf-ctl" },
       h("b", { class: "uf-ctl__label" }, "Layout"),
       layoutSeg.el,
     ),
-    board,
-    stepsBox,
   );
-  const detachRun = [attachPipelines(runList), attachSteplists(runList)];
-  // kp's log viewer, the same builder as the job panel's (feat-kpadopt-2).
-  const jobLog = jobLogViewer(0, {
-    whole: false,
-    tools: "search,wrap,time,level,copy",
-    label: "What the host did",
-    height: "12rem",
-    hint: "No lines yet. Lines appear here as the host works.",
-  });
+  view.setLead(true);
+  const detachRun = [attachPipelines(view.slots.alt)];
+  const jobLog = view.log;
   jobLog.element.classList.add("uf-log");
-  runCard.body.append(runList, jobLog.element);
+  runCard.body.append(view.element);
 
   // ---- 6 · Done --------------------------------------------------------
   const doneCard = h("section", {
@@ -686,7 +697,9 @@ export function mount(root, scope) {
     );
     summary.textContent = items.length
       ? `${items.length} ${items.length === 1 ? "update" : "updates"} waiting: ${sum.text}`
-      : "Everything is up to date.";
+      : scope.all
+        ? "Everything is up to date."
+        : "Nothing to update.";
     if (!items.length) {
       table.tbody.replaceChildren();
       table.ready();
@@ -915,10 +928,24 @@ export function mount(root, scope) {
     sel.refresh();
   };
 
+  /**
+   * update-nothing-1: the stack's apps on a moving tag, read from its files
+   * before the list is drawn: the pull row exists only for those. Undefined
+   * while unread, null when the files could not be read (the row is then
+   * offered as before).
+   * @type {string[] | null | undefined}
+   */
+  let moving = scope.all ? null : undefined;
+  /** The stale-images answer that waits for `moving`. @type {any} */
+  let waiting;
   /** @param {any} body */
   const got = (body) => {
+    if (moving === undefined) {
+      waiting = body ?? null;
+      return;
+    }
     feedUpdates(body);
-    items = itemsFor(body, scope);
+    items = itemsFor(body, scope, moving);
     releasedOf = new Map(
       (body?.images ?? [])
         .filter((/** @type {any} */ x) => x.key && x.released)
@@ -1263,7 +1290,8 @@ export function mount(root, scope) {
     );
     layoutSeg.set(layout);
     board.hidden = layout !== "board";
-    stepsBox.hidden = layout !== "steps";
+    view.slots.alt.hidden = layout !== "board";
+    view.slots.stepsList.hidden = layout !== "steps";
     const failedRow = rows.find((r) => r.state === "bad");
     const lane = failedRow
       ? failedRow.step >= 5
@@ -1302,30 +1330,59 @@ export function mount(root, scope) {
           .toUpperCase(),
       })),
     });
-    if (layout === "steps") {
-      stepsBox.replaceChildren(
-        buildSteplist(
-          rows.map((r) => ({
-            id: r.id,
-            title: r.title,
-            note: r.note ? `${r.desc} · ${r.note}` : r.desc,
-            state:
-              r.state === "ok"
-                ? "done"
-                : r.state === "run"
-                  ? "running"
-                  : r.state === "bad"
-                    ? "failed"
-                    : r.state === "skip"
-                      ? "skipped"
-                      : "pending",
-            time: r.time,
-          })),
-          { label: "Steps of the update" },
-        ),
-      );
-      attachSteplists(stepsBox);
-    }
+    // The shared view's figures, bar and time bar, with the flow's own rows
+    // as the steps: "Steps done" counts the rows that finished.
+    const finishedRows = rows.filter((r) => r.state === "ok").length;
+    const spec = runSpec(j, {
+      rows: rows.map((r) => ({
+        id: r.id,
+        title: r.title,
+        desc: r.desc,
+        state: r.state,
+        note: r.note,
+        time: r.time,
+      })),
+      times: new Map(
+        (flow?.rows ?? [])
+          .filter((/** @type {any} */ r) => r.took_s != null)
+          .map((/** @type {any} */ r) => [r.title, Number(r.took_s)]),
+      ),
+      historyLen: null,
+      now: now(),
+      progressAt: act.progressAt.get(j.job) ?? null,
+      label: actionLabel,
+      human: (n) => humanBytes(n),
+    });
+    const pct = done
+      ? j.state === "done"
+        ? 100
+        : Math.round((finishedRows / rows.length) * 100)
+      : Math.min(99, Math.round((finishedRows / rows.length) * 100));
+    view.paint({
+      ...spec,
+      figures: spec.figures && {
+        ...spec.figures,
+        done: finishedRows,
+        of: String(rows.length),
+        note: "",
+      },
+      bar: spec.bar && {
+        ...spec.bar,
+        percent: pct,
+        note: !done
+          ? `${pct} % done, by steps.`
+          : j.state === "done"
+            ? "Finished."
+            : `Stopped at ${pct} %.`,
+        line: done
+          ? null
+          : {
+              ...(spec.bar.line ?? {}),
+              step: Math.min(rows.length, finishedRows + 1),
+              steps: rows.length,
+            },
+      },
+    });
     jobLog.bind(j.job);
     if (done) {
       if (logsFor !== j.job) {
@@ -1618,6 +1675,19 @@ export function mount(root, scope) {
 
   show();
   table.loading({ words: "Reading which apps have a newer version" });
+  if (!scope.all)
+    void (async () => {
+      const r = await fetchJson(
+        `/data/stacks/${encodeURIComponent(scope.stack)}/edit`,
+        "the stack's files",
+        abort.signal,
+      );
+      if (abort.signal.aborted) return;
+      moving = r.ok ? movingApps(r.body?.images) : null;
+      if (waiting !== undefined) got(waiting);
+    })().catch(() => {
+      moving = null;
+    });
   void (async () => {
     const r = await slowRead(
       "/data/stale-images",
@@ -1632,7 +1702,7 @@ export function mount(root, scope) {
       // its moving tags point at; the reason stays on top.
       if (scope.all) table.failed(r.error);
       else {
-        items = itemsFor(null, scope);
+        items = itemsFor(null, scope, moving ?? null);
         chosen = firstChosen(items, scope);
         picked = true;
         paintList();
@@ -1657,7 +1727,7 @@ export function mount(root, scope) {
     detachGates();
     detachDeltas();
     detachDeps();
-    jobLog.stop();
+    view.stop();
     detachStages();
     for (const f of detachRun) f();
   };

@@ -20,7 +20,7 @@ use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 
 use crate::core::notify::{
-    self, AlertDraft, Draft, Fix, Kind, Notice, PushOutcome, Settings, settles,
+    self, AlertDraft, Draft, Fix, Kind, Notice, PushOutcome, Settings, ends, is_success, settles,
 };
 
 type Res<T> = Result<T, Error>;
@@ -222,14 +222,14 @@ fn update(tx: &Transaction, n: &Notice) -> Res<()> {
 pub(crate) fn add(tx: &Transaction, d: Draft, at: i64, push: PushOutcome) -> Res<Notice> {
     let mut n = Notice::from_draft(0, d, at, push);
     n.id = insert(tx, &n, false)?;
-    if n.kind == Kind::ActionDone
+    if is_success(&n)
         && let Some(stack) = n.stack.clone()
     {
         let open = many(
             tx,
             &format!(
                 "SELECT {COLS} FROM notices WHERE is_read = 0 AND stack = ?1 AND at <= ?2 \
-                 AND id <> ?3 AND kind IN ('action_failed','incident','schedule_missed')"
+                 AND id <> ?3 AND kind IN ('action_failed','incident','schedule_missed','host_event')"
             ),
             &[&stack, &n.at, &(n.id as i64)],
         )?;
@@ -237,6 +237,28 @@ pub(crate) fn add(tx: &Transaction, d: Draft, at: i64, push: PushOutcome) -> Res
             if settles(&n, &x) {
                 x.read = true;
                 x.resolved_by = Some(n.id);
+                tx.execute(
+                    "UPDATE notices SET is_read = 1, resolved_by = ?2 WHERE id = ?1",
+                    params![x.id as i64, n.id as i64],
+                )?;
+            }
+        }
+    }
+    // inbox-resolved-clears-1: a service that answers again, an alert that
+    // resolved, settles the open notice of the same key.
+    if matches!(n.kind, Kind::Up | Kind::AlertResolved)
+        && let Some(key) = n.key.clone()
+    {
+        let open = many(
+            tx,
+            &format!(
+                "SELECT {COLS} FROM notices WHERE is_read = 0 AND notice_key = ?1 AND at <= ?2 \
+                 AND id <> ?3 AND kind IN ('down','alert')"
+            ),
+            &[&key, &n.at, &(n.id as i64)],
+        )?;
+        for x in open {
+            if ends(&n, &x) {
                 tx.execute(
                     "UPDATE notices SET is_read = 1, resolved_by = ?2 WHERE id = ?1",
                     params![x.id as i64, n.id as i64],

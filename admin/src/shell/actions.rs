@@ -2041,6 +2041,7 @@ impl Actions {
                 })
                 .sum();
             tracker.set_total(total);
+            self.announce_plan(view, &tracker);
         }
         // fix-171 round 3 (Kenny: "release_install over a stack's several
         // natives, e.g. kyu's three, must announce the full sum up front"),
@@ -2075,6 +2076,7 @@ impl Actions {
             .unwrap_or(0);
             if total > 0 {
                 tracker.set_total(total);
+                self.announce_plan(view, &tracker);
             }
         }
         let mut last = None;
@@ -2270,6 +2272,20 @@ impl Actions {
         reply.map_err(Stop::Link)
     }
 
+    /// steps-total-known-1: tell the page "step 0 of m" as soon as the
+    /// total is known, before the first step mark, so the step list and the
+    /// total show from the first frame.
+    fn announce_plan(&self, view: &mut JobView, tracker: &Tracker) {
+        let op = format!("{}-{}", view.action.slug(), view.stack);
+        if let Some(p) = tracker.planned(&op) {
+            view.progress = Some(p.clone());
+            self.inner.publish.publish(
+                "action_progress",
+                serde_json::json!({ "job": view.job, "progress": p }),
+            );
+        }
+    }
+
     fn line(&self, m: ServerMsg, id: u64, view: &mut JobView, tracker: &mut Tracker) {
         // ask-kp11be-5: the host's byte counter of this job's operation. An
         // older host sends it without a request id; it then belongs to no
@@ -2319,6 +2335,9 @@ impl Actions {
         // (`Tracker::set_total`), so this only confirms it.
         if let Some(p) = plan {
             tracker.on_plan(&p.op, &p.steps);
+            if view.progress.is_none() {
+                self.announce_plan(view, tracker);
+            }
         }
         if let Some(mark) = step {
             let p = tracker.on_mark(&mark, ts.max(0) as u64);

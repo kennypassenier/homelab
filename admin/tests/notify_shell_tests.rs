@@ -542,3 +542,63 @@ async fn settings_snooze_and_cursors_are_kept() {
         .await;
     assert_eq!(c.host_cursor().await, 5);
 }
+
+/// inbox-resolved-clears-1 (Kenny, 2026-10-23: "waarom zie ik dan 62
+/// meldingen in Inbox?"): a service that answers again settles its "does
+/// not answer", an alert's resolution its firing, and the host's own good
+/// scheduled backup settles the host's own failed one; another key or
+/// another stack stays open.
+#[tokio::test]
+async fn an_end_settles_the_trouble_of_the_same_subject() {
+    let clock = TestClock::at(10);
+    let (c, _, _) = center("ends", &clock);
+    let keyed = |kind: Kind, key: &str| {
+        let mut d = Draft::new(kind, "watch-x", "t", "b");
+        d.detail.key = Some(key.to_string());
+        d
+    };
+    let down = c.notify(keyed(Kind::Down, "sonarr")).await;
+    let other = c.notify(keyed(Kind::Down, "radarr")).await;
+    let firing = c.notify(keyed(Kind::Alert, "disk-full")).await;
+    let host_failed = {
+        let mut d = Draft::new(Kind::HostEvent, "backup-paperwork", "backup failed", "b");
+        d.stack = Some("paperwork".into());
+        d.detail.level = Level::Warning;
+        c.notify(d).await
+    };
+    let other_stack = {
+        let mut d = Draft::new(Kind::HostEvent, "backup-films", "backup failed", "b");
+        d.stack = Some("films".into());
+        d.detail.level = Level::Warning;
+        c.notify(d).await
+    };
+    clock.advance(10);
+    c.notify(keyed(Kind::Up, "sonarr")).await;
+    c.notify(keyed(Kind::AlertResolved, "disk-full")).await;
+    let good = {
+        let mut d = Draft::new(Kind::HostEvent, "backup-paperwork", "backup done", "b");
+        d.stack = Some("paperwork".into());
+        d.detail.level = Level::Ok;
+        c.notify(d).await
+    };
+    let snap = c.snapshot().await;
+    let by = |id: u64| {
+        snap["notices"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|n| n["id"] == id)
+            .cloned()
+            .unwrap()
+    };
+    assert_eq!(by(down.id)["read"], true, "answers again settles it");
+    assert_eq!(
+        by(firing.id)["read"],
+        true,
+        "the resolution settles the alert"
+    );
+    assert_eq!(by(host_failed.id)["read"], true);
+    assert_eq!(by(host_failed.id)["resolved_by"], good.id);
+    assert_eq!(by(other.id)["read"], false, "another key stays");
+    assert_eq!(by(other_stack.id)["read"], false, "another stack stays");
+}

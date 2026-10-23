@@ -209,7 +209,7 @@ export function ticks(r, last) {
  */
 export function humanBytes(bytes) {
   if (bytes == null || !Number.isFinite(bytes) || bytes < 0) return null;
-  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024) return `${Math.round(bytes)} B`;
   const units = ["KB", "MB", "GB", "TB"];
   let v = bytes / 1024;
   let i = 0;

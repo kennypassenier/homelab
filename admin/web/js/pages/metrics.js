@@ -68,7 +68,7 @@ import {
   section,
   segSwitch,
 } from "../ui.js";
-import { formatClock, formatDateTime, formatDay } from "../format.js";
+import { formatClock, formatDateTime, formatDay, gbText } from "../format.js";
 import { choice, setParams } from "../urlstate.js";
 import {
   CHART_RANGE_EVENT,
@@ -1204,7 +1204,7 @@ export function mount(root, ctx) {
           hover: hoverOf(
             rootPts,
             pct,
-            `${d ? `${d.root_lv_size_gb} GB on ${d.root_disk_device.replace(/^\/dev\//, "")}` : "The host's root"}${
+            `${d ? `${gbText(d.root_lv_size_gb)} on ${d.root_disk_device.replace(/^\/dev\//, "")}` : "The host's root"}${
               moved == null
                 ? ""
                 : Math.abs(moved) < 0.5

@@ -398,12 +398,12 @@ async fn feat_stacks_3_a_new_stack_is_scaffolded_committed_and_only_its_director
     // Clones on the way (the repo route or a plan clones it first).
     let v = p["suggest_vmid"].as_u64().unwrap();
     assert!(v >= 104 && ![104, 116, 120].contains(&v));
-    let req = serde_json::json!({ "name": "recipes", "vmid": 121, "preset": "mealie", "ram_mb": 512, "cores": 1, "disk_gb": 8 });
+    let req = serde_json::json!({ "name": "recipes", "vmid": 122, "preset": "mealie", "ram_mb": 512, "cores": 1, "disk_gb": 8 });
     let (st, paths) = call(
         &w.app,
         "POST",
         "/data/stacks-new/appdata",
-        Some(serde_json::json!({ "preset": "mealie", "name": "recipes", "vmid": 121 })),
+        Some(serde_json::json!({ "preset": "mealie", "name": "recipes", "vmid": 122 })),
     )
     .await;
     assert_eq!(st, StatusCode::OK);
@@ -422,7 +422,7 @@ async fn feat_stacks_3_a_new_stack_is_scaffolded_committed_and_only_its_director
         plan["effects"][0]["what"]
             .as_str()
             .unwrap()
-            .contains("creates CT 121")
+            .contains("creates CT 122")
     );
     let (st, v) = call(
         &w.app,

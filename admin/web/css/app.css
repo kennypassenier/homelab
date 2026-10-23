@@ -139,23 +139,20 @@ a.kp-button:visited {
   }
 }
 
-/* A label beside its value on one row (Kenny, 2026-10-01): "The same from
-   a workstation:" used to sit on its own line above the CLI line below it.
-   `.cli-row` keeps both on one row and wraps only when the row itself runs
-   out of width; `.cli-line` (the copy control) is `inline-flex` so it can
-   sit after ordinary inline text (a batch preview's stack name) too. */
+/* workstation-line-1 (Kenny, 2026-10-22: "is lelijk nu"): "The same from a
+   workstation:" on a line of its own, the command block under it, in every
+   run dialog. (It stood beside the block from 2026-10-01 to 2026-10-22.)
+   `.cli-line` (the copy control) stays `inline-flex` so it can still sit
+   after ordinary inline text (a batch preview's stack name). */
 .cli-row {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 4px 8px;
+  display: grid;
+  gap: 4px;
   margin-block: 8px;
 }
 .cli-row__label {
-  white-space: nowrap;
+  white-space: normal;
 }
 .cli-row > .cli-line {
-  flex: 1 1 320px;
   min-inline-size: 0;
 }
 .kp-card {
@@ -583,32 +580,6 @@ p:has(> .measured:only-child):first-child {
   min-inline-size: 0;
   max-inline-size: 100%;
 }
-/* feat-ops-6: the running-job panel. */
-/* A job started from the action dialog shows this same panel (`compact:
-   true` drops only its heading) directly in the dialog's own body, so its
-   `.kp-card` border and background doubled up with the dialog's own frame
-   around it — a card inside a card (Kenny, 2026-10-01). The dialog body
-   already is the frame; flatten the panel back to plain content there. */
-.kp-dialog__body > .job-panel {
-  padding: 0;
-  border: 0;
-  border-radius: 0;
-  background: none;
-  box-shadow: none;
-}
-.job-outcome:not(:empty),
-.job-cli:not(:empty) {
-  margin-block: 8px;
-}
-/* The compact panel (a dialog's own job panel): the detail takes its natural
-   height, the log a fixed box that scrolls (fix-261: the dialog never
-   resizes as lines arrive). */
-.job-panel--compact {
-  display: grid;
-  gap: 10px;
-  align-content: start;
-  box-sizing: border-box;
-}
 /* The job's log is kp's log viewer (joblog.js): a fixed height in every
    state, the "whole log" switch and its note on two shared tracks under it. */
 .jl {
@@ -628,10 +599,6 @@ p:has(> .measured:only-child):first-child {
 .jl-note {
   min-inline-size: 0;
   font-size: var(--kp-text-xs);
-}
-.job-log-wrap summary {
-  cursor: pointer;
-  margin-block: 8px 4px;
 }
 /* feat-stacks-5: the batch bar and progress. */
 .select-col {
@@ -785,89 +752,228 @@ tr.unread td:first-child {
   margin: 4px 0 0;
   padding-inline-start: 1.2em;
 }
-/* The job's detail (kp11, the approved Activity demo): the head, three
-   figures on shared tracks, the share bar, the steps beside the disc. */
-.job-panel {
-  container: job-panel / inline-size;
+/* one-progress-view-1 (Kenny, 2026-10-23): the shared progress view
+   (runview.js) for Update, Deploy, Deploy all changes and the Jobs page.
+   Two vertical sections side by side, each with a size of its own and its
+   own scroll: the steps with their progress, and the log with the result.
+   A part that appears does so inside its own area and moves nothing else
+   ("verschijnen mag, verschuiven niet"). The panel is no card of its own
+   inside a dialog (run-dialog-double-frame-1): `.kp-card` only on a page. */
+.rv {
+  --rv-steps-h: 15rem;
+  --rv-result-h: 9rem;
+  container: rv / inline-size;
   position: relative;
+  display: grid;
+  gap: var(--kp-space-md, 0.75rem);
+  align-content: start;
+  min-inline-size: 0;
 }
-/* A job the dashboard no longer keeps: the theme's empty plate fills the
-   whole panel. */
-.job-plate {
+.rv.kp-card {
+  padding: var(--kp-space-lg, 1rem);
+}
+.rv-plate {
   position: absolute;
   inset: 0;
   z-index: 5;
   display: grid;
   background: var(--card);
 }
-.job-plate[hidden] {
+.rv-plate[hidden] {
   display: none;
 }
-.job-plate > * {
+.rv-plate > * {
   min-block-size: 100%;
 }
-.job-head {
+.rv-head {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   gap: 0.5rem;
   align-items: start;
 }
-.job-head h3,
-.job-sub {
+.rv-title,
+.rv-sub {
   margin: 0;
 }
-.job-figures {
-  max-inline-size: 40rem;
-  margin: 0;
-}
-.job-fact {
-  font-variant-numeric: tabular-nums;
-}
-.job-bar {
-  margin: 0;
-}
-.job-progress-box {
+.rv-grid {
   display: grid;
-  gap: var(--kp-space-xs, 0.25rem);
-  max-inline-size: 40rem;
-}
-.job-progress__note {
-  margin: 0;
-}
-.job-progress-box [hidden] {
-  display: none;
-}
-.job-cols {
-  display: grid;
-  grid-template-columns: minmax(0, 3fr) minmax(16rem, 2fr);
+  grid-template-columns: minmax(0, 1fr);
   gap: var(--kp-space-lg, 1.5rem);
   align-items: start;
 }
-.job-disc-host {
+@container rv (min-width: 46rem) {
+  .rv-grid {
+    grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr);
+  }
+}
+.rv-col {
+  display: grid;
+  gap: var(--kp-space-sm, 0.5rem);
+  align-content: start;
+  min-inline-size: 0;
+}
+/* A note is one line that never wraps (its full words are its title): a
+   note that grows or shrinks would move everything below it. */
+.rv-note {
+  margin: 0;
+  min-inline-size: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* The three figures: side by side where the column is wide, one column
+   (labels over one left edge) where it is narrow, like a drawer. */
+.rv-figures {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--kp-space-xs, 0.25rem) var(--kp-space-md, 0.75rem);
+  margin: 0;
+}
+@container rv (min-width: 34rem) {
+  .rv-figures {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+  .rv-figure {
+    display: grid;
+    align-content: start;
+    gap: 2px;
+  }
+}
+.rv-figure dt {
+  color: var(--muted-foreground);
+  font-size: var(--kp-text-xs);
+}
+.rv-figure dd {
+  margin: 0;
+}
+.rv-fact {
+  font-variant-numeric: tabular-nums;
+}
+.rv-steps-note {
+  block-size: 1.4em;
+}
+/* The bar and the time left: the bar takes the track, the dial its own
+   fixed square; the dial is dimmed, never removed, when no estimate runs. */
+.rv-now {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 4.5rem;
+  gap: var(--kp-space-md, 0.75rem);
+  align-items: start;
+  block-size: 7.5rem;
+  overflow: hidden auto;
+}
+.rv-bar {
+  display: grid;
+  gap: var(--kp-space-xs, 0.25rem);
+  min-inline-size: 0;
+}
+.rv-bar [hidden] {
+  display: none;
+}
+.rv-disc {
   display: grid;
   justify-items: center;
   align-content: start;
-  gap: var(--kp-space-sm, 0.5rem);
 }
-.job-disc-host[hidden] {
+.rv-disc > * {
+  grid-area: 1 / 1;
+}
+/* No estimate to count down: the dial's place stays, drawn as a quiet
+   dashed ring, so the bar beside it keeps its width. */
+.rv-disc--off .rv-disc__dial {
+  visibility: hidden;
+}
+.rv-disc--off::before {
+  content: "";
+  grid-area: 1 / 1;
+  inline-size: 3rem;
+  block-size: 3rem;
+  border: 2px dashed var(--border);
+  border-radius: 50%;
+}
+.rv-lead[hidden] {
   display: none;
 }
-.job-disc__text {
-  margin: 0;
-  text-align: center;
-  max-inline-size: 22rem;
-}
-@container job-panel (max-width: 40rem) {
-  .job-cols {
-    grid-template-columns: minmax(0, 1fr);
-  }
-}
-/* The drawer scrolls as a whole: the detail and the log tail in one column,
-   the log keeping its own box. */
-.job-steps .kp-steplist {
+/* The step list: its own scroll area at a fixed height from the first
+   frame to the end; the list inside never folds, reorders or rebuilds. */
+.rv-steps {
+  block-size: var(--rv-steps-h);
+  overflow: auto;
+  overscroll-behavior: contain;
+  padding-inline-end: var(--kp-space-xs, 0.25rem);
+  border-block: 1px solid var(--border);
   min-inline-size: 0;
 }
-
+.rv-steps[hidden] {
+  display: none;
+}
+.rv-steps .kp-steplist {
+  min-inline-size: 0;
+}
+.rv-steps-alt[hidden],
+.rv-steps-list[hidden] {
+  display: none;
+}
+.rv-time-area {
+  block-size: var(--rv-time-h, 9rem);
+  overflow: auto;
+  overscroll-behavior: contain;
+  min-inline-size: 0;
+}
+.rv-time {
+  margin: 0;
+}
+.rv-time-note {
+  block-size: 1.4em;
+}
+/* The log column: the log at a fixed height, then the result area that
+   holds everything which can appear (a failure and its reason, the host's
+   words, the command to run it again), reserved from the start. */
+.rv-log {
+  min-inline-size: 0;
+}
+.rv-result {
+  block-size: var(--rv-result-h);
+  overflow: auto;
+  overscroll-behavior: contain;
+  display: grid;
+  gap: var(--kp-space-sm, 0.5rem);
+  align-content: start;
+  border: 1px dashed var(--border);
+  border-radius: var(--radius, 6px);
+  padding: var(--kp-space-sm, 0.5rem);
+  min-inline-size: 0;
+}
+.rv-result > * {
+  min-inline-size: 0;
+}
+.rv-result [hidden] {
+  display: none;
+}
+.rv-result__empty {
+  margin: 0;
+  color: var(--muted-foreground);
+}
+.rv-cli .cli-row {
+  margin-block: 0;
+}
+/* A part opening plays its short fade once, when it appears, never on an
+   update (redraw-unchanged-1). */
+@media (prefers-reduced-motion: no-preference) {
+  .rv-appear {
+    animation: rv-appear 180ms cubic-bezier(0.2, 0, 0.38, 0.9) both;
+  }
+}
+@keyframes rv-appear {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
 /* Milestone edit: the plan, the diff, the edit forms, the matrix. */
 .edit-card h2 {
   margin-top: 0;
@@ -2829,4 +2935,12 @@ details.nx-card--fold[open] > summary::before {
    package intends. Settings places its own bar (settings.css). */
 .kp-formgrid:has(.kp-refresh):not(.st-working) {
   --kp-formgrid-control: max-content;
+}
+
+/* percent-overlap-1 (Kenny, 2026-10-22: "10.5 %21/10/2026 04:07"): kp's bar
+   cell gives its figure a column of 4ch, so "10.5 %" ran out of it into the
+   next column. The figure's column holds "100.0 %" (7ch), the % sign stays
+   right after the number inside it, and nothing reaches the neighbour. */
+.kp-bar-cell {
+  --kp-bar-cell-value: 7ch;
 }

@@ -264,7 +264,7 @@ export function stackRows(fleet, ctx) {
  * host's CPU and its root disk; every tile a link to its detail.
  * @param {Fleet} fleet
  * @param {Trend | null} trend
- * @param {{count: number, urgent: number}} needs
+ * @param {{count: number, urgent: number, split?: string}} needs
  * @param {Map<string, number>} [newer] newer versions per stack
  * @returns {HostKpi[]}
  */
@@ -303,7 +303,7 @@ export function hostStrip(fleet, trend, needs, newer = new Map()) {
       ctx:
         needs.count === 0
           ? "nothing waiting"
-          : `${needs.urgent} urgent · open the list`,
+          : `${needs.urgent} urgent · ${needs.split ?? "open the list"}`,
       tone: needs.urgent ? "bad" : needs.count ? "warn" : null,
       href: "/inbox",
       title: "Everything waiting for a person; open the Inbox",

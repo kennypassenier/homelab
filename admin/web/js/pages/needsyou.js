@@ -23,24 +23,30 @@
 
 import { act, loadNotices, onAct, send } from "../act.js";
 import { openAction, openBatch } from "../actiondialog.js";
-import { openDialog, refusalCallout } from "../actui.js";
+import { notify, openDialog, refusalCallout } from "../actui.js";
 import { ensureStyle, fetchJson, h, slowRead } from "../dom.js";
 import { declare, drivable } from "../drivable.js";
 import { formatDateTime } from "../format.js";
 import { inboxNow, onInbox, snoozedNow } from "../inboxlist.js";
+import { settledNotices } from "../inboxresolve.js";
 import {
   KINDS,
   askKey,
   askWords,
   chipsOf,
   countWords,
+  countSplit,
   groupRows,
   kindOf,
+  plural,
   problemOf,
+  rowFixes,
   shownRows,
   worthRows,
 } from "../inboxrows.js";
+import { openJobDialog } from "../jobpanel.js";
 import {
+  answerCheck,
   mountBulk,
   mountChecks,
   mountQuestions,
@@ -108,6 +114,38 @@ const FIX = declare({
   opens: "dialog",
   row: "<row key>",
   what: "a row's fix: the action's own dialog, prefilled",
+});
+const ROW_ANSWER = declare({
+  id: "inbox-row-answer",
+  page: "needs-you",
+  opens: "run",
+  row: "<check id>:pass|fail",
+  what: "answer a manual check on its own row: it works, or it fails",
+  shows: "on a manual check's row",
+});
+const OPEN_CHECK = declare({
+  id: "inbox-open-check",
+  page: "needs-you",
+  opens: "view",
+  row: "<check id>",
+  what: "a manual check's row link: open that check in the Manual checks card",
+  shows: "on a manual check's row",
+});
+const OPEN_JOB = declare({
+  id: "inbox-open-job",
+  page: "needs-you",
+  opens: "dialog",
+  row: "<row key>",
+  what: "a failed job's row: open the job (its steps, what the host said, its log)",
+  shows: "on the row of a failure that is about a job",
+});
+const REMEDY_PAGE = declare({
+  id: "inbox-remedy-page",
+  page: "needs-you",
+  opens: "view",
+  row: "<row key>",
+  what: "a finding's row: the page its remedy names",
+  shows: "on a finding whose remedy names a page",
 });
 const SEEN = declare({
   id: "inbox-mark-seen",
@@ -482,29 +520,48 @@ export function mount(root) {
   };
 
   /**
-   * A row's buttons, by what it is.
+   * A row's buttons, by what it is: one per way to its fix
+   * (`rowFixes`, check-row-answer-1), the first the main one. A row with no
+   * known fix says so in words, never only Snooze.
    * @param {import("../inboxrows.js").Row} r
    * @returns {HTMLElement[]}
    */
   const actsBase = (r) => {
-    const kind = kindOf(r);
     const bad = r.severity === "bad";
-    if (r.source === "asks") {
-      const b = rowButton({
-        role: "act",
-        label: "Answer",
-        hint: "Go to the question: its card says what each answer does and how long the host waits",
-        primary: bad,
-      });
-      b.addEventListener("click", () => questions.focusAsk(r.key.slice(4)));
-      return [b];
-    }
-    if (kind === "update") {
-      const stacks = r.stacks ?? [];
-      const n = r.apps?.length ?? 0;
-      return [
-        ...(stacks.length > 1
-          ? [
+    const notice =
+      r.source === "notices"
+        ? Number(r.key.slice("notice:".length))
+        : r.ids?.[0];
+    const fixes = rowFixes(r, {
+      notice:
+        r.source === "notices"
+          ? (act.notices?.notices.find((n) => n.id === notice) ?? null)
+          : null,
+      job:
+        r.job != null ? (act.jobs.find((j) => j.job === r.job) ?? null) : null,
+      known: (action) =>
+        !!act.catalog?.actions.some((a) => a.action === action),
+    });
+    /** @type {HTMLElement[]} */
+    const out = [];
+    fixes.forEach((f, i) => {
+      const first = i === 0;
+      switch (f.type) {
+        case "answer-ask": {
+          const b = rowButton({
+            role: "act",
+            label: "Answer",
+            hint: "Go to the question: its card says what each answer does and how long the host waits",
+            primary: bad,
+          });
+          b.addEventListener("click", () => questions.focusAsk(r.key.slice(4)));
+          out.push(b);
+          break;
+        }
+        case "update-flow": {
+          const stacks = f.stacks;
+          if (stacks.length > 1)
+            out.push(
               drivable(
                 rowButton({
                   role: "open",
@@ -515,93 +572,164 @@ export function mount(root) {
                 REVIEW,
                 stacks[0],
               ),
-            ]
-          : []),
-        drivable(
-          rowButton({
-            role: "act",
-            label:
-              stacks.length === 1 && n === 1
-                ? "Review and update…"
-                : `Review and update all ${n}…`,
-            hint: "See what changes, then back up, update and verify; nothing runs until you confirm",
-            href:
-              stacks.length === 1 ? updateHref(stacks[0]) : updateHref(null),
-          }),
-          REVIEW,
-          stacks.length === 1 ? stacks[0] : "all",
-        ),
-      ];
-    }
-    if (kind === "setup") {
-      const b = drivable(
-        rowButton({
-          role: "act",
-          label: "Push the envs…",
-          hint: "Deploy each of these stacks so the host's vault takes a copy of its secrets; one confirm for all",
-        }),
-        PUSH_ENVS,
-      );
-      b.addEventListener(
-        "click",
-        () => void openBatch("deploy", r.stacks ?? []),
-      );
-      return [b];
-    }
-    if (r.check) {
-      const id = r.check;
-      const b = rowButton({
-        role: "act",
-        label: "Answer",
-        hint: "Go to the check: one question on the screen, with big answer buttons",
-        primary: bad,
-      });
-      b.addEventListener("click", () => checks.focusCheck(id));
-      return [b];
-    }
-    /** @type {HTMLElement[]} */
-    const out = [];
-    const notice =
-      r.source === "notices" ? Number(r.key.slice("notice:".length)) : null;
-    const fix =
-      r.fix ??
-      (notice != null
-        ? (act.notices?.notices.find((n) => n.id === notice)?.fixes?.[0] ??
-          null)
-        : null);
-    if (r.source === "notices")
-      out.push(
-        drivable(
-          rowButton({
-            // With a fix the fix is the main button; without one this is.
-            role: fix ? "open" : "act",
-            label: "See what happened",
-            hint: "Open where this happened",
-            href: r.href || "/activity",
-          }),
-          SEE_WHAT,
-          r.key,
-        ),
-      );
-    if (fix) {
-      const b = drivable(
-        rowButton({
-          role: "act",
-          label: `${fix.label}…`,
-          hint: "The action's own dialog, prefilled; nothing runs until you confirm",
-          primary: bad,
-        }),
-        FIX,
-        r.key,
-      );
-      b.addEventListener(
-        "click",
-        () =>
-          void openAction(fix.stack, fix.action, { preset: fix.args ?? {} }),
-      );
-      out.push(b);
-    }
-    if (notice != null) {
+            );
+          out.push(
+            drivable(
+              rowButton({
+                role: "act",
+                label:
+                  stacks.length === 1 && f.n === 1
+                    ? "Review and update…"
+                    : `Review and update all ${f.n}…`,
+                hint: "See what changes, then back up, update and verify; nothing runs until you confirm",
+                href:
+                  stacks.length === 1
+                    ? updateHref(stacks[0])
+                    : updateHref(null),
+              }),
+              REVIEW,
+              stacks.length === 1 ? stacks[0] : "all",
+            ),
+          );
+          break;
+        }
+        case "push-envs": {
+          const b = drivable(
+            rowButton({
+              role: "act",
+              label: "Push the envs…",
+              hint: "Deploy each of these stacks so the host's vault takes a copy of its secrets; one confirm for all",
+            }),
+            PUSH_ENVS,
+          );
+          b.addEventListener("click", () => void openBatch("deploy", f.stacks));
+          out.push(b);
+          break;
+        }
+        case "answer-check": {
+          const b = drivable(
+            rowButton({
+              role: "act",
+              label: f.label,
+              hint:
+                f.verdict === "ok"
+                  ? "Record that this check works; it leaves the list"
+                  : "Record that this check fails; it stays until you fix it and answer again",
+              primary: first && bad,
+            }),
+            ROW_ANSWER,
+            `${f.check}:${f.verdict === "ok" ? "pass" : "fail"}`,
+          );
+          b.addEventListener("click", () => {
+            for (const x of /** @type {NodeListOf<HTMLButtonElement>} */ (
+              rowOf(b).querySelectorAll("button[data-kp-action=act]")
+            ))
+              x.disabled = true;
+            void answerCheck(f.check, f.verdict).then((res) => {
+              if (res.ok) {
+                notify(
+                  f.verdict === "ok"
+                    ? "Recorded: it works."
+                    : "Recorded: it fails.",
+                  "success",
+                );
+                return;
+              }
+              for (const x of /** @type {NodeListOf<HTMLButtonElement>} */ (
+                rowOf(b).querySelectorAll("button[data-kp-action=act]")
+              ))
+                x.disabled = false;
+              notify(`${res.error.what}: ${res.error.why}.`, "warning");
+            });
+          });
+          out.push(b);
+          break;
+        }
+        case "open-check": {
+          const b = drivable(
+            rowButton({
+              role: "open",
+              label: "Open the check",
+              hint: "Go to this check in the Manual checks card, one question on the screen",
+            }),
+            OPEN_CHECK,
+            f.check,
+          );
+          b.addEventListener("click", () => checks.focusCheck(f.check));
+          out.push(b);
+          break;
+        }
+        case "open-job": {
+          const b = drivable(
+            rowButton({
+              role: first ? "act" : "open",
+              label: "Open the job",
+              hint: "The job that failed: its steps, what the host said and its log",
+              primary: first && bad,
+            }),
+            OPEN_JOB,
+            r.key,
+          );
+          b.addEventListener("click", () => openJobDialog(f.job));
+          out.push(b);
+          break;
+        }
+        case "run-fix": {
+          const b = drivable(
+            rowButton({
+              role: "act",
+              label: f.fix.label.endsWith("…")
+                ? f.fix.label
+                : `${f.fix.label}…`,
+              hint: f.retry
+                ? "Run this job again: its own dialog, prefilled as it was; nothing runs until you confirm"
+                : "The action's own dialog, prefilled; nothing runs until you confirm",
+              primary: bad,
+            }),
+            FIX,
+            r.key,
+          );
+          b.addEventListener(
+            "click",
+            () =>
+              void openAction(f.fix.stack, f.fix.action, {
+                preset: f.fix.args ?? {},
+              }),
+          );
+          out.push(b);
+          break;
+        }
+        case "link":
+          out.push(
+            drivable(
+              rowButton({
+                role: first ? "act" : "open",
+                label: f.label,
+                hint:
+                  f.why === "remedy"
+                    ? "The page its remedy names"
+                    : "Open where this happened",
+                href: f.href || "/activity",
+                primary: first && bad,
+              }),
+              f.why === "remedy" ? REMEDY_PAGE : SEE_WHAT,
+              r.key,
+            ),
+          );
+          break;
+        case "none":
+          out.push(
+            h(
+              "span",
+              { class: "ib-nofix measured", title: f.note },
+              "No fix to point to yet",
+            ),
+          );
+          break;
+      }
+    });
+    // A failure the dashboard knows by number can be marked seen.
+    if (r.source === "notices" && Number.isFinite(notice)) {
       const b = drivable(
         rowButton({
           role: "seen",
@@ -890,7 +1018,17 @@ export function mount(root) {
       for (const b of itemsOf(chips)) drivable(b, KIND, valueOf(b));
     }
     const show = shownRows(rows, kinds);
-    count.textContent = countWords(show.length, rows.length);
+    // One count, with its split shown (inbox-resolved-clears-1): the same
+    // number as the bar and the Stacks tile, and how it divides.
+    const split = countSplit(rows);
+    const settled = [
+      ...settledNotices(act.notices?.notices ?? []).keys(),
+    ].filter(
+      (id) => act.notices?.notices.find((n) => n.id === id)?.read === false,
+    ).length;
+    count.textContent = `${countWords(show.length, rows.length)}${
+      split.text ? ` · ${split.text}` : ""
+    }${settled ? ` · ${plural(settled, "notice")} already settled, not listed` : ""}`;
     if (rows.length === 0)
       putState(listCard, "empty", {
         title: "Nothing needs you",

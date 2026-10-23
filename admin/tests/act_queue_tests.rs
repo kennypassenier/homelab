@@ -122,7 +122,14 @@ async fn feat_stacks_4_a_press_runs_on_the_host_and_its_lines_and_progress_arriv
     assert!(logs.iter().any(|l| l["msg"] == "working on up"));
     // feat-ops-6: step n/m with the medians of the two past runs.
     let progress = w.live.events("action_progress");
-    let first = &progress[0]["progress"];
+    // steps-total-known-1: the total is announced before the first step.
+    let planned = &progress[0]["progress"];
+    assert_eq!(
+        (planned["n"].as_u64(), planned["m"].as_u64()),
+        (Some(0), Some(3)),
+        "step 0 of 3 comes before the first mark"
+    );
+    let first = &progress[1]["progress"];
     assert_eq!(
         (first["n"].as_u64(), first["m"].as_u64()),
         (Some(1), Some(3))

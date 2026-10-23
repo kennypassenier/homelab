@@ -279,6 +279,208 @@ test("invariants: the job dialog's panel does not shift sideways between its run
   }
 });
 
+// one-progress-view-1 / progress-stays-put-1 / redraw-unchanged-1 (Kenny,
+// 2026-10-22/23: "ik haat het als elementen heen en weer springen"): the
+// run view keeps every one of its areas where it is from the first frame
+// to the end of the job (the step list's rows keep their places while more
+// appear), and a finished job draws nothing again.
+test("invariants: one-progress-view-1: the run view's areas and step rows keep their place through a run, and a finished job redraws nothing", async () => {
+  const browser = await launch();
+  try {
+    const context = await browser.newContext({
+      viewport: { width: 1894, height: 1000 },
+    });
+    const page = await freshPage(context);
+    await page.goto(`${BASE}/stacks/films`);
+    await page.waitForTimeout(600);
+    await page.locator('[data-drive="stack-more"]').click({ timeout: 5000 });
+    await page
+      .locator('[role=menuitem][data-action="disable"]')
+      .click({ timeout: 5000 });
+    await page.waitForTimeout(300);
+    await page.locator("#action-dialog #act-run").click();
+    await page
+      .locator("#action-dialog .rv-steps .kp-steplist__item")
+      .first()
+      .waitFor({ timeout: 5000 });
+    // Sample the areas and the step rows every 120 ms until the job is done.
+    const samples = await page.evaluate(async () => {
+      const out = [];
+      // Positions are read against the run view's own top-left corner: the
+      // dialog around it centres itself while it opens, the areas inside
+      // the view must not move.
+      const rv = () => document.querySelector("#action-dialog .rv");
+      const rect = (/** @type {string} */ sel) => {
+        const el = document.querySelector(`#action-dialog ${sel}`);
+        const o = rv()?.getBoundingClientRect();
+        if (!el || !o) return null;
+        const r = el.getBoundingClientRect();
+        return [r.left - o.left, r.top - o.top, r.width, r.height]
+          .map(Math.round)
+          .join(",");
+      };
+      for (let i = 0; i < 70; i++) {
+        const area = document.querySelector("#action-dialog .rv-steps");
+        const top = area?.getBoundingClientRect().top ?? 0;
+        const rows = [
+          ...(area?.querySelectorAll(".kp-steplist__item") ?? []),
+        ].map((r) => Math.round(r.getBoundingClientRect().top - top));
+        out.push({
+          areas: [
+            ".rv-steps",
+            ".rv-log",
+            ".rv-result",
+            ".rv-time-area",
+            ".rv-figures",
+            ".rv-now",
+          ].map(rect),
+          rows,
+          parts: [
+            ...(document.querySelector("#action-dialog")?.children ?? []),
+          ].map(
+            (c) =>
+              `${c.className.toString().slice(0, 24)}:${Math.round(c.getBoundingClientRect().height)}`,
+          ),
+          done: /done|failed/.test(
+            document.querySelector("#action-dialog .rv-badge")?.textContent ??
+              "",
+          ),
+        });
+        if (out[out.length - 1].done && i > 5) break;
+        await new Promise((r) => setTimeout(r, 120));
+      }
+      return out;
+    });
+    assert.ok(samples.length > 5, "the run was not sampled");
+    for (const [i, s] of samples.entries()) {
+      assert.deepEqual(
+        s.areas,
+        samples[0].areas,
+        `an area of the run view moved or resized at sample ${i} (${samples[0].parts.join(" ")} -> ${s.parts.join(" ")})`,
+      );
+      // A row that was there keeps its place; rows only get added below.
+      const prev = samples[Math.max(0, i - 1)].rows;
+      for (let k = 0; k < Math.min(prev.length, s.rows.length); k++)
+        assert.equal(
+          s.rows[k],
+          prev[k],
+          `step row ${k + 1} moved at sample ${i}`,
+        );
+    }
+    // The finished job: nothing but the log may be drawn again.
+    await page.waitForTimeout(1500);
+    const changed = await page.evaluate(async () => {
+      const root = document.querySelector("#action-dialog .rv");
+      if (!root) return -1;
+      let n = 0;
+      const mo = new MutationObserver((list) => {
+        for (const m of list)
+          if (!(m.target instanceof Element && m.target.closest(".rv-log")))
+            if (!(
+              m.target.parentElement &&
+              m.target.parentElement.closest(".rv-log")
+            ))
+              n++;
+      });
+      mo.observe(root, { childList: true, characterData: true, subtree: true });
+      await new Promise((r) => setTimeout(r, 2500));
+      mo.disconnect();
+      return n;
+    });
+    assert.equal(changed, 0, "a finished job's view drew something again");
+  } finally {
+    await browser.close();
+  }
+});
+
+// percent-overlap-1 (Kenny, 2026-10-22: "10.5 %21/10/2026 04:07"): a bar
+// cell's figure stays inside its own column, whatever its width.
+test("invariants: percent-overlap-1: a bar cell's figure never runs out of its column", async () => {
+  const browser = await launch();
+  try {
+    const context = await browser.newContext({
+      viewport: { width: 1600, height: 900 },
+    });
+    const page = await freshPage(context);
+    for (const width of [1600, 390]) {
+      await page.setViewportSize({ width, height: 900 });
+      await page.goto(`${BASE}/stacks`);
+      await page.locator(".kp-bar-cell__value").first().waitFor();
+      await page.waitForTimeout(300);
+      const bad = await page.evaluate(() => {
+        // Show the widest figure a cell can hold, in every cell.
+        for (const v of document.querySelectorAll(".kp-bar-cell__value"))
+          v.textContent = "100.5 %";
+        return [...document.querySelectorAll(".kp-bar-cell__value")].filter(
+          (v) => {
+            const r = v.getBoundingClientRect();
+            return r.width > 0 && v.scrollWidth > Math.ceil(r.width) + 1;
+          },
+        ).length;
+      });
+      assert.equal(
+        bad,
+        0,
+        `${bad} figures run out of their column at ${width}px`,
+      );
+    }
+  } finally {
+    await browser.close();
+  }
+});
+
+// stack-badge-center-1 (Kenny, 2026-10-22): a stack's initials sit in the
+// middle of their badge, both ways, in every theme.
+test("invariants: stack-badge-center-1: a stack's initials are centred in their badge in every theme", async () => {
+  const browser = await launch();
+  try {
+    const context = await browser.newContext({
+      viewport: { width: 1600, height: 900 },
+    });
+    const page = await freshPage(context);
+    const themes = [
+      "formal",
+      "dark",
+      "cyberpunk",
+      "synthwave",
+      "pastel",
+      "forest",
+      "blueprint",
+      "solstice",
+      "brutalism",
+      "deco",
+      "nostromo",
+      "titanium",
+    ];
+    for (const theme of themes) {
+      await page.evaluate((t) => localStorage.setItem("theme", t), theme);
+      await page.goto(`${BASE}/stacks/kp-soft`);
+      await page.locator(".sh-head__mark .kp-idmark__letters").waitFor();
+      await page.waitForTimeout(100);
+      const off = await page.evaluate(() => {
+        const m = document.querySelector(".sh-head__mark");
+        const l = m?.querySelector(".kp-idmark__letters");
+        if (!m || !l) return null;
+        const r = document.createRange();
+        r.selectNodeContents(l);
+        const t = r.getBoundingClientRect();
+        const b = m.getBoundingClientRect();
+        return {
+          dx: t.left + t.width / 2 - (b.left + b.width / 2),
+          dy: t.top + t.height / 2 - (b.top + b.height / 2),
+        };
+      });
+      assert.ok(off, `${theme}: no badge`);
+      assert.ok(
+        Math.abs(off.dx) <= 1.5 && Math.abs(off.dy) <= 1.5,
+        `${theme}: the initials are off centre by ${off.dx.toFixed(1)}, ${off.dy.toFixed(1)} px`,
+      );
+    }
+  } finally {
+    await browser.close();
+  }
+});
+
 test("invariants: an expandable row opens and closes from a click anywhere in it, never from its own controls", async () => {
   const browser = await launch();
   try {
@@ -3319,7 +3521,7 @@ test("invariants: every Inbox row says what and why and carries its fix, and a p
       );
       assert.match(
         await page.locator("#page .inbox-shown").innerText(),
-        new RegExp(`^1 of ${rows} items shown$`),
+        new RegExp(`^1 of ${rows} items shown( · .*)?$`),
       );
       await chip.click();
       assert.equal(
@@ -3445,7 +3647,7 @@ test("invariants: the Update flow runs See, Impact, Back up, Update, Verify and 
     );
     await go.click();
     await started;
-    await page.locator("#page .uf-run .kp-pipeline").waitFor({ timeout: 5000 });
+    await page.locator("#page .rv .kp-pipeline").waitFor({ timeout: 5000 });
     assert.equal(
       posts.find((p) => !p.endsWith("/plan")),
       "/data/actions/_host/update-apps",
@@ -3467,7 +3669,7 @@ test("invariants: the Update flow runs See, Impact, Back up, Update, Verify and 
     );
     // The same run as a step list: every step passed or was skipped.
     const states = await page
-      .locator("#page .uf-run .uf-steps li[data-state]")
+      .locator("#page .rv .kp-steplist__item[data-state]")
       .evaluateAll((l) => l.map((x) => x.getAttribute("data-state")));
     assert.ok(
       states.length > 0 && states.every((s) => s === "done" || s === "skipped"),

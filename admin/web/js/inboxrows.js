@@ -29,7 +29,7 @@ import { formatDateTime } from "./format.js";
  *   chips?: SrcChip[], stacks?: string[], apps?: NewerApp[],
  *   fix?: import("./notices.js").Fix | null, check?: string,
  *   checkState?: "open" | "not ok", checkText?: string,
- *   previous?: "ok" | "fail" | null}} Row
+ *   previous?: "ok" | "fail" | null, job?: number, remedy?: string}} Row
  */
 
 /** The chips' order and words (flows/inbox.html). */
@@ -281,6 +281,7 @@ export function todayRows(body, setupStacks = []) {
           : []),
       ],
       fix: i.fix ?? null,
+      remedy: i.remedy,
     });
   }
   return out;
@@ -371,6 +372,180 @@ export function worthRows(backups, versions) {
       source: "worth",
     });
   return out;
+}
+
+// ---- check-row-answer-1: every row points at its fix --------------------
+
+/**
+ * One way a row leads to where its fix is given.
+ * @typedef {{type: "answer-ask"} |
+ *   {type: "update-flow", stacks: string[], n: number} |
+ *   {type: "push-envs", stacks: string[]} |
+ *   {type: "answer-check", check: string, verdict: "ok" | "nok",
+ *     label: string} |
+ *   {type: "open-check", check: string} |
+ *   {type: "open-job", job: number} |
+ *   {type: "run-fix", fix: import("./notices.js").Fix, retry: boolean} |
+ *   {type: "link", href: string, label: string, why: "happened" | "remedy"} |
+ *   {type: "none", note: string}} RowFix
+ */
+
+/** The pages a remedy's words can name, and where they live. */
+const REMEDY_PAGES = /** @type {const} */ ([
+  [/\bbackups?\b/i, "/backups", "Open Backups"],
+  [/\bfirewall\b/i, "/firewall", "Open the Firewall"],
+  [/\bstorage\b/i, "/storage", "Open Storage"],
+  [/\bactivity\b/i, "/activity", "Open Activity"],
+  [/\bsettings\b/i, "/settings", "Open Settings"],
+  [/\bhost page\b|\bsystem\b/i, "/system", "Open System"],
+  [/\bmap\b/i, "/map", "Open the Map"],
+  [/\bmetrics\b|\bcharts?\b/i, "/charts", "Open Metrics"],
+]);
+
+/** @param {string} s */
+const sentenceCase = (s) => (s ? s[0].toUpperCase() + s.slice(1) : s);
+
+/**
+ * What a remedy's words point at: `homelab <action> <stack>` becomes that
+ * action's own dialog when the dashboard has the action; "…the Backups
+ * page" and the like become a link to the page. Null when it names neither.
+ * @param {string} remedy
+ * @param {(action: string) => boolean} known whether the dashboard has this action
+ * @param {string | null} [stack] the row's own stack, for a command that names none
+ * @returns {RowFix | null}
+ */
+export function remedyTarget(remedy, known, stack = null) {
+  const cmd = /homelab\s+([a-z][a-z-]*)(?:\s+([a-z0-9][a-z0-9_-]*))?/i.exec(
+    remedy,
+  );
+  if (cmd && known(cmd[1].toLowerCase())) {
+    const target = cmd[2] && !cmd[2].startsWith("-") ? cmd[2] : (stack ?? "");
+    if (target)
+      return {
+        type: "run-fix",
+        retry: false,
+        fix: {
+          action: cmd[1].toLowerCase(),
+          stack: target,
+          label: sentenceCase(cmd[1].toLowerCase().replace(/-/g, " ")),
+        },
+      };
+  }
+  const page = /\b([a-z]+)\s+(?:page|tab)\b/i.exec(remedy);
+  const word = page ? page[0] : remedy;
+  for (const [re, href, label] of REMEDY_PAGES)
+    if (re.test(word) && (page || /open|go to|see|look at/i.test(remedy)))
+      return { type: "link", href, label, why: "remedy" };
+  return null;
+}
+
+/**
+ * Every Inbox row's way to its fix (Kenny, 2026-10-23: "ik moet nooit
+ * raden naar iets als we zelf kunnen wijzen naar de oplossing"): a host
+ * question to its card, an update to the Update flow, a manual check to
+ * It works / It fails on the row itself with a link into the Manual checks
+ * card, a failed job to its job and the action that runs it again, a
+ * finding to the action or page its remedy names. The first entry is the
+ * row's main button. A row with no known fix says so (`none`), never offers
+ * only Snooze.
+ * @param {Row} r
+ * @param {{notice?: import("./notices.js").Notice | null,
+ *   job?: {action: string, stack: string, state: string,
+ *     args?: Record<string, unknown>} | null,
+ *   known?: (action: string) => boolean}} [ctx]
+ * @returns {RowFix[]}
+ */
+export function rowFixes(r, ctx = {}) {
+  const known = ctx.known ?? (() => true);
+  const kind = kindOf(r);
+  if (r.source === "asks") return [{ type: "answer-ask" }];
+  if (kind === "update")
+    return [
+      {
+        type: "update-flow",
+        stacks: r.stacks ?? [],
+        n: r.apps?.length ?? 0,
+      },
+    ];
+  if (kind === "setup") return [{ type: "push-envs", stacks: r.stacks ?? [] }];
+  if (r.check)
+    return [
+      {
+        type: "answer-check",
+        check: r.check,
+        verdict: "ok",
+        label: "It works",
+      },
+      {
+        type: "answer-check",
+        check: r.check,
+        verdict: "nok",
+        label: "It fails",
+      },
+      { type: "open-check", check: r.check },
+    ];
+  /** @type {RowFix[]} */
+  const out = [];
+  const job = r.job ?? ctx.notice?.job;
+  if (job != null) out.push({ type: "open-job", job });
+  const given = r.fix ?? ctx.notice?.fixes?.[0] ?? null;
+  if (given) out.push({ type: "run-fix", fix: given, retry: false });
+  else if (
+    job != null &&
+    ctx.job &&
+    known(ctx.job.action) &&
+    ctx.job.stack &&
+    !["done", "queued", "running"].includes(ctx.job.state)
+  )
+    // A failed job's own action, with its own arguments, run again.
+    out.push({
+      type: "run-fix",
+      retry: true,
+      fix: {
+        action: ctx.job.action,
+        stack: ctx.job.stack,
+        args: Object.fromEntries(
+          Object.entries(ctx.job.args ?? {})
+            .filter(([, v]) => v != null && v !== "" && v !== false)
+            .map(([k, v]) => [k, String(v)]),
+        ),
+        label: "Run it again",
+      },
+    });
+  else {
+    const remedy = r.remedy ?? r.problem?.remedy ?? "";
+    const t = remedy ? remedyTarget(remedy, known, r.stack) : null;
+    if (t) out.push(t);
+  }
+  if (r.source === "notices" && r.href && job == null)
+    out.push({
+      type: "link",
+      href: r.href,
+      label: "See what happened",
+      why: "happened",
+    });
+  if (!out.length)
+    out.push({
+      type: "none",
+      note: "No fix to point to yet: what to do is written under “What went wrong”, or snooze it.",
+    });
+  return out;
+}
+
+/**
+ * inbox-resolved-clears-1: the one count of the Inbox with its split shown:
+ * everything waiting (the number on the bar and on the Stacks tile), and
+ * how much of it is something to deal with and how much is an update.
+ * @param {Row[]} rows
+ * @returns {{total: number, act: number, updates: number, text: string}}
+ */
+export function countSplit(rows) {
+  const updates = rows.filter((r) => kindOf(r) === "update").length;
+  const act = rows.length - updates;
+  const parts = [];
+  if (act) parts.push(`${act} to deal with`);
+  if (updates) parts.push(plural(updates, "update"));
+  return { total: rows.length, act, updates, text: parts.join(" · ") };
 }
 
 /**

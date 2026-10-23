@@ -8,7 +8,7 @@
 import { h } from "./dom.js";
 import { declare, drivable } from "./drivable.js";
 import { hungryRows, nightKey, nightsGrid, readsOf } from "./fleetmodel.js";
-import { formatDateTime, formatDay } from "./format.js";
+import { formatDateTime, formatDay, gbText } from "./format.js";
 import { gb } from "./fleet.js";
 import { current } from "./store.js";
 import { section, segSwitch } from "./ui.js";
@@ -238,9 +238,9 @@ export function fleetGlance(ctx) {
           : `The ${Math.min(5, shown.length)} of ${plural(rows.filter((r) => r.state.label !== "parked").length, "running stack")} that use the most, worst ${measure === "ram" ? "memory" : measure === "cpu" ? "CPU" : "disk"} first.`;
     const dp = diskParts(rows);
     setStackbar(split, {
-      title: dp ? `Root volume, ${dp.total} GB` : "Root volume",
+      title: dp ? `Root volume, ${gbText(dp.total)}` : "Root volume",
       total: dp?.total,
-      format: (v) => `${v} GB`,
+      format: (v) => gbText(v),
       restLabel: "Free space",
       marks: [{ at: 0.8, label: "amber at 80 %" }],
       parts: dp?.parts ?? [],

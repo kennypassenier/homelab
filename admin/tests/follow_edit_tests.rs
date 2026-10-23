@@ -922,7 +922,7 @@ async fn follow_the_new_stack_wizard_commits_once() {
     ok(&w, pick("new-preset", "mealie")).await;
     ok(&w, press("next")).await;
     ok(&w, typed("new-name", "kp-soft")).await;
-    ok(&w, typed("new-vmid", "121")).await;
+    ok(&w, typed("new-vmid", "122")).await;
     let (why, _) = refused(&step(&w, press("next")).await);
     assert!(
         why.contains("There is a stack called kp-soft already."),
@@ -976,7 +976,7 @@ async fn follow_new_stack_tile_folds_into_the_one_commit() {
     ok(&w, pick("new-preset", "mealie")).await;
     ok(&w, press("next")).await;
     ok(&w, typed("new-name", "recipes")).await;
-    ok(&w, typed("new-vmid", "121")).await;
+    ok(&w, typed("new-vmid", "122")).await;
     ok(&w, press("next")).await;
     ok(&w, press("next")).await;
     ok(&w, press("next")).await;

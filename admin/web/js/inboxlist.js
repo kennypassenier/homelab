@@ -12,27 +12,30 @@
 // `setInboxSource` (the Inbox page's slower reads: stale images, today).
 
 import { askView, openAsks } from "./asks.js";
+import { settledNotices } from "./inboxresolve.js";
 import { levelBadge } from "./notices.js";
 
 /**
  * @typedef {"bad" | "warn" | "info"} Severity
  * @typedef {{key: string, severity: Severity, title: string, why: string,
  *   href: string, stack: string | null, at: number, source: string,
- *   count?: number, first_at?: number, ids?: number[],
+ *   count?: number, first_at?: number, ids?: number[], job?: number,
  *   problem?: {what: string, why?: string, remedy?: string},
  *   snoozeKey?: string}} InboxItem
  *   `key`: stable over reads; `source`: which list it came from; `count`
  *   and `first_at`: how often the same thing was said and since when, for
  *   a row that stands for several notices; `ids`: the notices a row stands
  *   for, all marked seen together; `snoozeKey`: what a snooze is kept under
- *   when `key` moves (a group of notices takes the newest notice's key).
+ *   when `key` moves (a group of notices takes the newest notice's key);
+ *   `job`: the dashboard job a failure notice is about (its newest), for
+ *   the row's "Open the job" and "Run it again".
  * @typedef {{key: string, until: number, title: string, href?: string,
  *   remind: boolean, set_at: number}} Snooze one row the server holds
  *   snoozed (ask-kp11be-7)
  */
 
 /** Notice kinds that report something finished well: never an Inbox row. */
-const QUIET_KINDS = new Set(["action_done", "alert_resolved"]);
+const QUIET_KINDS = new Set(["action_done", "alert_resolved", "up"]);
 
 const ORDER = /** @type {Record<Severity, number>} */ ({
   bad: 0,
@@ -69,8 +72,11 @@ export function inboxItems(src) {
   // counts how often and says since when.
   /** @type {Map<string, InboxItem>} */
   const same = new Map();
+  // inbox-resolved-clears-1: what a later event already settled is no row.
+  const settled = settledNotices(src.notices ?? []);
   for (const n of src.notices ?? []) {
     if (n.read || QUIET_KINDS.has(n.kind) || n.level === "ok") continue;
+    if (settled.has(n.id)) continue;
     const tone = levelBadge(n).tone;
     const group = `${n.stack ?? ""}|${n.kind}|${n.level ?? ""}|${n.title}`;
     const had = same.get(group);
@@ -82,6 +88,7 @@ export function inboxItems(src) {
         had.at = n.at;
         had.key = `notice:${n.id}`;
         had.why = n.consequence || n.body || "";
+        if (n.job != null) had.job = n.job;
       }
       continue;
     }
@@ -97,6 +104,7 @@ export function inboxItems(src) {
       first_at: n.at,
       count: 1,
       ids: [n.id],
+      ...(n.job != null ? { job: n.job } : {}),
       source: "notices",
       snoozeKey: `notice-group:${group}`,
       // kp11: the failure's fold ("What went wrong") reads these.

@@ -55,6 +55,7 @@ import { mountJobPanel } from "../jobpanel.js";
 import { lineTime, logsUrl } from "../logs.js";
 import { stage } from "../stage.js";
 import { openPinRollback, openPinUpdate } from "../pinupdate.js";
+import { isMovingTag } from "../updateflow.js";
 import { movesOf } from "../updateflow.js";
 import { openRollback } from "../rollbackdialog.js";
 import { STACK_TABS, stackHref } from "../router.js";
@@ -2191,6 +2192,7 @@ function appsTab(panel, c) {
         r.version,
         r.newer?.latest,
         r.restarts,
+        isMovingTag(r.image),
       ]),
       stale == null,
       S.inFleet,
@@ -2241,7 +2243,14 @@ function appsTab(panel, c) {
           );
           up.dataset.kpAction = "update";
           acts.push(up);
-        } else if (!r.extra && S.inFleet) {
+        } else if (
+          !r.extra &&
+          S.inFleet &&
+          // update-nothing-1: a pull changes only an app on a moving tag; one
+          // pinned by digest has nothing to pull (its newer version, if any,
+          // is the pin row above). A native service updates its own way.
+          (S.s?.native || isMovingTag(r.image))
+        ) {
           const pull = actionButton(
             c,
             S.s?.native ? "update-native" : "update",

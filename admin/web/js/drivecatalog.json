@@ -2343,6 +2343,30 @@
       "twins": false
     },
     {
+      "id": "inbox-open-check",
+      "page": "needs-you",
+      "what": "a manual check's row link: open that check in the Manual checks card",
+      "opens": "view",
+      "row": "<check id>",
+      "href": "/inbox",
+      "was": [],
+      "shows": "on a manual check's row",
+      "reach": [],
+      "twins": false
+    },
+    {
+      "id": "inbox-open-job",
+      "page": "needs-you",
+      "what": "a failed job's row: open the job (its steps, what the host said, its log)",
+      "opens": "dialog",
+      "row": "<row key>",
+      "href": "/inbox",
+      "was": [],
+      "shows": "on the row of a failure that is about a job",
+      "reach": [],
+      "twins": false
+    },
+    {
       "id": "inbox-push-envs",
       "page": "needs-you",
       "what": "deploy every stack without a sealed env, so the host's vault takes a copy (one confirm)",
@@ -2355,6 +2379,18 @@
       "twins": false
     },
     {
+      "id": "inbox-remedy-page",
+      "page": "needs-you",
+      "what": "a finding's row: the page its remedy names",
+      "opens": "view",
+      "row": "<row key>",
+      "href": "/inbox",
+      "was": [],
+      "shows": "on a finding whose remedy names a page",
+      "reach": [],
+      "twins": false
+    },
+    {
       "id": "inbox-review-updates",
       "page": "needs-you",
       "what": "open the Update flow from the Updates row: every app with a newer version, or one stack's",
@@ -2363,6 +2399,18 @@
       "href": "/inbox",
       "was": [],
       "shows": null,
+      "reach": [],
+      "twins": false
+    },
+    {
+      "id": "inbox-row-answer",
+      "page": "needs-you",
+      "what": "answer a manual check on its own row: it works, or it fails",
+      "opens": "run",
+      "row": "<check id>:pass|fail",
+      "href": "/inbox",
+      "was": [],
+      "shows": "on a manual check's row",
       "reach": [],
       "twins": false
     },

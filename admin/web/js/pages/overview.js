@@ -20,6 +20,7 @@ import { fleetGlance } from "../fleetglance.js";
 import { fleetList } from "../fleetlist.js";
 import { openImport } from "../importstack.js";
 import { inboxNow, onInbox } from "../inboxlist.js";
+import { countSplit } from "../inboxrows.js";
 import { capacityRows } from "../mapview.js";
 import { openNewStack } from "../newstack.js";
 import { stackHref } from "../router.js";
@@ -30,6 +31,7 @@ import {
   newerByStack,
   stackRows,
 } from "../stacksview.js";
+import { openDialog } from "../actui.js";
 import { drawer, ensureStyle, kpiStrip, pageHeader } from "../ui.js";
 import { setParams } from "../urlstate.js";
 import { mount as mountPlan } from "./apply.js";
@@ -217,6 +219,7 @@ export function mount(root, ctx) {
       {
         count: items.length,
         urgent: items.filter((i) => i.severity === "bad").length,
+        split: countSplit(/** @type {any} */ (items)).text,
       },
       newer,
     );
@@ -263,7 +266,7 @@ export function mount(root, ctx) {
   };
 
   // ── side panels ──────────────────────────────────────────────────────
-  /** @type {ReturnType<typeof drawer> | null} */
+  /** @type {{close: () => void} | null} */
   let panel = null;
 
   /** Deploy all changes: compare, read the plan, deploy (FLOWS.md task 13). */
@@ -327,22 +330,26 @@ export function mount(root, ctx) {
     });
     const planBody = h("div", { class: "sk-plan", id: "apply-section" });
     let stopPlan = () => {};
-    panel = drawer({
-      // redesign-final-c1: a wide sheet (stacks.css), the plan's steps,
-      // tiles and columns at the approved apply.html's size.
-      cls: "sk-drawer sk-drawer--plan",
+    // deploy-all-dialog-1 (Kenny, 2026-10-22: "ipv een normale dialoog"):
+    // Deploy all changes is a normal centred dialog like every other
+    // action, not the panel on the right. It stays wide: the plan's steps,
+    // tiles and columns are the approved apply.html at its size.
+    const dlg = openDialog({
       title: "Deploy all changes",
-      desc: "Make every stack match its files in the repository, in one confirmed batch. Each stack is backed up before it changes.",
+      description:
+        "Make every stack match its files in the repository, in one confirmed batch. Each stack is backed up before it changes.",
       body: [planBody],
-      onClose: () => {
-        stopPlan();
-        panel = null;
-        const s = setParams(location.search, { "deploy-all": null });
-        if (s !== location.search)
-          history.replaceState(history.state, "", location.pathname + s);
-      },
+      id: "deploy-all-dialog",
+      wide: true,
     });
-    panel.open();
+    panel = { close: dlg.close };
+    void dlg.closed.then(() => {
+      stopPlan();
+      if (panel?.close === dlg.close) panel = null;
+      const s = setParams(location.search, { "deploy-all": null });
+      if (s !== location.search)
+        history.replaceState(history.state, "", location.pathname + s);
+    });
     stopPlan = mountPlan(planBody, {
       compare,
       // The plan's own count is the exact one: it goes on the header
@@ -391,7 +398,7 @@ export function mount(root, ctx) {
       });
       return b;
     };
-    panel = drawer({
+    const drawerPanel = drawer({
       cls: "sk-drawer",
       title: "New stack",
       desc: "A stack is one container with the apps it runs. Pick how to start; the wizard asks only what it cannot work out itself.",
@@ -433,7 +440,8 @@ export function mount(root, ctx) {
         panel = null;
       },
     });
-    panel.open();
+    drawerPanel.open();
+    panel = drawerPanel;
   };
 
   // Live view (owner decision 2026-09-30): `homelab ui select` ticks stacks

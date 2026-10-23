@@ -2,6 +2,8 @@
 // Presets gallery's words and order, pure so they are tested without a
 // browser.
 
+import { figure } from "./format.js";
+
 /**
  * @typedef {{name: string, description: string, ram_mb: number,
  *   cores: number, disk_gb: number, cores_set?: boolean,
@@ -25,10 +27,10 @@ export const emptyPreset = (list) =>
  */
 export const ramText = (mb) =>
   mb >= 1024 && mb % 1024 === 0
-    ? `${mb / 1024} GB`
+    ? `${figure(mb / 1024)} GB`
     : mb >= 1024
       ? `${(mb / 1024).toFixed(1)} GB`
-      : `${mb} MB`;
+      : `${figure(mb)} MB`;
 
 /**
  * The toolbar's count: "8 presets · next free container 107", or "2 of 8

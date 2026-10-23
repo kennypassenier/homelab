@@ -295,6 +295,35 @@ impl Tracker {
         }
     }
 
+    /// steps-total-known-1 (Kenny, 2026-10-22: "we weten toch altijd hoeveel
+    /// stappen iets moet doorlopen?"): the progress before the first step
+    /// mark, once a total is known (`set_total`, or the first `on_plan`):
+    /// step 0 of `m`. The page shows the total, and every step of the plan
+    /// waiting, from the first frame instead of "0 of —". None while no
+    /// total is known, or once a mark has arrived (the marks say it then).
+    pub fn planned(&self, op: &str) -> Option<Progress> {
+        if !self.started.is_empty() {
+            return None;
+        }
+        let m = self.total?;
+        let plan = self.plan.clone().unwrap_or_default();
+        Some(Progress {
+            op: op.to_string(),
+            step: String::new(),
+            n: 0,
+            m: Some(m),
+            finished: false,
+            changed: false,
+            expected_step_s: None,
+            expected_total_s: plan.total_s,
+            expected_total_min_s: plan.total_min_s,
+            expected_total_max_s: plan.total_max_s,
+            expected_remaining_s: plan.total_s,
+            elapsed_s: 0,
+            runs: plan.runs,
+        })
+    }
+
     /// A mark as it arrived, with the time the host put on its line.
     pub fn on_mark(&mut self, mark: &StepMark, ts: u64) -> Progress {
         if self.plan.is_none() {
@@ -570,6 +599,25 @@ mod tracker_m_tests {
         assert_eq!((p3.n, p3.m), (3, Some(3)));
         let p3b = t.on_mark(&mark(subject, "step-2", true), 14);
         assert_eq!((p3b.n, p3b.m), (3, Some(3)), "n reaches m exactly");
+    }
+
+    /// steps-total-known-1: before the first mark the tracker already says
+    /// "step 0 of m", for a fixed total and for a single command's plan.
+    #[test]
+    fn planned_gives_step_zero_of_the_total_before_the_first_mark() {
+        let mut t = Tracker::new(Vec::new());
+        assert!(t.planned("deploy-media").is_none(), "no total yet");
+        t.set_total(56);
+        let p = t.planned("deploy-media").expect("a fixed total is known");
+        assert_eq!((p.n, p.m, p.finished), (0, Some(56), false));
+        assert_eq!(p.step, "");
+        // A single command's own plan sets the total the same way.
+        let mut one = Tracker::new(Vec::new());
+        one.on_plan("deploy-media", &plan_names(28, "step"));
+        assert_eq!(one.planned("deploy-media").map(|p| p.m), Some(Some(28)));
+        // Once a mark arrived the marks say it.
+        one.on_mark(&mark("deploy-media", "step-0", false), 1);
+        assert!(one.planned("deploy-media").is_none());
     }
 
     /// fix-171 round 2: a job that sends several commands in a row (Apply,

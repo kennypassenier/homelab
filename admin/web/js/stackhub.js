@@ -11,7 +11,7 @@ import { historyRows } from "./activity.js";
 import { ownerOf } from "./activityview.js";
 import { cellState, nightKey, nightRange, nightsNow } from "./backupsview.js";
 import { humanMb, stackState } from "./fleet.js";
-import { formatDateTime } from "./format.js";
+import { formatDateTime, gbText } from "./format.js";
 import { canonicalLevel } from "./logs.js";
 import { majorJump } from "./staleimages.js";
 
@@ -1309,7 +1309,7 @@ export function sizeFacts(x) {
       label: "Disk",
       value:
         r.disk_gb != null
-          ? `${r.disk_gb} GB${x.diskPct != null ? ` · ${Math.round(x.diskPct)}% used` : ""}`
+          ? `${gbText(r.disk_gb)}${x.diskPct != null ? ` · ${Math.round(x.diskPct)}% used` : ""}`
           : "—",
     },
     { label: "Address", value: bareIp(m.network?.ip) || "—", mono: true },

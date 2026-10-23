@@ -8,6 +8,7 @@
 
 import { h, selectCell, tableBlock } from "./dom.js";
 import { declare, drivable } from "./drivable.js";
+import { gbText } from "./format.js";
 import { ramText } from "./presetsview.js";
 import { current } from "./store.js";
 import { ensureStyle, section } from "./ui.js";
@@ -306,13 +307,15 @@ export function presetsCompare(deps) {
     const over = (now + gb) / total >= 0.8;
     const left = Math.round((total - now - gb) * 10) / 10;
     setStackbar(cost, {
-      title: `What would the ${p.name} preset cost? Host memory, ${total} GB`,
+      title: `What would the ${p.name} preset cost? Host memory, ${gbText(total)}`,
       total,
-      format: (v) => `${v} GB`,
+      format: (v) => gbText(v),
       restLabel: "Free",
       marks: [{ at: 0.8, label: "80 % of the host" }],
       summary:
-        left >= 0 ? `${left} GB would stay free` : `${-left} GB over the host`,
+        left >= 0
+          ? `${gbText(left)} would stay free`
+          : `${gbText(-left)} over the host`,
       parts: [
         { key: "now", label: "Allowed today", value: now },
         {

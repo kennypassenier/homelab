@@ -156,6 +156,24 @@ pub struct Notice {
     pub resolved_by: Option<u64>,
 }
 
+/// Whether a notice reports that an operation finished well: the
+/// dashboard's own success, or the host's own notice of one (a scheduled
+/// backup that ran) at level ok.
+pub fn is_success(n: &Notice) -> bool {
+    n.kind == Kind::ActionDone || (n.kind == Kind::HostEvent && n.level == Level::Ok)
+}
+
+/// Whether a notice reports trouble with an operation: a failure, an
+/// incident, a missed schedule, or a host notice that is not a success
+/// (inbox-resolved-clears-1: the host's own failures of a scheduled backup
+/// are host events, and a later good backup must settle them too).
+fn is_operation_trouble(n: &Notice) -> bool {
+    matches!(
+        n.kind,
+        Kind::ActionFailed | Kind::Incident | Kind::ScheduleMissed
+    ) || (n.kind == Kind::HostEvent && n.level != Level::Ok)
+}
+
 /// Whether the success `done` settles the earlier notice `x`: a failure,
 /// an incident or a missed schedule on the same stack, of the same
 /// operation (its `op`, with a schedule's `schedule-` prefix taken off) or
@@ -165,10 +183,7 @@ pub fn settles(done: &Notice, x: &Notice) -> bool {
         || x.id == done.id
         || x.stack.is_none()
         || x.stack != done.stack
-        || !matches!(
-            x.kind,
-            Kind::ActionFailed | Kind::Incident | Kind::ScheduleMissed
-        )
+        || !is_operation_trouble(x)
     {
         return false;
     }
@@ -179,6 +194,18 @@ pub fn settles(done: &Notice, x: &Notice) -> bool {
     let same_op = bare(&x.op).is_some() && bare(&x.op) == bare(&done.op);
     let same_label = x.label.is_some() && x.label == done.label;
     same_op || same_label
+}
+
+/// inbox-resolved-clears-1 (Kenny, 2026-10-23: "waarom zie ik dan 62
+/// meldingen in Inbox?"): whether `end` is the end of the trouble `x` that
+/// a keyed watch or alert reported: "answers again" for "does not answer",
+/// an alert's own resolution for its firing, the same key on both.
+pub fn ends(end: &Notice, x: &Notice) -> bool {
+    let pair = matches!(
+        (x.kind, end.kind),
+        (Kind::Down, Kind::Up) | (Kind::Alert, Kind::AlertResolved)
+    );
+    pair && x.id != end.id && x.at <= end.at && x.key.is_some() && x.key == end.key
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

@@ -926,7 +926,7 @@ export function mount(root, ctx) {
     );
     for (const j of live)
       if (!panels.has(j.job)) {
-        const p = mountJobPanel(j.job);
+        const p = mountJobPanel(j.job, { framed: true });
         panels.set(j.job, p.stop);
         runningBox.prepend(p.element);
       }

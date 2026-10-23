@@ -6,7 +6,7 @@
 import { h, selectCell, tableBlock, labelCells, stateWord } from "./dom.js";
 import { declare, drivable } from "./drivable.js";
 import { gb } from "./fleet.js";
-import { formatDay } from "./format.js";
+import { formatDay, gbText } from "./format.js";
 import { timeChart } from "./charts.js";
 import {
   KIND_TONE,
@@ -933,10 +933,10 @@ export function diskCard(deps) {
     const dp = diskParts();
     setStackbar(who, {
       title: dp
-        ? `Who fills the root disk, ${dp.total} GB`
+        ? `Who fills the root disk, ${gbText(dp.total)}`
         : "Who fills the root disk",
       total: dp?.total,
-      format: (v) => `${v} GB`,
+      format: (v) => gbText(v),
       restLabel: "Free space",
       marks: [{ at: 0.8, label: "amber at 80 %" }],
       parts: isRoot ? (dp?.parts ?? []) : [],

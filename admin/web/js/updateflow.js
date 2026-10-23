@@ -96,13 +96,46 @@ export const flowArea = (search) => {
 };
 
 /**
+ * update-nothing-1 (Kenny, 2026-10-23: "daar zie ik precies dat er geen
+ * effectieve update is, waarom is dit dan een optie?"): whether an image
+ * line is on a moving tag, the kind a pull can change (`:latest`, `:stable`,
+ * a bare name). One pinned by digest (`…@sha256:…`) only moves by changing
+ * its line, which is the Update flow's pin row, never a pull. An empty line
+ * (the files were not read) is no claim either way: false.
+ * @param {string | null | undefined} image
+ */
+export const isMovingTag = (image) =>
+  !!image && !/@sha256:[0-9a-f]{16,}/i.test(image);
+
+/**
+ * The apps of a stack that are on a moving tag, from the stack's files
+ * (`/data/stacks/<s>/edit`'s `images`: `<app>/<service>` → image line); a
+ * stack of native services only has no such apps.
+ * @param {Record<string, string> | null | undefined} images
+ * @returns {string[]} app names, in order, once each
+ */
+export function movingApps(images) {
+  return [
+    ...new Set(
+      Object.entries(images ?? {})
+        .filter(([, image]) => isMovingTag(image))
+        .map(([key]) => key.split("/")[0]),
+    ),
+  ];
+}
+
+/**
  * What the list holds: the pinned images with a newer version (all of
  * them, or one stack's), and for one stack also its "pull" row.
  * @param {any} staleBody `/data/stale-images`
  * @param {Scope} scope
+ * @param {string[] | null} [moving] the stack's apps on a moving tag
+ *   (`movingApps`), once its files were read: the pull row exists only for
+ *   those (update-nothing-1). `null` or absent: not known, the pull row is
+ *   offered as before.
  * @returns {Item[]}
  */
-export function itemsFor(staleBody, scope) {
+export function itemsFor(staleBody, scope, moving) {
   // redesign-final-h1: every app with a newer version (`newerApps`, the
   // one source Stacks and the Inbox count from); one that comes with a
   // homelab release is listed as such, never ticked.
@@ -144,7 +177,11 @@ export function itemsFor(staleBody, scope) {
     )
       ? scope.app
       : null;
-  if (!scope.all)
+  // Nothing on a moving tag (every image pinned by digest, or a stack of
+  // native services): no pull row, so nothing to update is nothing offered.
+  const pullable =
+    !moving || (pullApp ? moving.includes(pullApp) : moving.length > 0);
+  if (!scope.all && pullable)
     out.push({
       id: `pull:${scope.stack}`,
       kind: "pull",

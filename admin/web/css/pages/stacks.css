@@ -146,18 +146,8 @@ main.shell.ap-page > [hidden] {
 .sk-drawer .kp-drawer__body {
   gap: var(--kp-space-lg, 16px);
 }
-/* redesign-final-c1: Deploy all changes is the approved apply.html in a
-   sheet: wide enough for its four steps, four tiles and three columns, the
-   whole window on a phone (the plan lays out by its own width). */
-dialog.kp-drawer.sk-drawer--plan {
-  /* kp's drawer is 28rem; this sheet is the plan's page. */
-  --kp-drawer-width: min(82rem, calc(100vw - 4rem));
-}
-@media (max-width: 48rem) {
-  dialog.kp-drawer.sk-drawer--plan {
-    --kp-drawer-width: 100vw;
-  }
-}
+/* Deploy all changes is a centred dialog since deploy-all-dialog-1
+   (overview.js); it no longer needs a wide sheet of its own. */
 .sk-steps {
   list-style: none;
   margin: 0;

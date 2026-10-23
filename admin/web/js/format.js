@@ -123,3 +123,27 @@ export function formatDateTime(unix, opts = {}) {
 export function agoText(verb, at, now) {
   return kpAgoText(verb, at == null ? null : at * 1000, now * 1000);
 }
+
+/**
+ * root-disk-decimals-1 (Kenny, 2026-10-22: "81.39999999999999 GB / 96 GB"):
+ * a figure a person reads, rounded to at most `decimals` places (2 by
+ * default) with no trailing zeros: 81.4, 96, 0.25. The one formatter every
+ * bar, tile and sentence puts a raw number through; a sum of floats never
+ * reaches the screen with its tail. Not a number reads as a dash.
+ * @param {number | null | undefined} n
+ * @param {number} [decimals]
+ * @returns {string}
+ */
+export function figure(n, decimals = 2) {
+  if (n == null || !Number.isFinite(n)) return "—";
+  const f = 10 ** decimals;
+  const t = (Math.round((n + Number.EPSILON) * f) / f).toFixed(decimals);
+  const out = t.includes(".") ? t.replace(/\.?0+$/, "") : t;
+  return out === "-0" ? "0" : out;
+}
+
+/**
+ * A size in gigabytes as a person reads it: `81.4 GB`.
+ * @param {number | null | undefined} n
+ */
+export const gbText = (n) => (n == null ? "—" : `${figure(n)} GB`);

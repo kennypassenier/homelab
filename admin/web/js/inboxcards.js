@@ -358,6 +358,21 @@ function checkWords() {
 }
 
 /**
+ * Record a manual check's answer from anywhere (a row of the list, the
+ * card): `ok` it works, `nok` it fails. The answer is a job; the checks are
+ * read again when it is done (checks.js `answeredJobs`).
+ * @param {string} check
+ * @param {"ok" | "nok"} verdict
+ */
+export const answerCheck = (check, verdict) =>
+  send(
+    "POST",
+    "/data/actions/_host/answer-check",
+    { check, verdict },
+    "the answer to the check",
+  );
+
+/**
  * The manual checks, one question per screen (demo section 4).
  * @param {() => import("./inboxrows.js").Row[]} rowsOf the open checks as Inbox rows
  */

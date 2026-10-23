@@ -63,19 +63,15 @@ test("redesign-final-c2: a job's step list ticks the done steps, runs the curren
   for (const r of rows) assert.ok(r.desc, `${r.title} has no description`);
 });
 
-test("redesign-final-c2: a long job folds the steps far from the current one into two summary rows", () => {
+test("redesign-final-c2 (changed by one-progress-view-1): a long job lists every step and folds none, so no row moves when another changes", () => {
   const rows = jobs.jobSteps(
     job({ progress: prog({ n: 20, m: 35, step: "restart" }) }),
     new Map([[20, "restart"]]),
   );
-  assert.ok(rows.length <= 7, `${rows.length} rows`);
-  assert.deepEqual(rows[0], {
-    title: "Steps 1–18",
-    desc: "done",
-    state: "ok",
-  });
+  assert.equal(rows.length, 35);
+  assert.equal(rows.filter((r) => r.state === "ok").length, 19);
   assert.equal(rows.find((r) => r.state === "run")?.title, "restart");
-  assert.equal(rows[rows.length - 1].title, "Steps 23–35");
+  assert.equal(rows[34].title, "Step 35");
 });
 
 test("redesign-final-c2: a finished job ticks every step, a failed one marks its last step failed, a queued one says it waits", () => {

@@ -334,7 +334,7 @@ fn timebar_after_done_1_the_median_is_of_whole_commands_not_of_one_unit() {
         unit_run("update-kyu", 7, 100, &[("pull", 2)], true),
         unit_run("update-kyu", 7, 102, &[("pull", 50), ("up", 12)], true),
         unit_run("update-kyu", 9, 1_000, &[("pull", 2)], true),
-        unit_run("update-kyu", 9, 1_002, &[("pull", 46), ("up", 14)], true),
+        unit_run("update-kyu", 9, 1_002, &[("pull", 46), ("up", 16)], true),
     ];
     let e = expectation(&h, "update-kyu");
     assert_eq!(e.runs, 2, "two commands, not four lines");

@@ -962,11 +962,18 @@ async fn a_native_only_container_is_never_given_docker() {
         "docker network create",
         "rm -rf",
     ] {
+        // native-cadvisor-1: the one exception is setting aside a cadvisor
+        // the golden template left behind, which runs only where it exists.
+        let seen: Vec<_> = exec
+            .calls_containing(forbidden)
+            .into_iter()
+            .filter(|c| !c.contains(homelab_core::ops::guards::CADVISOR_RETIRE))
+            .collect();
         assert!(
-            exec.calls_containing(forbidden).is_empty(),
+            seen.is_empty(),
             "a native-only container must never see '{}': {:?}",
             forbidden,
-            exec.calls_containing(forbidden)
+            seen
         );
     }
     // And no weekly prune timer for a docker that is not there. CT 109 and
@@ -2659,9 +2666,16 @@ async fn h4_cadvisor_is_not_installed_where_there_is_no_docker() {
     sp.gateway_route = None;
 
     let _ = deploy(&ctx(&exec, &sink, &journal), &sp).await;
+    // native-cadvisor-1: only the retire step (a template's leftover cadvisor
+    // is set aside) may name the directory; nothing installs into it.
+    let installs: Vec<_> = exec
+        .calls_containing("/opt/cadvisor")
+        .into_iter()
+        .filter(|c| !c.contains(homelab_core::ops::guards::CADVISOR_RETIRE))
+        .collect();
     assert!(
-        exec.calls_containing("/opt/cadvisor").is_empty(),
-        "a native-only host has no docker to report on"
+        installs.is_empty(),
+        "a native-only host has no docker to report on: {installs:?}"
     );
 }
 

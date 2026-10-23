@@ -1000,11 +1000,12 @@ fn fix_145_inbox_declares_ct_118_as_it_runs_today() {
     assert_eq!(m.natives, vec!["inbox".to_string()]);
     assert!(m.apps.is_empty() && m.storage.is_empty() && m.data_mounts.is_empty());
     // The unit file, byte for byte what CT 118 runs, or a deploy would
-    // rewrite it.
+    // rewrite it. Since native-first-install-1 the -pre-update path is
+    // optional (`-/var/lib/inbox-pre-update`); the next inbox deploy writes it.
     let unit = std::fs::read(dir.join("inbox/inbox.service")).expect("the unit file");
     assert_eq!(
         homelab_core::manifest::sha256_hex(&unit),
-        "469fabcc71edda36ef1c87d836ce9c7db40888ead6a8a9e92700c552a5a0f039"
+        "fec889acae5f4f692fc17034f3d82e7421262d47a5ff6fdde3ae1c97ff63bc98"
     );
 }
 

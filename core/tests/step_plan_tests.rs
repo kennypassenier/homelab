@@ -468,8 +468,9 @@ async fn update_skips_the_rest_of_an_apps_steps_when_its_policy_gate_says_skip()
     let plan = plan_of(&events);
     // "safety gates" + 5 names per app (no "pre-update copy" skip-branch
     // reached because the policy gate stops first) ... the PLAN still lists
-    // every name `auto=true` could produce for each app (9 names each).
-    assert_eq!(plan.len(), 1 + 2 * 9);
+    // every name `auto=true` could produce for each app (10 names each,
+    // "<app> :: settings" last since app-settings-enforced-1).
+    assert_eq!(plan.len(), 1 + 2 * 10);
 
     let names = marked_names(&events);
     assert_eq!(
@@ -489,6 +490,7 @@ async fn update_skips_the_rest_of_an_apps_steps_when_its_policy_gate_says_skip()
             "stop-first",
             "up",
             "verify",
+            "settings",
         ] {
             let name = format!("{app} :: {suffix}");
             assert!(

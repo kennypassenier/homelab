@@ -130,7 +130,12 @@ pub fn pins_in_compose(compose: &str) -> Vec<Pin> {
 pub fn pins_in_deployed_compose(compose: &str, cfg: &CacheCfg) -> Vec<Pin> {
     let mut out = Vec::new();
     for p in pinned_digests(compose) {
-        let Some((first, rest)) = p.reference.split_once('/') else {
+        // The reference still carries `@sha256:…`; its ':' is not a tag's.
+        let name = p
+            .reference
+            .split_once('@')
+            .map_or(&*p.reference, |(n, _)| n);
+        let Some((first, rest)) = name.split_once('/') else {
             out.extend(pin_of(&p));
             continue;
         };

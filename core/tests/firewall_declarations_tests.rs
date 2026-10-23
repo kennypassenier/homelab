@@ -93,6 +93,12 @@ fn kp_soft_declares_its_live_firewall_minus_kuma() {
             )
             .replace(header_old, header_new)
             .replace(rule4_old, rule4_new)
+            // pinned-digest-pruned-1: the keep registry answers on 5004
+            // beside the cache's 5000-5003.
+            .replace(
+                "-dest 10.10.10.17 -p tcp -dport 5000:5003\n",
+                "-dest 10.10.10.17 -p tcp -dport 5000:5004\n"
+            )
     );
     let all = stacks();
     let m = &all["kp-soft"];

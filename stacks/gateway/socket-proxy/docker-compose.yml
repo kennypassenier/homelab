@@ -16,9 +16,10 @@
 services:
   socket-proxy:
     # Pinned by digest like every other manual-class image here (the
-    # policy label below). `0.3.0` is the project's latest tagged release;
-    # resolved 2026-10-01 from Docker Hub.
-    image: tecnativa/docker-socket-proxy:0.3.0@sha256:9e4b9e7517a6b660f2cc903a19b257b1852d5b3344794e3ea334ff00ae677ac2
+    # policy label below). Since v0.4 the project tags its images with the
+    # leading `v` (`v0.5.0`; `0.5.0` is a 404 on Docker Hub). v0.5.0 resolved
+    # 2026-10-23 from Docker Hub; its notes change no variable used here.
+    image: tecnativa/docker-socket-proxy:v0.5.0@sha256:1f5038b54f06c3e18422902cf00ba21803d1c97805aae032e5e6673d532d3459
     container_name: socket-proxy
     networks:
       - gateway_net

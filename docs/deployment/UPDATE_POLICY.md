@@ -51,7 +51,7 @@ fails while this section is stale.
 | downloader | qbittorrent | qbittorrent | `manual` | `lscr.io/linuxserver/qbittorrent:5.2.4_v2.0.15-ls479@sha256:b522f9f4b769…` |  |
 | gateway | cloudflared | cloudflared | `manual` | `cloudflare/cloudflared:2026.10.0@sha256:9b49eed8f628…` |  |
 | gateway | crowdsec | crowdsec | `manual` | `crowdsecurity/crowdsec:v1.8.1@sha256:0f2523fa61ef…` |  |
-| gateway | socket-proxy | socket-proxy | `manual` | `tecnativa/docker-socket-proxy:0.3.0@sha256:9e4b9e7517a6…` |  |
+| gateway | socket-proxy | socket-proxy | `manual` | `tecnativa/docker-socket-proxy:v0.5.0@sha256:1f5038b54f06…` |  |
 | gateway | traefik | traefik | `manual` | `traefik:v3.7.14@sha256:575fa15b1350…` |  |
 | kp-soft | jobtracker | jobtracker | `auto` | `ghcr.io/kennypassenier/jobtracker:latest` |  |
 | kp-soft | kp-soft | kp-soft | `manual` | `ghcr.io/kennypassenier/kp-soft:v0.4.0@sha256:b9fd7be0bd3e…` |  |

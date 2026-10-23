@@ -1,3 +1,38 @@
+# Release 4.1.0 — in flight since 2026-10-23 18:50
+
+Kenny's answers to the release form (2026-10-23 18:50, verbatim): release-go:
+Uitbrengen · keep-live: Mee in de uitrol · tokio-advisory: Meenemen ·
+crate-updates: Meenemen · npm-dev: Niet nu · cf-secrets: Claude stelt ze in ·
+new-thread: Nieuwe thread.
+
+- **The work is UNCOMMITTED** in the worktree `.claude/worktrees/kp-themes-11`
+  (about 80 files, branch main, last commit 54672738). Every row in
+  `REGISTER.md` whose status reads "doing: built 2026-10-23" is in it. No test
+  ran after Kenny's reminder (tests only at the release go); everything compiles
+  (`cargo build --workspace --tests`, clippy -D warnings, tsc).
+- **Steps:** `cargo update` (tokio 1.53.1 → 1.54.1 for RUSTSEC-2026-0386, plus
+  the 81 other compatible crates; npm dev tools stay); commit in a few scoped
+  commits through the gate; `make release VERSION=4.1.0` (one full test run,
+  report every run's duration; list every test over 20 s for Kenny to prune);
+  signing through the coordinator; rollout via Live view only (the dashboard
+  now refuses changing `ui` steps when no tab is in Live view): host, client,
+  dashboard.
+- **keep-live:** after the dashboard, set `keep_port = 5004` (and
+  `keep_max_mb = 12288`) in the live /etc/homelab/host.toml, deploy the
+  registry stack first (new `keep` registry on CT 117, new backed-up mount
+  /appdata/registry/registry-keep), then every docker stack once (firewall
+  5000:5004, insecure-registries).
+- **cf-secrets:** set HOMELAB_ADMIN_CLOUDFLARE_ACCOUNT_ID (account id in
+  captured/gateway/cloudflare-tunnel.json) and HOMELAB_ADMIN_CLOUDFLARE_ACCESS_TOKEN
+  (~/.config/cloudflare/kp-soft-access-write.token, expires 2026-12-31) in
+  admin.env through latch, values never printed, then restart the dashboard via
+  Live view and press Check again in Settings › home-address.
+- **First live measurements:** a `ui` step without a Live view tab is refused;
+  Deploy all changes shows one step list with a fixed total; the Inbox count
+  equals "needs you"; the first press of "Update the home address" (watch it,
+  the Cloudflare PUT shapes are unrun); qBittorrent's setting is left alone
+  when equal; the keep round copies the pins.
+
 # Resume point — last verified 2026-09-27
 
 Written so a new session can pick this up without reading a chat log. Kenny's

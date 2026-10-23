@@ -844,7 +844,7 @@ workstation), `testplan` and `update-policy` (repository documents), and
 |---|---|---|
 | `homelab today` | **Today** page: the verdict first, then every item with its remedy | `goto /health?block=today` |
 | `homelab check`, TUI `c` | **Today** page, "Run the fleet check": every finding with its remedy (the Cloudflare edge and the registries' pins stay on a workstation: they need its token) | `goto /health?block=today` |
-| `homelab checks answer <id> ok\|nok\|accept <days> <reason>` | an **Answer…** button on each manual check (Checks page, a stack's Checks tab); the form `answer-check` | `open answer-check`, `pick act-check <id>`, `pick act-verdict ok\|nok\|accept`, `type act-days 30`, `type act-note <reason>` |
+| `homelab checks answer <id> ok\|nok\|accept <days> <reason>` | an **I checked it** button on each line of "When something goes wrong, check this" (a stack's page; the standing check on Host), which only records the date; the form `answer-check` still answers ok, not ok or accepted | `open answer-check`, `pick act-check <id>`, `pick act-verdict ok\|nok\|accept`, `type act-days 30`, `type act-note <reason>` |
 | `homelab incidents show <name>` | a **Show** button on each incident (Activity page, a stack's History tab): the bundle's text, secrets masked | — (a read) |
 | `homelab exec <vmid> <cmd>`, TUI SHELL | the form `exec` (one step, no typed name: Kenny, "we hebben genoeg security"; the host still refuses unless `exec_enabled = true`), and the **Shell** page, one line at a time, Up recalls | `open exec`, `type act-vmid 105`, `type act-command df -h`, `press confirm` (a token of scope `all`) |
 | `homelab templates` | **Host** page, "Read the templates" | — |
@@ -1257,7 +1257,7 @@ twelve more readings, 5 seconds apart, before a drop counts
 (`core/src/ops/deploy.rs:2561-2594`). Each `blind_spot` is printed as
 `[check] does not prove: <text>` even when everything passed
 (`core/src/ops/deploy.rs:2608-2612`). The `manual` lines become manual checks
-you answer with `homelab checks answer` (see section 3).
+you can confirm with `homelab checks answer` (see section 3). They are listed on the stack's page under "When something goes wrong, check this" for debugging, with when someone last confirmed each; they are never a notification, an Inbox row or a fleet-check finding (manual-checks-as-info-1).
 
 #### B4 · Drift detection
 

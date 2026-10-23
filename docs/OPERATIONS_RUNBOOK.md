@@ -456,7 +456,10 @@ Workstation, repository root, unless stated.
    uses owns the same repository; the stack recorded later is refused
    (`core/src/ops/backup.rs:315-373`).
 7. **Manual checks.** `homelab checks` lists what the deploy registered for
-   a person to confirm (`core/src/state.rs:121-134`).
+   a person to confirm (`core/src/state.rs:121-134`). They are information, not
+   notifications: each stack page lists them under "When something goes
+   wrong, check this" (the standing password-chain check is on Host), and none
+   reaches the Inbox, the fleet check or the nightly report.
 8. **Regenerate the DR runbook.** `homelab runbook` rewrites
    `docs/DR_RUNBOOK.md` from `stacks/` (`client/src/main.rs:899-913`).
 9. Commit `stacks/<name>/` and `docs/DR_RUNBOOK.md` on `main`.

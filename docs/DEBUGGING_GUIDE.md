@@ -921,7 +921,7 @@ A selection. Every finding carries its own remedy line.
 | `has no runaway guards: no journald cap, no docker log cap, or both` | run `homelab guards <vmid>` | `core/src/ops/fleetcheck.rs:794-800` |
 | `its last deploy stopped at "<step>" and never finished` | see section 8.4 | `core/src/ops/fleetcheck.rs:1018-1026` |
 | `the last drill did not prove a restore: <e>` | the last restore drill failed | `core/src/ops/restoredrill.rs:136` |
-| `<n> check(s) only a person can answer are open, e.g. <examples>` | run `homelab checks` | `core/src/ops/manualchecks.rs:164-168` |
+| `somebody looked and said no: "<question>"` | a person answered a manual check "not ok"; fix it, then answer again (`homelab checks`). Open, reopened or unanswered manual checks raise no finding since manual-checks-as-info-1: they are information on the stack's page ("When something goes wrong, check this") | `core/src/ops/manualchecks.rs` |
 | `but has no stack file in the repository` | `drift`: the stack runs and is in state, but `stacks/<stack>/` is gone. `homelab apply` destroys it after its name is typed; put the directory back to keep it | `core/src/ops/fleetcheck.rs:700-714` |
 | `retired <date> (<kind>, vmid <n>) — kept: restic <repos>; /appdata <dirs>; vault <paths>` | `noted`: data a retired stack, app or unit keeps on purpose; `homelab wipe <key>` deletes it | `core/src/ops/retired.rs:199-216` |
 | `monitor(s) watch a stack the fleet no longer has` | `drift`: the Uptime Kuma seeder left undeclared monitors in place because removing them all would have taken more than a quarter of the monitors at once; `refused` in `last-seed.json` says why | `core/src/ops/fleetcheck.rs:1045-1059` |

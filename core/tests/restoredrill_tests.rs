@@ -398,3 +398,72 @@ fn fix_62_a_postgres_container_that_never_becomes_ready_fails_the_drill() {
         already_failed
     );
 }
+
+/// failed-proof-retried-1 (2026-10-23): syncthing's drill and check failed in
+/// the outage night of 2026-10-22 and, picked longest-ago-first, would have
+/// waited 25 nights while its failure stood in the Inbox. A failure now goes
+/// first the next night, a few nights in a row at most.
+#[test]
+fn failed_proof_retried_1_a_failed_drill_goes_first_the_next_night() {
+    use homelab_core::ops::restoredrill::{RETRY_FAILED, pick};
+    use homelab_core::state::{DrillRecord, HostState};
+    let repos: Vec<String> = ["actual", "kitchen", "syncthing"]
+        .map(String::from)
+        .to_vec();
+    let mut st = HostState::default();
+    st.restore_drills.insert(
+        "actual".into(),
+        DrillRecord {
+            last_attempt: 100,
+            last_pass: 100,
+            ..Default::default()
+        },
+    );
+    st.restore_drills.insert(
+        "kitchen".into(),
+        DrillRecord {
+            last_attempt: 300,
+            last_pass: 300,
+            ..Default::default()
+        },
+    );
+    st.restore_drills.insert(
+        "syncthing".into(),
+        DrillRecord {
+            last_attempt: 200,
+            last_error: Some("rclone timed out".into()),
+            ..Default::default()
+        },
+    );
+    assert_eq!(pick(&st, &repos).as_deref(), Some("syncthing"));
+    // Failing every night: back into the rotation after RETRY_FAILED tries.
+    st.restore_drills
+        .get_mut("syncthing")
+        .unwrap()
+        .failures_in_row = RETRY_FAILED;
+    assert_eq!(pick(&st, &repos).as_deref(), Some("actual"));
+}
+
+#[test]
+fn failed_proof_retried_1_a_failed_check_goes_first_the_next_night() {
+    use homelab_core::ops::secondcopy::pick;
+    use homelab_core::state::{HostState, IntegrityRecord};
+    let repos: Vec<String> = ["actual", "syncthing"].map(String::from).to_vec();
+    let mut st = HostState::default();
+    st.integrity.insert(
+        "actual".into(),
+        IntegrityRecord {
+            last_check: 100,
+            ..Default::default()
+        },
+    );
+    st.integrity.insert(
+        "syncthing".into(),
+        IntegrityRecord {
+            last_check: 200,
+            drive_error: Some("timed out".into()),
+            ..Default::default()
+        },
+    );
+    assert_eq!(pick(&st, &repos).as_deref(), Some("syncthing"));
+}

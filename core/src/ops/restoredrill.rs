@@ -154,18 +154,25 @@ pub fn all_drill_repos(
 /// to decide this, and a repository that failed then waited a whole
 /// rotation; ordering by the last attempt keeps the rotation and needs no
 /// cursor that a changed list can shift.
+///
+/// failed-proof-retried-1: a repository whose last drill failed goes first
+/// the next night, up to `RETRY_FAILED` nights in a row; before this it
+/// waited a whole rotation (26 nights in October 2026) while its failure,
+/// often an outage's, stood in the Inbox.
 pub fn pick(state: &HostState, repos: &[String]) -> Option<String> {
     let mut sorted = repos.to_vec();
     sorted.sort();
     sorted.dedup();
     sorted.into_iter().min_by_key(|r| {
-        state
-            .restore_drills
-            .get(r)
-            .map(|d| d.last_attempt)
-            .unwrap_or(0)
+        let d = state.restore_drills.get(r);
+        let retry = d.is_some_and(|d| d.last_error.is_some() && d.failures_in_row < RETRY_FAILED);
+        (!retry, d.map(|d| d.last_attempt).unwrap_or(0))
     })
 }
+
+/// failed-proof-retried-1: how many nights in a row a failed drill or check
+/// is retried first before it rejoins the rotation.
+pub const RETRY_FAILED: u32 = 3;
 
 /// fix-62: fold one finished drill into the state. The failure is kept on
 /// the repository it belongs to until that repository passes; another
@@ -182,9 +189,13 @@ pub fn record(state: &mut HostState, repos: &[String], repo: &str, outcome: &Out
         Outcome::Passed { .. } => {
             rec.last_pass = now;
             rec.last_error = None;
+            rec.failures_in_row = 0;
             state.last_restore_drill = now;
         }
-        Outcome::Failed(why) => rec.last_error = Some(why.clone()),
+        Outcome::Failed(why) => {
+            rec.last_error = Some(why.clone());
+            rec.failures_in_row = rec.failures_in_row.saturating_add(1);
+        }
     }
     state.last_restore_drill_repo = repo.to_string();
     // The per-repository record carries the error now; the single field is

@@ -414,9 +414,15 @@ pub fn pick(state: &HostState, repos: &[String]) -> Option<String> {
     let mut sorted = repos.to_vec();
     sorted.sort();
     sorted.dedup();
-    sorted
-        .into_iter()
-        .min_by_key(|r| state.integrity.get(r).map(|i| i.last_check).unwrap_or(0))
+    // failed-proof-retried-1: a failed check goes first, as in the drill.
+    sorted.into_iter().min_by_key(|r| {
+        let i = state.integrity.get(r);
+        let retry = i.is_some_and(|i| {
+            (i.drive_error.is_some() || i.local_error.is_some())
+                && i.failures_in_row < crate::ops::restoredrill::RETRY_FAILED
+        });
+        (!retry, i.map(|i| i.last_check).unwrap_or(0))
+    })
 }
 
 /// Does this repository's check read data tonight, and which slice?
@@ -534,6 +540,11 @@ pub async fn check_repo(
                 rec.last_data_read = now;
                 rec.next_subset = n % t + 1;
             }
+            rec.failures_in_row = if d.is_some() || l.is_some() {
+                rec.failures_in_row.saturating_add(1)
+            } else {
+                0
+            };
             rec.drive_error = d;
             rec.local_error = l;
             s.last_integrity_check = now;

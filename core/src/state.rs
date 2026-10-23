@@ -357,6 +357,10 @@ pub struct IntegrityRecord {
     /// not checked.
     #[serde(default)]
     pub local_error: Option<String>,
+    /// failed-proof-retried-1: failed checks in a row, so a failure is
+    /// retried first the next night, a few times, without starving the rest.
+    #[serde(default)]
+    pub failures_in_row: u32,
 }
 
 /// fix-62: what the restore drill knows about one repository.
@@ -371,6 +375,9 @@ pub struct DrillRecord {
     /// Why the last drill of this repository proved nothing. None = it did.
     #[serde(default)]
     pub last_error: Option<String>,
+    /// failed-proof-retried-1: failed drills in a row (see `IntegrityRecord`).
+    #[serde(default)]
+    pub failures_in_row: u32,
 }
 
 /// What kind of thing left the files.

@@ -50,3 +50,24 @@ async fn fix_161_every_package_the_guard_installs_is_checked() {
         assert!(format!("{}", e).contains(pkg), "{pkg}: {e}");
     }
 }
+
+/// native-cadvisor-1 (2026-10-23): CT 120 and CT 121 were cloned from the
+/// golden template and kept its cadvisor running; the guards of a native-only
+/// stack now stop it and set it aside, and leave a docker host's alone.
+#[tokio::test]
+async fn native_cadvisor_1_a_native_only_ct_retires_the_template_cadvisor() {
+    let exec = MockExecutor::new();
+    let sink = VecSink::new();
+    homelab_core::ops::guards::apply(&exec, &sink, 121, false, None)
+        .await
+        .unwrap();
+    let retire = exec.calls_containing("mv /opt/cadvisor /opt/cadvisor.retired-");
+    assert_eq!(retire.len(), 1, "{:?}", retire);
+    assert!(exec.calls_containing("docker compose up -d").is_empty());
+
+    let exec = MockExecutor::new();
+    homelab_core::ops::guards::apply(&exec, &sink, 106, true, None)
+        .await
+        .unwrap();
+    assert!(exec.calls_containing("cadvisor.retired-").is_empty());
+}

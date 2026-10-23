@@ -192,6 +192,13 @@ pub struct RepoFiles {
     pub wc: Option<Arc<super::workcopy::WorkingCopy>>,
 }
 
+/// update-flow-latch-1: does `commit` (a full id, or an abbreviation of at
+/// least seven characters) name the working copy's `head`?
+pub fn is_head(head: Option<&str>, commit: &str) -> bool {
+    let commit = commit.trim();
+    commit.len() >= 7 && head.is_some_and(|h| h.trim().starts_with(commit))
+}
+
 fn no_repo(repo: &Path, what: String) -> Refusal {
     Refusal::new(
         what,
@@ -304,6 +311,14 @@ impl StackFiles for RepoFiles {
         let Some(commit) = commit else {
             return self.read_dir(&self.repo.join("stacks").join(stack), stack, kind, &what);
         };
+        // update-flow-latch-1: the commit the working copy already stands on
+        // (the Update flow deploys its own commit right after making it) is
+        // read from the working copy itself. A checkout under tmp/ is a
+        // directory latch has no link for, so every stack with a latch
+        // secret was refused there; the files are the same either way.
+        if is_head(self.git(&["rev-parse", "HEAD"]).ok().as_deref(), commit) {
+            return self.read_dir(&self.repo.join("stacks").join(stack), stack, kind, &what);
+        }
         // feat-stacks-6: a checkout of that commit beside the working copy,
         // read like the working copy, removed again whatever happened.
         let _ = std::fs::create_dir_all(&self.scratch);

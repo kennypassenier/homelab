@@ -40,6 +40,12 @@ pub const DOCKER_DAEMON_JSON: &str = r#"{
 }
 "#;
 
+/// native-cadvisor-1: stop and set aside a cadvisor the golden template left
+/// on a native-only CT. Exits 0 whether or not there was one.
+pub const CADVISOR_RETIRE: &str = "if [ -d /opt/cadvisor ]; then \
+(cd /opt/cadvisor && docker compose down >/dev/null 2>&1); \
+mv /opt/cadvisor /opt/cadvisor.retired-$(date +%Y%m%d%H%M%S) && echo retired; fi; true";
+
 /// cAdvisor, on every managed docker host.
 ///
 /// H4. It was a per-stack app directory in seven of thirteen stacks, while
@@ -481,6 +487,17 @@ pub async fn apply(
         // a no-op and buys self-repair.
         pct_sh(exec, vmid, "cd /opt/cadvisor && docker compose up -d", 300).await?;
         log("[guard] cadvisor up — this host reports its containers".into());
+    } else {
+        // native-cadvisor-1: a native-only CT cloned from the golden
+        // template inherits the template's cadvisor, running, which no
+        // Prometheus target reads and no guard ever updates. It surfaced as
+        // "admin/cadvisor" and "kitchen/cadvisor" in the Updates list
+        // (2026-10-23), and its Update failed because it belongs to no stack
+        // app. Stopped and set aside here; a CT without it is untouched.
+        let out = pct_sh(exec, vmid, CADVISOR_RETIRE, 120).await?;
+        if out.stdout.contains("retired") {
+            log("[guard] template cadvisor stopped — no docker app runs here".into());
+        }
     }
 
     // 5. apt cache hygiene.

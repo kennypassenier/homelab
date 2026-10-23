@@ -144,6 +144,19 @@ pub fn target_tag(pinned: &str, latest: &str) -> String {
     }
 }
 
+/// pin-update-tag-form-1: the same version in the other `v` convention
+/// (`0.5.0` ↔ `v0.5.0`), or None when the tag is no version. A project can
+/// change its convention between releases (docker-socket-proxy tagged
+/// `0.3.0` and then `v0.5.0`), so the tag `target_tag` derives from the old
+/// pin is not always the one the registry has.
+pub fn other_tag_form(tag: &str) -> Option<String> {
+    match tag.strip_prefix('v') {
+        Some(rest) if rest.starts_with(|c: char| c.is_ascii_digit()) => Some(rest.to_string()),
+        _ if tag.starts_with(|c: char| c.is_ascii_digit()) => Some(format!("v{tag}")),
+        _ => None,
+    }
+}
+
 /// The image name without its tag and digest (`registry/repo:tag@sha256:…`
 /// → `registry/repo`); a `:` inside the registry's own host:port is kept.
 pub fn image_name(reference: &str) -> &str {

@@ -823,3 +823,25 @@ fn redesign_stackhub_2_seal_env_is_a_stack_action_that_seals_that_stack() {
     assert_eq!(e["target"], "stack");
     assert_eq!(e["label"], "Push the env");
 }
+
+/// update-flow-latch-1: the Update flow deploys the commit it just made; that
+/// commit is the working copy's HEAD and is read from the working copy, where
+/// latch is linked, instead of from a checkout under tmp/.
+#[test]
+fn the_commit_the_working_copy_stands_on_is_read_in_place() {
+    use homelab_admin::shell::actions::is_head;
+    let head = "b5dfb87f9ad606cb15e3be5bc338a35b54492ed0\n";
+    assert!(is_head(
+        Some(head),
+        "b5dfb87f9ad606cb15e3be5bc338a35b54492ed0"
+    ));
+    assert!(is_head(Some(head), "b5dfb87"));
+    // An older commit (a real roll-back) still gets its own checkout.
+    assert!(!is_head(
+        Some(head),
+        "a9702b8d8d5d26a1914fa4c3e4b7895bbaecf31e"
+    ));
+    // Too short to be sure, or no HEAD at all: never in place.
+    assert!(!is_head(Some(head), "b5df"));
+    assert!(!is_head(None, "b5dfb87"));
+}

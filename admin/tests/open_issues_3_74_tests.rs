@@ -488,3 +488,42 @@ fn fix_stale_refresh_1_the_update_refusal_offers_the_deploy() {
         serde_json::json!({"action": "deploy", "stack": "cloud"})
     );
 }
+
+/// pin-update-tag-form-1 (2026-10-23): docker-socket-proxy was pinned at
+/// `0.3.0` and released `v0.5.0`; Docker Hub has `v0.5.0` and answers 404 for
+/// `0.5.0`. The update takes the form the registry has instead of asking for
+/// a hand edit.
+#[test]
+fn pin_update_tag_form_1_the_tag_the_registry_has_is_used() {
+    use homelab_admin::core::stackedit::StackTexts;
+    let mut t = StackTexts::new();
+    t.insert(
+        "socket-proxy/docker-compose.yml".into(),
+        "services:\n  socket-proxy:\n    image: tecnativa/docker-socket-proxy:0.3.0@sha256:old\n"
+            .into(),
+    );
+    let resolve: Box<homelab_admin::shell::pinupdate::ResolveFn> =
+        Box::new(|_, _, tag| Ok((tag == "v0.5.0").then(|| "sha256:new".into())));
+    let target = homelab_admin::shell::pinupdate::plan_target(
+        "gateway",
+        &t,
+        "socket-proxy/socket-proxy",
+        "v0.5.0",
+        &*resolve,
+    )
+    .unwrap();
+    assert_eq!(target.to_version, "v0.5.0");
+    assert!(target.to.ends_with(":v0.5.0@sha256:new"), "{}", target.to);
+
+    // Neither form exists: the refusal says the tag is missing, not "edit by hand".
+    let none: Box<homelab_admin::shell::pinupdate::ResolveFn> = Box::new(|_, _, _| Ok(None));
+    let r = homelab_admin::shell::pinupdate::plan_target(
+        "gateway",
+        &t,
+        "socket-proxy/socket-proxy",
+        "v0.5.0",
+        &*none,
+    )
+    .unwrap_err();
+    assert!(r.why.contains("has no tag"), "{}", r.why);
+}

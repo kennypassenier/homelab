@@ -98,7 +98,7 @@ pub fn plan_target(
             "pin it to a version first in the stack editor",
         ));
     };
-    let tag = target_tag(&from_version, latest);
+    let mut tag = target_tag(&from_version, latest);
     if tag == from_version {
         // fix-stale-refresh-1: the file is ahead of the running stack; the
         // fix is the stack's deploy, offered as a button (`fix_action`).
@@ -110,13 +110,29 @@ pub fn plan_target(
         .with_fix_action(crate::core::actions::ActionKind::Deploy, stack));
     }
     let (registry, repository) = registry_of(&from);
-    let digest = match resolve(&registry, &repository, &tag) {
+    // pin-update-tag-form-1: the derived tag first, then the same version in
+    // the other `v` convention; a registry answer without a digest is most
+    // often a tag it does not have.
+    let first = resolve(&registry, &repository, &tag);
+    let first = match (&first, crate::core::stale_images::other_tag_form(&tag)) {
+        (Ok(Some(_)), _) | (_, None) => first,
+        (_, Some(alt)) => match resolve(&registry, &repository, &alt) {
+            Ok(Some(d)) => {
+                tag = alt;
+                Ok(Some(d))
+            }
+            _ => first,
+        },
+    };
+    let digest = match first {
         Ok(Some(d)) => d,
         Ok(None) => {
             return Err(Refusal::new(
                 what,
-                format!("{registry} answered for {repository}:{tag} without a digest"),
-                "edit the image line by hand in the stack editor, with the digest from the registry",
+                format!(
+                    "{registry} has no tag {repository}:{tag} (nor the same version with or without its leading v)"
+                ),
+                "the release may not be published as an image yet; the update is offered again once it is",
             ));
         }
         Err(e) => {

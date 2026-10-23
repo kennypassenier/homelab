@@ -8766,6 +8766,18 @@ async function genWalk(entry) {
         const path = entry.path;
         await page.goto(BASE + path);
         await page.waitForTimeout(1500);
+        // A card still growing to content that just arrived (kp's size
+        // motion clips it for its 400 ms) is motion, not a cut: the audit
+        // reads the page once it holds still.
+        await page
+          .waitForFunction(
+            () => !document.querySelector("[data-kp-resizing]"),
+            null,
+            {
+              timeout: 3000,
+            },
+          )
+          .catch(() => {});
         keep(path, await page.evaluate(layoutAudit, null));
         const pc = await page.evaluate(pageChecks);
         keep(path, pc);

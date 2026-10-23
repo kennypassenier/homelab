@@ -27,11 +27,14 @@ fn conf_disk_gb(conf: &str) -> Option<u32> {
         .and_then(|v| v.parse().ok())
 }
 
+/// one-process-batch-2: `hot_apply`'s step plan — fixed and unconditional.
+pub const RESIZE_STEPS: &[&str] = &["read live config", "apply ram + cores", "apply disk"];
+
 pub async fn hot_apply(ctx: &OpCtx<'_>, m: &StackManifest) -> OperationReport {
     let op = format!("resize-{}", m.stack_name);
     let mut runner = Runner::new(&op, ctx.sink, ctx.journal);
     // fix-171 round 3: fixed and unconditional.
-    runner.plan(&["read live config", "apply ram + cores", "apply disk"]);
+    runner.plan(RESIZE_STEPS);
     let texec = TracingExecutor::new(ctx.exec, ctx.sink);
     let exec: &dyn Executor = &texec;
     let vm = m.vmid.to_string();

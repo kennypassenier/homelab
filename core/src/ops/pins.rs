@@ -224,6 +224,26 @@ pub fn runs_image(running: &BTreeMap<String, RunningImage>, want: &str) -> Optio
     }))
 }
 
+/// update-nothing-1: whether every `manual` container of `want`'s repository
+/// runs `registry_digest` (what the tag's registry gives right now), so a
+/// moving tag with nothing newer can be told from one with a newer image.
+/// `None` when no `manual` container runs that repository (nothing measured).
+pub fn runs_current(
+    running: &BTreeMap<String, RunningImage>,
+    want: &str,
+    registry_digest: &str,
+) -> Option<bool> {
+    let repo = repository(want);
+    let same: Vec<&RunningImage> = running
+        .values()
+        .filter(|r| repository(&r.image) == repo)
+        .collect();
+    if same.is_empty() {
+        return None;
+    }
+    Some(same.iter().all(|r| r.digest == registry_digest))
+}
+
 /// The version a reference is pinned to: the tag in its last path segment,
 /// without the digest. None for a digest-only reference.
 pub fn pinned_version(image: &str) -> Option<String> {

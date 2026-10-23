@@ -2161,6 +2161,7 @@ fn t40_stateless_must_be_declared_not_inferred() {
         backup_pause: BackupPause::Off,
         update_policy: Default::default(),
         after_restore: None,
+        first_secret_cmd: None,
         metrics: None,
         release_repo: None,
         release_asset: None,
@@ -3503,6 +3504,7 @@ async fn t69_a_regressed_check_fails_the_deploy_when_nobody_is_watching() {
             url: None,
             probes: Vec::new(),
             busy_check: None,
+            settings: Vec::new(),
             checks: vec![homelab_core::checks::Check {
                 name: "routes".into(),
                 command: "echo 28".into(),
@@ -3695,6 +3697,7 @@ async fn t69_an_operator_who_says_yes_lets_the_deploy_finish() {
             url: None,
             probes: Vec::new(),
             busy_check: None,
+            settings: Vec::new(),
             checks: vec![homelab_core::checks::Check {
                 name: "routes".into(),
                 command: "echo 28".into(),

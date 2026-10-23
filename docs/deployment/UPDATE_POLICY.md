@@ -79,6 +79,8 @@ fails while this section is stale.
 | registry | registry | cache-ghcr | `manual` | `registry:3.1.2@sha256:ddf754342cfc…` |  |
 | registry | registry | cache-gcr | `manual` | `registry:3.1.2@sha256:ddf754342cfc…` |  |
 | registry | registry | cache-lscr | `manual` | `registry:3.1.2@sha256:ddf754342cfc…` |  |
+| registry | registry | keep | `manual` | `registry:3.1.2@sha256:ddf754342cfc…` |  |
+| registry | registry | keep-copy | `manual` | `quay.io/skopeo/stable:v1.22.3@sha256:24940638e4ab…` |  |
 | syncthing | syncthing | syncthing | `auto` | `syncthing/syncthing:latest` |  |
 
 ### Native services (`update_policy` in `service.yml`)

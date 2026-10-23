@@ -28,6 +28,10 @@ pub enum PinAnswer {
     Present,
     /// 404 on the manifest: the next pull of this pin fails.
     Missing,
+    /// pinned-digest-pruned-1: 404 at the origin, but the keep registry on
+    /// the cache host still holds the digest. The text is the reference the
+    /// kept copy pulls from.
+    MissingKept(String),
     /// No answer that means anything (a private repository without
     /// credentials here, no network, a registry error); the text says why.
     NotAsked(String),
@@ -130,6 +134,19 @@ pub fn evaluate_pin_existence(answers: &[(PinnedDigest, PinAnswer)]) -> Vec<Find
                 ),
                 remedy: "repin: read the digest the tag carries today from the registry, put \
                          it on the image: line, and deploy the stack before anything rebuilds it"
+                    .into(),
+            }),
+            PinAnswer::MissingKept(kept) => out.push(Finding {
+                severity: Severity::Drift,
+                subject: format!("{} image {}/{}", p.stack, p.registry, p.repository),
+                what: format!(
+                    "the pinned digest {} was deleted upstream; the kept copy at {} is used \
+                     by a rebuild or a disaster recovery",
+                    p.digest, kept
+                ),
+                remedy: "nothing breaks today. Repin to the digest the tag carries now and \
+                         deploy when convenient; the kept copy is dropped by itself once no \
+                         stack file pins it"
                     .into(),
             }),
             PinAnswer::NotAsked(why) => out.push(Finding {

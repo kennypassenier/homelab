@@ -8412,6 +8412,26 @@ async fn scheduler_loop(state: AppState) {
                     }
                 }
             }
+            // app-settings-enforced-1: the values a fix depends on, put back
+            // in the apps' own files. After the backup batch and the update
+            // (both done with this stack), under the same operation lock as
+            // every mutation, so never while a backup of the stack runs. A
+            // stack whose update just failed is left alone.
+            if update_ok
+                && st.enabled
+                && !st.is_native()
+                && let Some(m) = st.manifest.clone()
+                && store
+                    .load()
+                    .await
+                    .is_ok_and(|s| homelab_core::ops::settings::stack_has_settings(&s, &name))
+            {
+                let _ = run_mutating_op(&state, &exec, 0, "scheduled-settings", |ctx| {
+                    Box::pin(async move { homelab_core::ops::settings::enforce(ctx, &m).await })
+                })
+                .instrument(stack_span(&name))
+                .await;
+            }
             // H8 / fix-59: only a failed update parks, and only the updates;
             // a failed or deferred backup is simply tried again tomorrow.
             if night.settle_park {
@@ -8638,6 +8658,8 @@ async fn scheduler_loop(state: AppState) {
                 // fix-registry-1: a newer pinned version was learned; warm the
                 // cache in the background, never in this round's way.
                 spawn_cache_prefetch(&state, &s);
+                // pinned-digest-pruned-1: keep a copy of every pinned digest.
+                spawn_keep_round(&state, &s);
             }
         }
 
@@ -10159,6 +10181,13 @@ where
     {
         refresh_running_images(state, exec, stack).await;
     }
+    // pinned-digest-pruned-1: a deploy may have brought a new pin; keep it.
+    if resp.ok && stack.is_some() && matches!(label, "deploy" | "update") {
+        let store = homelab_core::state::StateStore::new(exec, &state.config.state_dir);
+        if let Ok(snapshot) = store.load().await {
+            spawn_keep_round(state, &snapshot);
+        }
+    }
     resp
 }
 
@@ -10195,6 +10224,45 @@ fn spawn_cache_prefetch(state: &AppState, hs: &homelab_core::state::HostState) {
             info!("{}", line);
         }
         PREFETCH_RUNNING.store(false, std::sync::atomic::Ordering::SeqCst);
+    });
+}
+
+/// pinned-digest-pruned-1: one keep round at a time.
+static KEEP_RUNNING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// pinned-digest-pruned-1: make sure the keep registry on the cache host holds
+/// every digest the deployed compose files pin, and drop what none pins any
+/// more (`homelab_core::ops::keep`). A detached task like the prefetch: no
+/// operation lock, never in the nightly round's way, one at a time.
+fn spawn_keep_round(state: &AppState, hs: &homelab_core::state::HostState) {
+    let Some(cache) = state.config.registry_cache.clone() else {
+        return;
+    };
+    if cache.keep_port.is_none() {
+        return;
+    }
+    let Some(vmid) = hs.stacks.get("registry").map(|s| s.vmid) else {
+        return;
+    };
+    if KEEP_RUNNING.swap(true, std::sync::atomic::Ordering::SeqCst) {
+        info!("[keep] a round is still running — not starting another");
+        return;
+    }
+    let hs = hs.clone();
+    let no_touch = state.config.safety.no_touch.clone();
+    tokio::spawn(async move {
+        let (wanted, complete, notes) =
+            homelab_core::ops::keep::gather_wanted(&RealExecutor, &hs, &cache, &no_touch).await;
+        for n in notes {
+            info!("{}", n);
+        }
+        info!("[keep] {} pinned digest(s) across the fleet", wanted.len());
+        for line in
+            homelab_core::ops::keep::round(&RealExecutor, &cache, vmid, &wanted, complete).await
+        {
+            info!("{}", line);
+        }
+        KEEP_RUNNING.store(false, std::sync::atomic::Ordering::SeqCst);
     });
 }
 
@@ -11981,7 +12049,7 @@ async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse {
                     let mut runner =
                         homelab_core::runner::Runner::new("apply-guards", ctx.sink, ctx.journal);
                     // fix-171 round 3: one fixed step, always.
-                    runner.plan(&["guards"]);
+                    runner.plan(homelab_core::ops::guards::APPLY_GUARDS_STEPS);
                     match runner
                         .step("guards", || async {
                             // gap-33: only a managed stack, after the A2

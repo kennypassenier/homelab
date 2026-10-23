@@ -352,6 +352,7 @@ fn kyu_manifest() -> NativeServiceManifest {
         backup_pause: homelab_core::native::BackupPause::Off,
         update_policy: Default::default(),
         after_restore: None,
+        first_secret_cmd: None,
         metrics: None,
         release_repo: Some("kennypassenier/kyu".into()),
         release_asset: None,

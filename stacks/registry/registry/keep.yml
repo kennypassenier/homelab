@@ -1,0 +1,26 @@
+# The KEEP registry (pinned-digest-pruned-1): a plain registry with NO proxy
+# section, so nothing in it expires by itself. Written only by the host's
+# keep round (core/src/ops/keep.rs); read by the deploy's pull fallback and
+# by `homelab check`. Deleting is enabled so the round can drop a copy no
+# stack pins any more; garbage-collect then returns the blobs.
+version: 0.1
+log:
+  level: warn
+  fields:
+    service: registry
+storage:
+  cache:
+    blobdescriptor: inmemory
+  filesystem:
+    rootdirectory: /var/lib/registry
+  delete:
+    enabled: true
+http:
+  addr: :5000
+  headers:
+    X-Content-Type-Options: [nosniff]
+health:
+  storagedriver:
+    enabled: true
+    interval: 10s
+    threshold: 3

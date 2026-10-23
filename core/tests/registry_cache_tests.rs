@@ -24,6 +24,8 @@ fn cfg() -> CacheCfg {
             },
         ],
         pull_timeout_secs: 180,
+        keep_port: None,
+        keep_max_mb: None,
     }
 }
 
@@ -192,6 +194,8 @@ fn fix_registry_1_update_pulls_are_planned_through_the_cache() {
             },
         ],
         pull_timeout_secs: 180,
+        keep_port: None,
+        keep_max_mb: None,
     };
     let up = vec!["ghcr.io".to_string(), "docker.io".to_string()];
     let imgs = vec!["ghcr.io/a/b:1.2".to_string(), "postgres:16".to_string()];

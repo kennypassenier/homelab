@@ -126,6 +126,10 @@ pub const LOGROTATE_POLICY: &str = r#"/var/log/syslog /var/log/messages /var/log
 }
 "#;
 
+/// one-process-batch-2: the `apply-guards` operation's step plan — one fixed
+/// step, the one list the host plans from and the dashboard counts.
+pub const APPLY_GUARDS_STEPS: &[&str] = &["guards"];
+
 /// double-ingestion-logrotate (panel finding, 2026-10-01): the `rsyslog`
 /// package ships its own `/etc/logrotate.d/rsyslog`, which already rotates
 /// `/var/log/syslog`, `/var/log/auth.log` and `/var/log/messages` with the
@@ -360,7 +364,9 @@ pub async fn apply(
             let hosts: Vec<String> = c
                 .upstreams
                 .iter()
-                .map(|u| format!("\"{}:{}\"", c.host, u.port))
+                .map(|u| u.port)
+                .chain(c.keep_port)
+                .map(|port| format!("\"{}:{}\"", c.host, port))
                 .collect();
             DOCKER_DAEMON_JSON
                 .trim_end()

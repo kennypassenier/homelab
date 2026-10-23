@@ -56,6 +56,12 @@ Environment=HOMELAB_ADMIN_TRAFFIC_JOB=access
 # the tiles through Traefik's :80 would reopen the Host-header route to the
 # Proxmox and OPNsense logins that fix-89 closed; how the tiles are watched
 # is Kenny's call. Until then the watch covers containers and the host.
+# eten-home-ip-1: the Home address section of Settings compares the house's
+# public address with the Cloudflare Access bypass policies. The account id
+# and the Access token are secrets/identity and come from admin.env (latch):
+#   HOMELAB_ADMIN_CLOUDFLARE_ACCOUNT_ID, HOMELAB_ADMIN_CLOUDFLARE_ACCESS_TOKEN
+# Optional: HOMELAB_ADMIN_HOME_ADDRESS_URL (default https://api.ipify.org),
+# HOMELAB_ADMIN_HOME_ADDRESS_CHECK_EVERY_S (default 900).
 # Live view announces every step this long before taking it (Kenny,
 # 2026-09-29, form "Live view tempo": 5 s; 3 s was "soms nog wat te snel").
 Environment=HOMELAB_ADMIN_LIVE_ANNOUNCE_MS=5000

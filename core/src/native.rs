@@ -199,6 +199,17 @@ pub struct NativeServiceManifest {
     /// beside it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub after_restore: Option<String>,
+    /// native-first-install-1 (2026-10-23): a command run INSIDE the
+    /// container, under a pseudo-terminal, on a FIRST install when
+    /// `env_file` is missing or empty — e.g. `/opt/kitchen/bin/kitchen
+    /// gen-secret`. It must print `KEY=value` lines (anything else is
+    /// dropped); those lines become the env file (mode 0600, owned by the
+    /// unit's `User=`), and the file is sealed into the host's vault. The
+    /// values are never logged, only the key names. A non-empty env file is
+    /// never touched. Needs `env_file`. None = the installer creates no
+    /// secrets (the env file must then come from the vault or by hand).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub first_secret_cmd: Option<String>,
 }
 
 impl NativeServiceManifest {
@@ -325,6 +336,18 @@ pub fn validate_native(m: &NativeServiceManifest) -> Result<(), Vec<String>> {
         problems.push(
             "update_policy: self without an update_cmd — there is no verb to run nightly".into(),
         );
+    }
+    if let Some(cmd) = &m.first_secret_cmd {
+        if m.env_file.is_none() {
+            problems.push(
+                "first_secret_cmd is set without an env_file — there is nowhere to write what \
+                 it prints"
+                    .into(),
+            );
+        }
+        if cmd.trim().is_empty() {
+            problems.push("first_secret_cmd is empty".into());
+        }
     }
     if let Some(glob) = &m.backup_from_newest {
         if !glob.starts_with('/') || glob.contains("..") || !glob.contains('*') {

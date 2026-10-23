@@ -667,11 +667,27 @@ async fn run(explicit_host: Option<String>) {
             };
             // gap-37 (2026-09-28, Kenny: "eerst checken of de image bestaat"):
             // every pinned digest in the stack files, asked of its registry.
-            let pin_findings = homelab_client::pinexists::check_pins(Path::new(&base));
+            let keep = std::fs::read_to_string(in_repo("config/host.toml"))
+                .ok()
+                .and_then(|t| homelab_client::pinexists::declared_keep(&t));
+            let pin_findings = homelab_client::pinexists::check_pins(
+                Path::new(&base),
+                keep.as_ref().map(|(h, p)| (h.as_str(), *p)),
+            );
             let broken_pins: Vec<_> = pin_findings
                 .iter()
                 .filter(|f| f.severity == homelab_core::ops::fleetcheck::Severity::Broken)
                 .collect();
+            // pinned-digest-pruned-1: deleted upstream, a kept copy is used.
+            for f in pin_findings
+                .iter()
+                .filter(|f| f.severity == homelab_core::ops::fleetcheck::Severity::Drift)
+            {
+                println!(
+                    "  [attention] {} — {}\n      remedy: {}",
+                    f.subject, f.what, f.remedy
+                );
+            }
             if broken_pins.is_empty() {
                 println!(
                     "pins: every pinned image digest still exists ({} not asked)",

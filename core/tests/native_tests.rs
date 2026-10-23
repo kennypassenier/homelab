@@ -48,6 +48,7 @@ fn kyu_manifest() -> NativeServiceManifest {
         backup_pause: BackupPause::Off,
         update_policy: Default::default(),
         after_restore: None,
+        first_secret_cmd: None,
         metrics: None,
         release_repo: None,
         release_asset: None,
@@ -2222,5 +2223,174 @@ async fn fix_171_no_release_repo_marks_nothing() {
             .iter()
             .any(|e| matches!(e, homelab_core::sink::PipelineEvent::Plan { .. })),
         "nothing was ever attempted, so no plan was announced"
+    );
+}
+
+// ── native-first-install-1 · first install creates dirs and seeds secrets ──
+//
+// CT 121 (kitchen), 2026-10-22: the first install failed on a missing
+// EnvironmentFile and then on missing secrets. The install now creates every
+// declared directory and, when the stack file opts in with `first_secret_cmd`,
+// generates the env file inside the container.
+
+const SEED_UNIT_FILE: &str = "[Unit]\nDescription=kyu\n\n[Service]\nUser=kyu\n\
+                              ExecStart=/usr/local/bin/kyu\n\n[Install]\n\
+                              WantedBy=multi-user.target\n";
+
+fn seeding_manifest() -> NativeServiceManifest {
+    NativeServiceManifest {
+        first_secret_cmd: Some("/usr/local/bin/kyu gen-secret".into()),
+        ..install_manifest()
+    }
+}
+
+/// Everything a successful install needs from the mock container.
+fn first_install_mocks(exec: &MockExecutor) {
+    adopt_mocks(exec);
+    glibc_ok(exec);
+    exec.respond_always("test -f", CmdOutput::ok("no\n"));
+    exec.respond_always("base64 -d", CmdOutput::ok(""));
+    exec.respond_always("systemctl daemon-reload", CmdOutput::ok(""));
+    exec.respond_always("systemctl stop", CmdOutput::ok(""));
+    exec.respond_always("cat /var/lib/homelab/state.json", CmdOutput::failed(1, ""));
+}
+
+async fn run_install(
+    exec: &MockExecutor,
+    m: &NativeServiceManifest,
+) -> (
+    homelab_core::sink::VecSink,
+    homelab_core::runner::OperationReport,
+) {
+    let sink = VecSink::new();
+    let j = NullJournal;
+    let report = homelab_core::ops::native::install_native(
+        &ctx(exec, &sink, &j),
+        m,
+        "YmluYXJ5",
+        SEED_UNIT_FILE,
+    )
+    .await;
+    (sink, report)
+}
+
+#[tokio::test]
+async fn native_first_install_1_creates_the_declared_directories_for_the_service_user() {
+    let exec = MockExecutor::new();
+    first_install_mocks(&exec);
+    exec.respond_always("[ -d '/var/lib/kyu' ]", CmdOutput::ok("created\n"));
+    let (_sink, report) = run_install(&exec, &install_manifest()).await;
+    assert!(report.ok, "{:?}", report.error);
+    let mk = exec.calls_containing("mkdir -p '/var/lib/kyu'");
+    assert_eq!(mk.len(), 1, "{:?}", mk);
+    assert!(mk[0].contains("chown 'kyu': '/var/lib/kyu'"), "{}", mk[0]);
+    // the env file's directory too
+    assert!(
+        !exec.calls_containing("mkdir -p '/etc/kyu'").is_empty(),
+        "the env file's directory must be created"
+    );
+}
+
+#[tokio::test]
+async fn native_first_install_1_runs_the_secret_command_only_when_the_field_is_set() {
+    let exec = MockExecutor::new();
+    first_install_mocks(&exec);
+    let (_sink, report) = run_install(&exec, &install_manifest()).await;
+    assert!(report.ok, "{:?}", report.error);
+    assert!(
+        exec.calls_containing("script -qec").is_empty(),
+        "no first_secret_cmd declared, so nothing may be generated"
+    );
+}
+
+#[tokio::test]
+async fn native_first_install_1_seeds_a_missing_env_file_and_never_logs_the_values() {
+    let exec = MockExecutor::new();
+    first_install_mocks(&exec);
+    exec.respond_always(
+        "script -qec",
+        CmdOutput::ok("KEY KYU_TOKEN\nKEY KYU_SECRET_KEY\n"),
+    );
+    exec.respond_always(
+        "cat '/etc/kyu/kyu.env'",
+        CmdOutput::ok("KYU_TOKEN=seed-secret-r1\nKYU_SECRET_KEY=seed-secret-r2\n"),
+    );
+    let (sink, report) = run_install(&exec, &seeding_manifest()).await;
+    assert!(report.ok, "{:?}", report.error);
+
+    let run = exec.calls_containing("script -qec");
+    assert_eq!(run.len(), 1, "{:?}", run);
+    assert!(
+        run[0].contains("/usr/local/bin/kyu gen-secret"),
+        "{}",
+        run[0]
+    );
+    assert!(run[0].contains("chmod 600"), "{}", run[0]);
+    assert!(run[0].contains("chown 'kyu':"), "{}", run[0]);
+    // sealed into the vault like adopt's env files
+    assert_eq!(
+        exec.file("/var/lib/homelab/secrets/kyu/kyu/kyu.env")
+            .as_deref(),
+        Some("KYU_TOKEN=seed-secret-r1\nKYU_SECRET_KEY=seed-secret-r2\n")
+    );
+    let log = sink.lines().join("\n");
+    assert!(!log.contains("seed-secret-r"), "a value reached the log");
+    assert!(
+        log.contains("KYU_TOKEN") && log.contains("KYU_SECRET_KEY"),
+        "{}",
+        log
+    );
+}
+
+#[tokio::test]
+async fn native_first_install_1_an_existing_env_file_is_left_untouched() {
+    let exec = MockExecutor::new();
+    first_install_mocks(&exec);
+    // the in-container script finds a non-empty file and keeps it
+    exec.respond_always("script -qec", CmdOutput::ok("KEEP\n"));
+    let (sink, report) = run_install(&exec, &seeding_manifest()).await;
+    assert!(report.ok, "{:?}", report.error);
+    let script = &exec.calls_containing("script -qec")[0];
+    // the guard comes before the generator, and the target is only replaced by mv
+    let guard = script.find("[ -s '/etc/kyu/kyu.env' ]").expect("guard");
+    assert!(guard < script.find("script -qec").unwrap(), "{}", script);
+    assert!(
+        !sink
+            .lines()
+            .iter()
+            .any(|l| l.contains("generated the env file")),
+        "nothing was generated, so nothing may claim it"
+    );
+}
+
+#[tokio::test]
+async fn native_first_install_1_a_failing_secret_command_refuses_with_a_remedy() {
+    let exec = MockExecutor::new();
+    first_install_mocks(&exec);
+    exec.respond_always("script -qec", CmdOutput::failed(10, ""));
+    let (_sink, report) = run_install(&exec, &seeding_manifest()).await;
+    assert!(!report.ok);
+    let why = format!("{:?}", report.error);
+    assert!(
+        why.contains("first_secret_cmd") && why.contains("re-run"),
+        "{}",
+        why
+    );
+    assert!(
+        exec.calls_containing("systemctl start").is_empty(),
+        "the unit must not be activated without its secrets"
+    );
+}
+
+#[test]
+fn native_first_install_1_the_install_plan_lists_the_new_steps() {
+    let names = homelab_core::ops::native::install_plan_names(&seeding_manifest(), None);
+    assert!(names.contains(&"create declared directories".to_string()));
+    assert!(names.contains(&"seed the env file".to_string()));
+    let mut no_env = seeding_manifest();
+    no_env.env_file = None;
+    assert!(
+        validate_native(&no_env).is_err(),
+        "first_secret_cmd needs env_file"
     );
 }

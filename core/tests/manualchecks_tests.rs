@@ -238,14 +238,13 @@ fn answering_an_unknown_id_says_so_rather_than_doing_nothing() {
 }
 
 #[test]
-fn a_question_nobody_ever_answered_is_a_finding() {
+fn a_question_nobody_ever_answered_raises_nothing() {
+    // manual-checks-as-info-1 (Kenny, 2026-10-23): a check only a person can
+    // confirm is information on the stack's page, not a finding.
     let mut st = state_with_stack(100);
     register(&mut st, "media", &[q("jellyfin", "sound in sync")], 100);
-    let f = evaluate_manual(&st, 200);
-    assert_eq!(f.len(), 1);
-    assert_eq!(f[0].severity, Severity::Drift);
-    assert_eq!(f[0].subject, "media");
-    assert!(f[0].what.contains("sound in sync"), "{}", f[0].what);
+    assert!(evaluate_manual(&st, 200).is_empty());
+    assert!(render_listing(&st, 200).contains("unanswered"));
 }
 
 #[test]
@@ -272,7 +271,7 @@ fn a_no_from_a_person_is_the_strongest_signal_and_stays_until_it_is_a_yes() {
 }
 
 #[test]
-fn an_answer_older_than_the_deploy_that_followed_it_is_asked_again() {
+fn an_answer_older_than_the_deploy_that_followed_it_is_listed_reopened_but_raises_nothing() {
     let mut st = state_with_stack(1_000);
     register(&mut st, "media", &[q("jellyfin", "sound in sync")], 100);
     let id = id_for("media", "jellyfin", "sound in sync");
@@ -282,10 +281,14 @@ fn an_answer_older_than_the_deploy_that_followed_it_is_asked_again() {
     // fix-65: that holds for a deploy that changed the stack's files.
     st.stacks.get_mut("media").unwrap().applied_hash = "changed".into();
 
-    let f = evaluate_manual(&st, 1_100);
-    assert_eq!(f.len(), 1, "{:?}", f);
-    assert_eq!(f[0].severity, Severity::Drift);
-    assert!(f[0].what.contains("1 check(s)"), "{}", f[0].what);
+    assert!(
+        evaluate_manual(&st, 1_100).is_empty(),
+        "a reopening after a file change raises nothing"
+    );
+    assert!(
+        render_listing(&st, 1_100).contains("reopened"),
+        "the listing still says the answer is about older files"
+    );
 }
 
 /// checks-interval (Kenny, 2026-09-30): an answer has no age limit. Only a
@@ -313,7 +316,10 @@ fn a_once_question_answered_ok_is_answered_for_good() {
     once.once = true;
     register(&mut st, "media", &[once.clone()], 100);
     let id = id_for("media", "jobtracker", "register a passkey");
-    assert_eq!(evaluate_manual(&st, 200).len(), 1, "unanswered is open");
+    assert!(
+        evaluate_manual(&st, 200).is_empty(),
+        "unanswered raises nothing"
+    );
     answer(&mut st, &id, true, "", 300);
     st.stacks.get_mut("media").unwrap().applied_hash = "changed".into();
     assert!(
@@ -324,7 +330,9 @@ fn a_once_question_answered_ok_is_answered_for_good() {
     let mut plain = once;
     plain.once = false;
     register(&mut st, "media", &[plain], 500);
-    assert_eq!(evaluate_manual(&st, 600).len(), 1);
+    assert!(evaluate_manual(&st, 600).is_empty(), "reopened, silently");
+    let rec = &st.manual_checks[&id];
+    assert!(homelab_core::ops::manualchecks::open_again(&st, rec, 600));
 }
 
 /// checks-link (Kenny, 2026-09-30): the finding names where the application
@@ -335,12 +343,6 @@ fn an_open_question_carries_the_address_of_its_application() {
     let mut with_url = q("sonarr", "recent episode in the right folder");
     with_url.url = Some("https://son.kp-soft.dev".into());
     register(&mut st, "media", &[with_url], 100);
-    let f = evaluate_manual(&st, 200);
-    assert!(
-        f[0].what.contains("(https://son.kp-soft.dev)"),
-        "{}",
-        f[0].what
-    );
     let id = id_for("media", "sonarr", "recent episode in the right folder");
     assert_eq!(
         st.manual_checks[&id].url.as_deref(),
@@ -389,10 +391,10 @@ fn an_empty_register_says_so_instead_of_printing_nothing() {
     assert!(out.contains("no manual checks"), "{}", out);
 }
 
-/// The whole reason for aggregating: 94 findings a night is a wall nobody
-/// reads, which is the failure this gap exists to fix.
+/// manual-checks-as-info-1: ninety-four unanswered questions are ninety-four
+/// lines on a page, and zero findings.
 #[test]
-fn many_open_questions_on_one_stack_are_one_line_with_a_count_and_examples() {
+fn many_open_questions_raise_no_finding_at_all() {
     let mut st = state_with_stack(100);
     let qs: Vec<Question> = (0..12)
         .map(|i| q("jellyfin", &format!("question number {:02}", i)))
@@ -404,25 +406,7 @@ fn many_open_questions_on_one_stack_are_one_line_with_a_count_and_examples() {
         &[q("paperless", "did the scan arrive")],
         100,
     );
-
-    let f = evaluate_manual(&st, 200);
-    assert_eq!(
-        f.len(),
-        2,
-        "one line per stack, not one per question: {:?}",
-        f
-    );
-    let media = f.iter().find(|x| x.subject == "media").unwrap();
-    assert!(media.what.contains("12 check(s)"), "{}", media.what);
-    assert!(
-        media.what.contains("question number 00") && media.what.contains("and 10 more"),
-        "a count with no example says nothing you can act on: {}",
-        media.what
-    );
-    assert!(
-        media.remedy.contains("homelab checks"),
-        "and it must say how to answer"
-    );
+    assert!(evaluate_manual(&st, 200).is_empty());
 }
 
 /// A person's "no" is never folded into a count — it is the one signal worth
@@ -520,10 +504,11 @@ fn fix_195_only_the_files_a_check_is_about_can_reopen_its_answer() {
         .component_digests
         .files
         .insert("jellyfin/compose.yml".into(), "f2".into());
-    let f = evaluate_manual(&st, 300);
-    assert_eq!(f.len(), 1, "{:?}", f);
-    assert_eq!(f[0].severity, Severity::Drift);
-    assert!(f[0].what.contains("reopened"), "{}", f[0].what);
+    // manual-checks-as-info-1: reopened, shown as such, raising nothing.
+    assert!(evaluate_manual(&st, 300).is_empty());
+    let rec = &st.manual_checks[&id];
+    assert!(homelab_core::ops::manualchecks::open_again(&st, rec, 300));
+    assert!(render_listing(&st, 300).contains("reopened"));
 }
 
 /// fix-195: the rootfs and the app's own env count too, not only the app's
@@ -554,9 +539,8 @@ fn fix_195_rootfs_and_env_changes_reopen_too() {
         .component_digests
         .env
         .insert("jellyfin".into(), "e2".into());
-    assert_eq!(
-        evaluate_manual(&st, 300).len(),
-        1,
+    assert!(
+        homelab_core::ops::manualchecks::open_again(&st, &st.manual_checks[&id], 300),
         "the app's own env changed"
     );
 
@@ -568,7 +552,14 @@ fn fix_195_rootfs_and_env_changes_reopen_too() {
         .component_digests
         .files
         .insert("rootfs/etc/foo".into(), "r2".into());
-    assert_eq!(evaluate_manual(&st, 500).len(), 1, "rootfs changed");
+    assert!(
+        homelab_core::ops::manualchecks::open_again(&st, &st.manual_checks[&id], 500),
+        "rootfs changed"
+    );
+    assert!(
+        evaluate_manual(&st, 500).is_empty(),
+        "and it raises nothing"
+    );
 }
 
 /// fix-195: a record with no `answered_digests` (an answer from before this
@@ -599,9 +590,8 @@ fn fix_195_an_old_record_without_digests_keeps_the_old_rule() {
         "applied_hash unchanged: still answered under the old rule"
     );
     st.stacks.get_mut("media").unwrap().applied_hash = "h2".into();
-    assert_eq!(
-        evaluate_manual(&st, 300).len(),
-        1,
+    assert!(
+        homelab_core::ops::manualchecks::open_again(&st, &st.manual_checks[&id], 300),
         "applied_hash moved: the old rule still reopens it"
     );
 }
@@ -630,10 +620,14 @@ fn fix_65_a_redeploy_that_changed_nothing_does_not_reopen_an_answer() {
 
     // Redeployed with changed files: asked again, and told why.
     st.stacks.get_mut("media").unwrap().applied_hash = "h2".into();
-    let f = evaluate_manual(&st, 1_100);
-    assert_eq!(f.len(), 1, "{:?}", f);
-    assert_eq!(f[0].severity, Severity::Drift);
-    assert!(f[0].what.contains("files changed"), "{}", f[0].what);
+    assert!(
+        homelab_core::ops::manualchecks::open_again(&st, &st.manual_checks[&id], 1_100),
+        "listed as reopened"
+    );
+    assert!(
+        evaluate_manual(&st, 1_100).is_empty(),
+        "but raising nothing"
+    );
 }
 
 /// fix-65: kp-soft.dev's deliberate `nok` (D56) was Broken every night with
@@ -729,14 +723,9 @@ fn password_chain_bus_factor_a_standing_check_recurs_on_its_own_clock() {
     // Never answered: due, same as any unanswered check — aggregated under
     // STANDING_STACK, which is not a real stack name an app-knowledge scan
     // would ever see deployed.
-    let findings = evaluate_manual(&st, now);
-    assert!(
-        findings
-            .iter()
-            .any(|f| f.subject == STANDING_STACK && f.severity == Severity::Drift),
-        "{:?}",
-        findings
-    );
+    // manual-checks-as-info-1: information on the Host page, no finding.
+    assert!(evaluate_manual(&st, now).is_empty());
+    assert_eq!(st.manual_checks[&id].stack, STANDING_STACK);
 
     // Answered ok: silent immediately after.
     assert!(answer(&mut st, &id, true, "", now));
@@ -751,14 +740,11 @@ fn password_chain_bus_factor_a_standing_check_recurs_on_its_own_clock() {
 
     // At the window: due again, with no deploy involved at all.
     let due = now + PASSWORD_CHAIN_RECUR_DAYS * 86400;
-    let findings = evaluate_manual(&st, due);
     assert!(
-        findings
-            .iter()
-            .any(|f| f.subject == STANDING_STACK && f.severity == Severity::Drift),
-        "a standing check must become due on its own clock: {:?}",
-        findings
+        homelab_core::ops::manualchecks::open_again(&st, &st.manual_checks[&id], due),
+        "a standing check must become due on its own clock"
     );
+    assert!(evaluate_manual(&st, due).is_empty(), "and raise nothing");
 
     // Answering it again resets the clock.
     assert!(answer(&mut st, &id, true, "", due));
@@ -821,10 +807,9 @@ fn fix_195_the_listing_shows_an_answer_the_report_reopened() {
         .component_digests
         .files
         .insert("jellyfin/docker-compose.yml".into(), "b".into());
-    assert_eq!(
-        evaluate_manual(&st, 2 * DAY).len(),
-        1,
-        "the report reopens it"
+    assert!(
+        homelab_core::ops::manualchecks::open_again(&st, &st.manual_checks[&id], 2 * DAY),
+        "the listing reopens it"
     );
     let out = render_listing(&st, 2 * DAY);
     assert!(
@@ -883,9 +868,8 @@ fn fix_195_a_deploy_moves_a_current_old_rule_answer_to_its_digests() {
 
     // A later deploy that does change the app's compose file reopens it.
     st.stacks.get_mut("media").unwrap().component_digests = digests("b");
-    assert_eq!(
-        evaluate_manual(&st, 400).len(),
-        1,
+    assert!(
+        homelab_core::ops::manualchecks::open_again(&st, &st.manual_checks[&id], 400),
         "a real change must still reopen it"
     );
 }

@@ -140,7 +140,7 @@ firewall:
       action: ACCEPT
       dest: 10.10.10.17
       proto: tcp
-      dport: "5000:5003"
+      dport: "5000:5004"
       note: registry cache (docker pulls; the deploy probes all four)
     - comment: "every other neighbour in VLAN 10 stays out of reach"
       dir: out

@@ -2166,6 +2166,8 @@ async fn f129_a_cache_that_cannot_serve_falls_back_to_the_real_registry() {
             port: 5001,
         }],
         pull_timeout_secs: 180,
+        keep_port: None,
+        keep_max_mb: None,
     };
     c.registry_cache = Some(cache);
 
@@ -3157,6 +3159,7 @@ mod native_from_zero {
             backup_pause: homelab_core::native::BackupPause::Off,
             update_policy: Default::default(),
             after_restore: None,
+            first_secret_cmd: None,
             metrics: None,
         }
     }

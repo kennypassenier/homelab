@@ -105,6 +105,43 @@ services:
     ports:
       - "5003:5000"
 
+  # pinned-digest-pruned-1: the KEEP registry. Not a cache: no `proxy:`
+  # section, so nothing in it ever expires by itself, and it is written only
+  # by the host's keep round (core/src/ops/keep.rs), which copies every digest
+  # a stack file pins into it and drops the ones no stack pins any more.
+  # That is what lets a rebuild or a disaster recovery pull a pinned digest
+  # the upstream has deleted (Super Productivity keeps only its last 17
+  # builds). It lives under its own mount, /appdata/registry/registry-keep,
+  # which IS backed up: unlike a cache layer, a kept copy may be the only
+  # copy left. Size: only the current pins, capped by `keep_max_mb` in
+  # host.toml (12 GB) and 80 digests in all.
+  keep:
+    <<: *cache
+    container_name: keep
+    environment:
+      <<: *cache-env
+      REGISTRY_STORAGE_FILESYSTEM_ROOTDIRECTORY: /var/lib/registry
+    volumes:
+      - /appdata/registry/registry-keep:/var/lib/registry
+      - ./keep.yml:/etc/distribution/config.yml:ro
+    ports:
+      - "5004:5000"
+
+  # The copy tool of the keep round: `docker compose run --rm keep-copy copy
+  # --all --preserve-digests docker://<origin> docker://127.0.0.1:5004/...`.
+  # skopeo copies the manifest and every blob without a docker daemon and
+  # keeps the manifest digest, which a `docker pull` + `docker push` of a
+  # multi-platform image does not guarantee. Profile `tool`: `compose up`
+  # never starts it. Host network so 127.0.0.1:5004 is the keep registry.
+  keep-copy:
+    image: quay.io/skopeo/stable:v1.22.3@sha256:24940638e4abb0edfedc78a680554f316069d0212a00159276759421a059e611
+    profiles: ["tool"]
+    entrypoint: ["skopeo"]
+    network_mode: host
+    labels:
+      - com.homelab.update.policy=manual
+      - com.homelab.update.upstream=github.com/containers/skopeo
+
 networks:
   registry_net:
     external: true

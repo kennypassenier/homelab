@@ -52,6 +52,7 @@ fn almanac(data_dirs: Vec<String>, stateless: bool) -> NativeServiceManifest {
         backup_pause: BackupPause::Off,
         update_policy: Default::default(),
         after_restore: None,
+        first_secret_cmd: None,
         metrics: None,
     }
 }

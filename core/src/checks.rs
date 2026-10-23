@@ -116,12 +116,96 @@ pub struct ServiceChecks {
     /// this app, so an update or a backup does not stop it under them.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub busy_check: Option<BusyCheck>,
+    /// app-settings-enforced-1 (Kenny, 2026-10-23: "zie dat fixes permanent
+    /// zijn en dat het admin dashboard dit kan enforcen"): settings inside
+    /// the app's own files that a fix depends on. A probe detects a lost
+    /// fix; this puts it back, on every deploy, every update and the nightly
+    /// round (`ops::settings`).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub settings: Vec<AppSetting>,
     /// checks-link (Kenny, 2026-09-30: "een link naar die toepassing in de
     /// notificatie"): where the application is opened. The client fills it
     /// from the stack's route file (the router whose service is this app)
     /// when the file does not name one; None when the app has no route.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub url: Option<String>,
+}
+
+/// How a settings file is laid out.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SettingFormat {
+    /// `[section]` headers with `key=value` lines below them (qBittorrent.conf).
+    Ini,
+    /// Bare `KEY=value` lines, no sections (an env file).
+    Kv,
+}
+
+/// One value an app's own file must hold (app-settings-enforced-1). Written
+/// in the app's `checks.yml` under `settings:`:
+///
+/// ```yaml
+/// settings:
+///   - file: /appdata/downloader/qbittorrent-config/qBittorrent/qBittorrent.conf
+///     format: ini
+///     section: BitTorrent
+///     key: 'Session\ExcludedFileNames'
+///     value: "*.exe, *.7z"
+///     stop_app: true
+/// ```
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AppSetting {
+    /// Absolute path inside the container.
+    pub file: String,
+    pub format: SettingFormat,
+    /// The `[section]` of an `ini` file; absent for `kv`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub section: Option<String>,
+    pub key: String,
+    /// The value after the `=`, exactly as the file must hold it.
+    pub value: String,
+    /// The app rewrites this file when it exits (qBittorrent does), so a
+    /// write while it runs would be undone: stop it first, start it after.
+    #[serde(default)]
+    pub stop_app: bool,
+}
+
+impl AppSetting {
+    /// What makes the entry unusable, in words; empty when it is fine.
+    pub fn problems(&self) -> Vec<String> {
+        let mut out = Vec::new();
+        let who = format!("{} {}", self.file, self.key);
+        if !self.file.starts_with('/') || self.file.split('/').any(|c| c == "..") {
+            out.push(format!(
+                "setting '{}': file must be an absolute path without '..'",
+                who
+            ));
+        }
+        if self.key.trim().is_empty() || self.key.contains(['=', '\n', '\r']) {
+            out.push(format!(
+                "setting '{}': key must be non-empty with no '=' or line break",
+                who
+            ));
+        }
+        if self.value.contains(['\n', '\r']) {
+            out.push(format!("setting '{}': value must be one line", who));
+        }
+        match (self.format, self.section.as_deref()) {
+            (SettingFormat::Ini, None | Some("")) => {
+                out.push(format!("setting '{}': format ini needs a section", who))
+            }
+            (SettingFormat::Kv, Some(_)) => {
+                out.push(format!("setting '{}': format kv takes no section", who))
+            }
+            (_, Some(sec)) if sec.contains(['[', ']', '\n', '\r']) => out.push(format!(
+                "setting '{}': section is the bare name, without brackets",
+                who
+            )),
+            _ => {}
+        }
+        out
+    }
 }
 
 /// A command run inside the container: nothing on stdout when idle, one

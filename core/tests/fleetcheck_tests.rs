@@ -959,10 +959,11 @@ mod incomplete_deploys {
     }
 }
 
-/// G17: the unanswered question has to ride the round that already reaches
-/// Kenny, or it is a record nobody reads — the fault this whole audit is about.
+/// manual-checks-as-info-1 (Kenny, 2026-10-23, replaces G17's "rides the
+/// round"): an unanswered question is information on the stack's page; the
+/// full round must not turn it into a finding.
 #[test]
-fn the_full_round_carries_the_manual_checks() {
+fn the_full_round_does_not_raise_the_manual_checks() {
     let mut st = HostState::default();
     homelab_core::ops::manualchecks::register(
         &mut st,
@@ -979,10 +980,11 @@ fn the_full_round_carries_the_manual_checks() {
     );
     let findings = check(&st, &LiveFacts::default());
     assert!(
-        findings
+        !findings
             .iter()
-            .any(|f| f.what.contains("is the sound in sync")),
-        "evaluate() must fan out to it: {:?}",
+            .any(|f| f.what.contains("is the sound in sync")
+                || f.what.contains("only a person can answer")),
+        "a check only a person can confirm raises nothing: {:?}",
         findings
     );
 }

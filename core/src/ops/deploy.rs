@@ -342,6 +342,7 @@ pub const STEPS: &[&str] = &[
     "native units",
     "record state",
     "reconcile",
+    "app settings",
     "service checks",
 ];
 
@@ -2167,6 +2168,7 @@ pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
             // to fall back TO and cutting it short would only turn a slow
             // registry into a failed deploy.
             let fallback = cache_orig.lock().ok().and_then(|g| g.get(app).cloned());
+            let keep_port = ctx.registry_cache.as_ref().and_then(|c| c.keep_port);
             let budget = match (&fallback, ctx.registry_cache.as_ref()) {
                 (Some(_), Some(c)) => c.pull_timeout_secs,
                 _ => 900,
@@ -2217,7 +2219,7 @@ pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
             let mut pull = match first {
                 Ok(o) if o.success() => o,
                 other => {
-                    if fallback.is_none() {
+                    if fallback.is_none() && keep_port.is_none() {
                         // Nothing to fall back to — the original behaviour,
                         // error and all.
                         let o = other?;
@@ -2256,6 +2258,48 @@ pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
                     // which reads like the image itself is broken. It is
                     // not: it is the truncated blob the cache left behind.
                     pct_sh(exec, m.vmid, "docker system prune -f", 300).await?;
+                    pull = pct_sh(exec, m.vmid, &cmd, 900).await?;
+                }
+            }
+            // pinned-digest-pruned-1: the origin (and the cache) could not
+            // deliver. If this app pins digests, the keep registry on the
+            // cache host may hold them: point only those `image:` lines at
+            // it and pull once more. Pulling by digest is verified by docker,
+            // so a kept copy is exactly the pinned image or nothing.
+            if !pull.success()
+                && let (Some(port), Some(cache)) = (keep_port, ctx.registry_cache.as_ref())
+                && let Some(f) = spec
+                    .files
+                    .iter()
+                    .find(|f| f.path == format!("{}/docker-compose.yml", app))
+            {
+                let kept = crate::ops::keep::rewrite_to_keep(
+                    &f.content,
+                    &cache.host,
+                    port,
+                    m.registry_login.as_ref().map(|r| r.registry.as_str()),
+                );
+                if kept != f.content {
+                    let (dest, perms) = manifest::file_destination(&m.stack_name, &f.path)
+                        .map(|(d, mode)| (d, format!("{:o}", f.mode.unwrap_or(mode))))
+                        .map_err(CoreError::Validation)?;
+                    ctx.sink.emit(PipelineEvent::Line {
+                        level: Level::Warn,
+                        source: "HOST".into(),
+                        msg: format!(
+                            "[keep] {} :: the registry did not deliver ({}) — pulling the \
+                             pinned digests from the kept copies on {}:{}",
+                            app,
+                            pull.stderr
+                                .trim()
+                                .lines()
+                                .last()
+                                .unwrap_or("no reason given"),
+                            cache.host,
+                            port
+                        ),
+                    });
+                    push_content(exec, m.vmid, &dest, &kept, &perms).await?;
                     pull = pct_sh(exec, m.vmid, &cmd, 900).await?;
                 }
             }
@@ -3682,6 +3726,34 @@ pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
         }
     });
 
+    // app-settings-enforced-1: the values a fix depends on, put back in the
+    // apps' own files (the update and the nightly round do the same from the
+    // state this deploy registers below). Never fails the deploy: a setting
+    // that cannot be put back is a warning naming it.
+    step!(runner, exec, ctx, m, "app settings", {
+        let mut put_back = false;
+        for (app, sc) in &spec.checks {
+            if sc.settings.is_empty() || !m.apps.contains(app) {
+                continue;
+            }
+            put_back |= crate::ops::settings::enforce_or_warn(
+                exec,
+                ctx.sink,
+                m.vmid,
+                &m.stack_name,
+                app,
+                &sc.settings,
+            )
+            .await
+                == StepOutcome::Changed;
+        }
+        Ok(if put_back {
+            StepOutcome::Changed
+        } else {
+            StepOutcome::Unchanged
+        })
+    });
+
     // ── J1: the AFTER half. Same commands, same container, minutes later.
     step!(runner, exec, ctx, m, "service checks", {
         if spec.checks.is_empty() {
@@ -3815,8 +3887,8 @@ pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
         }
     });
 
-    // The list no measurement can settle. It goes out as a notification Kenny
-    // has to acknowledge (form I2) rather than a page he has to go and find.
+    // The list no measurement can settle. manual-checks-as-info-1: it is
+    // information on the stack's page, no longer a notification.
     // G17: registering them is the half that was missing. Printing a
     // question at the end of a transcript is not asking anybody anything.
     let questions = crate::ops::manualchecks::questions_of(&spec.checks);
@@ -3842,10 +3914,13 @@ pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
             );
             let busy_before = st.busy_checks.clone();
             crate::ops::busy::register(&mut st, &spec.manifest.stack_name, &spec.checks);
+            let settings_before = st.app_settings.clone();
+            crate::ops::settings::register(&mut st, &spec.manifest.stack_name, &spec.checks);
             if !questions.is_empty()
                 || st.manual_checks.len() != before
                 || st.probes != probes_before
                 || st.busy_checks != busy_before
+                || st.app_settings != settings_before
             {
                 let _ = store.save(st).await;
             }
@@ -3863,10 +3938,10 @@ pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
             })
             .collect();
         runner.log(
-            Level::Warn,
+            Level::Info,
             format!(
-                "[check] {} thing(s) only a person can confirm — answer one with \
-                 `homelab checks answer <id> ok|nok`:\n  - {}",
+                "[check] {} thing(s) to look at if something goes wrong, listed on the \
+                 stack's page (`homelab checks` lists them):\n  - {}",
                 lines.len(),
                 lines.join("\n  - ")
             ),

@@ -11,6 +11,10 @@ hostname: 121-app-kitchen
 unit: kitchen
 binary: /opt/kitchen/bin/kitchen
 env_file: /appdata/kitchen/kitchen-config/kitchen.env
+# First install on a fresh container: if the env file is missing or empty the
+# host runs this under a terminal and writes the KEY=value lines it prints
+# (KITCHEN_TOKEN, KITCHEN_SECRET_KEY) to the env file, 0600, owned by the unit's user.
+first_secret_cmd: /opt/kitchen/bin/kitchen gen-secret
 data_dirs:
   - /appdata/kitchen/kitchen-config
 update_cmd: >-

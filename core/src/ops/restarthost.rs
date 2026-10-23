@@ -19,10 +19,13 @@ use super::OpCtx;
 /// The systemd service `restart_host` restarts.
 pub const SERVICE: &str = "homelab-host";
 
+/// one-process-batch-2: `restart_host`'s step plan — one fixed step.
+pub const RESTART_HOST_STEPS: &[&str] = &["schedule restart"];
+
 pub async fn restart_host(ctx: &OpCtx<'_>) -> OperationReport {
     let mut runner = Runner::new("restart-host", ctx.sink, ctx.journal);
     // fix-171 round 3: one fixed step, always.
-    runner.plan(&["schedule restart"]);
+    runner.plan(RESTART_HOST_STEPS);
     let texec = TracingExecutor::new(ctx.exec, ctx.sink);
     let exec: &dyn Executor = &texec;
 

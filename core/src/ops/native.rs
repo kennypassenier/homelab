@@ -460,6 +460,8 @@ pub const INSTALL_STEPS: &[&str] = &[
     "stage binary",
     "check the glibc the binary needs",
     "install unit file",
+    "create declared directories",
+    "seed the env file",
     "activate",
     "own program directory",
     "keep one previous binary",
@@ -618,6 +620,105 @@ async fn install_native_impl<'a>(
         Ok(StepOutcome::Changed)
     });
 
+    // native-first-install-1 (2026-10-23, CT 121 kitchen): a fresh container
+    // has none of the paths the unit and the manifest declare, so the first
+    // start failed on a missing EnvironmentFile and then on missing secrets.
+    // Both steps only ever ADD what is missing; nothing existing is touched.
+    let service_user = unit_user(unit_file);
+    scoped_step!(scope, "create declared directories", {
+        let script = create_dirs_script(m, service_user.as_deref());
+        if script.is_empty() {
+            return Ok(StepOutcome::Unchanged);
+        }
+        let out = util_pct_sh(exec, m.vmid, &script, 60).await?;
+        if !out.success() {
+            return Err(CoreError::Other(format!(
+                "could not create the declared directories in CT {} ({}) — check that the unit's \
+                 User= exists in the container and that the paths are writable, then re-run \
+                 the install",
+                m.vmid,
+                out.stderr.trim()
+            )));
+        }
+        Ok(if out.stdout.contains("created") {
+            StepOutcome::Changed
+        } else {
+            StepOutcome::Unchanged
+        })
+    });
+
+    let mut seeded_keys: Vec<String> = Vec::new();
+    scoped_step!(scope, "seed the env file", {
+        let (Some(env), Some(cmd)) = (&m.env_file, &m.first_secret_cmd) else {
+            return Ok(StepOutcome::Unchanged);
+        };
+        // Runs inside the container and writes there; the values never reach
+        // the host, only the key names come back (pct_sh_secret is quiet).
+        let out = crate::executor::pct_sh_secret(
+            exec,
+            m.vmid,
+            &seed_env_script(env, cmd, service_user.as_deref()),
+            120,
+        )
+        .await?;
+        let first = out.stdout.lines().next().unwrap_or("").trim().to_string();
+        match out.code {
+            0 if first == "KEEP" => return Ok(StepOutcome::Unchanged),
+            0 => {
+                let keys: Vec<&str> = out
+                    .stdout
+                    .lines()
+                    .filter_map(|l| l.strip_prefix("KEY "))
+                    .collect();
+                seeded_keys = keys.iter().map(|k| k.to_string()).collect();
+            }
+            10 => {
+                return Err(CoreError::Other(format!(
+                    "first_secret_cmd `{}` failed in CT {} — nothing was written to {}. Run it \
+                     by hand under a terminal (`script -qec '{}' /dev/null`) to see why, or \
+                     create {} yourself (mode 0600, owned by the service user), then re-run \
+                     the install",
+                    cmd, m.vmid, env, cmd, env
+                )));
+            }
+            11 => {
+                return Err(CoreError::Other(format!(
+                    "first_secret_cmd `{}` printed no KEY=value lines — nothing was written to \
+                     {}. Fix the command in the stack file (it must print KEY=value lines) or \
+                     create {} yourself, then re-run the install",
+                    cmd, env, env
+                )));
+            }
+            _ => {
+                return Err(CoreError::Other(format!(
+                    "could not write {} in CT {} while seeding it — nothing was kept; check the \
+                     directory and the service user, then re-run the install",
+                    env, m.vmid
+                )));
+            }
+        }
+        let vault = format!(
+            "{}/secrets/{}/{}",
+            ctx.state_dir,
+            m.stack_name,
+            crate::ops::deploy::vault_key(env)
+        );
+        seal_one(exec, m.vmid, env, &vault).await?;
+        Ok(StepOutcome::Changed)
+    });
+
+    if !seeded_keys.is_empty() {
+        scope.log(
+            Level::Info,
+            format!(
+                "[install] generated the env file for {} with its first_secret_cmd; keys: {} \
+                 (values not logged)",
+                m.unit,
+                seeded_keys.join(", ")
+            ),
+        );
+    }
+
     scoped_step!(scope, "activate", {
         // Stopping first is deliberate: replacing the file under a running
         // process leaves the old one mapped, so the service keeps running the
@@ -743,6 +844,62 @@ async fn install_native_impl<'a>(
         ),
     );
     Ok(())
+}
+
+/// native-first-install-1: make every directory the manifest declares
+/// (`data_dirs` and the env file's directory) that does not exist yet, owned
+/// by the unit's `User=` (root when it has none). Prints `created` when it
+/// made anything; empty script when there is nothing declared.
+pub fn create_dirs_script(m: &NativeServiceManifest, user: Option<&str>) -> String {
+    let mut dirs: Vec<String> = m.data_dirs.clone();
+    if let Some(env) = &m.env_file
+        && let Some((dir, _)) = env.rsplit_once('/')
+        && !dir.is_empty()
+    {
+        dirs.push(dir.to_string());
+    }
+    dirs.dedup();
+    let mut script = String::new();
+    for d in dirs {
+        let q = shq(&d);
+        let chown = match user {
+            Some(u) => format!(" && chown {}: {}", shq(u), q),
+            None => String::new(),
+        };
+        script.push_str(&format!(
+            "[ -d {q} ] || {{ mkdir -p {q}{chown} && echo created; }}; "
+        ));
+    }
+    if script.is_empty() {
+        return script;
+    }
+    script.push_str("true");
+    script
+}
+
+/// native-first-install-1: runs INSIDE the container. A non-empty env file
+/// is kept (prints `KEEP`). Otherwise `cmd` runs under a pseudo-terminal
+/// (`script -qec`, because chassis `gen-secret` refuses a non-terminal
+/// stdout), only `KEY=value` lines are kept, and they land in `env` with mode
+/// 0600 owned by `user`. Prints `KEY <name>` per key, never a value. Exit 10:
+/// the command failed; 11: it printed no KEY=value lines; 12: writing failed.
+pub fn seed_env_script(env: &str, cmd: &str, user: Option<&str>) -> String {
+    let f = shq(env);
+    let tmp = shq(&format!("{env}.homelab-new"));
+    let chown = match user {
+        Some(u) => format!("chown {}: {tmp} || {{ rm -f {tmp}; exit 12; }}; ", shq(u)),
+        None => String::new(),
+    };
+    format!(
+        "if [ -s {f} ]; then echo KEEP; exit 0; fi; umask 077; \
+         out=$(script -qec {c} /dev/null) || exit 10; \
+         printf '%s\n' \"$out\" | tr -d '\\r' | grep -E '^[A-Za-z_][A-Za-z0-9_]*=' > {tmp}; \
+         [ -s {tmp} ] || {{ rm -f {tmp}; exit 11; }}; \
+         chmod 600 {tmp} || {{ rm -f {tmp}; exit 12; }}; {chown}\
+         mv -f {tmp} {f} || {{ rm -f {tmp}; exit 12; }}; \
+         cut -d= -f1 {f} | sed 's/^/KEY /'",
+        c = shq(cmd),
+    )
 }
 
 pub async fn install_native(
@@ -954,6 +1111,24 @@ pub fn decide_chassis_pause(
     }
 }
 
+/// one-process-batch-2: `restore_native`'s step plan for one service, known
+/// from its manifest alone — a unit that declares no data never gets past
+/// "safety gates", and `after_restore` is a fixed field of the manifest. The
+/// one list the op plans from and the dashboard counts.
+pub fn restore_native_plan_names(m: &NativeServiceManifest) -> Vec<String> {
+    let mut steps: Vec<&str> = vec!["safety gates"];
+    if !(m.stateless || m.data_dirs.is_empty()) {
+        steps.push("stop unit");
+        steps.push("safety copy");
+        steps.push("unpack snapshot");
+        if m.after_restore.is_some() {
+            steps.push("re-seed from restore");
+        }
+        steps.push("start unit");
+    }
+    steps.into_iter().map(String::from).collect()
+}
+
 /// feat-backup-2: `restore_empty_unit`'s pipeline, gated and chosen rather
 /// than automatic-and-always-latest: the operator picks a snapshot from the
 /// Backups page and confirms by typing the stack's name (the same gate
@@ -979,17 +1154,7 @@ pub async fn restore_native(
     // a unit that declares no data never gets past "safety gates", and
     // `after_restore` is a fixed field of the manifest, not a runtime
     // decision.
-    let mut steps: Vec<&str> = vec!["safety gates"];
-    if !(m.stateless || m.data_dirs.is_empty()) {
-        steps.push("stop unit");
-        steps.push("safety copy");
-        steps.push("unpack snapshot");
-        if m.after_restore.is_some() {
-            steps.push("re-seed from restore");
-        }
-        steps.push("start unit");
-    }
-    runner.plan(&steps);
+    runner.plan(&restore_native_plan_names(m));
 
     runner.log(
         Level::Warn,
@@ -1134,6 +1299,35 @@ pub async fn restore_native(
     runner.finish_ok()
 }
 
+/// one-process-batch-2: `backup_native`'s step plan for one service — empty
+/// for a stateless unit that keeps nothing (the op then plans nothing). The
+/// pause step's name and whether a resume step follows are decided by
+/// `m.backup_pause`, a fixed field of the manifest. The one list the op plans
+/// from and the dashboard counts.
+pub fn backup_native_plan_names(m: &NativeServiceManifest) -> Vec<String> {
+    if m.stateless && m.data_dirs.is_empty() && m.backup_from_newest.is_none() {
+        return Vec::new();
+    }
+    let mut steps: Vec<&str> = vec![
+        "guard target",
+        "init repo",
+        "find the service's own newest copy",
+        "empty data over history",
+        "clear stale locks",
+    ];
+    match m.backup_pause {
+        BackupPause::Off => {}
+        BackupPause::Unit => steps.push("pause the service"),
+        BackupPause::Chassis => steps.push("pause the service (chassis)"),
+    }
+    steps.push("snapshot");
+    if !matches!(m.backup_pause, BackupPause::Off) {
+        steps.push("resume the service");
+    }
+    steps.push("retention");
+    steps.into_iter().map(String::from).collect()
+}
+
 /// C7 nightly backup for a native stack. The data lives INSIDE the
 /// container (adoption never restarts a service, so a bind-mount to
 /// /appdata was never an option); the snapshot therefore streams
@@ -1169,24 +1363,7 @@ pub async fn backup_native(
     // field of the manifest, known before anything runs. Whether "resume
     // the service" actually fires (Chassis can find nothing running to
     // pause) is a live decision, so a run that skips it still marks it.
-    let mut steps: Vec<&str> = vec![
-        "guard target",
-        "init repo",
-        "find the service's own newest copy",
-        "empty data over history",
-        "clear stale locks",
-    ];
-    match m.backup_pause {
-        BackupPause::Off => {}
-        BackupPause::Unit => steps.push("pause the service"),
-        BackupPause::Chassis => steps.push("pause the service (chassis)"),
-    }
-    steps.push("snapshot");
-    if !matches!(m.backup_pause, BackupPause::Off) {
-        steps.push("resume the service");
-    }
-    steps.push("retention");
-    runner.plan(&steps);
+    runner.plan(&backup_native_plan_names(m));
 
     step!(runner, "guard target", {
         super::guard_target(exec, &ctx.safety, m.vmid, &m.hostname).await?;
@@ -2538,6 +2715,28 @@ pub fn update_skip_note(m: &NativeServiceManifest) -> String {
     }
 }
 
+/// one-process-batch-2: `update_native`'s step plan once the unit declares an
+/// `update_cmd` — fixed from there on (an already-current release skip-marks
+/// the rest).
+pub const UPDATE_NATIVE_STEPS: &[&str] = &[
+    "guard target",
+    "read the installed binary",
+    "preserve binary",
+    "run self-update",
+    "restart if changed",
+    "keep one previous binary",
+    "drop the kit's own rollback copy",
+];
+
+/// one-process-batch-2: `update_native`'s step plan for one service — empty
+/// without an `update_cmd` (the op then plans nothing and ends with a note).
+pub fn update_native_plan_names(m: &NativeServiceManifest) -> Vec<String> {
+    if m.update_cmd.is_none() {
+        return Vec::new();
+    }
+    UPDATE_NATIVE_STEPS.iter().map(|s| s.to_string()).collect()
+}
+
 /// `stored_at` is when the host last wrote the manifest this runs from —
 /// `StackState::applied_at`, passed in because core never reads a clock. It is
 /// only used to make the skip message below say where its facts come from.
@@ -2584,15 +2783,7 @@ pub async fn update_native(
     // the run is committed to the full fixed plan — whether it stops early
     // because the release is already current (a live GitHub decision) is
     // handled by skip-marking the rest, below.
-    runner.plan(&[
-        "guard target",
-        "read the installed binary",
-        "preserve binary",
-        "run self-update",
-        "restart if changed",
-        "keep one previous binary",
-        "drop the kit's own rollback copy",
-    ]);
+    runner.plan(UPDATE_NATIVE_STEPS);
 
     step!(runner, "guard target", {
         super::guard_target(exec, &ctx.safety, m.vmid, &m.hostname).await?;
@@ -2811,6 +3002,16 @@ fn restore_set_aside_script(prev: &str) -> String {
     )
 }
 
+/// one-process-batch-2: `rollback_native`'s step plan — fixed and
+/// unconditional.
+pub const ROLLBACK_NATIVE_STEPS: &[&str] = &[
+    "guard target",
+    "a previous binary is kept",
+    "roll back",
+    "keep the other as previous",
+    "park automatic updates",
+];
+
 /// fix-114: `homelab rollback-native <stack>/<unit>` — go back to the kept
 /// previous binary by hand, when a release that passed its health window
 /// misbehaves later. The unit is stopped, the kept binary copied into place
@@ -2829,13 +3030,7 @@ pub async fn rollback_native(ctx: &OpCtx<'_>, m: &NativeServiceManifest) -> Oper
     let swap = format!("{}.homelab-rollback", m.binary);
 
     // fix-171 round 3: fixed and unconditional, like `destroy::STEPS`.
-    runner.plan(&[
-        "guard target",
-        "a previous binary is kept",
-        "roll back",
-        "keep the other as previous",
-        "park automatic updates",
-    ]);
+    runner.plan(ROLLBACK_NATIVE_STEPS);
 
     step!(runner, "guard target", {
         super::guard_target(exec, &ctx.safety, m.vmid, &m.hostname).await?;

@@ -538,6 +538,19 @@ pub fn verify_restore_owners(
             .map(|(o, _)| o)
             .collect()
     };
+    select_verify_owners(owners, stack, app, snapshot)
+}
+
+/// one-process-batch-2: the choice [`verify_restore_owners`] makes among a
+/// stack's repositories (`owners`, every one it keeps), pure so the dashboard
+/// can name the steps of a `verify-restore` from the stack's files with the
+/// very rule the host applies to its own state.
+pub fn select_verify_owners(
+    owners: Vec<String>,
+    stack: &str,
+    app: Option<&str>,
+    snapshot: &str,
+) -> Result<Vec<String>, String> {
     if owners.is_empty() {
         return Err(format!("stack '{}' has no backed-up repository", stack));
     }
@@ -636,6 +649,16 @@ pub async fn verify_restore_one(
     })
 }
 
+/// one-process-batch-2: `verify_restore`'s step plan — one step per
+/// repository (`owners`, as [`verify_restore_owners`] names them). The one
+/// list the op plans from and the dashboard counts.
+pub fn verify_restore_plan_names<S: AsRef<str>>(owners: &[S]) -> Vec<String> {
+    owners
+        .iter()
+        .map(|o| format!("verify restore {}", o.as_ref()))
+        .collect()
+}
+
 /// fix-237: the `verify-restore` operation — one step per repository, each
 /// a [`verify_restore_one`] into `scratch_dir`, its result as a line. A
 /// repository that proves nothing fails the operation; the ones after it
@@ -649,10 +672,7 @@ pub async fn verify_restore(
 ) -> crate::runner::OperationReport {
     use crate::runner::{Runner, StepOutcome};
     let mut runner = Runner::new("verify-restore", ctx.sink, ctx.journal);
-    let names: Vec<String> = owners
-        .iter()
-        .map(|o| format!("verify restore {}", o))
-        .collect();
+    let names = verify_restore_plan_names(owners);
     runner.plan(&names);
     let texec = crate::executor::TracingExecutor::new(ctx.exec, ctx.sink);
     let exec: &dyn Executor = &texec;

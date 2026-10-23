@@ -87,6 +87,23 @@ pub fn tls_args(dev: &DeviceBackup) -> Vec<String> {
 /// would store it without complaint.
 const MIN_PLAUSIBLE_BYTES: usize = 4096;
 
+/// one-process-batch-2: `backup_device`'s step plan — fixed and
+/// unconditional, one run per configured device.
+pub const DEVICE_BACKUP_STEPS: &[&str] = &[
+    "init repo",
+    "fetch and store",
+    "verify the snapshot has substance",
+];
+
+/// one-process-batch-2: what `backup-devices` marks in all — the host runs
+/// one `backup_device` per configured device, in order, so the plan is
+/// [`DEVICE_BACKUP_STEPS`] once per device.
+pub fn backup_devices_plan_names(device_count: usize) -> Vec<String> {
+    (0..device_count)
+        .flat_map(|_| DEVICE_BACKUP_STEPS.iter().map(|s| s.to_string()))
+        .collect()
+}
+
 pub async fn backup_device(
     ctx: &OpCtx<'_>,
     dev: &DeviceBackup,
@@ -95,11 +112,7 @@ pub async fn backup_device(
     let op = format!("device-backup-{}", dev.name);
     let mut runner = Runner::new(&op, ctx.sink, ctx.journal);
     // fix-171 round 3: fixed and unconditional.
-    runner.plan(&[
-        "init repo",
-        "fetch and store",
-        "verify the snapshot has substance",
-    ]);
+    runner.plan(DEVICE_BACKUP_STEPS);
     let exec = ctx.exec;
 
     runner.log(

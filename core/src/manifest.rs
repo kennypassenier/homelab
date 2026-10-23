@@ -1418,6 +1418,11 @@ pub fn validate(spec: &DeploySpec) -> Result<(), CoreError> {
         for problem in crate::checks::shortcomings(sc) {
             problems.push(format!("checks for '{}': {}", app, problem));
         }
+        for setting in &sc.settings {
+            for problem in setting.problems() {
+                problems.push(format!("checks for '{}': {}", app, problem));
+            }
+        }
     }
     // fix-182: an explicit `id:` is the check's identity, so two checks
     // sharing one would make two different questions carry one answer.

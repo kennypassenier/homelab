@@ -155,6 +155,7 @@ fn blind_spots_are_reported_with_a_green_result() {
 fn a_service_whose_deepest_check_is_a_port_is_refused() {
     let sc = ServiceChecks {
         url: None,
+        settings: Vec::new(),
         probes: Vec::new(),
         busy_check: None,
         checks: vec![Check {
@@ -183,6 +184,7 @@ fn a_service_whose_deepest_check_is_a_port_is_refused() {
 fn a_shallow_check_must_declare_its_blind_spot() {
     let mut sc = ServiceChecks {
         url: None,
+        settings: Vec::new(),
         probes: Vec::new(),
         busy_check: None,
         checks: vec![
@@ -330,6 +332,7 @@ async fn a_deliberate_drop_can_be_allowed_but_never_by_silence() {
 fn checks_with_manual_id(app: &str, id: &str) -> ServiceChecks {
     ServiceChecks {
         url: None,
+        settings: Vec::new(),
         probes: Vec::new(),
         busy_check: None,
         checks: Vec::new(),
@@ -345,6 +348,7 @@ fn checks_with_manual_id(app: &str, id: &str) -> ServiceChecks {
 fn checks_with_probe_id(app: &str, id: &str) -> ServiceChecks {
     ServiceChecks {
         url: None,
+        settings: Vec::new(),
         probes: vec![Probe {
             name: format!("probe for {app}"),
             command: "true".into(),

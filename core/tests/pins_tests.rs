@@ -545,6 +545,8 @@ fn cache_cfg() -> homelab_core::ops::registry_cache::CacheCfg {
             },
         ],
         pull_timeout_secs: 180,
+        keep_port: None,
+        keep_max_mb: None,
     }
 }
 

@@ -52,6 +52,29 @@ pub struct CacheCfg {
     /// image is slow for honest reasons.
     #[serde(default = "default_pull_timeout_secs")]
     pub pull_timeout_secs: u64,
+    /// pinned-digest-pruned-1: the port of the NON-proxy "keep" registry on
+    /// the same host (see `ops::keep`). None = no kept copies are made and
+    /// the deploy has nothing to fall back to when an upstream deletes a
+    /// pinned digest.
+    #[serde(default)]
+    pub keep_port: Option<u16>,
+    /// Hard cap on the keep registry's data directory, in MB. A round
+    /// stops copying when it is reached (owner rule: everything that grows
+    /// has a cap).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub keep_max_mb: Option<u64>,
+}
+
+impl CacheCfg {
+    /// The cap in MB, `default_keep_max_mb` when unset.
+    pub fn keep_cap_mb(&self) -> u64 {
+        self.keep_max_mb.unwrap_or_else(default_keep_max_mb)
+    }
+}
+
+/// 12 GB: the fleet's pinned digests measured about 6 GB of distinct layers.
+pub fn default_keep_max_mb() -> u64 {
+    12 * 1024
 }
 
 /// Three minutes. Long enough for a cold cache fetching a large image over a

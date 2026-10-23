@@ -344,16 +344,17 @@ pub fn pin_pre_digest_answers(state: &mut HostState, stack: &str) {
     }
 }
 
+/// manual-checks-as-info-1 (Kenny, 2026-10-23: "ik ga echt niet elke keer
+/// dat ik een stack update, al die shit checken ... een notificatie brengt
+/// stress voor niks"): a check only a person can confirm is information on
+/// its stack's page, not something the fleet check raises. An unanswered
+/// check, a check reopened by a file change and a standing check that fell
+/// due all produce NOTHING here. What remains are the two things a person
+/// deliberately wrote down: a "not ok" answer is still a finding (somebody
+/// looked and said it is broken), and a timed acceptance is a noted line.
 pub fn evaluate_manual(state: &HostState, now: u64) -> Vec<Finding> {
     let mut out: Vec<Finding> = Vec::new();
-    // stack -> (unanswered//stale-by-deploy, stale-by-age)
-    let mut pending: BTreeMap<String, Vec<String>> = BTreeMap::new();
-    // fix-65: how many of a stack's open checks were answered before and
-    // reopened because its files changed, so the finding can say why.
-    let mut reopened: BTreeMap<String, usize> = BTreeMap::new();
-
     for r in state.manual_checks.values() {
-        let files_changed = |at: u64| files_changed_since_answer(state, r, at);
         match (r.ok, r.answered_at) {
             (Some(false), _) if r.accepted_until.is_some_and(|u| now < u) => out.push(Finding {
                 severity: Severity::Noted,
@@ -384,76 +385,11 @@ pub fn evaluate_manual(state: &HostState, now: u64) -> Vec<Finding> {
                          somebody says it is right"
                     .into(),
             }),
-            (_, None) => pending
-                .entry(r.stack.clone())
-                .or_default()
-                .push(labelled(r)),
-            (Some(true), Some(_)) if r.once => {}
-            // password-chain-bus-factor: a standing check is due again
-            // `recur_days` after it was last answered, whatever the answer
-            // was — on a clock, since no deploy ever reopens it.
-            (_, Some(at)) if recur_due(r, at, now) => pending
-                .entry(r.stack.clone())
-                .or_default()
-                .push(labelled(r)),
-            (_, Some(at)) if files_changed(at) => {
-                if r.answered_hash.is_some() {
-                    *reopened.entry(r.stack.clone()).or_default() += 1;
-                }
-                pending
-                    .entry(r.stack.clone())
-                    .or_default()
-                    .push(labelled(r))
-            }
             _ => {}
         }
     }
-
-    for (stack, mut texts) in pending {
-        texts.sort();
-        out.push(Finding {
-            severity: Severity::Drift,
-            subject: stack.clone(),
-            what: format!(
-                "{} check(s) only a person can answer are open, e.g. {}{}",
-                texts.len(),
-                examples(&texts),
-                match reopened.get(&stack) {
-                    Some(n) => format!(
-                        " ({} of them answered before, reopened because the stack's files \
-                         changed since)",
-                        n
-                    ),
-                    None => String::new(),
-                }
-            ),
-            remedy: "`homelab checks` lists them with their ids; \
-                     `homelab checks answer <id> ok|nok` records one"
-                .into(),
-        });
-    }
     out.sort_by(|a, b| a.subject.cmp(&b.subject).then(a.what.cmp(&b.what)));
     out
-}
-
-/// The question as a finding quotes it, with the application's address when
-/// it has one (checks-link), so the notification opens the right app.
-fn labelled(r: &ManualCheckRecord) -> String {
-    match &r.url {
-        Some(u) => format!("{} ({})", r.text, u),
-        None => r.text.clone(),
-    }
-}
-
-/// Two examples and a tail, so a one-line finding still says something
-/// concrete about what is open.
-fn examples(texts: &[String]) -> String {
-    let head: Vec<String> = texts.iter().take(2).map(|t| format!("\"{}\"", t)).collect();
-    if texts.len() > 2 {
-        format!("{} and {} more", head.join(", "), texts.len() - 2)
-    } else {
-        head.join(", ")
-    }
 }
 
 /// The list a person answers from, newest question first within a stack.

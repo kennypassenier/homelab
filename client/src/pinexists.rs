@@ -171,9 +171,56 @@ pub const PIN_ASK_WIDTH: usize = 8;
 
 /// Ask about every pin; a registry that did not answer once is not asked
 /// again in the same run.
-pub fn check_pins(stacks_dir: &Path) -> Vec<Finding> {
-    let answers = answer_pins(collect(stacks_dir), PIN_ASK_WIDTH, ask);
+pub fn check_pins(stacks_dir: &Path, keep: Option<(&str, u16)>) -> Vec<Finding> {
+    let answers = answer_pins(collect(stacks_dir), PIN_ASK_WIDTH, |p| {
+        let a = ask(p);
+        match (a, keep) {
+            (PinAnswer::Missing, Some((host, port))) => ask_keep(p, host, port),
+            (a, _) => a,
+        }
+    });
     evaluate_pin_existence(&answers)
+}
+
+/// pinned-digest-pruned-1: the origin said 404; does the keep registry on the
+/// cache host still hold the digest? Plain HTTP on the LAN, no token.
+fn ask_keep(p: &PinnedDigest, host: &str, port: u16) -> PinAnswer {
+    let Some(pin) = homelab_core::ops::keep::pin_of(p) else {
+        return PinAnswer::Missing;
+    };
+    let url = format!(
+        "http://{}:{}/v2/{}/manifests/{}",
+        host,
+        port,
+        pin.kept_repo(),
+        pin.digest
+    );
+    let accept = format!("Accept: {}", ACCEPT);
+    let (code, _) = curl(&[
+        "-I",
+        "-o",
+        "/dev/null",
+        "-w",
+        "%{http_code}",
+        "-H",
+        &accept,
+        &url,
+    ]);
+    if code.trim() == "200" {
+        PinAnswer::MissingKept(pin.kept_ref(host, port))
+    } else {
+        PinAnswer::Missing
+    }
+}
+
+/// The keep registry's address from the repository's `config/host.toml`
+/// (`[registry_cache] host` and `keep_port`); None when not declared.
+pub fn declared_keep(host_toml: &str) -> Option<(String, u16)> {
+    let t: toml::Table = toml::from_str(host_toml).ok()?;
+    let rc = t.get("registry_cache")?.as_table()?;
+    let host = rc.get("host")?.as_str()?.to_string();
+    let port = u16::try_from(rc.get("keep_port")?.as_integer()?).ok()?;
+    Some((host, port))
 }
 
 /// The answer for every pin, in the order given. Identical references are

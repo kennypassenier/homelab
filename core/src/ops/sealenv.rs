@@ -14,11 +14,14 @@ use crate::sink::Level;
 
 use super::OpCtx;
 
+/// one-process-batch-2: `seal_env`'s step plan — fixed and unconditional.
+pub const SEAL_ENV_STEPS: &[&str] = &["load state", "guard target", "seal env files"];
+
 pub async fn seal_env(ctx: &OpCtx<'_>, stack_name: &str) -> OperationReport {
     let op = format!("seal-env-{}", stack_name);
     let mut runner = Runner::new(&op, ctx.sink, ctx.journal);
     // fix-171 round 3: fixed and unconditional.
-    runner.plan(&["load state", "guard target", "seal env files"]);
+    runner.plan(SEAL_ENV_STEPS);
     let texec = TracingExecutor::new(ctx.exec, ctx.sink);
     let exec: &dyn Executor = &texec;
     let store = crate::state::StateStore::new(exec, &ctx.state_dir);

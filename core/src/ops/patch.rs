@@ -15,6 +15,16 @@ const PATCH_SCRIPT: &str = "export DEBIAN_FRONTEND=noninteractive; \
      apt-get dist-upgrade -y -qq -o Dpkg::Options::=--force-confold && \
      apt-get autoremove -y -qq && apt-get clean";
 
+/// one-process-batch-2: `patch_fleet`'s step plan — one named step per
+/// target, in target order; none for no targets (the op then plans nothing).
+/// The one list the op plans from and the dashboard counts.
+pub fn patch_plan_names<S: AsRef<str>>(target_names: &[S]) -> Vec<String> {
+    target_names
+        .iter()
+        .map(|n| format!("patch {}", n.as_ref()))
+        .collect()
+}
+
 /// Patch the given `(stack_name, vmid)` targets sequentially. The caller
 /// (host) builds the list from state.json — only managed stacks, never the
 /// no-touch fleet.
@@ -33,7 +43,8 @@ pub async fn patch_fleet(ctx: &OpCtx<'_>, targets: &[(String, u16)]) -> Operatio
 
     // fix-171 round 3: one named step per target, known entirely from this
     // run's own `targets` list before anything is touched.
-    let plan: Vec<String> = targets.iter().map(|(n, _)| format!("patch {n}")).collect();
+    let names: Vec<&str> = targets.iter().map(|(n, _)| n.as_str()).collect();
+    let plan = patch_plan_names(&names);
     runner.plan(&plan.iter().map(String::as_str).collect::<Vec<_>>());
 
     for (name, vmid) in targets {

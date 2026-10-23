@@ -495,7 +495,30 @@ fn app_steps(app: &str, auto: bool) -> Vec<String> {
     v.push(format!("{app} :: stop-first"));
     v.push(format!("{app} :: up"));
     v.push(format!("{app} :: verify"));
+    // app-settings-enforced-1: a new version may reset what a fix depends on.
+    v.push(super::settings::app_step(app));
     v
+}
+
+/// one-process-batch-2: `update`'s whole step plan — "safety gates", then
+/// every selected app's own steps — from the manifest, the optional app
+/// filter and `auto`, the exact inputs `update` itself plans from. Empty when
+/// the filter names no app of the stack (the op then fails before planning).
+/// The one list `update` plans from and the dashboard counts.
+pub fn update_plan_names(m: &StackManifest, only: Option<&str>, auto: bool) -> Vec<String> {
+    let apps: Vec<&String> = m
+        .apps
+        .iter()
+        .filter(|a| only.is_none_or(|o| o == a.as_str()))
+        .collect();
+    if apps.is_empty() {
+        return Vec::new();
+    }
+    let mut plan: Vec<String> = vec!["safety gates".to_string()];
+    for app in apps {
+        plan.extend(app_steps(app, auto));
+    }
+    plan
 }
 
 /// Update one app (or all apps when `only=None`) in a stack. `auto=true` means
@@ -535,10 +558,7 @@ pub async fn update(
     // ever produce are fixed right here, so the announced plan is complete
     // and a skipped one still fills its slot (see the `continue` points
     // below).
-    let mut plan: Vec<String> = vec!["safety gates".to_string()];
-    for app in &apps {
-        plan.extend(app_steps(app, auto));
-    }
+    let plan = update_plan_names(m, only, auto);
     runner.plan(&plan.iter().map(String::as_str).collect::<Vec<_>>());
 
     // A1/A2: updates pull and recreate containers inside the target.
@@ -888,6 +908,24 @@ pub async fn update(
                 ))
                 .await;
         }
+
+        // app-settings-enforced-1: the new version may have reset a setting a
+        // fix depends on; put it back. Never fails the update.
+        let settings_step = super::settings::app_step(app);
+        let settings_sink = ctx.sink;
+        step!(runner, &settings_step, {
+            let wanted = match crate::state::StateStore::new(ctx.exec, &ctx.state_dir)
+                .load()
+                .await
+            {
+                Ok(st) => super::settings::wanted(&st, &stack, app),
+                Err(_) => Vec::new(),
+            };
+            Ok(
+                super::settings::enforce_or_warn(exec, settings_sink, vmid, &stack, app, &wanted)
+                    .await,
+            )
+        });
 
         runner.log(Level::Info, format!("[update] {} updated + verified", app));
     }

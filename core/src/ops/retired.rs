@@ -446,17 +446,20 @@ pub fn wipe_plan(state: &HostState, key: &str, state_dir: &str) -> Result<WipePl
 /// it is checked here as well so core is safe on its own. Repositories that
 /// a managed stack still uses are left alone and named. A failure stops the
 /// wipe and keeps the record, so it can be run again.
+/// one-process-batch-2: `wipe`'s step plan — fixed and unconditional.
+pub const WIPE_STEPS: &[&str] = &[
+    "confirm",
+    "plan",
+    "restic repositories",
+    "appdata and vault",
+    "update state",
+];
+
 pub async fn wipe(ctx: &OpCtx<'_>, key: &str, confirmed_name: &str) -> OperationReport {
     let op = format!("wipe-{}", key.replace('/', "-"));
     let mut runner = Runner::new(&op, ctx.sink, ctx.journal);
     // fix-171 round 3: fixed and unconditional.
-    runner.plan(&[
-        "confirm",
-        "plan",
-        "restic repositories",
-        "appdata and vault",
-        "update state",
-    ]);
+    runner.plan(WIPE_STEPS);
     let texec = TracingExecutor::new(ctx.exec, ctx.sink);
     let exec: &dyn Executor = &texec;
     let say = |msg: String| {

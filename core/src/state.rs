@@ -194,6 +194,11 @@ pub struct HostState {
     /// stack's last deploy declared it, keyed `stack/app`.
     #[serde(default)]
     pub busy_checks: BTreeMap<String, String>,
+    /// app-settings-enforced-1: each app's wanted settings as its stack's
+    /// last deploy declared them, keyed `stack/app`. What the update and the
+    /// nightly round put back (`ops::settings`).
+    #[serde(default)]
+    pub app_settings: BTreeMap<String, Vec<crate::checks::AppSetting>>,
     /// G16: unix time of the last notification that actually arrived.
     #[serde(default)]
     pub last_notify_ok: u64,

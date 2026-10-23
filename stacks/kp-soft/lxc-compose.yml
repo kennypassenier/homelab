@@ -197,7 +197,7 @@ firewall:
       action: ACCEPT
       dest: 10.10.10.17
       proto: tcp
-      dport: "5000:5003"
+      dport: "5000:5004"
     - dir: out
       action: ACCEPT
       dest: 10.10.10.13

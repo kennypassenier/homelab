@@ -12,6 +12,11 @@ use crate::sink::Level;
 
 use super::OpCtx;
 
+/// one-process-batch-2: `set_enabled`'s step plan — fixed and
+/// unconditional, for enable and disable alike.
+pub const SET_ENABLED_STEPS: &[&str] =
+    &["load state", "guard target", "set onboot", "persist flag"];
+
 pub async fn set_enabled(ctx: &OpCtx<'_>, stack_name: &str, enabled: bool) -> OperationReport {
     let op = format!(
         "{}-{}",
@@ -20,7 +25,7 @@ pub async fn set_enabled(ctx: &OpCtx<'_>, stack_name: &str, enabled: bool) -> Op
     );
     let mut runner = Runner::new(&op, ctx.sink, ctx.journal);
     // fix-171 round 3: fixed and unconditional.
-    runner.plan(&["load state", "guard target", "set onboot", "persist flag"]);
+    runner.plan(SET_ENABLED_STEPS);
     let texec = TracingExecutor::new(ctx.exec, ctx.sink);
     let exec: &dyn Executor = &texec;
     let store = crate::state::StateStore::new(exec, &ctx.state_dir);

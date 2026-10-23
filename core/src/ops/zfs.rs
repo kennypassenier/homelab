@@ -433,6 +433,21 @@ fn snapshot_label(now_unix: u64, trigger: crate::ops::backup::BackupTrigger) -> 
     )
 }
 
+/// one-process-batch-2: `replicate`'s step plan — "validate jobs" plus five
+/// named steps per job, known from the jobs alone. The one list the op plans
+/// from and the dashboard counts.
+pub fn replicate_plan_names(jobs: &[ZfsJob]) -> Vec<String> {
+    let mut plan: Vec<String> = vec!["validate jobs".to_string()];
+    for j in jobs {
+        plan.push(format!("check {} → {}", j.source, j.target));
+        plan.push(format!("snapshot {}", j.source));
+        plan.push(format!("replicate {} → {}", j.source, j.target));
+        plan.push(format!("prune {}", j.source));
+        plan.push(format!("prune {}", j.target));
+    }
+    plan
+}
+
 /// Run every configured job. Fails the whole operation if any job fails —
 /// a half-replicated fleet must not read as success. `trigger` is
 /// `BackupTrigger::Nightly` for the nightly round and anything else for a
@@ -447,14 +462,7 @@ pub async fn replicate(
     let mut runner = Runner::new("zfs-replicate", ctx.sink, ctx.journal);
     // fix-171 round 3: "validate jobs" plus five named steps per job — all
     // known from `jobs`, this run's own input, before anything runs.
-    let mut plan: Vec<String> = vec!["validate jobs".to_string()];
-    for j in jobs {
-        plan.push(format!("check {} → {}", j.source, j.target));
-        plan.push(format!("snapshot {}", j.source));
-        plan.push(format!("replicate {} → {}", j.source, j.target));
-        plan.push(format!("prune {}", j.source));
-        plan.push(format!("prune {}", j.target));
-    }
+    let plan = replicate_plan_names(jobs);
     runner.plan(&plan.iter().map(String::as_str).collect::<Vec<_>>());
     let texec = TracingExecutor::new(ctx.exec, ctx.sink);
     let exec: &dyn Executor = &texec;

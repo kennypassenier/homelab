@@ -155,6 +155,9 @@ max_age_hours = 26
 [registry_cache]
 host = "10.10.10.17"
 pull_timeout_secs = 180
+# pinned-digest-pruned-1: the non-proxy keep registry on the same host.
+keep_port = 5004
+keep_max_mb = 12288
 
 [[registry_cache.upstreams]]
 registry = "docker.io"

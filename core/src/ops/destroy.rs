@@ -420,6 +420,7 @@ async fn unregister(
             state.probes.retain(|_, r| r.stack != stack_name);
             let prefix = format!("{}/", stack_name);
             state.busy_checks.retain(|k, _| !k.starts_with(&prefix));
+            state.app_settings.retain(|k, _| !k.starts_with(&prefix));
             // ask-9: what it leaves behind is kept forever by default, and
             // recorded so the fleet check can say so and `homelab wipe` can
             // find it. The state's own manifest first (it is what applied),
@@ -447,6 +448,14 @@ async fn unregister(
     Ok(())
 }
 
+/// one-process-batch-2: `forget`'s step plan — fixed, every run. The one
+/// list `forget` plans from and the dashboard counts.
+pub fn forget_plan_names() -> Vec<String> {
+    let mut plan: Vec<String> = vec!["read record".to_string(), "live check".to_string()];
+    plan.extend(UNREGISTER_STEPS.iter().map(|s| s.to_string()));
+    plan
+}
+
 /// Drop a stale record, and everything registered for it, without touching
 /// any container (`homelab forget`).
 ///
@@ -460,9 +469,7 @@ async fn unregister(
 /// forgotten would go silently unbacked-up.
 pub async fn forget(ctx: &OpCtx<'_>, stack: &str) -> OperationReport {
     let mut scope = Scope::top(&format!("forget-{}", stack), ctx.sink, ctx.journal);
-    let mut plan: Vec<&str> = vec!["read record", "live check"];
-    plan.extend(UNREGISTER_STEPS);
-    scope.plan_if_top(&plan);
+    scope.plan_if_top(&forget_plan_names());
     let result = forget_impl(ctx, stack, &mut scope).await;
     scope.finish(result)
 }

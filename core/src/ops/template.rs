@@ -85,6 +85,20 @@ pub fn os_slug(base_template: &str) -> String {
     }
 }
 
+/// one-process-batch-2: `build_template`'s step plan — fixed and
+/// unconditional.
+pub const TEMPLATE_BUILD_STEPS: &[&str] = &[
+    "claim temp vmid",
+    "create build container",
+    "wait for systemd",
+    "bake docker",
+    "bake observability agents",
+    "bake guards",
+    "trim what cannot work in a container",
+    "generalize",
+    "convert to template",
+];
+
 pub async fn build_template(ctx: &OpCtx<'_>, cfg: &TemplateCfg) -> OperationReport {
     // The suffix is not decoration: a clone silently inherits its template's
     // privilege level, so telling the two apart at a glance is the difference
@@ -97,17 +111,7 @@ pub async fn build_template(ctx: &OpCtx<'_>, cfg: &TemplateCfg) -> OperationRepo
     );
     let mut runner = Runner::new("template-build", ctx.sink, ctx.journal);
     // fix-171 round 3: fixed and unconditional.
-    runner.plan(&[
-        "claim temp vmid",
-        "create build container",
-        "wait for systemd",
-        "bake docker",
-        "bake observability agents",
-        "bake guards",
-        "trim what cannot work in a container",
-        "generalize",
-        "convert to template",
-    ]);
+    runner.plan(TEMPLATE_BUILD_STEPS);
     let texec = TracingExecutor::new(ctx.exec, ctx.sink);
     let exec: &dyn Executor = &texec;
     let vm = cfg.temp_vmid.to_string();

@@ -40,7 +40,8 @@ resources:
 
   swap_mb: 0
   # A cache of the fleet's images: about 6 GB of distinct layers today, and
-  # it only ever holds what was actually asked for.
+  # it only ever holds what was actually asked for. Plus the keep registry,
+  # capped at 12 GB (pinned-digest-pruned-1).
   disk_gb: 32
   storage: local-lvm
 
@@ -72,6 +73,14 @@ storage:
       registry, so a lost cache costs one slow pull and nothing else.
       Measured 2026-09-02: backing it up cost 1381 MB and 457 s per night,
       a fifth of the whole round, for data that protects nothing
+
+  # pinned-digest-pruned-1: the keep registry's data. Backed up, unlike the
+  # cache: when an upstream has deleted a pinned digest this is the only copy.
+  # Bounded by the keep round (80 digests, `keep_max_mb` 12 GB).
+  - host_path: /appdata/registry/registry-keep
+    mount_point: /appdata/registry/registry-keep
+    host_owner_uid: 100000
+    app: registry
 
 apps: [registry]
 
@@ -112,8 +121,8 @@ firewall:
       action: ACCEPT
       source: 10.10.10.0/24
       proto: tcp
-      dport: "5000:5003"
-      note: docker pulls from every container
+      dport: "5000:5004"
+      note: docker pulls from every container; 5004 is the keep registry
     - dir: in
       action: ACCEPT
       source: 10.10.10.13

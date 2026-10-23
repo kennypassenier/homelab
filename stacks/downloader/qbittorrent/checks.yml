@@ -86,3 +86,19 @@ probes:
     healthy: {equals: "ok"}
     layer: application
     id: qbittorrent-fake-release-types-excluded
+
+# app-settings-enforced-1 (Kenny, 2026-10-23: "zie dat fixes permanent zijn en
+# dat het admin dashboard dit kan enforcen"): values in the app's own files
+# that a fix depends on. The host puts a key back, and only that key, on every
+# deploy, every update and in the nightly round, and says "put back <key> in
+# <app>" when it had to; the probe above keeps measuring the running value.
+settings:
+  # 2026-10-23: four fake releases (.7z, .iso) reached Sonarr's queue; the
+  # list was extended by hand. qBittorrent rewrites qBittorrent.conf when it
+  # exits, so it is stopped while the file is written.
+  - file: /appdata/downloader/qbittorrent-config/qBittorrent/qBittorrent.conf
+    format: ini
+    section: BitTorrent
+    key: 'Session\ExcludedFileNames'
+    value: "*.exe, *.bat, *.cmd, *.scr, *.lnk, *.7z, *.iso, *.zipx, *.vbs, *.ps1, *.msi"
+    stop_app: true

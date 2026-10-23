@@ -1735,6 +1735,26 @@ fn restore_groups(
     Ok(groups)
 }
 
+/// one-process-batch-2: `restore_app`'s step plan, known from `safety_copy`
+/// alone (a plain argument of the command). "restore data" is always in the
+/// plan, even on the branch where the safety copy fails and it never runs —
+/// that branch marks it skipped. The one list the op plans from and the
+/// dashboard counts.
+pub fn restore_plan_names(safety_copy: bool) -> Vec<String> {
+    let mut steps: Vec<&str> = vec!["safety gates", "native units", "validate snapshot"];
+    if safety_copy {
+        steps.push("room for a safety copy");
+    }
+    steps.push("quiesce stack");
+    if safety_copy {
+        steps.push("safety copy");
+    }
+    steps.push("restore data");
+    steps.push("resume stack");
+    steps.push("verify health");
+    steps.into_iter().map(String::from).collect()
+}
+
 /// E2 for one app of a stack (`app`), or the whole stack (None).
 ///
 /// fix-112: three changes (story: `docs/deployment/REGISTER.md`). Only the
@@ -1763,18 +1783,7 @@ pub async fn restore_app(
     // before anything runs. "restore data" is always in the plan too, even
     // on the branch where the safety copy fails and it never runs — that
     // branch marks it skipped (below) rather than leaving it absent.
-    let mut steps: Vec<&str> = vec!["safety gates", "native units", "validate snapshot"];
-    if safety_copy {
-        steps.push("room for a safety copy");
-    }
-    steps.push("quiesce stack");
-    if safety_copy {
-        steps.push("safety copy");
-    }
-    steps.push("restore data");
-    steps.push("resume stack");
-    steps.push("verify health");
-    runner.plan(&steps);
+    runner.plan(&restore_plan_names(safety_copy));
 
     runner.log(
         Level::Warn,

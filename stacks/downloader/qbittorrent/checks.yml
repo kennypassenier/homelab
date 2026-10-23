@@ -72,3 +72,18 @@ probes:
     layer: application
     id: qbittorrent-completed-outside-downloads-folder
     blind_spot: "the path inside the container; that /downloads is the 18TB disk is the mount's question"
+
+  # 2026-10-23: four fake releases (.7z and .iso instead of video) reached
+  # Sonarr's queue and made it log "make sure ffprobe is available" every
+  # minute. qBittorrent now skips such files; this check fails when a restore
+  # or a reset loses that list.
+  - name: "fake-release file types excluded"
+    command: >-
+      grep -E '^Session\\ExcludedFileNames=.*\*\.7z.*\*\.iso'
+      /appdata/downloader/qbittorrent-config/qBittorrent/qBittorrent.conf
+    expect: must_be_present
+    layer: application
+    blind_spot: >-
+      Reads the setting from qBittorrent's own configuration file, not from
+      the running program; a change made in the Web UI shows here only after
+      qBittorrent writes its configuration, which it does on exit.

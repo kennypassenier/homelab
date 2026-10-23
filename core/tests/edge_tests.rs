@@ -38,7 +38,14 @@ fn emails() -> Value {
            {"email": {"email": "c@example.invalid"}}])
 }
 
-/// edge-capture-2026-10-03: the Access apps as read-only measured on
+/// eten-home-ip-1 (2026-10-22): the house's address passes without a login;
+/// a documentation address stands in for it, the projection redacts both.
+fn home() -> Value {
+    json!({"name": "home address, no login", "decision": "bypass",
+           "include": [{"ip": {"ip": "198.51.100.7/32"}}], "require": [], "exclude": []})
+}
+
+/// edge-capture-2026-10-23 (renewed with eten-home-ip-1): the Access apps as read-only measured on
 /// 2026-10-03 — the Access split (step-25) replaced `Kobo services`
 /// (ha/trmnl) with `Homelab admin` (prox, opn, traefik, admin), so the
 /// capture and this answer were renewed together.
@@ -61,8 +68,15 @@ fn api_apps() -> Value {
         {"id": "x3", "name": "Homelab", "domain": "*.kp-soft.dev",
          "self_hosted_domains": ["*.kp-soft.dev"], "type": "self_hosted",
          "session_duration": "730h",
-         "policies": [{"name": "Toegang kpsoft", "decision": "allow", "include": emails(),
-                       "require": [], "exclude": []}]}
+         "policies": [home(),
+                      {"name": "Toegang kpsoft", "decision": "allow", "include": emails(),
+                       "require": [], "exclude": []}]},
+        {"id": "x4", "name": "eten (Kitchen wheel, home only)", "domain": "eten.kp-soft.dev",
+         "self_hosted_domains": ["eten.kp-soft.dev"], "type": "self_hosted",
+         "session_duration": "24h",
+         "policies": [home(),
+                      {"name": "everyone else refused", "decision": "deny",
+                       "include": [{"everyone": {}}], "require": [], "exclude": []}]}
     ])
 }
 
@@ -92,7 +106,7 @@ fn fix_143_the_committed_capture_loads_with_the_ids_to_ask() {
     assert_eq!(ids.account_id, "19c7db90b03ef77b410fce31ba5624bf");
     assert_eq!(ids.zone_id, "f53290db3a400e6b3de07eda03c76267");
     assert_eq!(ids.tunnel_id, "b027d052-9f97-43e5-9272-eeb336d3266e");
-    assert_eq!(cap.apps.as_array().map(Vec::len), Some(3));
+    assert_eq!(cap.apps.as_array().map(Vec::len), Some(4));
     assert_eq!(cap.dns.as_array().map(Vec::len), Some(2));
 }
 
@@ -180,4 +194,42 @@ fn fix_143_a_changed_ingress_is_drift() {
 fn fix_143_addresses_are_redacted_like_the_capture() {
     let v = redact_emails(&json!({"email": {"email": "someone@example.invalid"}, "n": "x"}));
     assert_eq!(v, json!({"email": {"email": "<email>"}, "n": "x"}));
+}
+
+/// edge-ip-bypass-1 (2026-10-23): the home-address bypass put first on the
+/// Homelab app lets in one address, not everyone. It is drift against an
+/// older capture, never Broken, and the address never reaches the capture.
+#[test]
+fn edge_ip_bypass_1_a_bypass_for_one_address_is_not_open_to_everyone() {
+    let (_, cap) = load_capture(&captured_dir()).unwrap();
+    let mut apps = api_apps();
+    // Against a capture from before the bypass existed.
+    let mut cap = cap;
+    let homelab = cap
+        .apps
+        .as_array_mut()
+        .unwrap()
+        .iter_mut()
+        .find(|a| a["name"] == "Homelab")
+        .unwrap();
+    homelab["policies"].as_array_mut().unwrap().remove(0);
+    apps[2]["policies"][0]["include"] = json!([{"ip": {"ip": "198.51.100.7/32"}}]);
+    let projected = project_apps(&apps);
+    assert!(
+        !projected.to_string().contains("198.51.100.7"),
+        "{projected}"
+    );
+    let l = EdgeState {
+        apps: projected,
+        ..live()
+    };
+    let got = compare_edge(&cap, &l);
+    assert!(
+        !got.is_empty(),
+        "the new policy is drift against the old capture"
+    );
+    assert!(
+        got.iter().all(|f| f.severity != Severity::Broken),
+        "{got:#?}"
+    );
 }

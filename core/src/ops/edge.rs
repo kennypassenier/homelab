@@ -45,6 +45,10 @@ pub struct EdgeIds {
 pub fn redact_emails(v: &Value) -> Value {
     match v {
         Value::String(s) if s.contains('@') && !s.contains(' ') => json!("<email>"),
+        // edge-ip-bypass-1: an Access rule naming an address (the house's
+        // public one, for the home-only bypass) is redacted the same way;
+        // the capture lives in a public repository.
+        Value::String(s) if is_address(s) => json!("<address>"),
         Value::Array(a) => Value::Array(a.iter().map(redact_emails).collect()),
         Value::Object(o) => Value::Object(
             o.iter()
@@ -53,6 +57,15 @@ pub fn redact_emails(v: &Value) -> Value {
         ),
         other => other.clone(),
     }
+}
+
+/// An IP address or a CIDR range (`62.235.8.143/32`, `2001:db8::/48`).
+fn is_address(s: &str) -> bool {
+    let (ip, len) = match s.split_once('/') {
+        Some((ip, len)) => (ip, Some(len)),
+        None => (s, None),
+    };
+    ip.parse::<std::net::IpAddr>().is_ok() && len.is_none_or(|l| l.parse::<u8>().is_ok())
 }
 
 fn pick(v: &Value, keys: &[&str]) -> Value {
@@ -185,19 +198,23 @@ fn name_of(v: &Value) -> String {
         .to_string()
 }
 
-/// Does this app let anyone in: a bypass decision, or an `everyone` rule
-/// in an allowing policy?
+/// Does this app let anyone in: an `everyone` rule in a bypassing or
+/// allowing policy, or a bypass that names no rule at all. A bypass whose
+/// include narrows it (an address range, a country) is not open to everyone
+/// (edge-ip-bypass-1: the house-only bypass was reported as "lets everyone
+/// in").
 fn opens_to_everyone(app: &Value) -> bool {
     app.get("policies")
         .and_then(Value::as_array)
         .is_some_and(|ps| {
             ps.iter().any(|p| {
                 let decision = p.get("decision").and_then(Value::as_str).unwrap_or("");
-                let everyone = p
-                    .get("include")
-                    .and_then(Value::as_array)
-                    .is_some_and(|i| i.iter().any(|r| r.get("everyone").is_some()));
-                decision == "bypass" || (decision == "allow" && everyone)
+                let include = p.get("include").and_then(Value::as_array);
+                let everyone =
+                    include.is_some_and(|i| i.iter().any(|r| r.get("everyone").is_some()));
+                let unnarrowed = include.is_none_or(|i| i.is_empty());
+                (decision == "bypass" && (everyone || unnarrowed))
+                    || (decision == "allow" && everyone)
             })
         })
 }

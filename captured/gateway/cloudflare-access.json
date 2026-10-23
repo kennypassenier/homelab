@@ -1,7 +1,89 @@
 {
-  "captured_at": "2026-10-03",
-  "source": "Cloudflare API, read-only token (R5); e-mail addresses redacted",
+  "captured_at": "2026-10-23",
+  "source": "Cloudflare API, read-only token (R5); e-mail addresses and IP addresses redacted",
   "apps": [
+    {
+      "name": "Homelab",
+      "domain": "*.kp-soft.dev",
+      "self_hosted_domains": [
+        "*.kp-soft.dev"
+      ],
+      "type": "self_hosted",
+      "session_duration": "730h",
+      "policies": [
+        {
+          "name": "home address, no login",
+          "decision": "bypass",
+          "include": [
+            {
+              "ip": {
+                "ip": "<address>"
+              }
+            }
+          ],
+          "require": [],
+          "exclude": []
+        },
+        {
+          "name": "Toegang kpsoft",
+          "decision": "allow",
+          "include": [
+            {
+              "email": {
+                "email": "<email>"
+              }
+            },
+            {
+              "email": {
+                "email": "<email>"
+              }
+            },
+            {
+              "email": {
+                "email": "<email>"
+              }
+            }
+          ],
+          "require": [],
+          "exclude": []
+        }
+      ]
+    },
+    {
+      "name": "eten (Kitchen wheel, home only)",
+      "domain": "eten.kp-soft.dev",
+      "self_hosted_domains": [
+        "eten.kp-soft.dev"
+      ],
+      "type": "self_hosted",
+      "session_duration": "24h",
+      "policies": [
+        {
+          "name": "home address, no login",
+          "decision": "bypass",
+          "include": [
+            {
+              "ip": {
+                "ip": "<address>"
+              }
+            }
+          ],
+          "require": [],
+          "exclude": []
+        },
+        {
+          "name": "everyone else refused",
+          "decision": "deny",
+          "include": [
+            {
+              "everyone": {}
+            }
+          ],
+          "require": [],
+          "exclude": []
+        }
+      ]
+    },
     {
       "name": "Homelab admin",
       "domain": "prox.kp-soft.dev",
@@ -49,40 +131,6 @@
           "include": [
             {
               "everyone": {}
-            }
-          ],
-          "require": [],
-          "exclude": []
-        }
-      ]
-    },
-    {
-      "name": "Homelab",
-      "domain": "*.kp-soft.dev",
-      "self_hosted_domains": [
-        "*.kp-soft.dev"
-      ],
-      "type": "self_hosted",
-      "session_duration": "730h",
-      "policies": [
-        {
-          "name": "Toegang kpsoft",
-          "decision": "allow",
-          "include": [
-            {
-              "email": {
-                "email": "<email>"
-              }
-            },
-            {
-              "email": {
-                "email": "<email>"
-              }
-            },
-            {
-              "email": {
-                "email": "<email>"
-              }
             }
           ],
           "require": [],

@@ -309,10 +309,18 @@ impl SlowRead {
         // of riding out the rest of `wait` (up to 20 s, longer than the
         // 10 s shutdown bound) and forcing chassis to log a false "shutdown
         // exceeded its bound" on every restart.
+        // A closed flag (its sender's runtime gone, as between tests that
+        // share the process-wide cell) is not a shutdown: wait_for() errs at
+        // once there, and answering 503 "restarting" would be false.
         let mut shutdown = self.shutdown.clone();
+        let stopping = async move {
+            if shutdown.wait_for(|down| *down).await.is_err() {
+                std::future::pending::<()>().await;
+            }
+        };
         tokio::select! {
             _ = tokio::time::timeout(wait, rx.wait_for(|d| *d >= id)) => {}
-            _ = shutdown.wait_for(|down| *down) => {
+            _ = stopping => {
                 return (
                     StatusCode::SERVICE_UNAVAILABLE,
                     Json(serde_json::json!({

@@ -157,3 +157,27 @@
     grid-template-columns: minmax(0, 1fr);
   }
 }
+
+/* deploy-all-dialog-1: on a phone the "What changed" line is a sentence that
+   can hold a long setting name (latch_files is set but HOMELAB_LATCH_ENV is
+   not), so its label stands over it and the sentence takes the card's whole
+   width instead of the value track beside the label, where the name broke
+   letter by letter. The other lines of the card keep the two tracks. */
+@container kp-table (max-width: 40rem) {
+  .ap-root
+    .kp-datatable[data-kp-cards]:not([data-kp-cards="spread"])
+    .kp-table
+    tr:not([data-kp-row-group])
+    > td[data-label="What changed"] {
+    grid-template-columns: minmax(0, 1fr);
+    row-gap: var(--kp-space-xs, 0.25rem);
+    overflow-wrap: anywhere;
+  }
+  .ap-root
+    .kp-datatable[data-kp-cards]:not([data-kp-cards="spread"])
+    .kp-table
+    tr:not([data-kp-row-group])
+    > td[data-label="What changed"]::before {
+    grid-column: 1;
+  }
+}

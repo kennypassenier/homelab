@@ -910,6 +910,18 @@ tr.unread td:first-child {
 .rv-steps .kp-steplist {
   min-inline-size: 0;
 }
+/* one-progress-view-1: every row has a whole-pixel height in every state.
+   The package's rows come out at 62.5 px (a 13 px note at line-height 1.5 is
+   19.5 px), so the row below one sat on a half pixel and rounded one way or
+   the other as the dialog's own centring moved it by sub-pixels: a 1 px
+   "shift" of step 2 against step 1. Whole-pixel lines keep every row's top an
+   integer from the area's top, whatever the sub-pixel position of the dialog. */
+.rv-steps .kp-steplist__title {
+  line-height: 1.5rem;
+}
+.rv-steps .kp-steplist__note {
+  line-height: 1.25rem;
+}
 .rv-steps-alt[hidden],
 .rv-steps-list[hidden] {
   display: none;

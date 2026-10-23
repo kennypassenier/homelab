@@ -168,10 +168,16 @@ function followRunning(area) {
     '.kp-steplist__item[data-state="running"], .kp-steplist__item[data-state="failed"]',
   );
   if (!(row instanceof HTMLElement)) return;
+  // one-progress-view-1: the area moves only when the running row would
+  // otherwise be out of view, and then by the least that shows it whole
+  // (the row ends on the area's edge). A row that is in view keeps its
+  // place: centring the running row shifted every row at each step, so the
+  // list moved under the eye while nothing needed it to.
   const top = row.offsetTop - area.offsetTop;
-  const want = top - (area.clientHeight - row.offsetHeight) / 2;
-  if (Math.abs(area.scrollTop - want) > row.offsetHeight / 2)
-    area.scrollTop = Math.max(0, want);
+  const bottom = top + row.offsetHeight;
+  if (top < area.scrollTop) area.scrollTop = Math.max(0, top);
+  else if (bottom > area.scrollTop + area.clientHeight)
+    area.scrollTop = bottom - area.clientHeight;
 }
 
 /**

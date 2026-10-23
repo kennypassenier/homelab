@@ -470,6 +470,10 @@ details.st-grp[hidden] {
 .ha-plate p {
   margin: 0;
 }
+.ha-plate .kp-alert__body {
+  min-inline-size: 0;
+  overflow-wrap: anywhere;
+}
 .ha-rows {
   display: grid;
   min-inline-size: 0;
@@ -522,7 +526,7 @@ details.st-grp[hidden] {
    one column, every step's text aligned in the next. */
 .ha-steps {
   display: grid;
-  grid-template-columns: max-content 1fr;
+  grid-template-columns: max-content minmax(0, 1fr);
   gap: var(--kp-space-2, 8px) var(--kp-space-3, 12px);
   margin: var(--kp-space-3, 12px) 0 0;
   padding: 0;
@@ -530,6 +534,12 @@ details.st-grp[hidden] {
 }
 .ha-step {
   display: contents;
+}
+.ha-step__t {
+  /* eten-home-ip-1: a long setting name (HOMELAB_ADMIN_CLOUDFLARE_ACCESS_TOKEN)
+     breaks where it must instead of pushing the page sideways on a phone. */
+  min-inline-size: 0;
+  overflow-wrap: anywhere;
 }
 .ha-step__n {
   font-variant-numeric: tabular-nums;

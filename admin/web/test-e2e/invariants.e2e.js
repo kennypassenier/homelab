@@ -3105,7 +3105,8 @@ test("invariants: the Host page lays out Containers across the top, then two col
         bad.push(`${width}px: left column ${r.main}`);
       if (
         r.side.join() !==
-        "host-connection,host-about-card,host-templates-card,host-checks-card"
+        // manual-checks-as-info-1: "when to check again" closes the column.
+        "host-connection,host-about-card,host-templates-card,host-checks-card,host-when-wrong"
       )
         bad.push(`${width}px: right column ${r.side}`);
       // fix-371-1 (Kenny approved the Host tiles demo 2026-10-04): the
@@ -6627,9 +6628,10 @@ test("invariants: review metrics — a refresh feeds the charts in place: the pl
       );
     });
     const before = reads;
-    await page.clock.fastForward(31_000);
+    // refresh-one-minute-1: the charts read again once a minute.
+    await page.clock.fastForward(61_000);
     await page.waitForTimeout(1500);
-    assert.ok(reads > before, "no refresh ran in 31 s");
+    assert.ok(reads > before, "no refresh ran in 61 s");
     assert.ok(
       await page.evaluate(
         () =>

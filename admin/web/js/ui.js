@@ -1004,6 +1004,14 @@ export function toastRegion(host) {
       class: "kp-toasts nx-toasts",
       role: "status",
       "aria-live": "polite",
+      // An Undo toast arrives by its own CSS entrance and never
+      // by the page's box motion. The region sits inside #page, which kp's
+      // size motion watches; it took each toast added after the first
+      // render for "news" and played its arrival as its leave turned
+      // around, with the length of the toast's own 6 s Undo clock: the
+      // toast stood folded to its 2 px border for 5.4 s and its Undo could
+      // not be pressed. "none" leaves the toast to its entrance.
+      "data-kp-arrive": "none",
     });
     page.append(region);
   }

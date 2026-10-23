@@ -353,7 +353,17 @@ fn parse_plan(
     }
     let mut steps = Vec::new();
     for (i, line) in lines.iter().enumerate() {
-        let words: Vec<String> = line.split_whitespace().map(str::to_string).collect();
+        let mut words: Vec<String> = line.split_whitespace().map(str::to_string).collect();
+        // liveview-final-button-1: the usage lists `press confirm --wait`
+        // and `finish`, and a plan copies those steps; announced, they are
+        // the press itself (waiting is what the sender does afterwards), so
+        // `--wait` is dropped and `finish` is left out of the announcement.
+        if words.first().map(String::as_str) == Some("press") {
+            words.retain(|w| w != "--wait");
+        }
+        if words.first().map(String::as_str) == Some("finish") && words.len() == 1 {
+            continue;
+        }
         match words.first().map(String::as_str) {
             Some("plan") | Some("state") | None => {
                 return Err(format!(
@@ -604,6 +614,36 @@ mod tests {
 
     fn words(s: &str) -> Vec<String> {
         s.split_whitespace().map(str::to_string).collect()
+    }
+
+    /// liveview-final-button-1 (2026-10-22): a plan copied from the usage,
+    /// with `press confirm --wait` and `finish`, was refused, so the tab
+    /// showed "Claude's next step" instead of the whole sequence.
+    #[test]
+    fn a_plan_takes_press_wait_and_finish_as_the_usage_lists_them() {
+        let args: Vec<String> = [
+            "plan",
+            "open deploy media",
+            "press confirm --wait",
+            "finish",
+        ]
+        .map(String::from)
+        .to_vec();
+        let UiStep::Plan { steps } = parse(&args).unwrap() else {
+            panic!("a plan")
+        };
+        assert_eq!(
+            steps,
+            vec![
+                UiStep::Open {
+                    form: "deploy".into(),
+                    target: Some("media".into())
+                },
+                UiStep::Press {
+                    button: "confirm".into()
+                },
+            ]
+        );
     }
 
     #[test]

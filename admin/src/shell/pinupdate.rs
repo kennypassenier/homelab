@@ -39,6 +39,9 @@ pub type Resolver = Arc<ResolveFn>;
 pub struct PinCtx {
     pub wc: Arc<WorkingCopy>,
     pub resolve: Resolver,
+    /// update-nothing-1: the host, asked (read-only) what a stack's
+    /// containers run, to compare with the registry's digest for the tag.
+    pub host: Arc<dyn super::actions::HostPort>,
 }
 
 #[derive(Deserialize)]
@@ -156,6 +159,119 @@ pub fn plan_target(
     })
 }
 
+/// update-nothing-1: where one app on a moving tag stands.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PullState {
+    /// The running image is the one the tag points at now.
+    Current,
+    /// The registry's digest for the tag differs from the running one.
+    Newer,
+    /// Not measured (nothing read, or the registry did not answer): the
+    /// flow keeps offering the pull, as before.
+    Unknown,
+}
+
+/// The state of every app of the stack that has a service on a moving tag
+/// (`<app>` → state): `Newer` when any service's registry digest differs
+/// from what its container runs, `Current` when all are the same, otherwise
+/// `Unknown`. Pure: the runtime and the resolver are passed in.
+pub fn plan_pull_state(
+    texts: &StackTexts,
+    runtime: Option<&homelab_core::ops::pins::StackRuntime>,
+    resolve: &ResolveFn,
+) -> std::collections::BTreeMap<String, PullState> {
+    let mut by_app: std::collections::BTreeMap<String, Vec<PullState>> = Default::default();
+    for (key, image) in images(texts) {
+        if image.contains("@sha256:") {
+            continue;
+        }
+        let app = key.split('/').next().unwrap_or(&key).to_string();
+        let tag =
+            homelab_core::ops::pins::pinned_version(&image).unwrap_or_else(|| "latest".into());
+        let (registry, repository) = registry_of(&image);
+        let state = match (runtime, resolve(&registry, &repository, &tag)) {
+            (Some(rt), Ok(Some(digest))) => {
+                match homelab_core::ops::pins::runs_current(&rt.images, &image, &digest) {
+                    Some(true) => PullState::Current,
+                    Some(false) => PullState::Newer,
+                    None => PullState::Unknown,
+                }
+            }
+            _ => PullState::Unknown,
+        };
+        by_app.entry(app).or_default().push(state);
+    }
+    by_app
+        .into_iter()
+        .map(|(app, states)| {
+            let one = if states.contains(&PullState::Newer) {
+                PullState::Newer
+            } else if states.iter().all(|s| *s == PullState::Current) {
+                PullState::Current
+            } else {
+                PullState::Unknown
+            };
+            (app, one)
+        })
+        .collect()
+}
+
+async fn pull_state(State(c): State<PinCtx>, UrlPath(stack): UrlPath<String>) -> Response {
+    if !valid_stack_name(&stack) {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(Refusal::new(
+                "the pull state",
+                "not a stack name",
+                "use the name the Fleet view shows",
+            )),
+        )
+            .into_response();
+    }
+    let runtime = match c
+        .host
+        .ask_traced(
+            homelab_proto::Command::StackRuntime {
+                stack: stack.clone(),
+            },
+            std::time::Duration::from_secs(30),
+            None,
+        )
+        .await
+    {
+        Ok(r) if r.ok => serde_json::from_str::<serde_json::Value>(&r.message)
+            .ok()
+            .and_then(|v| {
+                serde_json::from_value::<homelab_core::ops::pins::StackRuntime>(
+                    v["runtime"].clone(),
+                )
+                .ok()
+            }),
+        _ => None,
+    };
+    let resolve = c.resolve.clone();
+    let wc = c.wc.clone();
+    let done = tokio::task::spawn_blocking(move || {
+        let texts = wc.stack_texts(&stack)?;
+        Ok::<_, Refusal>(plan_pull_state(&texts, runtime.as_ref(), &*resolve))
+    })
+    .await;
+    match done {
+        Ok(Ok(apps)) => Json(serde_json::json!({ "apps": apps })).into_response(),
+        Ok(Err(r)) => (StatusCode::CONFLICT, Json(r)).into_response(),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(Refusal::new(
+                "the pull state",
+                format!("the lookup stopped: {e}"),
+                "try again",
+            )),
+        )
+            .into_response(),
+    }
+}
+
 async fn pin_target(
     State(c): State<PinCtx>,
     UrlPath(stack): UrlPath<String>,
@@ -196,6 +312,7 @@ async fn pin_target(
 pub fn router(ctx: PinCtx) -> Router {
     Router::new()
         .route("/data/stacks/{stack}/pin-target", get(pin_target))
+        .route("/data/stacks/{stack}/pull-state", get(pull_state))
         .with_state(ctx)
 }
 
@@ -214,6 +331,71 @@ mod tests {
 
     fn ok(_: &str, _: &str, tag: &str) -> Result<Option<String>, String> {
         Ok(Some(format!("sha256:{tag}")))
+    }
+
+    fn moving_texts() -> StackTexts {
+        [(
+            "web/docker-compose.yml".to_string(),
+            "services:\n  web:\n    image: example/web:latest\n".to_string(),
+        )]
+        .into_iter()
+        .collect()
+    }
+
+    fn runtime_running(digest: &str) -> homelab_core::ops::pins::StackRuntime {
+        let mut rt = homelab_core::ops::pins::StackRuntime::default();
+        rt.images.insert(
+            "web".into(),
+            homelab_core::ops::pins::RunningImage {
+                image: "example/web:latest".into(),
+                digest: digest.into(),
+                upstream: None,
+                seen_at: 0,
+            },
+        );
+        rt
+    }
+
+    #[test]
+    /// covers: update-nothing-1
+    fn update_nothing_1_a_moving_tag_is_current_only_when_the_digests_agree() {
+        let registry = |_: &str, _: &str, _: &str| -> Result<Option<String>, String> {
+            Ok(Some("sha256:new".into()))
+        };
+        let same = plan_pull_state(
+            &moving_texts(),
+            Some(&runtime_running("sha256:new")),
+            &registry,
+        );
+        assert_eq!(same["web"], PullState::Current);
+        let older = plan_pull_state(
+            &moving_texts(),
+            Some(&runtime_running("sha256:old")),
+            &registry,
+        );
+        assert_eq!(older["web"], PullState::Newer);
+    }
+
+    #[test]
+    /// covers: update-nothing-1
+    fn update_nothing_1_what_was_not_measured_is_unknown_and_pinned_apps_are_absent() {
+        let silent =
+            |_: &str, _: &str, _: &str| -> Result<Option<String>, String> { Err("down".into()) };
+        let r = plan_pull_state(
+            &moving_texts(),
+            Some(&runtime_running("sha256:old")),
+            &silent,
+        );
+        assert_eq!(r["web"], PullState::Unknown);
+        let registry = |_: &str, _: &str, _: &str| -> Result<Option<String>, String> {
+            Ok(Some("sha256:new".into()))
+        };
+        assert_eq!(
+            plan_pull_state(&moving_texts(), None, &registry)["web"],
+            PullState::Unknown,
+            "no runtime read, no claim"
+        );
+        assert!(plan_pull_state(&texts(), Some(&runtime_running("x")), &registry).is_empty());
     }
 
     #[test]

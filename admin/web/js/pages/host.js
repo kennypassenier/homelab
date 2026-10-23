@@ -21,7 +21,9 @@
 import { act, catalogReady, onAct } from "../act.js";
 import { openAction } from "../actiondialog.js";
 import { agoEl, setAgo } from "../ago.js";
+import { STANDING_STACK } from "../checks.js";
 import { doctorRows } from "../doctor.js";
+import { mountWhenCheck } from "../whencheck.js";
 import { fetchJson, h, labelCells, slowReport, tableBlock } from "../dom.js";
 import { declare, declareField, drivable, viaForm } from "../drivable.js";
 import { humanDuration } from "../format.js";
@@ -108,9 +110,10 @@ import { registerShortcuts } from "/static/kp/js/shortcuts.js";
 import { GROUP_HOST, unlessDialog } from "../shortcuts.js";
 import { gridRow, formGrid } from "../gridrow.js";
 import { setParams } from "../urlstate.js";
+import { REFRESH_S, changeGate } from "../quiet.js";
 
 /** Seconds between two readings of the container list and the ping. */
-const EVERY_S = 30;
+const EVERY_S = REFRESH_S;
 /** How many pings the latency strip keeps. */
 const PINGS = 12;
 /** Seconds between two readings of the host's trends (1-minute data). */
@@ -142,6 +145,14 @@ const RUN_CHECKS = declare({
   // kit round (chassis-rs 3.9.0): the Host checks card's own Run checks was a
   // second button for the same read; the header's one button took its place.
   was: ["read-host-checks"],
+});
+const CHECK_CONFIRM = declare({
+  id: "host-check-confirm",
+  page: "host",
+  opens: "run",
+  row: "<check id>",
+  what: "keep today's date as the last time the stack-less check (the restic password chain) was confirmed (answer-check with ok); nothing else changes",
+  shows: 'on the Host page\'s "When something goes wrong, check this" list',
 });
 const PING = declare({
   id: "ping-host",
@@ -829,6 +840,7 @@ export function mount(root, ctx) {
     BULLETS_RETRY_EVENT,
   ])
     gViews.addEventListener(ev, () => void loadGuests().catch(() => {}));
+  const guestsGate = changeGate();
   const loadGuests = async () => {
     const r = await fetchJson(
       "/data/host/guests",
@@ -841,9 +853,11 @@ export function mount(root, ctx) {
       return false;
     }
     guestsWhy = null;
+    setAgo(guestsAgo, r.body.measured_at);
+    // refresh-one-minute-1: the same containers draw nothing again.
+    if (!guestsGate.isNew(r.body.guests ?? []) && guests) return true;
     guests = r.body.guests ?? [];
     paintGuests();
-    setAgo(guestsAgo, r.body.measured_at);
     paintKpis();
     return true;
   };
@@ -1145,8 +1159,11 @@ export function mount(root, ctx) {
       state: "loading",
     });
   };
+  let reachDrawn = false;
   const loadReach = async () => {
-    loadingReach();
+    // refresh-one-minute-1: the strips show their loading card only before
+    // the first read; a refresh keeps the drawn strips until new ones land.
+    if (!reachDrawn) loadingReach();
     const now = Math.floor(Date.now() / 1000);
     const [d, hr] = await Promise.all([
       fetchJson(
@@ -1161,6 +1178,7 @@ export function mount(root, ctx) {
       ),
     ]);
     if (abort.signal.aborted) return true;
+    reachDrawn = true;
     const why = !d.ok
       ? `${d.error.what}: ${d.error.why}`
       : !hr.ok
@@ -1324,9 +1342,13 @@ export function mount(root, ctx) {
       : "no ping yet";
   };
   lat.addEventListener("kp-uptime-retry", () => void ping().catch(() => {}));
-  const ping = async () => {
-    pingBtn.setAttribute("disabled", "");
-    pingOut.textContent = "Pinging…";
+  /** @param {boolean} [quiet] a background refresh: no "Pinging…" flash */
+  const ping = async (quiet = false) => {
+    const silent = quiet && pingedOnce;
+    if (!silent) {
+      pingBtn.setAttribute("disabled", "");
+      pingOut.textContent = "Pinging…";
+    }
     const r = await fetchJson("/data/ping", "the ping", abort.signal);
     pingBtn.removeAttribute("disabled");
     pingedOnce = true;
@@ -1801,7 +1823,7 @@ export function mount(root, ctx) {
     void Promise.all([
       loadGuests(),
       loadTrend().then(() => true),
-      ping().then(() => true),
+      ping(true).then(() => true),
       loadReach(),
     ])
       .then((all) => {
@@ -1815,6 +1837,17 @@ export function mount(root, ctx) {
   });
   void refreshOf;
   void VIEW_EVENT;
+
+  // manual-checks-as-info-1: the stack-less standing check (the restic
+  // password chain), information for when something goes wrong.
+  const whenWrong = mountWhenCheck({
+    stack: STANDING_STACK,
+    id: "host-when-wrong",
+    drive: CHECK_CONFIRM,
+    signal: abort.signal,
+    emptyText: "No check that only a person can look at is registered yet.",
+  });
+  stops.push(whenWrong.stop);
 
   // ── assemble ──────────────────────────────────────────────────────────
   root.replaceChildren(
@@ -1834,6 +1867,7 @@ export function mount(root, ctx) {
         aboutCard.el,
         tplCard.el,
         checksCard.el,
+        whenWrong.el,
       ),
     ),
     settingsCard.el,
@@ -1923,6 +1957,7 @@ export function mount(root, ctx) {
     for (const t of tiles)
       t.set(hostTile(t.fig, trend?.get(t.fig.key) ?? null, f, trendWhy));
   };
+  const trendGate = changeGate();
   const loadTrend = async () => {
     const r = await fetchJson(
       "/data/host/trend",
@@ -1933,6 +1968,7 @@ export function mount(root, ctx) {
     if (r.ok) {
       /** @type {import("../host.js").TrendFigure[]} */
       const figs = r.body.figures ?? [];
+      if (!trendGate.isNew(figs) && trend && !trendWhy) return;
       trend = new Map(figs.map((x) => [x.key, x]));
       trendWhy = null;
     } else {

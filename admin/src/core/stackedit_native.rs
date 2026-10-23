@@ -324,6 +324,7 @@ pub fn add_native_files(stack: &StackManifest, a: &AddNativeEdit) -> (String, St
         backup_pause: BackupPause::Off,
         update_policy: UpdatePolicy::Manual,
         after_restore: None,
+        first_secret_cmd: None,
         metrics: None,
     };
     let yml = serde_yaml::to_string(&m).unwrap_or_default();
@@ -421,6 +422,7 @@ mod tests {
             backup_pause: BackupPause::Off,
             update_policy: UpdatePolicy::Manual,
             after_restore: None,
+            first_secret_cmd: None,
             metrics: None,
         }
     }

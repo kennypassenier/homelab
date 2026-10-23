@@ -6,23 +6,30 @@
 //   updates   the fleet check's stale images, its kept last answer
 //             (`?last=1`: starts no ~90 s run on a page load)
 //   today     Today's broken / attention items, its kept last answer
-//   checks    the manual checks a person answers (a cheap host read),
-//             again whenever an answer's job finished
+//   (manual checks are not a source: manual-checks-as-info-1, they are
+//   information on the stack's page)
+//   address   the house's public address against the one Cloudflare lets in
+//             without a login (the server's last reading, eten-home-ip-1)
 //   setup     the stacks whose secrets have no copy in the host's vault,
 //             live from the fleet snapshot
 //
 // The Inbox page's "Check again" runs the slow reads for real and hands the
 // fresh answers to `feedUpdates` / `feedToday`. Pure rows: inboxrows.js.
 
-import { onAnswered } from "./answer.js";
-import { fetchJson, fetchReport } from "./dom.js";
+import { fetchJson } from "./dom.js";
 import { setInboxSource } from "./inboxlist.js";
-import { checkRowsOf, setupRows, todayRows, updateRows } from "./inboxrows.js";
+import {
+  homeAddressRows,
+  setupRows,
+  todayRows,
+  updateRows,
+} from "./inboxrows.js";
+import { REFRESH_MS } from "./quiet.js";
 import { startRowSnoozes } from "./rowsnooze.js";
 import { current, subscribe } from "./store.js";
 
-/** How often the kept answers and the manual checks are read again. */
-const EVERY_MS = 10 * 60 * 1000;
+/** How often the kept answers are read again. */
+const EVERY_MS = REFRESH_MS;
 
 /** @type {any} the last Today answer, re-filtered when Setup moves */
 let lastToday = null;
@@ -50,46 +57,16 @@ export function feedToday(body) {
   setInboxSource("today", todayRows(body, setupStacks()));
 }
 
-/** @typedef {"loading" | "ready" | "error"} ChecksState */
-/** @type {ChecksState} */
-let checksState = "loading";
-/** @type {Set<() => void>} */
-const checksListeners = new Set();
-
-/** Whether the manual checks have been read, and whether that worked. */
-export const checksStatus = () => checksState;
-
-/**
- * @param {() => void} f called when the checks' read state changes
- * @returns {() => void} stop
- */
-export function onChecksStatus(f) {
-  checksListeners.add(f);
-  return () => checksListeners.delete(f);
-}
-
-/** @param {ChecksState} next */
-function setChecksState(next) {
-  if (next === checksState) return;
-  checksState = next;
-  for (const f of checksListeners) f();
-}
-
-/** Read the manual checks again. */
-export async function readChecks() {
-  const r = await fetchReport("/data/manual-checks", "the manual checks");
-  setChecksState(r.ok ? "ready" : "error");
-  if (r.ok) setInboxSource("checks", checkRowsOf(r.report));
-}
-
 /** The kept answers of the two slow reads; nothing kept leaves them be. */
 async function readKept() {
-  const [s, t] = await Promise.all([
+  const [s, t, a] = await Promise.all([
     fetchJson("/data/stale-images?last=1", "the stale images"),
     fetchJson("/data/today?last=1", "today's reading"),
+    fetchJson("/data/home-address?last=1", "the home address"),
   ]);
   if (s.ok) feedUpdates(s.body);
   if (t.ok) feedToday(t.body);
+  if (a.ok) setInboxSource("address", homeAddressRows(a.body));
 }
 
 const paintSetup = () => {
@@ -111,11 +88,8 @@ export function startInboxSources() {
   subscribe(paintSetup);
   paintSetup();
   void readKept().catch(() => {});
-  void readChecks().catch(() => {});
   startRowSnoozes();
-  onAnswered(() => void readChecks().catch(() => {}));
   setInterval(() => {
     void readKept().catch(() => {});
-    void readChecks().catch(() => {});
   }, EVERY_MS);
 }

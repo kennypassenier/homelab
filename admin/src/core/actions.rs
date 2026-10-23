@@ -140,6 +140,13 @@ pub enum ActionKind {
     /// so a closed tab never stops it. Never in the catalog: only the
     /// Update flow starts it, with the moves it showed.
     UpdateApps,
+    /// eten-home-ip-1 (Kenny, 2026-10-22): host-wide, runs on the
+    /// dashboard's own server and sends nothing to the host — writes the
+    /// house's current public address into the Cloudflare Access bypass
+    /// policies that hold the old one (`core::homeaddress`). Started from
+    /// the Home address section of Settings and from the Inbox row that
+    /// points at it, so it is not in the catalog.
+    UpdateHomeAddress,
 }
 
 /// What the shell has to read before the command can be built.
@@ -324,6 +331,7 @@ impl ActionKind {
             ChangeSecret => "change-secret",
             SealEnv => "seal-env",
             UpdateApps => "update-apps",
+            UpdateHomeAddress => "update-home-address",
         }
     }
 
@@ -337,7 +345,8 @@ impl ActionKind {
 
     /// redesign-flows-6: actions a page of its own starts (the Update flow),
     /// never listed in the catalog, the palette or a schedule.
-    pub const UNLISTED: &'static [ActionKind] = &[ActionKind::UpdateApps];
+    pub const UNLISTED: &'static [ActionKind] =
+        &[ActionKind::UpdateApps, ActionKind::UpdateHomeAddress];
 
     pub fn host_wide(self) -> bool {
         use ActionKind::*;
@@ -355,6 +364,7 @@ impl ActionKind {
                 | Apply
                 | RestartHost
                 | UpdateApps
+                | UpdateHomeAddress
         )
     }
 
@@ -510,6 +520,7 @@ impl ActionKind {
             ChangeSecret => "Change a secret",
             SealEnv => "Push the env",
             UpdateApps => "Update apps",
+            UpdateHomeAddress => "Update the home address in Cloudflare",
         }
     }
 
@@ -586,6 +597,9 @@ impl ActionKind {
             }
             UpdateApps => {
                 "move apps to a newer version as one job: back up each stack, commit the new image lines, deploy, verify each app runs healthy at its new version within 2 min, and roll a pinned app back by itself when it does not"
+            }
+            UpdateHomeAddress => {
+                "write the house's current public address into the Cloudflare Access bypass policies that hold the old one, so the house gets no login screens and eten lets it in again; no other policy is touched"
             }
             RestartHost => "restarts the host daemon; running jobs are refused while a job runs",
             ChangeSecret => {
@@ -1439,6 +1453,53 @@ pub fn commands(req: &ActionRequest, material: Material) -> Result<Vec<Command>,
         (BackupDevices, _) => vec![Command::BackupDevices],
         _ => return Err(wrong_material(req)),
     })
+}
+
+/// One declared native unit of a stack, read for an install of its newest
+/// release: the material install-native uses.
+#[derive(Debug, Clone)]
+pub struct UnitInstall {
+    pub manifest: NativeServiceManifest,
+    pub unit_file: String,
+    /// The newest release's tag, resolved like install-native resolves
+    /// "latest".
+    pub tag: String,
+    /// The directory the CLI names (`stacks/kitchen`).
+    pub dir: String,
+}
+
+/// "Install newest" on a stack whose files declare natives that the host
+/// has not adopted yet (its first deploy just ran): the host only knows
+/// adopted natives, so the dashboard carries the action out as an install
+/// of every declared unit. `host_native`: the host's record for the stack
+/// (None: the dashboard has not read it, so nothing changes).
+pub fn needs_first_install(host_native: Option<bool>, declared: &[String]) -> bool {
+    host_native == Some(false) && !declared.is_empty()
+}
+
+/// The commands (and the CLI line) of that first install: one
+/// install-native per declared unit, in the order the stack declares them.
+pub fn first_install_commands(
+    req: &ActionRequest,
+    units: Vec<UnitInstall>,
+) -> Result<(Vec<Command>, String), Refusal> {
+    let mut commands = Vec::new();
+    let mut lines = Vec::new();
+    for u in units {
+        if u.manifest.stack_name != req.stack {
+            return Err(name_mismatch(req, &u.manifest.stack_name));
+        }
+        lines.push(format!("homelab install-native {} {}", u.dir, u.tag));
+        commands.push(Command::InstallNativeRelease {
+            manifest: Box::new(u.manifest),
+            unit_file: u.unit_file,
+            tag: u.tag,
+        });
+    }
+    if commands.is_empty() {
+        return Err(wrong_material(req));
+    }
+    Ok((commands, lines.join(" && ")))
 }
 
 /// T85: each native binary on its own, then the deploy with the map emptied

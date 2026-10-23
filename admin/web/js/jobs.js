@@ -25,8 +25,12 @@ import { formatClock, formatDateTime, humanDuration } from "./format.js";
  *   args: Record<string, unknown>, state: JobState, queued_at: number,
  *   started_at: number | null, finished_at: number | null, reqs: number[],
  *   message: string | null, cli: string | null, progress: Progress | null,
- *   bytes?: JobBytes | null, restarts_dashboard: boolean, flow?: any}} Job
+ *   bytes?: JobBytes | null, restarts_dashboard: boolean, flow?: any,
+ *   plan?: string[] | null}} Job
  *   `flow` (redesign-flows-6): the Update flow job's own rows and moves.
+ *   `plan` (one-process-batch-2): every step of the job, named before the
+ *   first is sent ("kitchen · provision container" when it spans stacks);
+ *   present only when the server could name them all exactly.
  * @typedef {{job: number, req: number, level: string, source: string,
  *   msg: string, ts: number}} LogLine
  * @typedef {{job: number, stack: string, state: JobState,
@@ -579,8 +583,10 @@ export function stepFigures(j, historyLen = null) {
  * plan, from the first frame to the end, in one fixed order. The steps
  * before the current one are ticked, the current one runs (failed when the
  * job failed, the rest then skipped), the ones after it wait. A step is
- * named by what the host sent as it began (`names`, step number → name),
- * "Step N" when it has not begun or this page never saw it. A phase
+ * named by the job's own plan (`j.plan`, known before the first step is
+ * sent, one-process-batch-2) while it is as long as the total, else by what
+ * the host sent as it began (`names`, step number → name), "Step N" when it
+ * has not begun or this page never saw it. A phase
  * before the first step ("the host is getting ready") is a state of the
  * list's first row, never a card that replaces the list; the list is never
  * folded, so no row moves when another changes (Kenny, 2026-10-22/23:
@@ -618,9 +624,14 @@ export function jobSteps(j, names) {
   }
   const { total: t, grows } = stepTotal(p);
   const total = t ?? p.n;
+  // The plan names the rows only while it is the same length as the total:
+  // the host's own count wins should the two ever differ, and the rows then
+  // go back to the names the host sent.
+  const planned = j.plan && j.plan.length === total ? j.plan : null;
   /** @param {number} i @returns {import("./ui.js").CheckRow} */
   const row = (i) => {
-    const title = names.get(i) ?? (i === p.n ? p.step : `Step ${i}`);
+    const title =
+      planned?.[i - 1] ?? names.get(i) ?? (i === p.n ? p.step : `Step ${i}`);
     if (i < p.n || (ok && ended) || (i === p.n && p.finished && !ended))
       return { title, desc: "done", state: "ok" };
     if (i === p.n)

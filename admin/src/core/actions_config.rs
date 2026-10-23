@@ -28,6 +28,17 @@
 //! | `HOMELAB_ADMIN_LIVE_ANNOUNCE_MS` | 3000 | Live view: how long a driven step is announced ("Next: …" with its countdown) before it is taken; 0 announces nothing, at most 10000 |
 //! | `HOMELAB_ADMIN_LIVE_MAX_PAUSE_S` | 1800 | Live view: how long a step a viewer paused waits for Continue before it fails; 60 to 3600 |
 //!
+//! eten-home-ip-1 (the Home address section of Settings and its Inbox
+//! check):
+//!
+//! | Key | Default | Meaning |
+//! |---|---|---|
+//! | `HOMELAB_ADMIN_CLOUDFLARE_ACCOUNT_ID` | none: the section says what to set | the Cloudflare account that owns the Access policies (not a secret) |
+//! | `HOMELAB_ADMIN_CLOUDFLARE_ACCESS_TOKEN` | none | an API token that may read and edit Access policies and applications (a secret: admin.env, filled by latch) |
+//! | `HOMELAB_ADMIN_CLOUDFLARE_API` | `https://api.cloudflare.com/client/v4` | Cloudflare's API base (a proxy or a test) |
+//! | `HOMELAB_ADMIN_HOME_ADDRESS_URL` | `https://api.ipify.org` | the "what is my address" service, answering the bare address as text |
+//! | `HOMELAB_ADMIN_HOME_ADDRESS_CHECK_EVERY_S` | 900 | how often both sides are compared for the Inbox |
+//!
 //! Decision "23 constants" (Kenny, 2026-09-30): the rest were fixed
 //! `const`s; nothing changes until one is set.
 //!
@@ -114,6 +125,13 @@ pub struct ActConfig {
     /// in Activity ("Kenny revealed gateway/traefik/.env"); unset, the
     /// Cloudflare Access login is used.
     pub viewer_name: Option<String>,
+    /// eten-home-ip-1: the Cloudflare account and the Access token, the
+    /// API base, the address service and the check interval.
+    pub cloudflare_account_id: Option<String>,
+    pub cloudflare_token: Option<String>,
+    pub cloudflare_api: String,
+    pub home_address_url: String,
+    pub home_address_check_every_s: u64,
 }
 
 /// arch-edit-txn, arch-push-credential: how the working copy reaches its
@@ -326,6 +344,36 @@ pub fn from_env(lookup: &dyn Fn(&str) -> Option<String>) -> Result<ActConfig, St
             &mut why,
         ) as i64,
         viewer_name: non_empty("HOMELAB_ADMIN_VIEWER_NAME").map(|n| n.trim().to_string()),
+        cloudflare_account_id: non_empty(crate::core::homeaddress::ENV_ACCOUNT)
+            .map(|v| v.trim().to_string()),
+        cloudflare_token: non_empty(crate::core::homeaddress::ENV_TOKEN)
+            .map(|v| v.trim().to_string()),
+        cloudflare_api: {
+            let u = non_empty("HOMELAB_ADMIN_CLOUDFLARE_API")
+                .unwrap_or_else(|| crate::core::homeaddress::DEFAULT_API_BASE.into());
+            if !(u.starts_with("https://") || u.starts_with("http://")) {
+                why.push("HOMELAB_ADMIN_CLOUDFLARE_API must be an http(s) URL".to_string());
+            }
+            u.trim_end_matches('/').to_string()
+        },
+        home_address_url: {
+            let u = non_empty(crate::core::homeaddress::ENV_LOOKUP)
+                .unwrap_or_else(|| crate::core::homeaddress::DEFAULT_LOOKUP_URL.into());
+            if !(u.starts_with("https://") || u.starts_with("http://")) {
+                why.push(format!(
+                    "{} must be an http(s) URL",
+                    crate::core::homeaddress::ENV_LOOKUP
+                ));
+            }
+            u
+        },
+        home_address_check_every_s: number(
+            lookup,
+            "HOME_ADDRESS_CHECK_EVERY_S",
+            crate::core::homeaddress::DEFAULT_CHECK_EVERY_S,
+            30,
+            &mut why,
+        ),
         git: {
             let remote =
                 non_empty("HOMELAB_ADMIN_GIT_REMOTE").unwrap_or_else(|| DEFAULT_REMOTE.into());

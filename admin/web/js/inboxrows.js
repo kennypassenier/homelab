@@ -2,14 +2,12 @@
 // and notifications.html; Kenny approved 2026-10-03): the Inbox's sources
 // the foundation did not wire yet, as plain data — the apps with a newer
 // version (the fleet check's stale images), the stacks whose secrets have
-// no copy in the host's vault (setup), the manual checks a person answers,
-// and Today's broken / attention items — plus the "worth a look" rows that
+// no copy in the host's vault (setup), and Today's broken / attention items — plus the "worth a look" rows that
 // are not counted. Every row says what, why, and carries what its fix
 // button needs; the Inbox page draws them and inboxsources.js feeds them in
 // with `setInboxSource`. No DOM, no fetch, no clock: node tests hold it.
 
 import { askView } from "./asks.js";
-import { checkAnswer } from "./checks.js";
 import { drillState } from "./backupsview.js";
 import { versionNotes } from "./parity.js";
 import { majorJump } from "./staleimages.js";
@@ -27,9 +25,8 @@ import { formatDateTime } from "./format.js";
  *   when it comes with a homelab release (no key)
  * @typedef {import("./inboxlist.js").InboxItem & {kind?: Kind,
  *   chips?: SrcChip[], stacks?: string[], apps?: NewerApp[],
- *   fix?: import("./notices.js").Fix | null, check?: string,
- *   checkState?: "open" | "not ok", checkText?: string,
- *   previous?: "ok" | "fail" | null, job?: number, remedy?: string}} Row
+ *   fix?: import("./notices.js").Fix | null, job?: number,
+ *   remedy?: string}} Row
  */
 
 /** The chips' order and words (flows/inbox.html). */
@@ -187,50 +184,6 @@ export function setupRows(fleet) {
 }
 
 /**
- * One row per manual check that waits for a person: never answered
- * ("open") or answered "fails" (and not accepted for now).
- * @param {{checks?: {id: string, record: any}[], now?: number} | null | undefined} report
- * @returns {Row[]}
- */
-export function checkRowsOf(report) {
-  const now = report?.now ?? 0;
-  /** @type {Row[]} */
-  const out = [];
-  for (const c of report?.checks ?? []) {
-    const r = c.record ?? {};
-    const a = checkAnswer(r, now).label;
-    if (a !== "open" && a !== "not ok") continue;
-    out.push({
-      key: `check:${c.id}`,
-      severity: a === "not ok" ? "bad" : "warn",
-      kind: "check",
-      title: a === "not ok" ? `A check fails: ${r.text}` : `Check: ${r.text}`,
-      why:
-        a === "not ok"
-          ? "Answered “it fails”. Fix the cause, then answer it again; “Not now” asks again in 7 days."
-          : "Only a person can confirm this one. Answer it here; “Not now” asks again in 7 days.",
-      href: `/inbox#check-${c.id}`,
-      stack: r.stack ?? null,
-      at: Number(r.answered_at ?? r.registered_at) || 0,
-      source: "checks",
-      chips: [
-        { label: "check" },
-        ...(r.stack
-          ? [{ label: r.stack, href: `/stacks/${encodeURIComponent(r.stack)}` }]
-          : []),
-      ],
-      check: c.id,
-      checkState: a,
-      checkText: String(r.text ?? ""),
-      // kp11: "Same as last time" is offered only for a check that was
-      // answered "fails" before; a never-answered one has no last time.
-      previous: a === "not ok" ? "fail" : null,
-    });
-  }
-  return out;
-}
-
-/**
  * Today's broken and attention items (the doctor, the fleet check's
  * findings, the open incidents), each a row with its remedy and, when the
  * dashboard runs it, its Fix. A doctor's "stack X env" item is left out
@@ -374,6 +327,52 @@ export function worthRows(backups, versions) {
   return out;
 }
 
+/**
+ * eten-home-ip-1: the Home address check's row, when the house's public
+ * address is not the one Cloudflare lets in without a login (`GET
+ * /data/home-address`, the server's last reading). One row; none when the
+ * addresses match, when Cloudflare is not set up (the section says so; it
+ * is not a fault) or when nothing could be read.
+ * @param {{state?: string, current?: string | null, held?: string[],
+ *   message?: string, read_at?: number, token_note?: string | null} | null | undefined} body
+ * @returns {Row[]}
+ */
+export function homeAddressRows(body) {
+  /** @type {Row[]} */
+  const out = [];
+  // The token itself: expired, disabled or expiring within 14 days.
+  if (body?.token_note)
+    out.push({
+      key: "address:token",
+      severity: "bad",
+      kind: "check",
+      title: "The Cloudflare API token needs renewing",
+      why: body.token_note,
+      href: "/settings?section=home-address",
+      stack: null,
+      at: Number(body.read_at) || 0,
+      source: "address",
+      chips: [{ label: "home address" }],
+    });
+  if (body?.state !== "differs") return out;
+  const held = (body.held ?? []).join(" and ");
+  return [
+    ...out,
+    {
+      key: "address:home",
+      severity: "bad",
+      kind: "check",
+      title: `The house's address changed to ${body.current ?? "a new one"}`,
+      why: `Cloudflare still lets in ${held} without a login, so the house gets login screens and eten refuses it. Update the address in Cloudflare.`,
+      href: "/settings?section=home-address",
+      stack: null,
+      at: Number(body.read_at) || 0,
+      source: "address",
+      chips: [{ label: "home address" }],
+    },
+  ];
+}
+
 // ---- check-row-answer-1: every row points at its fix --------------------
 
 /**
@@ -381,9 +380,6 @@ export function worthRows(backups, versions) {
  * @typedef {{type: "answer-ask"} |
  *   {type: "update-flow", stacks: string[], n: number} |
  *   {type: "push-envs", stacks: string[]} |
- *   {type: "answer-check", check: string, verdict: "ok" | "nok",
- *     label: string} |
- *   {type: "open-check", check: string} |
  *   {type: "open-job", job: number} |
  *   {type: "run-fix", fix: import("./notices.js").Fix, retry: boolean} |
  *   {type: "link", href: string, label: string, why: "happened" | "remedy"} |
@@ -442,9 +438,7 @@ export function remedyTarget(remedy, known, stack = null) {
 /**
  * Every Inbox row's way to its fix (Kenny, 2026-10-23: "ik moet nooit
  * raden naar iets als we zelf kunnen wijzen naar de oplossing"): a host
- * question to its card, an update to the Update flow, a manual check to
- * It works / It fails on the row itself with a link into the Manual checks
- * card, a failed job to its job and the action that runs it again, a
+ * question to its card, an update to the Update flow, a failed job to its job and the action that runs it again, a
  * finding to the action or page its remedy names. The first entry is the
  * row's main button. A row with no known fix says so (`none`), never offers
  * only Snooze.
@@ -459,6 +453,15 @@ export function rowFixes(r, ctx = {}) {
   const known = ctx.known ?? (() => true);
   const kind = kindOf(r);
   if (r.source === "asks") return [{ type: "answer-ask" }];
+  if (r.source === "address")
+    return [
+      {
+        type: "link",
+        href: r.href,
+        label: "Update the home address",
+        why: "remedy",
+      },
+    ];
   if (kind === "update")
     return [
       {
@@ -468,22 +471,6 @@ export function rowFixes(r, ctx = {}) {
       },
     ];
   if (kind === "setup") return [{ type: "push-envs", stacks: r.stacks ?? [] }];
-  if (r.check)
-    return [
-      {
-        type: "answer-check",
-        check: r.check,
-        verdict: "ok",
-        label: "It works",
-      },
-      {
-        type: "answer-check",
-        check: r.check,
-        verdict: "nok",
-        label: "It fails",
-      },
-      { type: "open-check", check: r.check },
-    ];
   /** @type {RowFix[]} */
   const out = [];
   const job = r.job ?? ctx.notice?.job;

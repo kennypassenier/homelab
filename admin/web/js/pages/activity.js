@@ -122,6 +122,7 @@ import { FEED_RETRY_EVENT, attachFeeds, setFeed } from "/static/kp/js/feed.js";
 import { leave } from "/static/kp/js/motion.js";
 import { registerShortcuts } from "/static/kp/js/shortcuts.js";
 import { GROUP_ACTIVITY, unlessDialog } from "../shortcuts.js";
+import { REFRESH_MS, changeGate } from "../quiet.js";
 
 // Live view (invariant 39): every control on this page that opens a dialog
 // or runs something. "Run it again" reaches its dialog as a catalog form.
@@ -1920,6 +1921,8 @@ function mountNow(body, x) {
 
   // ── reading ───────────────────────────────────────────────────────────
   const abort = new AbortController();
+  const historyGate = changeGate();
+  let readOnce = false;
   const loadHistory = async () => {
     const since = t0();
     const r = await fetchReport(
@@ -1937,12 +1940,19 @@ function mountNow(body, x) {
         historyFail = r.error;
       }
     } else {
+      // refresh-one-minute-1: a read that brings the same history, after a
+      // good one, redraws nothing; only the "updated" line moves.
+      const fresh = r.report?.entries ?? [];
+      const same =
+        !historyGate.isNew(fresh) && !historyError && !historyFail && !stale;
       historyError = null;
       historyFail = null;
       stale = null;
       readAt = now();
-      entries = r.report?.entries ?? [];
       x.header.live?.set(readAt);
+      if (same && readOnce) return;
+      entries = fresh;
+      readOnce = true;
     }
     paintAll();
   };
@@ -1992,7 +2002,7 @@ function mountNow(body, x) {
   const tick = setInterval(() => {
     for (const b of blocks.values()) b.update();
   }, 1000);
-  const reread = setInterval(() => void loadHistory(), 60_000);
+  const reread = setInterval(() => void loadHistory(), REFRESH_MS);
   const heatQuery = window.matchMedia("(max-width: 700px)");
   heatQuery.addEventListener("change", paintHeat);
 

@@ -123,11 +123,15 @@ async fn feat_stacks_4_a_press_runs_on_the_host_and_its_lines_and_progress_arriv
     // feat-ops-6: step n/m with the medians of the two past runs.
     let progress = w.live.events("action_progress");
     // steps-total-known-1: the total is announced before the first step.
+    // one-process-batch-2: that total is the dashboard's own, computed from
+    // the deploy's plan names before the command is sent (the mock host then
+    // announces its scripted 3 steps, which replaces it as the first mark
+    // arrives; the real host announces the same list).
     let planned = &progress[0]["progress"];
     assert_eq!(
         (planned["n"].as_u64(), planned["m"].as_u64()),
-        (Some(0), Some(3)),
-        "step 0 of 3 comes before the first mark"
+        (Some(0), Some(homelab_core::ops::deploy::STEPS.len() as u64)),
+        "step 0 of the deploy's planned steps comes before the first mark"
     );
     let first = &progress[1]["progress"];
     assert_eq!(

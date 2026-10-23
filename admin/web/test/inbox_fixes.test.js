@@ -6,7 +6,6 @@ import assert from "node:assert/strict";
 import { inboxItems } from "../js/inboxlist.js";
 import { settledNotices } from "../js/inboxresolve.js";
 import {
-  checkRowsOf,
   countSplit,
   remedyTarget,
   rowFixes,
@@ -62,16 +61,6 @@ test("check-row-answer-1: every row kind carries an action that leads to its fix
     })[0],
     {},
   ]);
-  cases.push([
-    "a manual check",
-    checkRowsOf({
-      now: 1000,
-      checks: [
-        { id: "c1", record: { text: "Does the door lock", stack: "x" } },
-      ],
-    })[0],
-    {},
-  ]);
   const today = todayRows({
     today: {
       items: [
@@ -117,27 +106,9 @@ test("check-row-answer-1: every row kind carries an action that leads to its fix
   assert.deepEqual(seen, [
     "answer-ask",
     "update-flow",
-    "answer-check+answer-check+open-check",
     "run-fix",
     "open-job+run-fix",
   ]);
-});
-
-test("check-row-answer-1: a manual check's row answers It works and It fails on the row itself and links into its card", () => {
-  const [row] = checkRowsOf({
-    now: 1000,
-    checks: [{ id: "c1", record: { text: "Door", stack: "x" } }],
-  });
-  const f = rowFixes(row);
-  assert.deepEqual(
-    f.map((x) => (x.type === "answer-check" ? [x.label, x.verdict] : x.type)),
-    [["It works", "ok"], ["It fails", "nok"], "open-check"],
-  );
-  assert.equal(
-    f.find((x) => x.type === "open-check")?.["check"],
-    "c1",
-    "the link opens that check",
-  );
 });
 
 test("check-row-answer-1: a failed job's row offers its job and the same action again with its own arguments; a row with no known fix says so", () => {

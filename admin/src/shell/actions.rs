@@ -39,6 +39,8 @@ use tokio::sync::{broadcast, mpsc, oneshot};
 
 #[path = "actions_flow.rs"]
 mod flow;
+#[path = "actions_home.rs"]
+mod home;
 pub use flow::ImageCommitter;
 pub(crate) use flow::stacks_cell;
 #[cfg(test)]
@@ -619,6 +621,15 @@ pub struct JobView {
     /// FlowView`), for the page that follows this job.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub flow: Option<serde_json::Value>,
+    /// one-process-batch-2 (Kenny, 2026-10-23: "van begin tot einde moet dat
+    /// 1 proces zijn, met een op voorhand bekend aantal stappen"): every
+    /// step of the job, named before the first is sent, in the order they
+    /// run ("kitchen · provision container" when the job spans stacks).
+    /// Present only when every command of the job could be named exactly
+    /// (`actions_progress::commands_plan_with`); the page then shows these
+    /// names from the first frame instead of "Step N".
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub plan: Option<Vec<String>>,
 }
 
 struct Job {
@@ -670,6 +681,10 @@ struct Inner {
     queue: mpsc::UnboundedSender<Job>,
     jobs: std::sync::Mutex<VecDeque<JobView>>,
     batches: std::sync::Mutex<BTreeMap<u64, Vec<u64>>>,
+    /// one-process-batch-1: each batch's step plan (every member's steps),
+    /// made before its first job starts; and the gate that makes it once.
+    batch_plans: std::sync::Mutex<BTreeMap<u64, Vec<actions_progress::MemberPlan>>>,
+    batch_plan_gate: tokio::sync::Mutex<()>,
     /// feat-logs-1: the `action_log` lines per kept job.
     job_logs: std::sync::Mutex<BTreeMap<u64, VecDeque<serde_json::Value>>>,
     next_job: AtomicU64,
@@ -700,6 +715,9 @@ struct Inner {
     /// The running commands a viewer asked to stop, job -> who: `run` turns
     /// the host's `cancelled` reply into "cancelled by <who>".
     cancelling: std::sync::Mutex<std::collections::HashMap<u64, String>>,
+    /// eten-home-ip-1: the house's address against Cloudflare (mount and
+    /// tests set it).
+    home_address: std::sync::OnceLock<Arc<super::homeaddress::HomeAddress>>,
 }
 
 /// The first host release that knows `Command::CancelExec`. An older host
@@ -772,6 +790,8 @@ impl Actions {
             queue: tx,
             jobs: std::sync::Mutex::new(VecDeque::new()),
             batches: std::sync::Mutex::new(BTreeMap::new()),
+            batch_plans: std::sync::Mutex::new(BTreeMap::new()),
+            batch_plan_gate: tokio::sync::Mutex::new(()),
             job_logs: std::sync::Mutex::new(BTreeMap::new()),
             // Job ids from the start time, so a restarted dashboard never
             // reuses one a page still shows.
@@ -786,6 +806,7 @@ impl Actions {
             flow_timing: std::sync::OnceLock::new(),
             settled: std::sync::OnceLock::new(),
             cancelling: std::sync::Mutex::new(std::collections::HashMap::new()),
+            home_address: std::sync::OnceLock::new(),
         });
         let worker = Actions {
             inner: inner.clone(),
@@ -1144,6 +1165,7 @@ impl Actions {
             progress: None,
             bytes: None,
             flow: None,
+            plan: None,
         };
         self.store(&view);
         let _ = self.inner.queue.send(Job { view: view.clone() });
@@ -1197,7 +1219,186 @@ impl Actions {
             b.insert(batch, jobs.iter().map(|j| j.job).collect());
         }
         self.publish_batch(batch);
+        // one-process-batch-1: the batch's whole step plan, made now so the
+        // page has the total before the first step (the first job to start
+        // also waits for it, see `run`).
+        if let Ok(rt) = tokio::runtime::Handle::try_current() {
+            let me = self.clone();
+            rt.spawn(async move { me.ensure_batch_plan(batch).await });
+        }
         (batch, jobs)
+    }
+
+    /// one-process-batch-2: read what `commands`' step plans depend on besides
+    /// the commands themselves (`actions_progress::facts_needed`): the native
+    /// services a stack's files declare, the stack's restic repositories, the
+    /// host's managed stacks (newest fleet reading), and host.toml's
+    /// `zfs_jobs` and `device_backups`. A fact that cannot be read is left
+    /// out, and the commands that need it are then estimated and named so.
+    async fn plan_facts(&self, commands: &[Command]) -> actions_progress::PlanFacts {
+        let need = actions_progress::facts_needed(commands);
+        let mut facts = actions_progress::PlanFacts::default();
+
+        // The stacks whose native services are read: the native actions'
+        // own, and the native stacks among those verify-restore names.
+        let mut native_stacks = need.natives.clone();
+        for st in &need.repositories {
+            if self.fleet_native(st) == Some(true) && !native_stacks.contains(st) {
+                native_stacks.push(st.clone());
+            }
+        }
+        if !native_stacks.is_empty() {
+            let files = self.inner.files.clone();
+            facts.natives = tokio::task::spawn_blocking(move || {
+                let mut out = BTreeMap::new();
+                for stack in native_stacks {
+                    let units = files.native_units(&stack);
+                    let read: Vec<_> = units
+                        .iter()
+                        .filter_map(|u| files.native_release(&stack, Some(u)).ok())
+                        .map(|(m, _, _)| m)
+                        .collect();
+                    // Every declared unit read, or the stack stays unread.
+                    if !units.is_empty() && read.len() == units.len() {
+                        out.insert(stack, read);
+                    }
+                }
+                out
+            })
+            .await
+            .unwrap_or_default();
+        }
+
+        // verify-restore: the repositories a stack keeps.
+        for stack in &need.repositories {
+            match self.fleet_native(stack) {
+                Some(true) => {
+                    if let Some(ms) = facts.natives.get(stack) {
+                        facts.repositories.insert(
+                            stack.clone(),
+                            homelab_core::ops::restoredrill::backed_up_units(ms),
+                        );
+                    }
+                }
+                Some(false) => {
+                    let files = self.inner.files.clone();
+                    let s2 = stack.clone();
+                    let read = tokio::task::spawn_blocking(move || {
+                        files.read(&s2, crate::core::actions::ActionKind::Backup, None)
+                    })
+                    .await;
+                    if let Ok(Ok(crate::core::actions::Material::Manifest(m))) = read {
+                        facts.repositories.insert(
+                            stack.clone(),
+                            homelab_core::ops::backup::owner_groups(&m)
+                                .into_iter()
+                                .map(|(owner, _)| owner)
+                                .collect(),
+                        );
+                    }
+                }
+                None => {}
+            }
+        }
+
+        if need.fleet
+            && let Ok(s) = self.inner.shared.try_read()
+            && let Some(fleet) = s.fleet.as_ref()
+        {
+            facts.fleet_stacks = Some(fleet.stacks.iter().map(|x| x.name.clone()).collect());
+        }
+
+        if need.zfs_jobs || need.devices {
+            let reply = self
+                .inner
+                .host
+                .ask_traced(Command::GetHostConfig, Duration::from_secs(10), None)
+                .await;
+            if let Ok(r) = reply
+                && r.ok
+                && let Ok(file) = serde_json::from_str::<homelab_proto::HostConfigFile>(&r.message)
+            {
+                if need.zfs_jobs {
+                    facts.zfs_jobs = match file.values.get("zfs_jobs") {
+                        None => Some(Vec::new()),
+                        Some(v) => serde_json::from_value(v.clone()).ok(),
+                    };
+                }
+                if need.devices {
+                    facts.device_backups = match file.values.get("device_backups") {
+                        None => Some(Vec::new()),
+                        Some(v) => serde_json::from_value::<
+                            Vec<homelab_core::ops::devicebackup::DeviceBackup>,
+                        >(v.clone())
+                        .ok()
+                        .map(|d| d.into_iter().map(|x| x.name).collect()),
+                    };
+                }
+            }
+        }
+        facts
+    }
+
+    /// one-process-batch-1 (Kenny, 2026-10-23: "van begin tot einde moet dat
+    /// 1 proces zijn, met een op voorhand bekend aantal stappen"): every
+    /// member's step plan, from the commands it will send (the same source
+    /// a single action's up-front total uses, `actions_progress::
+    /// commands_plan_with`), once per batch. one-process-batch-2: every
+    /// command that reaches the host has its step names in core, next to the
+    /// op that runs them, so a member is exact wherever its inputs could be
+    /// read; only a member with a command whose inputs could not be read is
+    /// estimated from the history of the same operation and marked not
+    /// exact (with the reason), and the page then says "about N steps".
+    async fn ensure_batch_plan(&self, batch: u64) {
+        let _gate = self.inner.batch_plan_gate.lock().await;
+        if self
+            .inner
+            .batch_plans
+            .lock()
+            .is_ok_and(|p| p.contains_key(&batch))
+        {
+            return;
+        }
+        let ids = self
+            .inner
+            .batches
+            .lock()
+            .ok()
+            .and_then(|b| b.get(&batch).cloned())
+            .unwrap_or_default();
+        if ids.is_empty() {
+            return;
+        }
+        let history = self.history().await;
+        let mut plans = Vec::new();
+        for id in ids {
+            let Some(v) = self.job(id) else { continue };
+            let req = ActionRequest {
+                stack: v.stack.clone(),
+                action: v.action,
+                args: v.args.clone(),
+            };
+            let commands = match self.material(&req).await {
+                Ok(m) => actions::commands(&req, m).ok(),
+                Err(_) => None,
+            };
+            let facts = match &commands {
+                Some(c) => self.plan_facts(c).await,
+                None => actions_progress::PlanFacts::default(),
+            };
+            plans.push(actions_progress::member_plan_with(
+                v.job,
+                &v.stack,
+                commands.as_deref(),
+                &facts,
+                &history,
+                &format!("{}-{}", v.action.slug(), v.stack),
+            ));
+        }
+        if let Ok(mut p) = self.inner.batch_plans.lock() {
+            p.insert(batch, plans);
+        }
+        self.publish_batch(batch);
     }
 
     fn publish_batch(&self, batch: u64) {
@@ -1375,14 +1576,85 @@ impl Actions {
             .iter()
             .filter_map(|id| self.job(*id))
             .all(|j| j.state.finished());
+        // one-process-batch-1: the plan of the whole batch, one process.
+        let plan = self
+            .inner
+            .batch_plans
+            .lock()
+            .ok()
+            .and_then(|p| p.get(&batch).cloned());
+        let (steps_total, steps_exact) = plan.as_deref().map(actions_progress::batch_total).map_or(
+            (serde_json::Value::Null, serde_json::Value::Null),
+            |(t, e)| (t.into(), e.into()),
+        );
         Some(serde_json::json!({
             "batch": batch,
+            "plan": plan,
+            "steps_total": steps_total,
+            "steps_exact": steps_exact,
             "jobs": jobs,
             "done": done,
             "ok": count(JobState::Done),
             "failed": count(JobState::Failed) + count(JobState::Refused) + count(JobState::Unknown),
             "deferred": count(JobState::Deferred),
         }))
+    }
+
+    /// The host's record of whether the stack runs adopted natives.
+    fn fleet_native(&self, stack: &str) -> Option<bool> {
+        let s = self.inner.shared.try_read().ok()?;
+        s.fleet
+            .as_ref()?
+            .stacks
+            .iter()
+            .find(|x| x.name == stack)
+            .map(|x| x.native)
+    }
+
+    /// native-first-install-1: the commands of "Install newest" for a stack
+    /// declaring natives the host has not adopted (the host would answer
+    /// "is a compose stack, not a native service"); None: the verb goes to
+    /// the host unchanged.
+    async fn first_install(
+        &self,
+        req: &ActionRequest,
+    ) -> Result<Option<(Vec<Command>, String)>, Refusal> {
+        if req.action != ActionKind::ReleaseUpdateNative {
+            return Ok(None);
+        }
+        let what = format!("{} {}", req.action.slug(), req.stack);
+        let files = self.inner.files.clone();
+        let stack = req.stack.clone();
+        let declared = tokio::task::spawn_blocking(move || files.native_units(&stack))
+            .await
+            .map_err(|e| Refusal::new(what.clone(), e.to_string(), "report this"))?;
+        if !actions::needs_first_install(self.fleet_native(&req.stack), &declared) {
+            return Ok(None);
+        }
+        let mut units = Vec::new();
+        for unit in declared {
+            let files = self.inner.files.clone();
+            let (stack, u) = (req.stack.clone(), unit.clone());
+            let (manifest, unit_file, dir) =
+                tokio::task::spawn_blocking(move || files.native_release(&stack, Some(&u)))
+                    .await
+                    .map_err(|e| Refusal::new(what.clone(), e.to_string(), "report this"))??;
+            let repo = manifest.release_repo.clone().unwrap_or_default();
+            let tag = self.releases()?.latest_tag(&repo).await.map_err(|why| {
+                Refusal::new(
+                    what.clone(),
+                    why,
+                    "try again later, or install a named release",
+                )
+            })?;
+            units.push(actions::UnitInstall {
+                manifest,
+                unit_file,
+                tag,
+                dir,
+            });
+        }
+        actions::first_install_commands(req, units).map(Some)
     }
 
     fn fleet_stack(&self, stack: &str) -> Option<(u16, Option<String>)> {
@@ -1839,6 +2111,11 @@ impl Actions {
         {
             return;
         }
+        // one-process-batch-1: a batch's step plan exists before its first
+        // job starts.
+        if let Origin::Batch { batch } = job.view.origin {
+            self.ensure_batch_plan(batch).await;
+        }
         let mut view = job.view;
         view.state = JobState::Running;
         view.started_at = Some(self.now());
@@ -1983,6 +2260,10 @@ impl Actions {
         if req.action == ActionKind::UpdateApps {
             return self.run_update_flow(req, view).await;
         }
+        // eten-home-ip-1: a job of the dashboard's own, no host command.
+        if req.action == ActionKind::UpdateHomeAddress {
+            return self.run_home_address(req, view).await;
+        }
         let material = self.material(req).await.map_err(Stop::Refused)?;
         let over = actions::cli_override(req, &material);
         let expected = match &material {
@@ -1991,7 +2272,15 @@ impl Actions {
             }
             _ => None,
         };
-        let commands = actions::commands(req, material).map_err(Stop::Refused)?;
+        // native-first-install-1: "Install newest" on a stack whose files
+        // declare natives the host has not adopted yet is an install of the
+        // newest release of each declared unit.
+        let first = self.first_install(req).await.map_err(Stop::Refused)?;
+        let over = first.as_ref().map(|(_, l)| l.clone()).or(over);
+        let commands = match first {
+            Some((c, _)) => c,
+            None => actions::commands(req, material).map_err(Stop::Refused)?,
+        };
         let main = commands.last().cloned();
         // The name was typed and checked before the job ran (cli-yes).
         view.cli = over.or_else(|| {
@@ -2007,77 +2296,37 @@ impl Actions {
         self.store(view);
         let history = self.history().await;
         let mut tracker = Tracker::new(history);
-        // fix-171 round 2: a job of more than one plan-producing command
-        // (Apply, a batch item that stages a binary and then deploys it)
-        // would otherwise only learn command 2's plan once command 1 had
-        // already finished — too late for "m correct from step 1" on a
-        // 13-stack apply. Each deploy's and each destroy's own step plan is
-        // a fixed constant (`homelab_core::ops::deploy::STEPS`,
-        // `...::destroy::STEPS`) — the same list every run, because a step
-        // whose precondition does not hold this time is a planned no-op or
-        // an explicit skip, never an absent step (see those modules) — so
-        // the caller can sum them here, before the first command is sent.
-        // A job of exactly one such command needs none of this: its own
-        // announced plan already arrives before its own first step, which
-        // is the whole of "step 1" this job will ever have.
-        // fix-step-plan-nested: `DestroyRecorded`'s own plan now composes
-        // `backup`'s names in (destroy's single "backup before destroy" mark
-        // used to hide a whole second standalone op with its own plan) —
-        // `destroy_plan_names` is the one source `destroy` itself plans from
-        // AND this sum calls, so the two can never drift the way
-        // `destroy::STEPS.len()` (which did not know about the nested
-        // `backup`) once would have.
-        let plan_producing = commands
-            .iter()
-            .filter(|c| matches!(c, Command::DeployStack(_) | Command::DestroyRecorded { .. }));
-        if plan_producing.clone().count() > 1 {
-            let total: usize = plan_producing
-                .map(|c| match c {
-                    Command::DeployStack(spec) => homelab_core::ops::deploy::plan_names(spec).len(),
-                    Command::DestroyRecorded { stack, .. } => {
-                        homelab_core::ops::destroy::destroy_plan_names(stack).len()
-                    }
-                    _ => 0,
-                })
-                .sum();
-            tracker.set_total(total);
-            self.announce_plan(view, &tracker);
-        }
-        // fix-171 round 3 (Kenny: "release_install over a stack's several
-        // natives, e.g. kyu's three, must announce the full sum up front"),
-        // superseded in its per-unit SHAPE by fix-step-plan-nested: the LIVE
-        // 2026-10-02 fault was exactly this sum staying at
-        // `RELEASE_UPDATE_STEPS.len() * units` (18 for kyu's three) while
-        // `release_update` itself was fanning out into the FULL
-        // release_install → install_native → adopt chain per unit (69 marks
-        // actually ran: 23 × 3). `ReleaseUpdateNative` is still ONE command
-        // on the wire that the host fans out into one `release_update` per
-        // native service of the stack — now each with ONE combined plan
-        // (`release_install_plan_names`, the exact function `release_install`
-        // itself plans from), so the sum below can never drift from what
-        // actually runs the way the old per-unit constant did.
-        if let [Command::ReleaseUpdateNative { stack }] = commands.as_slice() {
-            let files = self.inner.files.clone();
-            let stack = stack.clone();
-            let total = tokio::task::spawn_blocking(move || {
-                files
-                    .native_units(&stack)
-                    .iter()
-                    .filter_map(|u| {
-                        let (m, _, _) = files.native_release(&stack, Some(u)).ok()?;
-                        Some(
-                            homelab_core::ops::native::release_install_plan_names(&m, None, None)
-                                .len(),
-                        )
-                    })
-                    .sum::<usize>()
-            })
-            .await
-            .unwrap_or(0);
-            if total > 0 {
+        // one-process-batch-2 (Kenny, 2026-10-23: "van begin tot einde moet
+        // dat 1 proces zijn, met een op voorhand bekend aantal stappen"): the
+        // job's whole step plan, named before the first command is sent. Every
+        // command that reaches the host has its plan-names function in core,
+        // next to the op that runs the steps (`homelab_core::ops::*`), and the
+        // op plans from that same function, so the count here cannot drift
+        // from what runs. The facts a command's plan depends on besides the
+        // command itself (the stack's native services, the host's patch
+        // targets, zfs jobs and devices) are read first (`plan_facts`).
+        //
+        // A job with several plans to come (Apply, a batch item that stages a
+        // binary and then deploys it, a native action the host fans out over
+        // the stack's units) fixes its total here as the sum, so the
+        // announcements that follow only confirm it. A job of ONE plan shows
+        // the total from the first frame too, but the host's own announcement
+        // replaces it, so the host's count wins should the dashboard's inputs
+        // ever have differed from the host's. A job with a command whose
+        // inputs could not be read keeps no up-front number: the host's
+        // announcement sets it, as before.
+        let facts = self.plan_facts(&commands).await;
+        let plan = actions_progress::commands_plan_with(&commands, &facts);
+        if plan.exact() && !plan.parts.is_empty() {
+            let total = plan.names().len();
+            if plan.multi() {
                 tracker.set_total(total);
-                self.announce_plan(view, &tracker);
+            } else {
+                tracker.expect_total(total);
             }
+            view.plan = Some(plan.labeled());
+            self.store(view);
+            self.announce_plan(view, &tracker);
         }
         let mut last = None;
         for command in commands {
@@ -3045,6 +3294,8 @@ pub fn mount(
         max_pause: Duration::from_secs(cfg.live_max_pause_s),
     });
     driver.set_limits(cfg.drive_idle_s, cfg.drive_release_after_job_s);
+    // liveview-final-button-1: nothing changes unless a tab watches.
+    driver.require_follower();
     // fix-172: the queue now holds between two jobs while Live view is
     // paused; the driver is the only thing that knows about Live view, so
     // it registers itself once it exists (the queue was built first).
@@ -3074,6 +3325,7 @@ pub fn mount(
     app.dashboard_routes(super::pinupdate::router(super::pinupdate::PinCtx {
         wc: wc.clone(),
         resolve,
+        host: host.clone(),
     }));
     let _ = demo_host;
     // TUI parity: releases (Update host, install-native, the badge), the
@@ -3096,6 +3348,24 @@ pub fn mount(
         ),
     ));
     app.dashboard_routes(router(actions.clone()));
+    // eten-home-ip-1: the house's address against the Cloudflare bypass
+    // policies (the Home address section and the Inbox check). A demo run
+    // never calls out.
+    let home_address = if demo_host {
+        super::homeaddress::HomeAddress::new(
+            Arc::new(super::homeaddress::StaticAddress(std::net::IpAddr::from([
+                203, 0, 113, 7,
+            ]))),
+            None,
+            crate::core::homeaddress::config_problem(None, None),
+            "the demo host".into(),
+            clock.clone(),
+        )
+    } else {
+        super::homeaddress::HomeAddress::from_config(&cfg, clock.clone())?
+    };
+    actions.set_home_address(home_address.clone());
+    app.dashboard_routes(super::homeaddress::router(home_address.clone()));
     app.dashboard_routes(super::actions_notify::router(notify.clone()));
     // ask-kp11be-7: the Inbox's per-row snooze and remind-me.
     let row_snoozes =
@@ -3186,6 +3456,12 @@ pub fn mount(
             tokio::spawn(async move { super::demo::seed_unread_notice(&center).await });
         }
         super::actions_notify::spawn_incident_poll(host, notify, poll);
+        if !demo_host {
+            super::homeaddress::spawn_watch(
+                home_address,
+                Duration::from_secs(cfg.home_address_check_every_s),
+            );
+        }
     });
     // The trend of the fleet (host_link) lives in the same database.
     Ok(db_for_link)

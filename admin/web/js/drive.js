@@ -58,6 +58,10 @@ const reducedMotion = () =>
   !!globalThis.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
 const now = () => Date.now() / 1000;
 
+/** How often a tab in Live view tells the dashboard it follows
+ * (`core::drive::FOLLOW_BEAT_S`); the dashboard accepts 10 s of silence. */
+const FOLLOW_BEAT_MS = 4000;
+
 /** sessionStorage: per tab, kept over a reload; absent in a private window. */
 function storage() {
   try {
@@ -89,6 +93,8 @@ export function mountFollow(region, ctx) {
     pageDlg = null;
   };
   let queue = Promise.resolve();
+  /** Sends a Live view heartbeat now; set once the heartbeat is wired. */
+  let beatNow = () => {};
   /**
    * review (the 15 s no-answer): the page-control steps the dashboard
    * stopped waiting for; one still queued here, or still being looked for,
@@ -457,8 +463,10 @@ export function mountFollow(region, ctx) {
     } catch {
       // A private window keeps it for this page only.
     }
-    if (on) void catchUpNow();
-    else {
+    if (on) {
+      beatNow();
+      void catchUpNow();
+    } else {
       // The driven dialog was Claude's, never the viewer's input.
       ctl?.close();
       ctl = null;
@@ -546,6 +554,16 @@ export function mountFollow(region, ctx) {
     document.addEventListener(type, refuse, { capture: true });
 
   setInterval(paint, 5000);
+  // liveview-final-button-1: while this tab follows, tell the dashboard
+  // every few seconds; it refuses every changing `homelab ui` step when no
+  // tab beat within ~10 s. Sent at once on turning the switch on.
+  const beat = () => {
+    if (!following) return;
+    void send("POST", "/data/drive/following", {}, "telling Live view follows");
+  };
+  beatNow = beat;
+  setInterval(beat, FOLLOW_BEAT_MS);
+  beat();
   // The countdown's digit and bar; a no-op while nothing is announced.
   setInterval(() => {
     if (state?.announce) paintLive();

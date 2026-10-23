@@ -26,7 +26,7 @@ import { majorJump } from "./staleimages.js";
  *   resources?: {memory_mb?: number, cores?: number, disk_gb?: number} | null,
  *   firewall?: {enabled?: boolean, rules?: unknown[]} | null,
  *   retention?: {daily?: number, weekly?: number, monthly?: number} | null,
- *   apps?: string[], native_only?: boolean} | null} Manifest
+ *   apps?: string[], natives?: string[], native_only?: boolean} | null} Manifest
  */
 
 /** A stack the fleet does not list (committed, not deployed yet). */
@@ -108,13 +108,29 @@ export const headerActions = (native) => ({
  */
 
 /**
+ * Do the stack's files declare native services? Read from the edit view's
+ * manifest (`natives` list, or `native_only`), so a new native stack is
+ * native from its first deploy, before the host has adopted any unit.
+ * @param {Manifest | null | undefined} manifest
+ * @returns {boolean}
+ */
+export const declaresNatives = (manifest) =>
+  !!manifest &&
+  (manifest.native_only === true ||
+    (Array.isArray(/** @type {any} */ (manifest).natives) &&
+      /** @type {any} */ (manifest).natives.length > 0));
+
+/**
  * The More menu (FLOWS.md §1.3): grouped Data · Change · Pause · Native
  * service · Tools · Remove. Every stack action of the catalog that is not
  * in the header's three slots is here, so nothing the old 13-button area
  * offered is lost; the destructive ones lead to Settings ▸ Danger zone,
  * each with its own confirm there.
  * @param {{stack: string, native: boolean | null | undefined,
- *   enabled: boolean | null | undefined, vmid?: number | null}} x
+ *   enabled: boolean | null | undefined, vmid?: number | null,
+ *   declared?: boolean}} x `declared`: the stack's files declare natives
+ *   (see `declaresNatives`), so the Native service group shows even while
+ *   the host has not adopted anything (the first install).
  * @returns {MenuGroup[]}
  */
 export function moreGroups(x) {
@@ -195,7 +211,7 @@ export function moreGroups(x) {
       ],
     },
   ];
-  if (native !== false) {
+  if (native !== false || x.declared === true) {
     /** @type {MenuItem[]} */
     const items = [];
     // An older host does not say whether the stack is native: offer the
@@ -412,7 +428,7 @@ export function staleFor(stack, images) {
  * Inbox, filtered to this stack), plus what only the hub knows.
  * @param {{stack: string, s: Stack | null | undefined,
  *   drift?: Drift | null, night?: string, last?: number | null,
- *   stale?: Stale[], openChecks?: number, now: number,
+ *   stale?: Stale[], now: number,
  *   inboxItems?: {key: string, severity: "bad" | "warn" | "info", title: string,
  *     why: string, href: string, ids?: number[], remedy?: string,
  *     fix?: {action: string, stack: string, args?: Record<string, string>,
@@ -545,22 +561,6 @@ export function attentionItems(x) {
         title: "Make the container match its files",
       },
     });
-  if ((x.openChecks ?? 0) > 0) {
-    const n = /** @type {number} */ (x.openChecks);
-    out.push({
-      key: "manual-checks",
-      tone: "warn",
-      title: `${n} manual ${n === 1 ? "check waits" : "checks wait"} for your answer`,
-      text: "Only a person can answer these; the stack is not called healthy until they are.",
-      act: {
-        kind: "go",
-        tab: "overview",
-        section: "healthy",
-        label: "Answer them",
-        title: "Is it healthy? lists them with Answer…",
-      },
-    });
-  }
   const seen = new Set(out.map((p) => p.title));
   // fix-ux-1: a row never links to the page it is already on. It offers
   // the notice's own fix when it has one; a link elsewhere stays an Open;
@@ -790,8 +790,7 @@ export function hubKpis(x) {
 
 /**
  * One line of "Is it healthy?".
- * @typedef {{key: string, text: string, tone: Tone, verdict: string,
- *   check?: string}} Health
+ * @typedef {{key: string, text: string, tone: Tone, verdict: string}} Health
  * @typedef {{key: string, name: string, stack?: string | null,
  *   state: string, checked_at?: number | null}} WatchTarget
  */
@@ -823,14 +822,11 @@ const verdictOf = (t) =>
  * (FLOWS.md §1.3): what the host measures, each app's own health check
  * (docker's healthcheck; `systemctl is-active` for a native unit), whether
  * its web addresses answer (the dashboard's minute watch, `watch`), what
- * the hub reads, and each manual check a deploy left open. No restart loop
- * counts the last 24 h (`restarts24`) — without that reading, the counter
+ * the hub reads. No restart loop counts the last 24 h (`restarts24`) — without that reading, the counter
  * since each container started.
  * @param {{s: Stack | null | undefined, night: string,
  *   diskPct: number | null | undefined, drift: Drift | null | undefined,
- *   restarts24?: RestartsDay | null, watch?: WatchTarget[] | null,
- *   manual?: {id: string, text: string, app: string,
- *     answer: {label: string, tone: "ok" | "warn" | "bad"}}[]}} x
+ *   restarts24?: RestartsDay | null, watch?: WatchTarget[] | null}} x
  * @returns {Health[]}
  */
 export function healthChecks(x) {
@@ -944,14 +940,6 @@ export function healthChecks(x) {
     "Matches its files",
     d?.state === "same" ? "ok" : d?.state === "changed" ? "warn" : "unknown",
   );
-  for (const m of x.manual ?? [])
-    out.push({
-      key: `manual:${m.id}`,
-      text: `${m.app}: ${m.text}`,
-      tone: m.answer.tone,
-      verdict: m.answer.label === "open" ? "needs you" : m.answer.label,
-      check: m.id,
-    });
   return out;
 }
 

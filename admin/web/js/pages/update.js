@@ -56,6 +56,7 @@ import {
   itemsFor,
   lastDeployS,
   movingApps,
+  splitByPullState,
   logVerdict,
   movesOf,
   notesQuery,
@@ -699,7 +700,9 @@ export function mount(root, scope) {
       ? `${items.length} ${items.length === 1 ? "update" : "updates"} waiting: ${sum.text}`
       : scope.all
         ? "Everything is up to date."
-        : "Nothing to update.";
+        : currentApps.length
+          ? `Nothing to update: ${currentApps.join(", ")} on a moving tag, current (the image it runs is the one the tag points at now).`
+          : "Nothing to update.";
     if (!items.length) {
       table.tbody.replaceChildren();
       table.ready();
@@ -936,6 +939,13 @@ export function mount(root, scope) {
    * @type {string[] | null | undefined}
    */
   let moving = scope.all ? null : undefined;
+  /**
+   * update-nothing-1: the apps on a moving tag that run what the tag points
+   * at now (the registry's digest equals the running one): no pull row for
+   * them, and the summary says so.
+   * @type {string[]}
+   */
+  let currentApps = [];
   /** The stale-images answer that waits for `moving`. @type {any} */
   let waiting;
   /** @param {any} body */
@@ -1684,6 +1694,20 @@ export function mount(root, scope) {
       );
       if (abort.signal.aborted) return;
       moving = r.ok ? movingApps(r.body?.images) : null;
+      if (moving?.length) {
+        // The host reads what the containers run and the registry what the
+        // tag points at; an app known to be current leaves the pull row.
+        const s = await fetchJson(
+          `/data/stacks/${encodeURIComponent(scope.stack)}/pull-state`,
+          "whether the moving tags have a newer image",
+          abort.signal,
+        );
+        if (abort.signal.aborted) return;
+        const states = s.ok ? (s.body?.apps ?? {}) : {};
+        const split = splitByPullState(moving, states);
+        currentApps = split.current;
+        moving = split.pullable;
+      }
       if (waiting !== undefined) got(waiting);
     })().catch(() => {
       moving = null;

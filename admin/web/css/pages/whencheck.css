@@ -1,0 +1,73 @@
+/* manual-checks-as-info-1: "When something goes wrong, check this".
+ * One grid for header and rows, so the columns continue down the list:
+ * what to look at (wide) | where | last confirmed | the button. */
+.wc-grid {
+  display: grid;
+  min-block-size: calc(var(--kp-space-8, 2rem) * 3);
+}
+.wc-row {
+  display: grid;
+  grid-template-columns: minmax(0, 5fr) minmax(0, 3fr) minmax(0, 2fr) minmax(
+      0,
+      2fr
+    );
+  gap: var(--kp-space-3, 0.75rem);
+  align-items: center;
+  padding-block: var(--kp-space-2, 0.5rem);
+  border-block-end: 1px solid var(--kp-border, currentColor);
+}
+.wc-row--head {
+  font-size: var(--kp-text-sm, 0.875rem);
+  opacity: 0.75;
+}
+.wc-cell {
+  min-inline-size: 0;
+  overflow-wrap: anywhere;
+}
+.wc-what {
+  display: grid;
+  gap: var(--kp-space-1, 0.25rem);
+}
+.wc-app {
+  font-size: var(--kp-text-sm, 0.875rem);
+  opacity: 0.75;
+}
+.wc-act {
+  justify-self: end;
+}
+.wc-never,
+.wc-none {
+  opacity: 0.75;
+}
+.wc-bar {
+  block-size: 1em;
+  border-radius: var(--kp-radius-1, 0.25rem);
+  background: var(--kp-surface-sunken, currentColor);
+  opacity: 0.15;
+}
+.wc-message {
+  display: grid;
+  place-items: center;
+  align-content: center;
+  gap: var(--kp-space-2, 0.5rem);
+  min-block-size: calc(var(--kp-space-8, 2rem) * 3);
+  text-align: center;
+}
+@media (max-width: 48rem) {
+  .wc-row--head {
+    display: none;
+  }
+  .wc-row {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .wc-act {
+    justify-self: start;
+  }
+  .wc-cell[data-label]::before {
+    content: attr(data-label) ": ";
+    opacity: 0.75;
+  }
+  .wc-what[data-label]::before {
+    content: none;
+  }
+}

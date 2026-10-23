@@ -1,10 +1,9 @@
 // kp11 (feat-kp11demo-4, Kenny approved the kp-themes review demo
-// app-homelab-inbox in full, 2026-10-19): the three cards of the Inbox page
+// app-homelab-inbox in full, 2026-10-19): the cards of the Inbox page
 // that kp-themes 11.0.0 draws for us beside the list itself.
 //
 //   questions   the host's open questions as question cards, each with a
 //               clock, the consequence of each answer and its safe answer
-//   checks      the manual checks, one question per screen
 //   bulk        the notices of the last 24 hours, to tick and act on
 //               together (Mark seen with an Undo window, Fix all as one
 //               batch)
@@ -29,18 +28,10 @@ import {
   fixAllRule,
   plural,
 } from "./inboxrows.js";
-import { checksStatus, onChecksStatus, readChecks } from "./inboxsources.js";
 import { kindBadge, levelBadge } from "./notices.js";
 import { current, rereadStore, setAsks, subscribe } from "./store.js";
 import { toastRegion } from "./ui.js";
 import { attachCardStates, setCardState } from "/static/kp/js/card-state.js";
-import {
-  attachFocusSteps,
-  getStepIndex,
-  goToStep,
-  setFocusSteps,
-  setFocusStepsState,
-} from "/static/kp/js/focus-steps.js";
 import {
   askQuestion,
   attachQuestions,
@@ -52,7 +43,6 @@ import {
   attachSelectionBars,
   setSelectionRules,
 } from "/static/kp/js/selection-bar.js";
-import { setStrings } from "/static/kp/js/strings.js";
 import { undoToast } from "/static/kp/js/undo-toast.js";
 
 const ANSWER = declare({
@@ -69,14 +59,6 @@ const ANSWER_ALL = declare({
   opens: "run",
   what: "answer every open question with its safe answer, leave it stopped",
   shows: "while the host asks a question",
-});
-const ANSWER_CHECK = declare({
-  id: "inbox-answer-check",
-  page: "needs-you",
-  opens: "run",
-  row: "<check id>:pass|fail|later",
-  what: "answer a manual check: it works, it fails, or not now (asks again in 7 days)",
-  shows: "while a manual check waits for an answer",
 });
 const BULK_SEEN = declare({
   id: "inbox-bulk-seen",
@@ -338,200 +320,6 @@ export function mountQuestions(page) {
       off();
       watch.disconnect();
       detachReasons();
-    },
-  };
-}
-
-// ═══ the manual checks ══════════════════════════════════════════════════
-
-/** @type {boolean} */
-let wordsSet = false;
-/** A check was last answered a while ago, not "yesterday". */
-function checkWords() {
-  if (wordsSet) return;
-  wordsSet = true;
-  setStrings({
-    focusSameYesterday: (label) => `Same as last time: ${label}`,
-    focusSkip: "Not now",
-    focusSkipped: "Not now",
-  });
-}
-
-/**
- * Record a manual check's answer from anywhere (a row of the list, the
- * card): `ok` it works, `nok` it fails. The answer is a job; the checks are
- * read again when it is done (checks.js `answeredJobs`).
- * @param {string} check
- * @param {"ok" | "nok"} verdict
- */
-export const answerCheck = (check, verdict) =>
-  send(
-    "POST",
-    "/data/actions/_host/answer-check",
-    { check, verdict },
-    "the answer to the check",
-  );
-
-/**
- * The manual checks, one question per screen (demo section 4).
- * @param {() => import("./inboxrows.js").Row[]} rowsOf the open checks as Inbox rows
- */
-export function mountChecks(rowsOf) {
-  checkWords();
-  const flow = h("div", {
-    class: "kp-focus-steps ib-checks",
-    "data-kp-focus-steps": "",
-    "data-kp-focus-mode": "answer",
-    "data-kp-focus-steps-wake": "false",
-    "aria-label": "Manual checks",
-  });
-  const el = card({
-    title: "Manual checks",
-    desc: "Walks you through the checks only a person can answer, one at a time with big buttons, and offers the same answer as last time in one press. “Not now” asks again in 7 days.",
-    id: "inbox-checks",
-    body: [flow],
-  });
-  attachCardStates(el);
-  const detach = attachFocusSteps(el);
-
-  /** @type {string[]} */
-  let ids = [];
-  let started = false;
-  let finished = false;
-  /** @type {{id: string, args: Record<string, string>} | null} */
-  let unsent = null;
-
-  /** The current screen's buttons are Live view controls. */
-  const mark = () => {
-    const id = ids[getStepIndex(flow)];
-    if (!id) return;
-    for (const b of /** @type {NodeListOf<HTMLElement>} */ (
-      flow.querySelectorAll(".kp-focus-steps__choice")
-    ))
-      drivable(
-        b,
-        ANSWER_CHECK,
-        `${id}:${b.dataset.kpValue === "ok" ? "pass" : "fail"}`,
-      );
-    const skip = flow.querySelector(".kp-focus-steps__skip");
-    if (skip instanceof HTMLElement)
-      drivable(skip, ANSWER_CHECK, `${id}:later`);
-  };
-  const watch = new MutationObserver(mark);
-  watch.observe(flow, { childList: true, subtree: true });
-
-  /** @param {{id: string, args: Record<string, string>}} one */
-  const sendAnswer = async (one) => {
-    const res = await send(
-      "POST",
-      "/data/actions/_host/answer-check",
-      one.args,
-      "the answer to the check",
-    );
-    if (res.ok) {
-      unsent = null;
-      setFocusStepsState(flow, "ready");
-      return;
-    }
-    unsent = one;
-    setFocusStepsState(
-      flow,
-      "save-error",
-      `${res.error.what}: ${res.error.why}`,
-    );
-  };
-  on(flow, "kp-focus-steps-answer", (e) => {
-    started = true;
-    const d = e.detail;
-    /** @type {Record<string, string>} */
-    const args =
-      d.source === "skip"
-        ? { check: d.id, verdict: "accept", days: "7", note: "Not now" }
-        : { check: d.id, verdict: d.value === "fail" ? "nok" : "ok" };
-    void sendAnswer({ id: d.id, args });
-  });
-  on(flow, "kp-focus-steps-save-retry", () => {
-    if (unsent) void sendAnswer(unsent);
-  });
-  on(flow, "kp-focus-steps-done", () => {
-    finished = true;
-  });
-  on(flow, "kp-focus-steps-retry", () => void readChecks());
-
-  const paint = () => {
-    const status = checksStatus();
-    if (status === "loading" && ids.length === 0) {
-      putState(el, "ready");
-      setFocusStepsState(flow, "loading");
-      return;
-    }
-    if (status === "error" && ids.length === 0) {
-      putState(el, "ready");
-      setFocusStepsState(
-        flow,
-        "error",
-        "The checks could not be read: the host did not answer.",
-      );
-      return;
-    }
-    const rows = rowsOf();
-    if (rows.length === 0) {
-      if (!started && !finished) {
-        ids = [];
-        putState(el, "empty", {
-          title: "No manual check waits for you",
-          text: "A check appears here when the nightly round registers one or when an answer says it fails.",
-        });
-      }
-      return;
-    }
-    putState(el, "ready");
-    const next = rows.map((r) => String(r.check));
-    // The flow is rebuilt only before the first answer or after the last;
-    // in between a refresh must not take the question away from a person.
-    if (next.join("|") === ids.join("|")) return;
-    if (started && !finished) return;
-    ids = next;
-    started = false;
-    finished = false;
-    setFocusStepsState(flow, "ready");
-    setFocusSteps(
-      flow,
-      rows.map((r) => ({
-        text: r.checkText || r.title,
-        ...(r.stack ? { note: `About ${r.stack}` } : {}),
-        answer: {
-          id: String(r.check),
-          kind: /** @type {const} */ ("choice"),
-          ...(r.previous ? { previous: r.previous } : {}),
-          choices: [
-            { value: "ok", label: "It works" },
-            { value: "fail", label: "It fails" },
-          ],
-        },
-      })),
-    );
-    mark();
-  };
-  const off = onChecksStatus(paint);
-  paint();
-
-  return {
-    el,
-    paint,
-    /** Take a check's screen into the view. @param {string} check */
-    focusCheck(check) {
-      el.scrollIntoView({ block: "center" });
-      const at = ids.indexOf(check);
-      if (at >= 0 && !finished) goToStep(flow, at);
-      /** @type {HTMLElement | null} */ (
-        flow.querySelector(".kp-focus-steps__choice")
-      )?.focus();
-    },
-    destroy() {
-      off();
-      watch.disconnect();
-      detach();
     },
   };
 }

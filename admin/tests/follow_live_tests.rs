@@ -768,3 +768,84 @@ fn fix_226_a_silent_drive_is_given_back_within_seconds() {
     };
     assert!(!over.idle_release_due(5000));
 }
+
+/// covers: liveview-final-button-1
+/// A plan with steps left holds its dialog past the idle limit; a finished
+/// plan, or none, does not; only a much longer silence gives it back.
+#[test]
+fn liveview_final_button_a_running_plan_keeps_its_dialog_open() {
+    use homelab_admin::core::drive::{DriveState, IDLE_S, PLAN_HOLD_S};
+    use homelab_admin::core::drivelive::{Plan, PlanStep};
+    let step = |done| PlanStep {
+        step: UiStep::Close,
+        text: "close".into(),
+        done,
+    };
+    let mut st = DriveState {
+        active: true,
+        by: Some("wsl".into()),
+        last_at: 1000,
+        plan: Some(Plan {
+            by: "wsl".into(),
+            steps: vec![step(true), step(false)],
+            next: 1,
+            changed: false,
+        }),
+        ..DriveState::default()
+    };
+    assert!(st.plan_pending());
+    assert!(!st.idle_release_due(1000 + IDLE_S));
+    assert!(st.snapshot(1000 + IDLE_S + 1).active);
+    assert!(!st.idle_release_due(1000 + PLAN_HOLD_S - 1));
+    assert!(st.idle_release_due(1000 + PLAN_HOLD_S));
+    st.plan.as_mut().unwrap().next = 2;
+    assert!(!st.plan_pending());
+    assert!(st.idle_release_due(1000 + IDLE_S));
+    st.plan = None;
+    assert!(st.idle_release_due(1000 + IDLE_S));
+}
+
+/// covers: liveview-final-button-1
+/// The follower window and which steps need a follower.
+#[test]
+fn liveview_final_button_follower_window_and_steps() {
+    use homelab_admin::core::drive::{
+        FOLLOW_BEAT_S, FOLLOW_WINDOW_S, follow_fresh, needs_following_tab,
+    };
+    const { assert!(FOLLOW_WINDOW_S >= 2 * FOLLOW_BEAT_S) };
+    assert!(!follow_fresh(None, 100, FOLLOW_WINDOW_S));
+    assert!(follow_fresh(
+        Some(100),
+        100 + FOLLOW_WINDOW_S - 1,
+        FOLLOW_WINDOW_S
+    ));
+    assert!(!follow_fresh(
+        Some(100),
+        100 + FOLLOW_WINDOW_S,
+        FOLLOW_WINDOW_S
+    ));
+    for s in [
+        UiStep::State,
+        UiStep::Done,
+        UiStep::Reload,
+        UiStep::Controls,
+        UiStep::Refusals,
+    ] {
+        assert!(!needs_following_tab(&s), "{s:?}");
+    }
+    for s in [
+        UiStep::Close,
+        UiStep::Press {
+            button: "confirm".into(),
+        },
+        UiStep::Open {
+            form: "deploy".into(),
+            target: None,
+        },
+        UiStep::Plan {
+            steps: vec![UiStep::Close],
+        },
+    ] {
+        assert!(needs_following_tab(&s), "{s:?}");
+    }
+}

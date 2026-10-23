@@ -22,6 +22,7 @@ import {
   logView,
   logWindow,
   moreGroups,
+  declaresNatives,
   noIncidentsText,
   restartsDay,
   shortWhen,
@@ -188,20 +189,12 @@ test("the five KPI tiles", () => {
   assert.equal(empty[4].value, "?");
 });
 
-test("is it healthy: every check with its verdict, manual checks last", () => {
+test("is it healthy: every check with its verdict, no manual check among them", () => {
   const rows = healthChecks({
     s: stack(),
     night: "miss",
     diskPct: 83,
     drift: null,
-    manual: [
-      {
-        id: "c1",
-        app: "traefik",
-        text: "does it route?",
-        answer: { label: "open", tone: "warn" },
-      },
-    ],
   });
   assert.deepEqual(
     rows.map((r) => [r.key, r.verdict]),
@@ -215,7 +208,6 @@ test("is it healthy: every check with its verdict, manual checks last", () => {
       ["backup", "failed"],
       ["env", "ok"],
       ["drift", "not measured"],
-      ["manual:c1", "needs you"],
     ],
   );
 });
@@ -671,4 +663,24 @@ test("review 10: an empty incident list says no bundle is kept, not that nothing
     "No incident bundles kept for kp-soft.",
   );
   assert.doesNotMatch(noIncidentsText("kp-soft"), /failed/);
+});
+
+test("a stack whose files declare natives shows the Native service group from its first deploy", () => {
+  assert.ok(declaresNatives({ natives: ["kitchen"] }));
+  assert.ok(declaresNatives({ native_only: true }));
+  assert.ok(!declaresNatives({ natives: [] }));
+  assert.ok(!declaresNatives(null));
+  const plain = moreGroups({ stack: "k", native: false, enabled: true });
+  assert.ok(!plain.some((x) => x.group === "Native service"));
+  const first = moreGroups({
+    stack: "k",
+    native: false,
+    enabled: true,
+    declared: true,
+  });
+  const nat = first.find((x) => x.group === "Native service");
+  const acts = nat?.items.map((i) => i.kind === "action" && i.action);
+  assert.ok(acts?.includes("install-native"));
+  assert.ok(acts?.includes("release-update-native"));
+  assert.ok(!acts?.includes("backup-native"));
 });

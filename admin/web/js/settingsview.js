@@ -121,7 +121,7 @@ export function shortRemote(remote) {
 }
 
 /**
- * The section a `?section=` names: the two dashboard sections, or a
+ * The section a `?section=` names: the dashboard's own sections, or a
  * host.toml group by its slug; null when it names none of them.
  * @param {string | null} section
  * @param {string[]} groups
@@ -130,6 +130,7 @@ export function shortRemote(remote) {
 export function sectionTarget(section, groups) {
   if (!section) return null;
   if (section === "sign-in" || section === "signin") return "signin";
+  if (section === "home-address" || section === "home") return "home-address";
   if (section === "repo" || section === "working-copy") return "wc";
   return groups.map(slug).find((g) => g === section) ?? null;
 }

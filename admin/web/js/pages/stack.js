@@ -29,7 +29,7 @@
 import { act, catalogReady, onAct, send } from "../act.js";
 import { openAction } from "../actiondialog.js";
 import { onAnswered } from "../answer.js";
-import { checkRows } from "../checks.js";
+import { mountWhenCheck } from "../whencheck.js";
 import {
   fetchJson,
   fetchReport,
@@ -108,6 +108,7 @@ import {
   logView,
   logWindow,
   moreGroups,
+  declaresNatives,
   noIncidentsText,
   restartsDay,
   shortWhen,
@@ -115,7 +116,7 @@ import {
   staleFor,
   WHO_CHIPS,
 } from "../stackhub.js";
-import { stackEntries, stackIncidents, stackChecks } from "../stacktabs.js";
+import { stackEntries, stackIncidents } from "../stacktabs.js";
 import { current, retryStream, subscribe } from "../store.js";
 import { setParams } from "../urlstate.js";
 import { attachDataTables } from "/static/kp/js/datatable.js";
@@ -337,14 +338,14 @@ const LINK = declare({
     row ? stackHref(seg(row, 0), /** @type {any} */ (seg(row, 1))) : null,
   what: "a link of the hub to a related page or tab (all history, the logs' errors, an app's logs, the host log, Map, Planned, Backups, the files, the fleet firewall)",
 });
-const CHECK_ANSWER = declare({
-  id: "stack-check-answer",
+const CHECK_CONFIRM = declare({
+  id: "stack-check-confirm",
   page: "stack",
-  opens: "dialog",
-  row: "<stack>/<check>",
+  opens: "run",
+  row: "<check id>",
   at: at("overview"),
-  what: "answer one manual check of Is it healthy?",
-  shows: "while a manual check of this stack waits for an answer",
+  what: "keep today's date as the last time one of this stack's checks was confirmed (answer-check with ok); nothing else changes",
+  shows: 'on the stack\'s "When something goes wrong, check this" list',
 });
 const LOG_SEARCH = declare({
   id: "stack-log-search",
@@ -566,6 +567,7 @@ export function mount(root, params) {
       native: S.s?.native ?? null,
       enabled: S.s ? S.s.enabled : null,
       vmid: S.s?.vmid ?? null,
+      declared: declaresNatives(S.edit?.manifest),
     });
     const cat = S.catalog;
     menu.fill(
@@ -1103,6 +1105,18 @@ function overviewTab(panel, c) {
   judged.body.append(judgedHost);
   stops.push(checksEditTab(judgedHost, { name }));
 
+  // manual-checks-as-info-1: the checks only a person can confirm, as
+  // information for when something goes wrong, never as a notification.
+  const whenWrong = mountWhenCheck({
+    stack: name,
+    id: "stack-when-wrong",
+    drive: CHECK_CONFIRM,
+    signal: c.signal,
+    emptyText: "This stack declares nothing that only a person can look at.",
+  });
+  whenWrong.el.classList.add("sh-span-12");
+  stops.push(whenWrong.stop);
+
   panel.replaceChildren(
     h(
       "div",
@@ -1116,6 +1130,7 @@ function overviewTab(panel, c) {
         needs.el,
         deps.el,
         recent.el,
+        whenWrong.el,
         judged.el,
       ),
     ),
@@ -1147,8 +1162,6 @@ function overviewTab(panel, c) {
   let errors;
   /** @type {number | null | undefined} */
   let diskPct;
-  /** @type {any[] | null} */
-  let manual = null;
   /** @type {import("../stackhub.js").Stale[]} */
   let stale = [];
   /** @type {any[] | null} */
@@ -1207,7 +1220,7 @@ function overviewTab(panel, c) {
       plain.title = dt.title ?? "";
       compareBtn.removeAttribute("aria-busy");
     }
-    const open = (manual ?? []).filter((m) => m.answer.tone !== "ok").length;
+    if (S.fleetRead && !checkedAtS) checkedAtS = now;
     const probs = attentionItems({
       stack: name,
       s: S.s,
@@ -1215,7 +1228,6 @@ function overviewTab(panel, c) {
       night: stand.night,
       last: stand.last,
       stale,
-      openChecks: open,
       now,
       inboxItems: inboxNow()
         .items.filter((i) => i.stack === name)
@@ -1269,14 +1281,8 @@ function overviewTab(panel, c) {
         drift: S.drift,
         restarts24: day,
         watch,
-        manual: manual ?? [],
       });
-      const counted = checks.set(statusRows(rows), (id) => {
-        const r = rows.find((x) => x.key === id);
-        return r?.check
-          ? answerButton(name, r.check, () => void readChecks())
-          : null;
-      });
+      const counted = checks.set(statusRows(rows));
       checksCount.textContent = `${counted.ok} of ${counted.total} ${counted.total === 1 ? "check passes" : "checks pass"}`;
       setCardState(checksStage, "ready");
       checkedAt.textContent = checkedAtS
@@ -1320,25 +1326,9 @@ function overviewTab(panel, c) {
   stops.push(onInbox(paint));
   stops.push(() => checks.stop());
 
-  const readChecks = async () => {
-    const r = await fetchReport(
-      "/data/manual-checks",
-      "the manual checks",
-      c.signal,
-    );
-    if (r.ok) {
-      const now = r.report?.now ?? nowS();
-      manual = checkRows(stackChecks(r.report?.checks ?? [], name), now);
-    } else manual = [];
-    checkedAtS = nowS();
-    paint();
-  };
-  stops.push(onAnswered(() => void readChecks().catch(() => {})));
-
   const readAll = async () => {
     const enc = encodeURIComponent(name);
     const tasks = [
-      readChecks(),
       (async () => {
         const r = await fetchJson("/data/topology", "the topology", c.signal);
         topo = r.ok ? (r.body.topology ?? null) : null;
@@ -1435,34 +1425,6 @@ function diskOf(body) {
   const pts = p?.series?.[0]?.points ?? [];
   const v = pts.at(-1)?.[1];
   return typeof v === "number" && Number.isFinite(v) ? v : null;
-}
-
-/**
- * A manual check's Answer… (the catalog form `answer-check`).
- * @param {string} stack
- * @param {string} id
- * @param {() => void} after
- */
-function answerButton(stack, id, after) {
-  const b = h(
-    "button",
-    {
-      type: "button",
-      class: "kp-button kp-button--sm",
-      "data-action": "answer-check",
-      "data-check": id,
-      title: "Record your answer: ok, not ok, or not ok accepted for a while",
-    },
-    "Answer…",
-  );
-  viaForm(drivable(b, CHECK_ANSWER, `${stack}/${id}`), "answer-check");
-  b.addEventListener("click", async () => {
-    const ctl = await openAction("_host", "answer-check", {
-      preset: { check: id },
-    });
-    if (ctl) void ctl.closed.then(after);
-  });
-  return b;
 }
 
 /**

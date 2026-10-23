@@ -6,7 +6,7 @@
 // asks for it. The press starts the job; the dialog then follows it
 // (feat-ops-6).
 
-import { act, catalogReady, onAct, send } from "./act.js";
+import { act, actionLabel, catalogReady, onAct, send } from "./act.js";
 import {
   REVIEW,
   actionForm,
@@ -52,6 +52,10 @@ import { driven, register } from "./drivehooks.js";
 import { stackDetail } from "./fleet.js";
 import { batchView, jobBadge } from "./jobs.js";
 import { mountJobPanel } from "./jobpanel.js";
+import { batchOf, batchProcess } from "./batchprocess.js";
+import { runSpec } from "./runspec.js";
+import { buildRunView } from "./runview.js";
+import { humanBytes } from "./backupsview.js";
 import { openUpdateFlow } from "./pinupdate.js";
 import { codeSpans, previewGate } from "./previewgate.js";
 import { restoreHref } from "./restoreflow.js";
@@ -1314,9 +1318,22 @@ export function mountBatchPanel(batch, jobs) {
     deferredTile.el,
   );
   const rows = h("ul", { class: "batch-jobs" });
-  const running = h("div", { class: "batch-running" });
-  /** @type {{job: number, stop: () => void} | null} */
-  let panel = null;
+  // one-process-batch-1: the batch is ONE process, drawn once by the shared
+  // progress view from the batch's whole step plan; it never switches to a
+  // member job (only its log follows the stack that runs now).
+  const view = buildRunView({
+    label: `Batch ${batch}`,
+    jobId: jobs[0]?.job ?? 0,
+    compact: true,
+    dataJob: String(batch),
+  });
+  const running = h("div", { class: "batch-running" }, view.element);
+  /** The step names the members sent, by member and step number. @type {Map<string, string>} */
+  const seen = new Map();
+  /** How long each step took, by its title, from the progress we saw. @type {Map<string, number>} */
+  const stepSeconds = new Map();
+  let lastStep = { title: "", at: 0 };
+  let boundJob = jobs[0]?.job ?? 0;
   /** The cancel routes answered 404: this host does not have them. */
   let cancelGone = false;
   // Kenny, 2026-09-30: a running batch could not be stopped halfway. The
@@ -1431,8 +1448,6 @@ export function mountBatchPanel(batch, jobs) {
     ).length;
     stopBtn.hidden = !!b.done;
     cancelAll.hidden = cancelGone || queued === 0;
-    setProgress(bar, v.percent);
-    text.textContent = `${v.percent}%`;
     setLive(totalTile.value, String(v.total));
     // The Done tile counts the finished stacks; `b.done` is whether the
     // whole batch is (it read "false" here before 3.74.0).
@@ -1484,24 +1499,63 @@ export function mountBatchPanel(batch, jobs) {
         );
       }),
     );
-    // The job running now gets the full panel.
-    const now = v.rows
-      .map((r) => act.jobs.find((x) => x.job === r.job))
-      .find((j) => j && (j.state === "running" || j.state === "queued"));
-    if (now && panel?.job !== now.job) {
-      panel?.stop();
-      const p = mountJobPanel(now.job);
-      panel = { job: now.job, stop: p.stop };
-      running.replaceChildren(p.element);
+    // The whole batch as one process.
+    const now = Date.now() / 1000;
+    const proc = batchProcess(/** @type {any} */ (b), act.jobs, now, seen);
+    const pj = proc.job;
+    const p = pj.progress;
+    if (p && p.step) {
+      const title = p.step;
+      if (lastStep.title && lastStep.title !== title)
+        stepSeconds.set(lastStep.title, Math.max(0, p.elapsed_s - lastStep.at));
+      if (lastStep.title !== title) lastStep = { title, at: p.elapsed_s };
+    }
+    const spec = runSpec(pj, {
+      rows: proc.rows,
+      times: stepSeconds,
+      now,
+      progressAt: null,
+      label: actionLabel,
+      human: (n) => humanBytes(n),
+    });
+    if (spec.head && spec.figures) {
+      const names = v.rows.map((r) => r.stack);
+      spec.head.title = `${actionLabel(pj.action)} · ${names.length} ${names.length === 1 ? "stack" : "stacks"}`;
+      spec.head.sub = `Batch ${batch}: ${names.join(", ")}`;
+      spec.figures.of = batchOf(proc.total, proc.approx);
+      spec.figures.note = proc.approx
+        ? proc.because.length
+          ? `About: ${proc.because.join("; ")}.`
+          : "About: some stacks' step counts are known only when the host starts them."
+        : "";
+    }
+    view.paint(spec);
+    // The head bar counts steps across the members, like the figures do;
+    // only before the plan exists does it fall back to the stacks done.
+    const pct = b.done
+      ? 100
+      : p?.m
+        ? Math.min(
+            99,
+            Math.max(0, Math.round(((p.n - (p.finished ? 0 : 1)) / p.m) * 100)),
+          )
+        : v.percent;
+    setProgress(bar, pct);
+    text.textContent = `${pct}%`;
+    if (proc.current != null && proc.current !== boundJob) {
+      boundJob = proc.current;
+      view.log.bind(boundJob);
     }
   }
   const offB = onBatch(paint);
+  const tick = setInterval(paint, 1000);
   paint();
   return {
     element,
     stop: () => {
       offB();
-      panel?.stop();
+      clearInterval(tick);
+      view.stop();
     },
   };
 }

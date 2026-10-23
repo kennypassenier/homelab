@@ -38,8 +38,6 @@ const FIXES = {
  * @param {string} key
  */
 export function fixFor(key) {
-  if (key.startsWith("manual:"))
-    return "Only a person can answer it: press Answer… on this row.";
   if (key.startsWith("health:"))
     return "Open the app's logs for the last answer of its health check.";
   return /** @type {Record<string, string>} */ (FIXES)[key] ?? "";

@@ -120,11 +120,12 @@ import { gridRow, formGrid } from "../gridrow.js";
 import { attachBarCells, setBarCell } from "/static/kp/js/barcell.js";
 import { attachUptimes, setUptime } from "/static/kp/js/uptime.js";
 import { periodsOf, uptimeQuery } from "../uptimeview.js";
+import { REFRESH_S } from "../quiet.js";
 
 const RANGES = /** @type {const} */ (["1h", "6h", "24h", "7d", "30d"]);
 const TABS = /** @type {const} */ (["system", "traffic"]);
 /** Seconds between two reads, until a person picks another interval. */
-const EVERY_S = 30;
+const EVERY_S = REFRESH_S;
 /** The window every key figure's trend covers. */
 const TREND_RANGE = "24h";
 

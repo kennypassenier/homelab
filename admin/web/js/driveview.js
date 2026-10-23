@@ -90,7 +90,27 @@ export function readFollow(storage) {
  * @param {number} now unix seconds
  */
 export const isActive = (s, now) =>
-  !!s && s.active && now - s.last_at < s.idle_s;
+  !!s && s.active && now - s.last_at < idleLimit(s);
+
+/** How long a driver may stay silent with steps of its plan left, as the
+ * dashboard holds it (`core::drive::PLAN_HOLD_S`). */
+export const PLAN_HOLD_S = 600;
+
+/**
+ * liveview-final-button-1: the silence after which the driver no longer
+ * holds the tabs. A plan announced with `ui plan` that has steps left keeps
+ * its dialog open far past the plain idle limit.
+ * @param {DriveState} s
+ */
+export const idleLimit = (s) => {
+  const p = /** @type {any} */ (s).plan;
+  const pending =
+    !!p &&
+    Array.isArray(p.steps) &&
+    typeof p.next === "number" &&
+    p.next < p.steps.length;
+  return pending ? Math.max(s.idle_s, PLAN_HOLD_S) : s.idle_s;
+};
 
 /**
  * A job or a driven batch is running under `s.form` right now (fix-188,

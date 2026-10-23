@@ -100,11 +100,6 @@
   align-content: start;
 }
 
-/* 4 · the manual checks keep the height of a question. */
-.ib-checks {
-  min-block-size: 22rem;
-}
-
 /* Worth a look: a fold with a chevron, its rows the kp action list. */
 .inbox-worth {
   display: grid;

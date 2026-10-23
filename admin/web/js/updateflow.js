@@ -125,6 +125,20 @@ export function movingApps(images) {
 }
 
 /**
+ * update-nothing-1: splits a stack's apps on a moving tag by what the host
+ * measured (`/data/stacks/<s>/pull-state`: app → "current" | "newer" |
+ * "unknown"). Only an app measured "current" leaves the pull row; one
+ * "newer" or not measured stays, so a failed read never hides an update.
+ * @param {string[]} moving
+ * @param {Record<string, string> | null | undefined} states
+ * @returns {{pullable: string[], current: string[]}}
+ */
+export function splitByPullState(moving, states) {
+  const current = moving.filter((a) => states?.[a] === "current");
+  return { pullable: moving.filter((a) => !current.includes(a)), current };
+}
+
+/**
  * What the list holds: the pinned images with a newer version (all of
  * them, or one stack's), and for one stack also its "pull" row.
  * @param {any} staleBody `/data/stale-images`

@@ -427,3 +427,112 @@ details.st-grp[hidden] {
     justify-self: stretch;
   }
 }
+
+/* ---------- home address (eten-home-ip-1) ----------
+   Grid: two tiles of one height (the house now | what Cloudflare lets in),
+   the verdict plate and the policy rows across both, the buttons beneath;
+   one column on a phone. Final geometry from the first frame. */
+.ha-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--cf-gap);
+  align-items: stretch;
+}
+.ha-grid > .ha-plate,
+.ha-grid > .ha-rows,
+.ha-grid > .ha-actions,
+.ha-grid > .ha-job,
+.ha-grid > .ha-result {
+  grid-column: 1 / -1;
+}
+.ha-tile {
+  display: grid;
+  grid-template-rows: auto 1fr auto;
+  gap: var(--kp-space-xs, 0.25rem);
+  padding: var(--cf-pad);
+  border: 1px solid var(--border);
+  border-radius: var(--cf-r);
+  min-inline-size: 0;
+}
+.ha-tile__head {
+  font-size: var(--kp-text-sm);
+  color: var(--muted-foreground);
+}
+.ha-addr {
+  font-family: var(--kp-font-mono, monospace);
+  font-size: var(--kp-text-xl, 1.5rem);
+  overflow-wrap: anywhere;
+  align-self: center;
+}
+.ha-plate {
+  margin: 0;
+}
+.ha-plate p {
+  margin: 0;
+}
+.ha-rows {
+  display: grid;
+  min-inline-size: 0;
+}
+.ha-rows[hidden] {
+  display: none;
+}
+.ha-row {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(0, 2fr) minmax(0, 2fr) 6rem;
+  gap: var(--kp-space-sm, 0.5rem);
+  align-items: center;
+  padding-block: var(--kp-space-xs, 0.25rem);
+  border-block-end: 1px solid var(--border);
+  overflow-wrap: anywhere;
+}
+.ha-row--head {
+  font-size: var(--kp-text-sm);
+  color: var(--muted-foreground);
+}
+.ha-mono {
+  font-family: var(--kp-font-mono, monospace);
+}
+.ha-actions {
+  display: grid;
+  grid-template-columns: auto auto minmax(0, 1fr);
+  gap: var(--kp-space-sm, 0.5rem);
+  align-items: center;
+}
+.ha-job:empty,
+.ha-result:empty {
+  display: none;
+}
+@media (max-width: 64rem) {
+  .ha-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .ha-row {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  }
+  .ha-row--head {
+    display: none;
+  }
+  .ha-actions {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* eten-home-ip-1: the token fix, step by step, in a grid: the numbers in
+   one column, every step's text aligned in the next. */
+.ha-steps {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: var(--kp-space-2, 8px) var(--kp-space-3, 12px);
+  margin: var(--kp-space-3, 12px) 0 0;
+  padding: 0;
+  list-style: none;
+}
+.ha-step {
+  display: contents;
+}
+.ha-step__n {
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  text-align: right;
+}

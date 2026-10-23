@@ -47,6 +47,7 @@ import { highlight, pageHeader, segSwitch } from "../ui.js";
 import { setParams } from "../urlstate.js";
 import { editable } from "../editforms.js";
 import { mountSignin } from "../signin.js";
+import { mountHomeAddress } from "../homeaddress.js";
 import { chip, dot, ensureStyle } from "../ui.js";
 import { attachAll } from "/static/kp/js/auto.js";
 import { attachContents, setContents } from "/static/kp/js/page-contents.js";
@@ -54,6 +55,7 @@ import { attachDisabledReasons } from "/static/kp/js/reason.js";
 import { setCardState } from "/static/kp/js/card-state.js";
 import { setProblems } from "/static/kp/js/problems.js";
 import { attachToolbars } from "/static/kp/js/toolbar.js";
+import { REFRESH_S, changeGate } from "../quiet.js";
 import { REFRESH_EVENT, refreshDone } from "/static/kp/js/auto-refresh.js";
 import { unsaved, unsavedSaved } from "/static/kp/js/unsaved.js";
 
@@ -407,6 +409,19 @@ export function mount(root, opts = {}) {
     mountSignin(signinBody, (what, e, retry) => failed(what, e, retry)),
   );
 
+  // ── home address (the house's public address against Cloudflare) ─────
+  const homeBody = h("div", { class: "ha-body" });
+  const home = dataCard({
+    id: "home-address",
+    title: "Home address",
+    desc: "The house has no fixed public address. Cloudflare lets it in without a login by that address; when the provider changes it, update it here.",
+    data: [homeBody],
+    state: "static",
+  });
+  stops.push(
+    mountHomeAddress(homeBody, (what, e, retry) => failed(what, e, retry)),
+  );
+
   // ── host settings ─────────────────────────────────────────────────────
   const showSeg = segSwitch({
     label: "Show",
@@ -478,6 +493,7 @@ export function mount(root, opts = {}) {
     setContents(side, [
       { id: "wc", label: "Working copy" },
       { id: "signin", label: "Sign-in" },
+      { id: "home-address", label: "Home address" },
       { id: "account", label: "Account" },
       { id: "browser", label: "This browser" },
       { id: "host-settings", label: "host.toml" },
@@ -523,6 +539,7 @@ export function mount(root, opts = {}) {
     { class: "st-main" },
     wc.card,
     signin.card,
+    home.card,
     accountCard.card,
     browserCard.card,
     hsCard.card,
@@ -889,8 +906,15 @@ export function mount(root, opts = {}) {
   }
 
   // ── loading ───────────────────────────────────────────────────────────
-  /** @returns {Promise<boolean>} */
-  const loadHost = async () => {
+  const hostGate = changeGate();
+  const repoGate = changeGate();
+  const versionsGate = changeGate();
+  /**
+   * @param {boolean} [quiet] a background refresh: a read that brings the
+   *   same file draws nothing again
+   * @returns {Promise<boolean>}
+   */
+  const loadHost = async (quiet = false) => {
     // A read that arrives while changes wait must not wipe them.
     const pending = groupBox.querySelectorAll("[data-kp-changed]").length;
     if (page && pending > 0 && groupBox.children.length) {
@@ -922,6 +946,11 @@ export function mount(root, opts = {}) {
       return false;
     }
     failed("the host settings", null, () => void loadHost());
+    const same = !hostGate.isNew(r.body.page);
+    if (quiet && same && page) {
+      setAgo(ago, r.body.measured_at ?? Date.now() / 1000);
+      return true;
+    }
     const first = page === null;
     page = r.body.page;
     paintSide();
@@ -967,7 +996,7 @@ export function mount(root, opts = {}) {
   const readLine = h("small", { class: "st-working__note" });
   const refreshHost = h("div", {
     class: "kp-refresh",
-    "data-kp-refresh": "30",
+    "data-kp-refresh": String(REFRESH_S),
     "data-kp-remember": "settings-read",
   });
   const refreshLabel = h("span", null, "Settings read from the host");
@@ -992,7 +1021,11 @@ export function mount(root, opts = {}) {
   const wcAttach = attachAll(wcBody);
   stops.push(() => wcAttach());
   refreshHost.addEventListener(REFRESH_EVENT, async () => {
-    const [a, b] = await Promise.all([loadHost(), loadRepo(), loadVersions()]);
+    const [a, b] = await Promise.all([
+      loadHost(true),
+      loadRepo(true),
+      loadVersions(true),
+    ]);
     refreshDone(refreshHost, a && b !== false);
   });
 
@@ -1027,9 +1060,12 @@ export function mount(root, opts = {}) {
     );
     void attachAll(versionRow);
   };
-  const loadVersions = async () => {
+  /** @param {boolean} [quiet] */
+  const loadVersions = async (quiet = false) => {
     const r = await fetchJson("/data/versions", "the versions", abort.signal);
+    if (r.ok && quiet && !versionsGate.isNew(r.body)) return true;
     if (r.ok) {
+      versionsGate.isNew(r.body);
       versions = { dashboard: r.body.dashboard, host: r.body.host };
       drawVersions();
     }
@@ -1054,7 +1090,8 @@ export function mount(root, opts = {}) {
       ),
     );
 
-  const loadRepo = async () => {
+  /** @param {boolean} [quiet] */
+  const loadRepo = async (quiet = false) => {
     const r = await fetchJson("/data/repo", "the working copy", abort.signal);
     if (!r.ok) {
       setCardState(wc.card, repoView ? "ready" : "error", {
@@ -1065,6 +1102,7 @@ export function mount(root, opts = {}) {
       return false;
     }
     failed("the working copy", null, () => void loadRepo());
+    if (!repoGate.isNew(r.body) && quiet && repoView) return true;
     drawRepo(r.body);
     setCardState(wc.card, "ready");
     return true;

@@ -8,7 +8,6 @@ import {
   askId,
   askSpec,
   bulkRows,
-  checkRowsOf,
   countWords,
   fixAllBatch,
   fixAllRule,
@@ -120,62 +119,6 @@ test("redesign-flows-2: the stacks without a sealed env are ONE Setup row", () =
     [],
   );
   assert.deepEqual(setupRows(null), []);
-});
-
-test("redesign-flows-2: a manual check is a row while open or failing, never once it passes or is accepted", () => {
-  const rows = checkRowsOf({
-    now: 100,
-    checks: [
-      {
-        id: "ups",
-        record: {
-          stack: "gateway",
-          app: "ups",
-          text: "Does the UPS self-test pass?",
-          ok: null,
-          registered_at: 10,
-        },
-      },
-      {
-        id: "fan",
-        record: {
-          stack: "nas",
-          app: "fan",
-          text: "Fan quiet?",
-          ok: false,
-          answered_at: 50,
-        },
-      },
-      { id: "ok", record: { stack: "nas", app: "x", text: "Fine?", ok: true } },
-      {
-        id: "acc",
-        record: {
-          stack: "nas",
-          app: "y",
-          text: "Later?",
-          ok: false,
-          accepted_until: 500,
-        },
-      },
-    ],
-  });
-  assert.deepEqual(
-    rows.map((r) => [r.check, r.severity, r.title]),
-    [
-      ["ups", "warn", "Check: Does the UPS self-test pass?"],
-      ["fan", "bad", "A check fails: Fan quiet?"],
-    ],
-  );
-  assert.ok(rows.every((r) => kindOf(r) === "check"));
-  // kp11: the check's own question, and "Same as last time" only for a
-  // check that was answered "fails" before.
-  assert.deepEqual(
-    rows.map((r) => [r.checkText, r.previous]),
-    [
-      ["Does the UPS self-test pass?", null],
-      ["Fan quiet?", "fail"],
-    ],
-  );
 });
 
 test("redesign-flows-2: Today's items are rows with their remedy and fix; a doctor env item the Setup row names is left out", () => {

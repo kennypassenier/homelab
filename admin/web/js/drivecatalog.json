@@ -1956,6 +1956,54 @@
       "twins": false
     },
     {
+      "id": "home-address-check",
+      "page": "settings",
+      "what": "read the house's address and the Cloudflare policies again now",
+      "opens": "view",
+      "row": null,
+      "href": "/settings",
+      "was": [],
+      "shows": null,
+      "reach": [],
+      "twins": false
+    },
+    {
+      "id": "home-address-token",
+      "page": "settings",
+      "what": "go to stack admin's secrets to change the Cloudflare API token or account id this section uses (HOMELAB_ADMIN_CLOUDFLARE_ACCESS_TOKEN, HOMELAB_ADMIN_CLOUDFLARE_ACCOUNT_ID in admin.env)",
+      "opens": "view",
+      "row": null,
+      "href": "/settings",
+      "was": [],
+      "shows": null,
+      "reach": [],
+      "twins": false
+    },
+    {
+      "id": "home-address-update",
+      "page": "settings",
+      "what": "write the house's current public address into the Cloudflare Access bypass policies that hold the old one (a job: progress and result show below the button)",
+      "opens": "run",
+      "row": null,
+      "href": "/settings",
+      "was": [],
+      "shows": null,
+      "reach": [],
+      "twins": false
+    },
+    {
+      "id": "host-check-confirm",
+      "page": "host",
+      "what": "keep today's date as the last time the stack-less check (the restic password chain) was confirmed (answer-check with ok); nothing else changes",
+      "opens": "run",
+      "row": "<check id>",
+      "href": "/host",
+      "was": [],
+      "shows": "on the Host page's \"When something goes wrong, check this\" list",
+      "reach": [],
+      "twins": false
+    },
+    {
       "id": "host-kpi-chart",
       "page": "host",
       "what": "open one of the host's figures on Charts (CPU, memory, load, root disk, disk traffic, network, CPU temperature, swap)",
@@ -2227,18 +2275,6 @@
       "twins": false
     },
     {
-      "id": "inbox-answer-check",
-      "page": "needs-you",
-      "what": "answer a manual check: it works, it fails, or not now (asks again in 7 days)",
-      "opens": "run",
-      "row": "<check id>:pass|fail|later",
-      "href": "/inbox",
-      "was": [],
-      "shows": "while a manual check waits for an answer",
-      "reach": [],
-      "twins": false
-    },
-    {
       "id": "inbox-bulk-fix",
       "page": "needs-you",
       "what": "fix every ticked notice as one batch, with one confirm",
@@ -2277,7 +2313,7 @@
     {
       "id": "inbox-check-again",
       "page": "needs-you",
-      "what": "read every source of the Inbox again now: the fleet check, Today, the manual checks, the notices",
+      "what": "read every source of the Inbox again now: the fleet check, Today, the notices",
       "opens": "run",
       "row": null,
       "href": "/inbox",
@@ -2343,18 +2379,6 @@
       "twins": false
     },
     {
-      "id": "inbox-open-check",
-      "page": "needs-you",
-      "what": "a manual check's row link: open that check in the Manual checks card",
-      "opens": "view",
-      "row": "<check id>",
-      "href": "/inbox",
-      "was": [],
-      "shows": "on a manual check's row",
-      "reach": [],
-      "twins": false
-    },
-    {
       "id": "inbox-open-job",
       "page": "needs-you",
       "what": "a failed job's row: open the job (its steps, what the host said, its log)",
@@ -2399,18 +2423,6 @@
       "href": "/inbox",
       "was": [],
       "shows": null,
-      "reach": [],
-      "twins": false
-    },
-    {
-      "id": "inbox-row-answer",
-      "page": "needs-you",
-      "what": "answer a manual check on its own row: it works, or it fails",
-      "opens": "run",
-      "row": "<check id>:pass|fail",
-      "href": "/inbox",
-      "was": [],
-      "shows": "on a manual check's row",
       "reach": [],
       "twins": false
     },
@@ -4150,14 +4162,14 @@
       "twins": false
     },
     {
-      "id": "stack-check-answer",
+      "id": "stack-check-confirm",
       "page": "stack",
-      "what": "answer one manual check of Is it healthy?",
-      "opens": "dialog",
-      "row": "<stack>/<check>",
-      "href": "/stacks/<stack>",
+      "what": "keep today's date as the last time one of this stack's checks was confirmed (answer-check with ok); nothing else changes",
+      "opens": "run",
+      "row": "<check id>",
+      "href": "/stacks/<check id>",
       "was": [],
-      "shows": "while a manual check of this stack waits for an answer",
+      "shows": "on the stack's \"When something goes wrong, check this\" list",
       "reach": [],
       "twins": false
     },

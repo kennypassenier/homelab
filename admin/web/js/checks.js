@@ -104,6 +104,38 @@ export function checkRows(checks, now, opts) {
 }
 
 /**
+ * manual-checks-as-info-1 (Kenny, 2026-10-23): one stack's checks as the
+ * "When something goes wrong, check this" list reads them: what to look at,
+ * where, and when someone last confirmed it. No open/closed verdict: a
+ * check nobody confirmed is "never", not a problem. The stack-less standing
+ * check is filed under the stack name "standing".
+ * @param {Check[]} checks
+ * @param {string} stack
+ * @returns {{id: string, app: string, text: string, url: string | null,
+ *   confirmed: number | null, notOk: number | null}[]}
+ */
+export function whenToCheckRows(checks, stack) {
+  return checks
+    .filter((c) => c.record.stack === stack)
+    .map(({ id, record: r }) => {
+      const url = typeof r.url === "string" ? r.url : "";
+      const at = r.answered_at ?? null;
+      return {
+        id,
+        app: r.app,
+        text: r.text,
+        url: /^https?:\/\//.test(url) ? url : null,
+        confirmed: r.ok === true ? at : null,
+        notOk: r.ok === false ? at : null,
+      };
+    })
+    .sort((a, b) => a.app.localeCompare(b.app) || a.text.localeCompare(b.text));
+}
+
+/** The stack name the host files the stack-less standing check under. */
+export const STANDING_STACK = "standing";
+
+/**
  * fix-checks-refresh: the answer jobs that finished well since the page
  * last looked, whoever pressed them (this tab, another, Claude, a
  * schedule); each is news once. `seen` holds the jobs already counted and

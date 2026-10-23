@@ -18,6 +18,7 @@ pub mod editplan;
 pub mod fleet;
 pub mod fwmatrix;
 pub mod guests;
+pub mod homeaddress;
 pub mod hostsettings;
 pub mod hostversion;
 pub mod logs;

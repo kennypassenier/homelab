@@ -14,6 +14,7 @@
 import { askView, openAsks } from "./asks.js";
 import { settledNotices } from "./inboxresolve.js";
 import { levelBadge } from "./notices.js";
+import { contentKey } from "./quiet.js";
 
 /**
  * @typedef {"bad" | "warn" | "info"} Severity
@@ -196,12 +197,16 @@ export function changed() {
  * @param {InboxItem[] | null} items
  */
 export function setInboxSource(name, items) {
-  if (items == null) extras.delete(name);
-  else
-    extras.set(
-      name,
-      items.map((i) => ({ ...i, source: name })),
-    );
+  const before = extras.get(name);
+  if (items == null) {
+    if (!extras.delete(name)) return;
+  } else {
+    const next = items.map((i) => ({ ...i, source: name }));
+    // refresh-one-minute-1: a background read that brings the same rows
+    // changes nothing on screen.
+    if (before && contentKey(before) === contentKey(next)) return;
+    extras.set(name, next);
+  }
   changed();
 }
 

@@ -22,6 +22,11 @@ use tokio::task::JoinHandle;
 use tower::ServiceExt as _;
 
 fn driver(_tag: &str) -> (Driver, Arc<Recorder>) {
+    let (d, live, _) = driver_clock(_tag);
+    (d, live)
+}
+
+fn driver_clock(_tag: &str) -> (Driver, Arc<Recorder>, TestClock) {
     let clock = TestClock::at(1_790_000_000);
     let host = MockHost::start(
         clock.clone(),
@@ -50,6 +55,7 @@ fn driver(_tag: &str) -> (Driver, Arc<Recorder>) {
     (
         Driver::new(actions, shared, live.clone(), clock.clock()),
         live,
+        clock,
     )
 }
 
@@ -461,4 +467,71 @@ async fn drive_review_a_reloaded_holder_lets_go_of_the_dialog() {
     )
     .unwrap();
     assert_eq!(pending.await.unwrap()["ok"], true);
+}
+
+/// covers: liveview-final-button-1
+/// With the follower rule on, a step that changes something is refused
+/// until a tab in Live view has beaten within the window, and refused again
+/// once the beats stop; reading the screen is never refused.
+#[tokio::test(start_paused = true)]
+async fn liveview_final_button_no_follower_refuses_every_changing_step() {
+    let (d, _live, clock) = driver_clock("nofollower");
+    d.require_follower();
+    for step in [
+        json!({"do": "open", "form": "deploy", "target": "media"}),
+        json!({"do": "press", "button": "confirm"}),
+        json!({"do": "close"}),
+        json!({"do": "plan", "steps": [{"do": "close"}]}),
+    ] {
+        let a = d.step("wsl", Scope::Operate, step_of(step.clone())).await;
+        assert_eq!(a["ok"], false, "{step} ran with no tab in Live view: {a}");
+        let why = a["refusal"]["why"].as_str().unwrap_or_default();
+        assert!(why.contains("no dashboard tab is in Live view"), "{a}");
+        let fix = a["refusal"]["fix"].as_str().unwrap_or_default();
+        assert!(fix.contains("Live view switch"), "{a}");
+    }
+    for step in [
+        json!({"do": "state"}),
+        json!({"do": "controls"}),
+        json!({"do": "refusals"}),
+        json!({"do": "done"}),
+    ] {
+        let a = d.step("wsl", Scope::Operate, step_of(step.clone())).await;
+        let why = a["refusal"]["why"].as_str().unwrap_or_default();
+        assert!(!why.contains("Live view"), "{step} was refused: {a}");
+    }
+    // A beat lets the step through; the window runs out without more.
+    d.follower_seen();
+    clock.advance(9);
+    assert!(d.follower_fresh());
+    let a = d
+        .step("wsl", Scope::Operate, step_of(json!({"do": "close"})))
+        .await;
+    let why = a["refusal"]["why"].as_str().unwrap_or_default();
+    assert!(!why.contains("Live view"), "{a}");
+    clock.advance(1);
+    assert!(!d.follower_fresh());
+    let a = d
+        .step("wsl", Scope::Operate, step_of(json!({"do": "close"})))
+        .await;
+    assert_eq!(a["ok"], false, "{a}");
+}
+
+/// covers: liveview-final-button-1
+/// The heartbeat route marks a follower seen.
+#[tokio::test(start_paused = true)]
+async fn liveview_final_button_the_heartbeat_route_marks_a_follower() {
+    let (d, _live, _clock) = driver_clock("beat");
+    assert!(!d.follower_fresh());
+    let res = router(d.clone())
+        .oneshot(
+            Request::post("/data/drive/following")
+                .header("content-type", "application/json")
+                .body(Body::from("{}"))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert!(res.status().is_success());
+    assert!(d.follower_fresh());
 }

@@ -34,6 +34,7 @@ import {
 import { openDialog } from "../actui.js";
 import { drawer, ensureStyle, kpiStrip, pageHeader } from "../ui.js";
 import { setParams } from "../urlstate.js";
+import { REFRESH_MS, changeGate } from "../quiet.js";
 import { mount as mountPlan } from "./apply.js";
 
 /** @typedef {{navigate: (href: string) => void}} Ctx */
@@ -467,6 +468,7 @@ export function mount(root, ctx) {
       recompute();
     }
   }
+  const trendGate = changeGate();
   const readTrend = async () => {
     const r = await fetchJson(
       "/data/fleet-trend",
@@ -474,7 +476,8 @@ export function mount(root, ctx) {
       abort.signal,
     );
     sourceError("trend", r.ok ? null : r.error);
-    if (r.ok) {
+    // refresh-one-minute-1: a minute-old read with the same lines redraws nothing.
+    if (r.ok && (trendGate.isNew(r.body) || !trend)) {
       trend = r.body;
       recompute();
     }
@@ -543,7 +546,7 @@ export function mount(root, ctx) {
   readAll();
   const trendTimer = setInterval(
     () => void readTrend().catch(unlessAborted),
-    300_000,
+    REFRESH_MS,
   );
 
   stops.push(subscribe(recompute));

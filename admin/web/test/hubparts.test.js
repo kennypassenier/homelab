@@ -30,7 +30,7 @@ test("feat-kp11demo-13: a failed or reserved check carries its fix, an unknown o
   );
   assert.match(rows[0].fix ?? "", /Deploy/);
   assert.equal(rows[3].fix, undefined);
-  assert.match(fixFor("manual:x"), /Answer/);
+  assert.equal(fixFor("manual:x"), "");
   assert.equal(passText({ ok: 5, total: 7 }), "5 of 7 checks pass");
 });
 

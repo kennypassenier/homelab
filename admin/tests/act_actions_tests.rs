@@ -845,3 +845,40 @@ fn the_commit_the_working_copy_stands_on_is_read_in_place() {
     assert!(!is_head(Some(head), "b5df"));
     assert!(!is_head(None, "b5dfb87"));
 }
+
+/// native-first-install-1: Install newest on a declared but unadopted native
+/// stack installs the newest release of each declared unit.
+#[test]
+fn install_newest_on_an_unadopted_native_stack_installs_each_unit() {
+    use homelab_admin::core::actions::{UnitInstall, first_install_commands, needs_first_install};
+    let declared = vec!["kitchen".to_string()];
+    assert!(needs_first_install(Some(false), &declared));
+    assert!(
+        !needs_first_install(Some(true), &declared),
+        "adopted: unchanged"
+    );
+    assert!(!needs_first_install(None, &declared), "unknown: unchanged");
+    assert!(
+        !needs_first_install(Some(false), &[]),
+        "compose stack: unchanged"
+    );
+    let req = validate("kitchen", "release-update-native", ActionArgs::default()).unwrap();
+    let mut n = native("kitchen");
+    n.stack_name = "kitchen".into();
+    let unit = |n: homelab_proto::NativeServiceManifest| UnitInstall {
+        manifest: n,
+        unit_file: "[Service]\n".into(),
+        tag: "v0.1.0".into(),
+        dir: "stacks/kitchen".into(),
+    };
+    let (cmds, line) = first_install_commands(&req, vec![unit(n.clone())]).unwrap();
+    assert!(matches!(
+        cmds.as_slice(),
+        [Command::InstallNativeRelease { tag, .. }] if tag == "v0.1.0"
+    ));
+    assert_eq!(line, "homelab install-native stacks/kitchen v0.1.0");
+    let mut other = n;
+    other.stack_name = "other".into();
+    assert!(first_install_commands(&req, vec![unit(other)]).is_err());
+    assert!(first_install_commands(&req, vec![]).is_err());
+}

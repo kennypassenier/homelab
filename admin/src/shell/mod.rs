@@ -12,6 +12,7 @@ pub mod demo_metrics;
 pub mod drive;
 pub mod edit;
 pub mod guard;
+pub mod homeaddress;
 pub mod host_link;
 pub mod hostlog;
 pub mod loki;

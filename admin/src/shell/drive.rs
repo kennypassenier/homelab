@@ -38,7 +38,8 @@ use super::edit::{self as ed, EditCtx};
 use super::host_link::Shared;
 use crate::core::actions::{self as act, ActionKind, Arg, Refusal};
 use crate::core::drive::{
-    Applied, Ctx, DriveState, Effect, Family, JobRef, Sources, TabAnswer, TabCaps, catalog,
+    Applied, Ctx, DriveState, Effect, FOLLOW_WINDOW_S, Family, JobRef, Sources, TabAnswer, TabCaps,
+    catalog, follow_fresh, needs_following_tab, no_follower_refusal,
 };
 use crate::core::driveedit::{self, EditCall, EditKind};
 use crate::core::drivelive::{self, Announce, Control};
@@ -118,6 +119,12 @@ struct Inner {
     tab_turn: Mutex<TabTurn>,
     /// drive-reach: every refused step, bounded (`core::driverefusals`).
     refusals: Mutex<RefusalLog>,
+    /// liveview-final-button-1: when a tab last said it follows (unix s).
+    last_follow: Mutex<Option<i64>>,
+    /// Refuse changing steps without a recent follower (off until the
+    /// dashboard turns it on; the tests of other things build a driver
+    /// with no tab).
+    require_follower: std::sync::atomic::AtomicBool,
 }
 
 #[derive(Clone)]
@@ -168,6 +175,8 @@ impl Driver {
                 continued_by: Mutex::new(None),
                 tab_turn: Mutex::new(TabTurn::default()),
                 refusals: Mutex::new(RefusalLog::default()),
+                last_follow: Mutex::new(None),
+                require_follower: std::sync::atomic::AtomicBool::new(false),
             }),
         }
     }
@@ -179,6 +188,32 @@ impl Driver {
             .timing
             .lock()
             .unwrap_or_else(PoisonError::into_inner) = t;
+    }
+
+    /// liveview-final-button-1: from now on a step that changes something
+    /// is refused unless a tab in Live view was seen within
+    /// [`FOLLOW_WINDOW_S`].
+    pub fn require_follower(&self) {
+        self.inner.require_follower.store(true, Ordering::SeqCst);
+    }
+
+    /// A tab in Live view says it follows (`POST /data/drive/following`).
+    pub fn follower_seen(&self) {
+        *self
+            .inner
+            .last_follow
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner) = Some(self.now());
+    }
+
+    /// Was a tab in Live view seen within the window?
+    pub fn follower_fresh(&self) -> bool {
+        let last = *self
+            .inner
+            .last_follow
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        follow_fresh(last, self.now(), FOLLOW_WINDOW_S)
     }
 
     /// Decision "23 constants": `idle_s` and `release_after_job_s`, from
@@ -695,6 +730,14 @@ impl Driver {
         // `if`'s condition: a MutexGuard born in a let-chain's condition
         // lives through the whole body, and `self.publish` below takes the
         // same lock again — nested, that deadlocks a step forever.
+        if self.inner.require_follower.load(Ordering::SeqCst)
+            && needs_following_tab(&step)
+            && !self.follower_fresh()
+        {
+            let r = no_follower_refusal(&step);
+            self.record_refusal(by, &step, &r);
+            return reply(Some(&r), &self.snapshot());
+        }
         let tab_caps = self.lock().tab_caps.clone();
         if let Some(r) = drivelive::missing_capability(&step, tab_caps.as_ref()) {
             self.record_refusal(by, &step, &r);
@@ -1697,6 +1740,13 @@ async fn attach(State(d): State<Driver>, Json(body): Json<AttachBody>) -> Json<V
     Json(json!({ "state": d.snapshot() }))
 }
 
+/// liveview-final-button-1: the heartbeat of a tab whose Live view switch
+/// is on.
+async fn following(State(d): State<Driver>) -> Json<Value> {
+    d.follower_seen();
+    Json(json!({ "ok": true }))
+}
+
 /// fix-172: the action queue's view of Live view's pause, wired in
 /// `shell::actions::mount` once both the queue and the driver exist
 /// (`Actions::set_pause_gate`).
@@ -1746,6 +1796,7 @@ pub fn router(driver: Driver) -> Router {
         .route("/data/drive", get(state))
         .route("/data/drive/control", post(control))
         .route("/data/drive/attach", post(attach))
+        .route("/data/drive/following", post(following))
         .route("/data/drive/claim", post(claim))
         .route("/data/drive/taken", post(taken))
         .route("/data/drive/controls", get(controls))

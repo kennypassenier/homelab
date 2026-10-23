@@ -32,6 +32,49 @@ pub const FORM_SPEC_JSON: &str = include_str!("../../web/js/formspec.json");
 /// when no `homelab ui done` ever comes.
 pub const IDLE_S: i64 = 20;
 
+/// How long a plan with steps left holds its dialog open without a step
+/// (liveview-final-button-1): the plain idle limit never closes a dialog
+/// under a running plan; only this much longer silence, a driver that died,
+/// gives it back.
+pub const PLAN_HOLD_S: i64 = 600;
+
+/// How often a tab in Live view tells the dashboard it follows (seconds).
+pub const FOLLOW_BEAT_S: i64 = 4;
+
+/// A step that changes something is taken only when a tab in Live view was
+/// seen within this many seconds (two missed beats still pass).
+pub const FOLLOW_WINDOW_S: i64 = 10;
+
+/// Whether a tab followed recently enough: `last` is the unix second of the
+/// newest heartbeat, if any.
+pub fn follow_fresh(last: Option<i64>, now: i64, window_s: i64) -> bool {
+    last.is_some_and(|l| now - l < window_s)
+}
+
+/// Every step except reading the screen, `reload` (it brings a stale tab
+/// current) and `done` (letting go) changes something on the host, a
+/// container or the screen and so needs a tab in Live view.
+pub fn needs_following_tab(step: &UiStep) -> bool {
+    !matches!(
+        step,
+        UiStep::State
+            | UiStep::Done
+            | UiStep::Reload
+            | UiStep::Controls
+            | UiStep::Refusals
+            | UiStep::RefusedLocally { .. }
+    )
+}
+
+/// The refusal for a changing step with no tab in Live view.
+pub fn no_follower_refusal(step: &UiStep) -> Refusal {
+    refused(
+        step,
+        "no dashboard tab is in Live view",
+        "turn the Live view switch on in a tab, then send the step again",
+    )
+}
+
 /// fix-163: a confirmed dialog whose job has ended, with no step since, is
 /// closed and the tabs given back this long after (as `homelab ui done`),
 /// unless `ActConfig` says otherwise (`HOMELAB_ADMIN_RELEASE_AFTER_JOB_S`).
@@ -1281,6 +1324,7 @@ impl DriveState {
             && self.announce.is_none()
             && self.paused_by.is_none()
             && self.stopped_by.is_none()
+            && !self.plan_pending()
             && self.form.as_ref().is_some_and(|f| f.job.is_some())
             && now - ended.max(self.last_at) >= self.release_after_job_s
     }
@@ -1289,7 +1333,22 @@ impl DriveState {
     /// given back now. A step still announced (its countdown running) is
     /// never cut short.
     pub fn idle_release_due(&self, now: i64) -> bool {
-        self.active && self.announce.is_none() && now - self.last_at >= self.idle_s
+        self.active && self.announce.is_none() && now - self.last_at >= self.idle_limit()
+    }
+
+    /// A plan announced with `ui plan` still has steps left.
+    pub fn plan_pending(&self) -> bool {
+        self.plan.as_ref().is_some_and(|p| p.next < p.steps.len())
+    }
+
+    /// The silence after which the driver no longer holds the tabs: the
+    /// idle limit, or [`PLAN_HOLD_S`] while a plan has steps left.
+    pub fn idle_limit(&self) -> i64 {
+        if self.plan_pending() {
+            self.idle_s.max(PLAN_HOLD_S)
+        } else {
+            self.idle_s
+        }
     }
 
     /// Release the drive as `homelab ui done` does: the dialog closes and
@@ -1309,7 +1368,7 @@ impl DriveState {
     /// longer holds the tabs.
     pub fn snapshot(&self, now: i64) -> DriveState {
         let mut s = self.clone();
-        s.active = s.active && now - s.last_at < s.idle_s;
+        s.active = s.active && now - s.last_at < s.idle_limit();
         s
     }
 

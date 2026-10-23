@@ -10,6 +10,7 @@ import {
   isMovingTag,
   itemsFor,
   movingApps,
+  splitByPullState,
 } from "../js/updateflow.js";
 
 const GATEWAY = {
@@ -97,4 +98,11 @@ test("update-nothing-1: a pinned move still lists beside it; only the pull row d
     itemsFor(NOTHING_NEWER, stack, null).map((i) => i.id),
     ["pull:gateway"],
   );
+});
+
+test("update-nothing-1: only an app measured current leaves the pull row", () => {
+  const r = splitByPullState(["a", "b", "c"], { a: "current", b: "newer" });
+  assert.deepEqual(r.current, ["a"]);
+  assert.deepEqual(r.pullable, ["b", "c"], "newer and unmeasured stay");
+  assert.deepEqual(splitByPullState(["a"], null).pullable, ["a"]);
 });

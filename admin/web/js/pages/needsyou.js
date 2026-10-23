@@ -13,8 +13,7 @@
 //
 // The page: the host's questions (question cards with a clock), the list
 // (kp action list with groups, a bar for how serious, version jumps and a
-// fold for what went wrong), the manual checks one question per screen,
-// the notices of the last 24 hours to tick and act on together
+// fold for what went wrong), the notices of the last 24 hours to tick and act on together
 // (inboxcards.js), and, folded, "Worth a look" — not urgent, not counted
 // (never drilled backups, a newer host release, the host's full doctor
 // report).
@@ -45,14 +44,8 @@ import {
   worthRows,
 } from "../inboxrows.js";
 import { openJobDialog } from "../jobpanel.js";
-import {
-  answerCheck,
-  mountBulk,
-  mountChecks,
-  mountQuestions,
-  putState,
-} from "../inboxcards.js";
-import { feedToday, feedUpdates, readChecks } from "../inboxsources.js";
+import { mountBulk, mountQuestions, putState } from "../inboxcards.js";
+import { feedToday, feedUpdates } from "../inboxsources.js";
 import {
   SNOOZE_MAX,
   endSnooze,
@@ -90,7 +83,7 @@ const CHECK_AGAIN = declare({
   id: "inbox-check-again",
   page: "needs-you",
   opens: "run",
-  what: "read every source of the Inbox again now: the fleet check, Today, the manual checks, the notices",
+  what: "read every source of the Inbox again now: the fleet check, Today, the notices",
 });
 const KIND = declare({
   id: "inbox-kind",
@@ -114,22 +107,6 @@ const FIX = declare({
   opens: "dialog",
   row: "<row key>",
   what: "a row's fix: the action's own dialog, prefilled",
-});
-const ROW_ANSWER = declare({
-  id: "inbox-row-answer",
-  page: "needs-you",
-  opens: "run",
-  row: "<check id>:pass|fail",
-  what: "answer a manual check on its own row: it works, or it fails",
-  shows: "on a manual check's row",
-});
-const OPEN_CHECK = declare({
-  id: "inbox-open-check",
-  page: "needs-you",
-  opens: "view",
-  row: "<check id>",
-  what: "a manual check's row link: open that check in the Manual checks card",
-  shows: "on a manual check's row",
 });
 const OPEN_JOB = declare({
   id: "inbox-open-job",
@@ -290,7 +267,7 @@ export function mount(root) {
         type: "button",
         class: "kp-button",
         title:
-          "Run every check again now: the fleet check (about 90 s on the host), Today, the manual checks and the notices (r)",
+          "Run every check again now: the fleet check (about 90 s on the host), Today and the notices (r)",
         "aria-keyshortcuts": "r",
       },
       "Check again",
@@ -394,11 +371,6 @@ export function mount(root) {
   );
 
   const questions = mountQuestions(root);
-  const checks = mountChecks(() =>
-    /** @type {import("../inboxrows.js").Row[]} */ (inboxNow().items).filter(
-      (r) => r.check,
-    ),
-  );
   const bulk = mountBulk(root);
 
   // Worth a look: folded, not counted.
@@ -467,7 +439,6 @@ export function mount(root) {
     ...(note ? [note.el] : []),
     questions.el,
     listCard,
-    checks.el,
     bulk.el,
     snoozed,
     worth,
@@ -477,7 +448,6 @@ export function mount(root) {
     attachSegmented(listCard),
     attachRowKeys(listCard),
     () => questions.destroy(),
-    () => checks.destroy(),
     () => bulk.destroy(),
   );
   setKeys(keysLine, [
@@ -603,59 +573,6 @@ export function mount(root) {
             PUSH_ENVS,
           );
           b.addEventListener("click", () => void openBatch("deploy", f.stacks));
-          out.push(b);
-          break;
-        }
-        case "answer-check": {
-          const b = drivable(
-            rowButton({
-              role: "act",
-              label: f.label,
-              hint:
-                f.verdict === "ok"
-                  ? "Record that this check works; it leaves the list"
-                  : "Record that this check fails; it stays until you fix it and answer again",
-              primary: first && bad,
-            }),
-            ROW_ANSWER,
-            `${f.check}:${f.verdict === "ok" ? "pass" : "fail"}`,
-          );
-          b.addEventListener("click", () => {
-            for (const x of /** @type {NodeListOf<HTMLButtonElement>} */ (
-              rowOf(b).querySelectorAll("button[data-kp-action=act]")
-            ))
-              x.disabled = true;
-            void answerCheck(f.check, f.verdict).then((res) => {
-              if (res.ok) {
-                notify(
-                  f.verdict === "ok"
-                    ? "Recorded: it works."
-                    : "Recorded: it fails.",
-                  "success",
-                );
-                return;
-              }
-              for (const x of /** @type {NodeListOf<HTMLButtonElement>} */ (
-                rowOf(b).querySelectorAll("button[data-kp-action=act]")
-              ))
-                x.disabled = false;
-              notify(`${res.error.what}: ${res.error.why}.`, "warning");
-            });
-          });
-          out.push(b);
-          break;
-        }
-        case "open-check": {
-          const b = drivable(
-            rowButton({
-              role: "open",
-              label: "Open the check",
-              hint: "Go to this check in the Manual checks card, one question on the screen",
-            }),
-            OPEN_CHECK,
-            f.check,
-          );
-          b.addEventListener("click", () => checks.focusCheck(f.check));
           out.push(b);
           break;
         }
@@ -1356,7 +1273,6 @@ export function mount(root) {
       slowRead("/data/today", "today's reading", abort.signal).then((r) => {
         if (r.ok) feedToday(r.body);
       }),
-      readChecks(),
       loadNotices(),
     ]).catch(() => {});
     if (abort.signal.aborted) return;
@@ -1369,7 +1285,6 @@ export function mount(root) {
   const paintAll = () => {
     paintList();
     questions.paint();
-    checks.paint();
     bulk.paint();
   };
   /** The Snoozed fold follows what the server holds. */

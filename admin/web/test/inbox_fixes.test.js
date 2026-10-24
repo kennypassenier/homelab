@@ -299,3 +299,18 @@ test("inbox-resolved-clears-1: the Inbox header and 'needs you' use one count an
   assert.equal(s.text, "2 to deal with · 2 updates");
   assert.equal(countSplit([]).text, "");
 });
+
+test("remedy-stack-path-1: a remedy naming stacks/<name> runs on that stack, never on one called stacks", () => {
+  const known = (/** @type {string} */ a) => a === "backup" || a === "deploy";
+  const r = remedyTarget(
+    "Run `homelab backup stacks/gateway` to take a fresh copy.",
+    known,
+  );
+  assert.equal(r?.type, "run-fix");
+  assert.equal(/** @type {any} */ (r).fix.stack, "gateway");
+  const d = remedyTarget(
+    "`homelab deploy stacks/admin` (or `homelab apply`)",
+    known,
+  );
+  assert.equal(/** @type {any} */ (d).fix.stack, "admin");
+});

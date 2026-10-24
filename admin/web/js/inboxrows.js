@@ -419,9 +419,13 @@ const sentenceCase = (s) => (s ? s[0].toUpperCase() + s.slice(1) : s);
  * @returns {RowFix | null}
  */
 export function remedyTarget(remedy, known, stack = null) {
-  const cmd = /homelab\s+([a-z][a-z-]*)(?:\s+([a-z0-9][a-z0-9_-]*))?/i.exec(
-    remedy,
-  );
+  // remedy-stack-path-1: the host writes a stack as `stacks/<name>` (its
+  // directory), so "homelab backup stacks/gateway" names gateway, never a
+  // stack called "stacks".
+  const cmd =
+    /homelab\s+([a-z][a-z-]*)(?:\s+(?:stacks\/)?([a-z0-9][a-z0-9_-]*))?/i.exec(
+      remedy,
+    );
   if (cmd && known(cmd[1].toLowerCase())) {
     const target = cmd[2] && !cmd[2].startsWith("-") ? cmd[2] : (stack ?? "");
     if (target)

@@ -1,3 +1,21 @@
+# Release 4.1.1 — live since 2026-10-24 09:04
+
+- **Live (measured 2026-10-24):** host v4.1.1 (`homelab status`), dashboard
+  homelab-admin 4.1.1 (CT 120, restarted 09:04:13 by the admin deploy that
+  carried the two Cloudflare keys, 2 lines in admin.env), client 4.1.1
+  (`make install` from the tag), Kitchen 2.0.0 binary on CT 121 (09:01,
+  previous kept as kitchen.homelab-prev), registry stack redeployed with
+  its own `keep` app (container `keep` up, the first keep round copying).
+  keep_port/keep_max_mb are in the live host.toml (Kenny ran
+  `homelab host apply`, 03:31).
+- **Not rolled out on purpose** (Kenny 07:32: "enkel de homelab repo"):
+  the deploy of the 8 docker stacks that opens 5004 in their firewalls.
+- **Next:** 4.1.2 = the measurement round (bundle-measure-round-1, 148
+  rows) plus the register rows marked "later: Kenny 2026-10-24, next
+  release" (run-dialog-clock-1, median-outlier-1). First live checks still
+  open: Settings › Home address (press Check again), the keep round's copy
+  count, Kitchen 2.0.0's converted kitchen.json.
+
 # Release 4.1.0 — in flight since 2026-10-23 18:50
 
 Kenny's answers to the release form (2026-10-23 18:50, verbatim): release-go:

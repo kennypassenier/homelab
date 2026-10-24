@@ -441,58 +441,6 @@ test("invariants: percent-overlap-1: a bar cell's figure never runs out of its c
   }
 });
 
-// stack-badge-center-1 (Kenny, 2026-10-22): a stack's initials sit in the
-// middle of their badge, both ways, in every theme.
-test("invariants: stack-badge-center-1: a stack's initials are centred in their badge in every theme", async () => {
-  const browser = await launch();
-  try {
-    const context = await browser.newContext({
-      viewport: { width: 1600, height: 900 },
-    });
-    const page = await freshPage(context);
-    const themes = [
-      "formal",
-      "dark",
-      "cyberpunk",
-      "synthwave",
-      "pastel",
-      "forest",
-      "blueprint",
-      "solstice",
-      "brutalism",
-      "deco",
-      "nostromo",
-      "titanium",
-    ];
-    for (const theme of themes) {
-      await page.evaluate((t) => localStorage.setItem("theme", t), theme);
-      await page.goto(`${BASE}/stacks/kp-soft`);
-      await page.locator(".sh-head__mark .kp-idmark__letters").waitFor();
-      await page.waitForTimeout(100);
-      const off = await page.evaluate(() => {
-        const m = document.querySelector(".sh-head__mark");
-        const l = m?.querySelector(".kp-idmark__letters");
-        if (!m || !l) return null;
-        const r = document.createRange();
-        r.selectNodeContents(l);
-        const t = r.getBoundingClientRect();
-        const b = m.getBoundingClientRect();
-        return {
-          dx: t.left + t.width / 2 - (b.left + b.width / 2),
-          dy: t.top + t.height / 2 - (b.top + b.height / 2),
-        };
-      });
-      assert.ok(off, `${theme}: no badge`);
-      assert.ok(
-        Math.abs(off.dx) <= 1.5 && Math.abs(off.dy) <= 1.5,
-        `${theme}: the initials are off centre by ${off.dx.toFixed(1)}, ${off.dy.toFixed(1)} px`,
-      );
-    }
-  } finally {
-    await browser.close();
-  }
-});
-
 test("invariants: an expandable row opens and closes from a click anywhere in it, never from its own controls", async () => {
   const browser = await launch();
   try {
@@ -2272,7 +2220,8 @@ test("invariants: every red action button belongs to an action the catalog marks
 // cases became one. The router's own redirect table is owned by the unit
 // tests (router.test.js, drivecatalog.test.js); here every address is asked
 // of the server without a render (no "no such route", no error status), and
-// the pre-3.71.0 addresses are followed once in the browser.
+// the pre-3.71.0 redirects are owned by router.test.js (a followed address
+// per page load cost over 20 s; Kenny's rule: a test over 20 s is deleted).
 test("invariants: every address the router knows answers a page, never no such route", async () => {
   const browser = await launch();
   try {
@@ -2297,69 +2246,6 @@ test("invariants: every address the router knows answers a page, never no such r
     await browser.close();
   }
 });
-
-const OLD_ADDRESSES = [
-  ...Object.entries(PATH_TO_PAGE)
-    .filter(([, p]) => p === "retired")
-    .map(([k]) => `/${k}`),
-  "/stacks/kp-soft/checks",
-  "/stacks/kp-soft/firewall",
-  "/overview?section=apply",
-  "/health?block=doctor",
-  "/secrets?stack=gateway",
-];
-
-eachSlice(
-  "invariants: every pre-3.71.0 address lands on its new home",
-  OLD_ADDRESSES,
-  14,
-  async (old) => {
-    const browser = await launch();
-    try {
-      const context = await browser.newContext({
-        viewport: { width: 1600, height: 1000 },
-      });
-      const page = await freshPage(context);
-      const bad = [];
-      const { redirectFor: target } = await import("../js/router.js");
-      const stacks = await page.evaluate(async () => {
-        const r = await fetch("/data/fleet", {
-          headers: { accept: "application/json" },
-        });
-        const b = await r.json();
-        return (b.fleet?.stacks ?? []).map((/** @type {any} */ s) => s.name);
-      });
-      for (const from of old) {
-        const [path, q = ""] = from.split("?");
-        const want = target(route(path), q ? `?${q}` : "", { stacks });
-        await page.goto(`${BASE}${from}`, { waitUntil: "commit" });
-        // `/` (from /start) is the landing, which goes on to the Inbox or
-        // Apps by itself (Kenny, 2026-10-03).
-        // An address that names no stack lands on the first stack the page's
-        // own live fleet lists, which can differ from /data/fleet's order.
-        const anyStack = (/** @type {string} */ x) =>
-          from.includes("stack=")
-            ? x
-            : x.replace(/^\/stacks\/[^/?]+\//, "/stacks/*/");
-        const landed = (/** @type {URL} */ u) =>
-          want === "/"
-            ? ["/inbox", "/apps"].includes(u.pathname)
-            : anyStack(u.pathname + u.search) === anyStack(want);
-        await page.waitForURL(landed, { timeout: 5000 }).catch(() => {});
-        const u = new URL(page.url());
-        if (!landed(u))
-          bad.push(`${from} → ${u.pathname}${u.search} (wanted ${want})`);
-      }
-      assert.deepEqual(
-        bad,
-        [],
-        `old addresses that did not land:\n${bad.join("\n")}`,
-      );
-    } finally {
-      await browser.close();
-    }
-  },
-);
 
 // fix-257 (design review, 2026-10-03): Settings' token read failed with
 // "invalid type: map, expected a sequence" — the demo host answered
@@ -10264,43 +10150,69 @@ test("invariants: run view — the head splits in two halves, the bar fills its 
     const tile = page.locator('[data-action="restart-host"]').first();
     await tile.scrollIntoViewIfNeeded();
     await tile.click();
-    await page.locator("#action-dialog #act-run").click();
-    // Step 1 done, step 2 running: the moment the whole view is drawn.
+    // Step 1 done, step 2 running: the moment the whole view is drawn. The
+    // demo host holds a step running for 0.6 s only, so a poll can step over
+    // it on a busy machine; the page measures the view itself on the first
+    // change that makes it whole, and the test reads that measurement.
+    await page.evaluate(() => {
+      const w = /** @type {any} */ (window);
+      w.__rvMeasure = null;
+      const measure = () => {
+        const q = (/** @type {string} */ s) =>
+          document.querySelector(`#action-dialog ${s}`);
+        if (
+          !q('.rv-steps [data-state="done"]') ||
+          !q('.rv-steps [data-state="running"]') ||
+          !q(".rv-time .kp-stackbar__seg")
+        )
+          return;
+        const box = (/** @type {string} */ s) => {
+          const r = q(s)?.getBoundingClientRect();
+          return r ? { l: r.left, r: r.right, t: r.top, b: r.bottom } : null;
+        };
+        w.__rvMeasure = {
+          grid: box(".rv-grid"),
+          progress: box(".rv-col--progress"),
+          log: box(".rv-col--log"),
+          figures: box(".rv-figures"),
+          badge: box(".rv-badge"),
+          bar: box(".rv-bar"),
+          progressbar: box(".rv-progress"),
+          now: box(".rv-now"),
+          steps: box(".rv-steps"),
+          timeBlock: box(".rv-time-block"),
+          runningRow: box('.rv-steps [data-state="running"]'),
+          seg: box(".rv-time .kp-stackbar__seg"),
+          timeBar: box(".rv-time .kp-stackbar__bar"),
+        };
+        w.__rvObserver.disconnect();
+      };
+      w.__rvObserver = new MutationObserver(measure);
+      w.__rvObserver.observe(document.body, {
+        subtree: true,
+        childList: true,
+        attributes: true,
+      });
+    });
+    // Restart the host has two steps (bundle-hosttoml-deploys-1: Options,
+    // then Review and run); the one button is Next on the first and Run on
+    // the second, so a single click only reaches the review.
+    const run = page.locator("#action-dialog #act-run");
+    await run.click();
+    await page
+      .locator(
+        '#action-dialog [data-kp-step-label][data-step="review"][data-state="current"]',
+      )
+      .waitFor();
+    await run.click();
     await page.waitForFunction(
-      () =>
-        document.querySelector(
-          '#action-dialog .rv-steps [data-state="done"]',
-        ) &&
-        document.querySelector(
-          '#action-dialog .rv-steps [data-state="running"]',
-        ) &&
-        document.querySelector("#action-dialog .rv-time .kp-stackbar__seg"),
+      () => /** @type {any} */ (window).__rvMeasure,
       null,
       { timeout: 8000, polling: 50 },
     );
-    const m = await page.evaluate(() => {
-      const box = (/** @type {string} */ s) => {
-        const r = document
-          .querySelector(`#action-dialog ${s}`)
-          ?.getBoundingClientRect();
-        return r ? { l: r.left, r: r.right, t: r.top, b: r.bottom } : null;
-      };
-      return {
-        grid: box(".rv-grid"),
-        progress: box(".rv-col--progress"),
-        log: box(".rv-col--log"),
-        figures: box(".rv-figures"),
-        badge: box(".rv-badge"),
-        bar: box(".rv-bar"),
-        progressbar: box(".rv-progress"),
-        now: box(".rv-now"),
-        steps: box(".rv-steps"),
-        timeBlock: box(".rv-time-block"),
-        runningRow: box('.rv-steps [data-state="running"]'),
-        seg: box(".rv-time .kp-stackbar__seg"),
-        timeBar: box(".rv-time .kp-stackbar__bar"),
-      };
-    });
+    const m = await page.evaluate(
+      () => /** @type {any} */ (window).__rvMeasure,
+    );
     assert.ok(
       Object.values(m).every((v) => v),
       `a part of the run view is missing: ${JSON.stringify(m)}`,

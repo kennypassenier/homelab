@@ -113,6 +113,9 @@ function closeBar() {
   if (f instanceof HTMLElement && bar.contains(f)) f.blur();
 }
 
+/** The last bar drawn, as markup: a refresh that builds the same one skips the redraw. */
+let navSignature = "";
+
 /**
  * The nav bar, the brand link, the trail and the tab title — everything
  * the page registry (pages.js) and the Inbox drive — redrawn on their own,
@@ -136,41 +139,57 @@ function renderNav() {
   }
   const entries = navEntries(ps, r, areaOf);
   const tone = worst(items);
-  nav.replaceChildren(
-    ...entries.flatMap((e, i) => {
-      /** @type {Record<string, string>} */
-      const a = { class: "kp-nav__link", href: e.href };
-      if (e.current) a["aria-current"] = "page";
-      const p = ps?.pages.find((x) => x.path === e.href);
-      const out = [];
-      // The divider before the rarely needed areas (FLOWS.md §1).
-      if (p && p.id === "backups" && i > 0)
-        out.push(h("li", { class: "nx-nav-sep", "aria-hidden": "true" }));
-      const kids = [/** @type {Node | string} */ (e.label)];
-      if (p?.id === "needs-you" && n > 0) {
-        kids.push(
-          h(
-            "span",
-            {
-              class: `kp-badge nx-count${tone === "bad" ? " kp-badge--destructive" : " kp-badge--warning"}`,
-              "aria-label": `${n} waiting`,
-              "data-inbox-count": String(n),
-            },
-            countText(n),
-          ),
-        );
-      }
-      if (p) a["data-area"] = p.id;
-      out.push(
+  const built = entries.flatMap((e, i) => {
+    /** @type {Record<string, string>} */
+    const a = { class: "kp-nav__link", href: e.href };
+    if (e.current) a["aria-current"] = "page";
+    const p = ps?.pages.find((x) => x.path === e.href);
+    const out = [];
+    // The divider before the rarely needed areas (FLOWS.md §1).
+    if (p && p.id === "backups" && i > 0)
+      out.push(h("li", { class: "nx-nav-sep", "aria-hidden": "true" }));
+    const kids = [/** @type {Node | string} */ (e.label)];
+    if (p?.id === "needs-you" && n > 0) {
+      kids.push(
         h(
-          "li",
-          p?.id === "needs-you" ? { "data-kp-nav-keep": "" } : null,
-          h("a", a, ...kids),
+          "span",
+          {
+            class: `kp-badge nx-count${tone === "bad" ? " kp-badge--destructive" : " kp-badge--warning"}`,
+            "aria-label": `${n} waiting`,
+            "data-inbox-count": String(n),
+          },
+          countText(n),
         ),
       );
-      return out;
-    }),
-  );
+    }
+    if (p) a["data-area"] = p.id;
+    out.push(
+      h(
+        "li",
+        p?.id === "needs-you" ? { "data-kp-nav-keep": "" } : null,
+        h("a", a, ...kids),
+      ),
+    );
+    return out;
+  });
+  // A refresh that changes nothing leaves the bar alone: the first-visit tour
+  // marks a link in it (`data-kp-tour-target`), and a bar drawn again would
+  // take the mark with the old link. When the bar does change, the mark moves
+  // to the new link of the same area.
+  const signature = built
+    .map((x) => /** @type {Element} */ (x).outerHTML)
+    .join("");
+  if (signature !== navSignature) {
+    navSignature = signature;
+    const marked = nav
+      .querySelector("[data-kp-tour-target]")
+      ?.getAttribute("data-area");
+    nav.replaceChildren(...built);
+    if (marked)
+      nav
+        .querySelector(`a[data-area="${marked}"]`)
+        ?.setAttribute("data-kp-tour-target", "");
+  }
   const list = crumbs(r, location.pathname, location.search, {
     tabLabel: (t) => STACK_TABS.find((x) => x.tab === t)?.label ?? t,
   });

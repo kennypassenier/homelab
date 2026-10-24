@@ -976,7 +976,10 @@ fn fail_first_proves_only_a_test_that_fails_on_the_old_code() {
         .map(|d| d.flatten().map(|e| e.path()).collect())
         .unwrap_or_default();
     assert!(left.is_empty(), "left behind: {left:?}");
-    assert!(!git(&repo, &["worktree", "list"]).contains("ff"));
+    // Only the repository itself is listed: a random temporary path may
+    // itself contain "ff", so the count is what proves nothing was left.
+    let worktrees = git(&repo, &["worktree", "list"]);
+    assert_eq!(worktrees.lines().count(), 1, "{worktrees}");
     // 0 matched is no failure.
     let verdict = Command::new("python3")
         .arg("-c")

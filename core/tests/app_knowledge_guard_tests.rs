@@ -31,6 +31,11 @@ const PLATFORM: &[(&str, &str)] = &[
         "the registry cache homelab pulls through, host.toml",
     ),
     (
+        "keep",
+        "the keep registry homelab copies pinned digests into (registry_cache.keep_port \
+         in host.toml, core::ops::keep), and an ordinary English word",
+    ),
+    (
         "inbox",
         "the dashboard's own Inbox page at /inbox (Kenny, 2026-10-09: \"dat \
          trouwens nog altijd niet het adres /inbox heeft\"), an ordinary word \

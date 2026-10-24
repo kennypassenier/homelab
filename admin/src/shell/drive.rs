@@ -90,6 +90,9 @@ impl Default for LiveTiming {
 
 /// What the relay does while a step is held: ask the host to wait
 /// `wait_s` more seconds and hand the note to the CLI.
+/// liveview-old-tab-1: how long a reloaded stale tab has to follow again.
+const STALE_TAB_WAIT: Duration = Duration::from_secs(15);
+
 pub type Hold<'a> = &'a (dyn Fn(u64, Option<String>) + Send + Sync);
 
 struct Inner {
@@ -125,6 +128,9 @@ struct Inner {
     /// dashboard turns it on; the tests of other things build a driver
     /// with no tab).
     require_follower: std::sync::atomic::AtomicBool,
+    /// liveview-plan-runs-1: who sent the plan, with which scope and client,
+    /// so the dashboard can take its steps itself once a viewer starts it.
+    plan_sender: Mutex<Option<(String, Scope, String)>>,
 }
 
 #[derive(Clone)]
@@ -177,6 +183,7 @@ impl Driver {
                 refusals: Mutex::new(RefusalLog::default()),
                 last_follow: Mutex::new(None),
                 require_follower: std::sync::atomic::AtomicBool::new(false),
+                plan_sender: Mutex::new(None),
             }),
         }
     }
@@ -733,6 +740,7 @@ impl Driver {
         if self.inner.require_follower.load(Ordering::SeqCst)
             && needs_following_tab(&step)
             && !self.follower_fresh()
+            && !self.reload_stale_follower().await
         {
             let r = no_follower_refusal(&step);
             self.record_refusal(by, &step, &r);
@@ -743,6 +751,14 @@ impl Driver {
             self.record_refusal(by, &step, &r);
             self.publish(&step, false, Some(&r));
             return reply(Some(&r), &self.snapshot());
+        }
+        if matches!(step, UiStep::Plan { .. }) {
+            *self
+                .inner
+                .plan_sender
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner) =
+                Some((by.to_string(), scope, client_version.to_string()));
         }
         let _turn = self.inner.turn.lock().await;
         let stacks = self.stacks().await;
@@ -1007,6 +1023,10 @@ impl Driver {
                 self.publish_live("control");
             }
             Control::Pause => self.publish_live("control"),
+            Control::Start => {
+                self.publish_live("control");
+                self.spawn_plan_run();
+            }
             // The drive ended: every tab closes the dialog, as on `done`.
             // A batch the drive started stops too: the job running now
             // ends on its own, the queued ones never start.
@@ -1037,6 +1057,170 @@ impl Driver {
     }
 
     /// The announcement or the pause changed; no step was taken.
+    /// liveview-old-tab-1: a tab whose page is older than this dashboard
+    /// (open since before an update) never sends the beat it now expects,
+    /// so its Live view looked off to the server while the switch was on.
+    /// Such a tab is reloaded, as `homelab ui reload` does, and given a few
+    /// seconds to come back following. `true`: a tab follows now.
+    async fn reload_stale_follower(&self) -> bool {
+        let stale = self
+            .lock()
+            .tab_page_version
+            .as_deref()
+            .is_some_and(|v| v != env!("CARGO_PKG_VERSION"));
+        if !stale {
+            return false;
+        }
+        tracing::info!("a Live view tab runs an older page: reloading it");
+        self.publish_reload();
+        let deadline = Instant::now() + STALE_TAB_WAIT;
+        while Instant::now() < deadline {
+            if self.follower_fresh() {
+                return true;
+            }
+            tokio::time::sleep(Duration::from_millis(250)).await;
+        }
+        false
+    }
+
+    /// liveview-plan-runs-1: take the started plan's steps here, one after
+    /// the other, instead of waiting for the sender to send each one. A
+    /// final press waits until the job (or batch) it started has ended and
+    /// then closes its dialog, as `finish` does; the first refused step or
+    /// failed job ends the run and is named in the plan.
+    fn spawn_plan_run(&self) {
+        let d = self.clone();
+        tokio::spawn(async move { d.run_plan().await });
+    }
+
+    async fn run_plan(&self) {
+        let sender = self
+            .inner
+            .plan_sender
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone();
+        let Some((by, scope, client_version)) = sender else {
+            self.end_plan(Some("nobody sent this plan".into()));
+            return;
+        };
+        let quiet = |_: u64, _: Option<String>| {};
+        loop {
+            let next = {
+                let st = self.lock();
+                match st.plan.as_ref() {
+                    Some(p) if p.running && p.next < p.steps.len() => {
+                        Some((p.next, p.steps[p.next].step.clone()))
+                    }
+                    _ => None,
+                }
+            };
+            let Some((at, step)) = next else { break };
+            let answer = self
+                .step_held(&by, scope, step.clone(), &client_version, &quiet)
+                .await;
+            if answer["ok"] != Value::Bool(true) {
+                let why = answer["refusal"]["why"]
+                    .as_str()
+                    .or_else(|| answer["refusal"]["reason"].as_str())
+                    .map(str::to_string)
+                    .unwrap_or_else(|| answer["refusal"].to_string());
+                self.end_plan(Some(format!(
+                    "step {} ({}) was refused: {why}",
+                    at + 1,
+                    step.verb()
+                )));
+                return;
+            }
+            if self.lock().stopped_by.is_some() {
+                return;
+            }
+            // A step the tab took without moving the plan (it was not the
+            // plan's next) must not loop forever on the same step.
+            let moved = self.lock().plan.as_ref().is_some_and(|p| p.next > at);
+            if !moved && let Some(p) = self.lock().plan.as_mut() {
+                p.steps[at].done = true;
+                p.next = at + 1;
+            }
+            if matches!(&step, UiStep::Press { button } if button == "confirm") {
+                if let Err(why) = self.wait_for_job().await {
+                    self.end_plan(Some(format!("step {} (press confirm): {why}", at + 1)));
+                    return;
+                }
+                if self.lock().form.is_some() {
+                    let _ = self
+                        .step_held(&by, scope, UiStep::Close, &client_version, &quiet)
+                        .await;
+                }
+            }
+        }
+        self.end_plan(None);
+    }
+
+    /// Wait until the open dialog's job or batch has ended (the same reading
+    /// as the client's `finish`). `Err`: it failed, or the drive was stopped.
+    async fn wait_for_job(&self) -> Result<(), String> {
+        loop {
+            let v = serde_json::to_value(self.snapshot()).unwrap_or(Value::Null);
+            if !v["stopped_by"].is_null() {
+                return Err(format!("stopped by {}", v["stopped_by"]));
+            }
+            let f = &v["form"];
+            if f.is_null() {
+                return Ok(());
+            }
+            let b = &f["edit"]["result"]["progress"];
+            if !b.is_null() {
+                if b["done"].as_bool().unwrap_or(false) {
+                    let failed = b["failed"].as_u64().unwrap_or(0);
+                    return if failed > 0 {
+                        Err(format!("{failed} job(s) of the batch failed"))
+                    } else {
+                        Ok(())
+                    };
+                }
+            } else {
+                let j = &f["job"];
+                if j.is_null() {
+                    return Ok(());
+                }
+                match j["state"].as_str().unwrap_or("") {
+                    "queued" | "running" | "" => {}
+                    "done" | "deferred" => return Ok(()),
+                    other => {
+                        return Err(format!(
+                            "job {} ended {other}{}",
+                            j["job"],
+                            j["message"]
+                                .as_str()
+                                .map(|m| format!(": {m}"))
+                                .unwrap_or_default()
+                        ));
+                    }
+                }
+            }
+            tokio::time::sleep(Duration::from_secs(2)).await;
+        }
+    }
+
+    /// The plan stopped running: finished, or failed with `why`.
+    fn end_plan(&self, why: Option<String>) {
+        {
+            let mut st = self.lock();
+            if let Some(p) = st.plan.as_mut() {
+                p.running = false;
+                p.finished = why.is_none();
+                p.failed = why.clone();
+            }
+            st.seq += 1;
+        }
+        match &why {
+            Some(w) => tracing::warn!(why = %w, "a Live view plan ended early"),
+            None => tracing::info!("a Live view plan ran to its end"),
+        }
+        self.publish_live("plan");
+    }
+
     fn publish_live(&self, kind: &str) {
         let state = self.snapshot();
         self.inner.publish.publish(

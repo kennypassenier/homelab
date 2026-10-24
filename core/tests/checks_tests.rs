@@ -159,6 +159,7 @@ fn a_service_whose_deepest_check_is_a_port_is_refused() {
         probes: Vec::new(),
         busy_check: None,
         checks: vec![Check {
+            off: None,
             name: "poort antwoordt".into(),
             command: "curl -s -o /dev/null -w %{http_code} http://127.0.0.1:8096/".into(),
             expect: Expect::MustBePresent,
@@ -189,6 +190,7 @@ fn a_shallow_check_must_declare_its_blind_spot() {
         busy_check: None,
         checks: vec![
             Check {
+                off: None,
                 name: "poort antwoordt".into(),
                 command: "true".into(),
                 expect: Expect::MustBePresent,
@@ -196,6 +198,7 @@ fn a_shallow_check_must_declare_its_blind_spot() {
                 blind_spot: None,
             },
             Check {
+                off: None,
                 name: "films".into(),
                 command: "true".into(),
                 expect: Expect::NeverDecreases,
@@ -350,6 +353,7 @@ fn checks_with_probe_id(app: &str, id: &str) -> ServiceChecks {
         url: None,
         settings: Vec::new(),
         probes: vec![Probe {
+            off: None,
             name: format!("probe for {app}"),
             command: "true".into(),
             healthy: Healthy::Equals("0".into()),

@@ -21,6 +21,7 @@ fn texts() -> StackTexts {
 
 fn jelly_check() -> Check {
     Check {
+        off: None,
         name: "films".to_string(),
         command: "echo 1".to_string(),
         expect: Expect::NeverDecreases,
@@ -31,6 +32,7 @@ fn jelly_check() -> Check {
 
 fn jelly_probe() -> Probe {
     Probe {
+        off: None,
         name: "errors".to_string(),
         command: "echo 0".to_string(),
         healthy: Healthy::Equals("0".to_string()),
@@ -74,6 +76,7 @@ fn a_new_check_is_added_and_the_old_one_is_kept() {
     edit.checks.as_mut().unwrap().push(CheckEdit {
         origin: None,
         check: Check {
+            off: None,
             name: "series".to_string(),
             command: "echo 2".to_string(),
             expect: Expect::NeverDecreases,
@@ -108,6 +111,7 @@ fn an_app_with_no_checks_yml_gets_one_created() {
         checks: Some(vec![CheckEdit {
             origin: None,
             check: Check {
+                off: None,
                 name: "queue".to_string(),
                 command: "echo 0".to_string(),
                 expect: Expect::MustBePresent,
@@ -147,6 +151,7 @@ fn a_shallow_check_needs_a_blind_spot() {
         checks: Some(vec![CheckEdit {
             origin: None,
             check: Check {
+                off: None,
                 name: "port open".to_string(),
                 command: "nc -z localhost 8989".to_string(),
                 expect: Expect::MustBePresent,
@@ -265,6 +270,7 @@ fn a_check_with_no_name_or_command_is_refused() {
         checks: Some(vec![CheckEdit {
             origin: None,
             check: Check {
+                off: None,
                 name: String::new(),
                 command: String::new(),
                 expect: Expect::MustBePresent,

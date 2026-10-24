@@ -91,6 +91,9 @@ pub struct Check {
     /// precisely the one that gets mistaken for proof.
     #[serde(default)]
     pub blind_spot: Option<String>,
+    /// check-turn-off-1: `off: "<why>"` turns the check off; nothing runs it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub off: Option<String>,
 }
 
 /// The whole file that sits beside a service.
@@ -241,6 +244,12 @@ pub struct Probe {
     /// probes; `manualchecks.rs`'s doc comment says why.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub id: Option<String>,
+    /// check-turn-off-1 (Kenny, 2026-10-24: "ik wil een check ook kunnen
+    /// uitschakelen, niet enkel snoozen"): `off: "<why>"` turns the probe off
+    /// without deleting it; the fleet check no longer reads it, and the
+    /// reason stays in the stack's own file.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub off: Option<String>,
 }
 
 /// What a probe's reading must be. Written in checks.yml as a map with one

@@ -72,6 +72,13 @@ pub struct Plan {
     pub next: usize,
     /// A step was taken that was not the plan's next.
     pub changed: bool,
+    /// liveview-plan-runs-1: the dashboard itself takes the steps, one after
+    /// the other, once a viewer pressed Start; the sender only follows.
+    pub running: bool,
+    /// Why the run ended early: the step and what refused it.
+    pub failed: Option<String>,
+    /// Every step was taken (and every job it started ended).
+    pub finished: bool,
 }
 
 /// Does this step wait while a viewer has paused? Everything that changes
@@ -270,6 +277,9 @@ pub fn new_plan(steps: &[UiStep], by: &str, st: &DriveState) -> Result<Plan, Ref
             .collect(),
         next: 0,
         changed: false,
+        running: false,
+        failed: None,
+        finished: false,
     })
 }
 
@@ -299,6 +309,8 @@ pub enum Control {
     Pause,
     Continue,
     Stop,
+    /// liveview-plan-runs-1: run the announced plan (Kenny's play button).
+    Start,
 }
 
 impl Control {
@@ -307,6 +319,7 @@ impl Control {
             Control::Pause => "pause",
             Control::Continue => "continue",
             Control::Stop => "stop",
+            Control::Start => "start",
         }
     }
 }
@@ -415,6 +428,30 @@ impl DriveState {
                     return refuse("nothing is paused", "Pause holds Claude's next step");
                 }
                 Ok(())
+            }
+            Control::Start => {
+                if self.stopped_by.is_some() {
+                    return refuse(
+                        "the drive was stopped",
+                        "Claude acknowledges the stop (`homelab ui done`) and sends the plan again",
+                    );
+                }
+                match self.plan.as_mut() {
+                    None => refuse(
+                        "there is no plan to start",
+                        "Claude sends one with `homelab ui plan`",
+                    ),
+                    Some(p) if p.running => refuse("the plan runs already", "Pause or Stop it"),
+                    Some(p) if p.finished || p.next >= p.steps.len() => {
+                        refuse("every step of the plan was taken", "nothing left to run")
+                    }
+                    Some(p) => {
+                        p.running = true;
+                        p.failed = None;
+                        self.seq += 1;
+                        Ok(())
+                    }
+                }
             }
             Control::Stop => {
                 if !driving {
@@ -605,5 +642,35 @@ mod tests {
         // Nothing to pause or stop once nobody drives.
         assert!(st.control(Control::Pause, "kenny", 100).is_err());
         assert!(st.control(Control::Stop, "kenny", 100).is_err());
+    }
+
+    /// liveview-plan-runs-1: Start runs an announced plan once; it is
+    /// refused with no plan, while it runs, once every step was taken, and
+    /// after a Stop.
+    #[test]
+    fn liveview_plan_runs_1_start_runs_the_announced_plan_once() {
+        let mut st = DriveState::default();
+        assert!(st.control(Control::Start, "kenny", 100).is_err(), "no plan");
+        let plan = new_plan(&[goto("/jobs"), UiStep::Close], "wsl", &st).unwrap();
+        assert!(!plan.running && !plan.finished && plan.failed.is_none());
+        st.plan = Some(plan);
+        let seq = st.seq;
+        st.control(Control::Start, "kenny", 100).unwrap();
+        assert!(st.plan.as_ref().unwrap().running);
+        assert_eq!(st.seq, seq + 1);
+        assert!(
+            st.control(Control::Start, "kenny", 100).is_err(),
+            "runs already"
+        );
+        let p = st.plan.as_mut().unwrap();
+        p.running = false;
+        p.next = 2;
+        assert!(
+            st.control(Control::Start, "kenny", 100).is_err(),
+            "all taken"
+        );
+        st.plan.as_mut().unwrap().next = 0;
+        st.stopped_by = Some("kenny".into());
+        assert!(st.control(Control::Start, "kenny", 100).is_err(), "stopped");
     }
 }

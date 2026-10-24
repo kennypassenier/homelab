@@ -28,7 +28,9 @@ pub fn register(
 ) {
     state.probes.retain(|_, r| r.stack != stack);
     for (app, sc) in checks {
-        for p in &sc.probes {
+        // check-turn-off-1: a probe turned off is not registered, so no
+        // fleet check reads it and no finding names it.
+        for p in sc.probes.iter().filter(|p| p.off.is_none()) {
             // fix-182: an explicit `id:` is a stable reference the same way
             // a manual check's is, but probes carry no answer of their own
             // (the whole stack's probe set is replaced on every deploy,

@@ -422,11 +422,22 @@ async fn run(explicit_host: Option<String>) {
             // the dialog open on its screen) before anything reaches the
             // tab; review L3: the orchestration lives in `ui_drive`, tested.
             use homelab_client::ui_drive::End;
+            let is_plan = matches!(step, UiStep::Plan { .. });
             let driven = homelab_client::ui_drive::drive(&mut line, step, &cache).await;
             for n in &driven.notes {
                 eprintln!("note: {n}");
             }
             match driven.end {
+                // liveview-plan-runs-1: an announced plan is run by the
+                // dashboard once a viewer presses Start; follow it to its end.
+                End::Print(r) if is_plan && r.ok => {
+                    if !json {
+                        println!(
+                            "plan announced: Kenny presses Start in the dashboard, which then takes every step itself"
+                        );
+                    }
+                    ui_follow_plan(&host, &token, json).await;
+                }
                 End::Print(r) => ui_print(
                     &homelab_proto::RpcResponse {
                         id: 0,
@@ -2631,6 +2642,18 @@ async fn ui_finish(host: &str, token: &str, json: bool) -> UiStep {
             tokio::time::sleep(std::time::Duration::from_secs(2)).await;
             continue;
         };
+        // restart-wait-1: a job that restarts the host answers "no dashboard
+        // is attached" for a few seconds while the link comes back.
+        if homelab_client::ui_cli::dashboard_away(&reply.message) {
+            misses += 1;
+            if misses >= 30 {
+                die(
+                    "ui finish: the dashboard did not come back for a minute; `homelab ui state` shows where it is",
+                );
+            }
+            tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+            continue;
+        }
         misses = 0;
         match finish_next(&reply.message).unwrap_or_else(|e| die(&e)) {
             FinishNext::Wait(line) => {
@@ -2651,6 +2674,53 @@ async fn ui_finish(host: &str, token: &str, json: bool) -> UiStep {
                 }
                 return UiStep::Done;
             }
+        }
+    }
+}
+
+/// liveview-plan-runs-1: follow a plan the dashboard runs itself, printing
+/// each change, until it finished (exit 0), failed or was stopped (exit 1).
+async fn ui_follow_plan(host: &str, token: &str, json: bool) {
+    use homelab_client::ui_cli::{PlanNext, dashboard_away, plan_next};
+    let mut last = String::new();
+    let mut misses = 0;
+    loop {
+        let reply = rpc_reply(
+            host,
+            token,
+            Command::Ui {
+                step: UiStep::State,
+                client_version: CLIENT_VERSION.to_string(),
+            },
+        )
+        .await;
+        let Some(reply) = reply.filter(|r| !dashboard_away(&r.message)) else {
+            misses += 1;
+            if misses >= 90 {
+                die(
+                    "ui plan: the dashboard did not answer for three minutes; `homelab ui state` shows where the plan is",
+                );
+            }
+            tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+            continue;
+        };
+        misses = 0;
+        match plan_next(&reply.message).unwrap_or_else(|e| die(&e)) {
+            PlanNext::Wait(line) => {
+                if !json && line != last {
+                    println!("{line}");
+                }
+                last = line;
+                tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+            }
+            PlanNext::Done(line) => {
+                if !json {
+                    println!("{line}");
+                }
+                return;
+            }
+            PlanNext::Failed(why) | PlanNext::Stopped(why) => die(&format!("ui plan: {why}")),
+            PlanNext::Gone => return,
         }
     }
 }

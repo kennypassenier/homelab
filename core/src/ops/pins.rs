@@ -429,6 +429,14 @@ pub fn is_current(state: &HostState, stack: &str, container: &str) -> bool {
     let Some(st) = state.stacks.get(stack) else {
         return false;
     };
+    // native-cadvisor-update-1 (Kenny, 2026-10-24: "admin/cadvisor" and
+    // "kitchen/cadvisor" offered as updates, refused by the Update flow): a
+    // native-only container runs no docker of its own; a cAdvisor there is
+    // the golden template's leftover that its next deploy sets aside
+    // (native-cadvisor-1, `guards::CADVISOR_RETIRE`), never an app to update.
+    if container == "cadvisor" && st.manifest.as_ref().is_some_and(|m| m.native_only) {
+        return false;
+    }
     let declared = st.apps.iter().any(|a| a == container)
         || st
             .manifest

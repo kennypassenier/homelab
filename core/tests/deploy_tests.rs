@@ -4216,6 +4216,7 @@ fn warmup_setup(exec: &MockExecutor) -> DeploySpec {
         "syncthing".into(),
         homelab_core::checks::ServiceChecks {
             checks: vec![homelab_core::checks::Check {
+                off: None,
                 name: "is klaar".into(),
                 command: "curl -s ready-probe".into(),
                 expect: homelab_core::checks::Expect::MustMatch,

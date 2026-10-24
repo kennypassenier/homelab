@@ -3506,6 +3506,7 @@ async fn t69_a_regressed_check_fails_the_deploy_when_nobody_is_watching() {
             busy_check: None,
             settings: Vec::new(),
             checks: vec![homelab_core::checks::Check {
+                off: None,
                 name: "routes".into(),
                 command: "echo 28".into(),
                 expect: homelab_core::checks::Expect::NeverDecreases,
@@ -3699,6 +3700,7 @@ async fn t69_an_operator_who_says_yes_lets_the_deploy_finish() {
             busy_check: None,
             settings: Vec::new(),
             checks: vec![homelab_core::checks::Check {
+                off: None,
                 name: "routes".into(),
                 command: "echo 28".into(),
                 expect: homelab_core::checks::Expect::NeverDecreases,

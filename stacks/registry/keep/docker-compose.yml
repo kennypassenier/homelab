@@ -1,0 +1,55 @@
+# keep-storage-name-1: the KEEP registry, an app of its own beside the
+# pull-through caches (stacks/registry/registry). O7 names a config directory
+# after the app that owns it, and this app's directory is backed up while the
+# caches' is not, so it cannot share the `registry` app.
+#
+# pinned-digest-pruned-1: not a cache: no `proxy:` section, so nothing in it
+# ever expires by itself, and it is written only by the host's keep round
+# (core/src/ops/keep.rs), which copies every digest a stack file pins into it
+# and drops the ones no stack pins any more. That is what lets a rebuild or a
+# disaster recovery pull a pinned digest the upstream has deleted (Super
+# Productivity keeps only its last 17 builds). Its directory,
+# /appdata/registry/keep-config, IS backed up: unlike a cache layer, a kept
+# copy may be the only copy left. Size: only the current pins, capped by
+# `keep_max_mb` in host.toml (12 GB) and 80 digests in all.
+
+services:
+  keep:
+    # The same image as the caches (stacks/registry/registry).
+    image: registry:3.1.2@sha256:ddf754342cfc8acc51a56d5d0ab6af06826461864460636d8bd5c546dab2a7b8
+    container_name: keep
+    restart: unless-stopped
+    environment:
+      REGISTRY_STORAGE_DELETE_ENABLED: "true"
+      REGISTRY_LOG_LEVEL: "warn"
+      REGISTRY_STORAGE_FILESYSTEM_ROOTDIRECTORY: /var/lib/registry
+    volumes:
+      - /appdata/registry/keep-config:/var/lib/registry
+      - ./keep.yml:/etc/distribution/config.yml:ro
+    ports:
+      - "5004:5000"
+    networks:
+      - registry_net
+    labels:
+      - com.homelab.update.policy=manual
+      - com.homelab.update.upstream=github.com/distribution/distribution
+
+  # The copy tool of the keep round: `docker compose run --rm keep-copy copy
+  # --all --preserve-digests docker://<origin> docker://127.0.0.1:5004/...`.
+  # skopeo copies the manifest and every blob without a docker daemon and
+  # keeps the manifest digest, which a `docker pull` + `docker push` of a
+  # multi-platform image does not guarantee. Profile `tool`: `compose up`
+  # never starts it. Host network so 127.0.0.1:5004 is the keep registry.
+  keep-copy:
+    image: quay.io/skopeo/stable:v1.22.3@sha256:24940638e4abb0edfedc78a680554f316069d0212a00159276759421a059e611
+    profiles: ["tool"]
+    entrypoint: ["skopeo"]
+    network_mode: host
+    labels:
+      - com.homelab.update.policy=manual
+      - com.homelab.update.upstream=github.com/containers/skopeo
+
+networks:
+  registry_net:
+    external: true
+    name: registry_net

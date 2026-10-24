@@ -622,3 +622,35 @@ async fn fix_registry_1_newer_pinned_versions_are_prefetched_into_the_cache() {
             .all(|t| *t <= homelab_core::ops::pins::PREFETCH_PULL_TIMEOUT_S + 30)
     );
 }
+
+/// native-cadvisor-update-1 (Kenny, 2026-10-24): `admin/cadvisor` and
+/// `kitchen/cadvisor` were offered as updates on two native-only stacks,
+/// and the Update flow refused them. A cAdvisor there is the template's
+/// leftover the next deploy sets aside (native-cadvisor-1); it is never
+/// reported, while a docker stack's cAdvisor still is.
+#[test]
+fn native_cadvisor_update_1_a_native_only_stacks_cadvisor_is_not_an_update() {
+    let mut s = fleet_after_retirements();
+    let raw = std::fs::read_to_string(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../stacks/admin/lxc-compose.yml"),
+    )
+    .unwrap();
+    let m: homelab_core::manifest::StackManifest = serde_yaml::from_str(&raw).unwrap();
+    assert!(m.native_only);
+    let mut admin = stack(120, "admin");
+    admin.manifest = Some(m);
+    s.stacks.insert("admin".into(), admin);
+    s.running_images.insert(
+        "admin".into(),
+        BTreeMap::from([(
+            "cadvisor".to_string(),
+            recorded(
+                "gcr.io/cadvisor/cadvisor:v0.55.1@sha256:aa",
+                Some("github.com/google/cadvisor"),
+            ),
+        )]),
+    );
+    let f = evaluate_pins(&s);
+    let subjects: Vec<&str> = f.iter().map(|x| x.subject.as_str()).collect();
+    assert_eq!(subjects, vec!["metrics/cadvisor"], "{f:#?}");
+}

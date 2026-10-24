@@ -178,6 +178,26 @@ impl Actions {
 
     /// The commit of `images` for `stack`, then the deploy of exactly that
     /// commit; the short commit id.
+    /// flow-stage-by-stage-1: the commit alone; the deploy is its own stage.
+    async fn commit_only(
+        &self,
+        stack: &str,
+        images: BTreeMap<String, String>,
+        subject: String,
+        view: &JobView,
+    ) -> Result<String, String> {
+        let committer = self
+            .inner
+            .committer
+            .get()
+            .cloned()
+            .ok_or_else(|| "the dashboard has no stack editor to commit with".to_string())?;
+        committer
+            .commit_images(stack.to_string(), images, subject, view.origin.clone())
+            .await
+            .map_err(|r| format!("the commit to stacks/{stack} was refused: {}", r.why))
+    }
+
     async fn commit_and_deploy(
         &self,
         stack: &str,
@@ -244,10 +264,12 @@ impl Actions {
             deferred: None,
         };
 
-        // 3 · Back up every touched stack; a failure stops everything.
-        flow.set("backup", RowState::Run, None, self.now());
-        self.show_flow(view, &flow);
+        // 3 · Back up every touched stack, one row each; a failure stops
+        // everything (flow-stage-by-stage-1: stage by stage, stack by stack).
         for s in &stacks {
+            let row = format!("backup:{s}");
+            flow.set(&row, RowState::Run, None, self.now());
+            self.show_flow(view, &flow);
             let r = self
                 .run_sub(
                     ActionRequest {
@@ -272,34 +294,27 @@ impl Actions {
                 Err(Stop::Link(e)) => Some(format!("The backup of {s}: {e}. Nothing was changed.")),
             };
             if let Some(why) = why {
-                flow.fail("backup", why.clone(), self.now());
+                flow.fail(&row, why.clone(), self.now());
                 self.show_flow(view, &flow);
                 self.keep_flow_record(view, &flow, "failed").await;
                 return Ok(done(false, why));
             }
+            flow.set(&row, RowState::Ok, Some("backed up".into()), self.now());
+            self.show_flow(view, &flow);
         }
-        flow.set(
-            "backup",
-            RowState::Ok,
-            Some(format!("{} backed up", stacks.len())),
-            self.now(),
-        );
-        self.show_flow(view, &flow);
 
-        // 4 · Commit the new image lines and deploy that commit; pull the
-        // apps on a moving tag.
+        // 4a · Commit the new image lines, one stack after the other.
         flow.deploy_at = Some(self.now());
         let pin_stacks: Vec<String> = stacks
             .iter()
             .filter(|s| !updateflow::images_to(&items, s).is_empty())
             .cloned()
             .collect();
-        if !pin_stacks.is_empty() {
-            flow.set("commit", RowState::Run, None, self.now());
-            flow.set("deploy", RowState::Run, None, self.now());
-            self.show_flow(view, &flow);
-        }
+        let mut shas: BTreeMap<String, String> = BTreeMap::new();
         for s in &pin_stacks {
+            let row = format!("commit:{s}");
+            flow.set(&row, RowState::Run, None, self.now());
+            self.show_flow(view, &flow);
             let subject = format!(
                 "Update {} (Update flow)",
                 items
@@ -309,83 +324,97 @@ impl Actions {
                     .collect::<Vec<_>>()
                     .join(", ")
             );
-            if let Err(why) = self
-                .commit_and_deploy(
-                    s,
-                    updateflow::images_to(&items, s),
-                    subject,
-                    view,
-                    &mut tracker,
-                    &mut flow,
-                )
+            match self
+                .commit_only(s, updateflow::images_to(&items, s), subject, view)
                 .await
             {
-                let row = if why.contains("commit to") || why.contains("stack editor") {
-                    "commit"
-                } else {
-                    "deploy"
-                };
-                if row == "deploy" {
-                    flow.set("commit", RowState::Ok, None, self.now());
+                Ok(sha) => {
+                    let short: String = sha.chars().take(7).collect();
+                    flow.commits.push(short.clone());
+                    flow.set(&row, RowState::Ok, Some(short), self.now());
+                    shas.insert(s.clone(), sha);
                 }
-                let why = format!(
-                    "{why}. {}",
-                    if row == "commit" {
-                        "Nothing was deployed."
-                    } else {
-                        "Roll back… on the result puts the earlier version back."
-                    }
-                );
-                flow.fail(row, why.clone(), self.now());
-                self.show_flow(view, &flow);
-                self.keep_flow_record(view, &flow, "failed").await;
-                return Ok(done(false, why));
+                Err(why) => {
+                    let why = format!(
+                        "{why}. {}",
+                        if shas.is_empty() {
+                            "Nothing was deployed."
+                        } else {
+                            "Nothing was deployed; the commits already made stay in the repository."
+                        }
+                    );
+                    flow.fail(&row, why.clone(), self.now());
+                    self.show_flow(view, &flow);
+                    self.keep_flow_record(view, &flow, "failed").await;
+                    return Ok(done(false, why));
+                }
             }
+            self.show_flow(view, &flow);
         }
-        if !pin_stacks.is_empty() {
-            flow.set(
-                "commit",
-                RowState::Ok,
-                Some(flow.commits.join(", ")),
-                self.now(),
-            );
-        }
-        flow.set("deploy", RowState::Run, None, self.now());
-        self.show_flow(view, &flow);
-        for i in items.iter().filter(|i| i.kind == ItemKind::Pull) {
-            let r = self
-                .run_sub(
-                    ActionRequest {
-                        stack: i.stack.clone(),
-                        action: ActionKind::Update,
-                        args: ActionArgs {
-                            app: i.app.clone(),
-                            ..Default::default()
-                        },
+
+        // 4b · Deploy, one stack after the other: its commit, then a pull of
+        // its apps on a moving tag.
+        for s in &stacks {
+            let row = format!("deploy:{s}");
+            flow.set(&row, RowState::Run, None, self.now());
+            self.show_flow(view, &flow);
+            let mut subs: Vec<ActionRequest> = Vec::new();
+            if let Some(sha) = shas.get(s) {
+                subs.push(ActionRequest {
+                    stack: s.clone(),
+                    action: ActionKind::DeployCommit,
+                    args: ActionArgs {
+                        commit: Some(sha.clone()),
+                        ..Default::default()
                     },
-                    view,
-                    &mut tracker,
-                )
-                .await;
-            let why = match r {
-                Ok(r) if r.ok => None,
-                Ok(r) => Some(format!(
-                    "The update of {} ended: {}. The host's update rolls an unhealthy app back by itself.",
-                    i.stack, r.message
-                )),
-                Err(Stop::Refused(r)) => {
-                    Some(format!("The update of {} was refused: {}.", i.stack, r.why))
-                }
-                Err(Stop::Link(e)) => Some(format!("The update of {}: {e}.", i.stack)),
-            };
-            if let Some(why) = why {
-                flow.fail("deploy", why.clone(), self.now());
-                self.show_flow(view, &flow);
-                self.keep_flow_record(view, &flow, "failed").await;
-                return Ok(done(false, why));
+                });
             }
+            for i in items
+                .iter()
+                .filter(|i| &i.stack == s && i.kind == ItemKind::Pull)
+            {
+                subs.push(ActionRequest {
+                    stack: i.stack.clone(),
+                    action: ActionKind::Update,
+                    args: ActionArgs {
+                        app: i.app.clone(),
+                        ..Default::default()
+                    },
+                });
+            }
+            for sub in subs {
+                let what = if sub.action == ActionKind::DeployCommit {
+                    "deploy"
+                } else {
+                    "update"
+                };
+                let r = self.run_sub(sub, view, &mut tracker).await;
+                let why = match r {
+                    Ok(r) if r.ok => None,
+                    Ok(r) => Some(format!("The {what} of {s} ended: {}", r.message)),
+                    Err(Stop::Refused(r)) => {
+                        Some(format!("The {what} of {s} was refused: {}", r.why))
+                    }
+                    Err(Stop::Link(e)) => Some(format!("The {what} of {s}: {e}")),
+                };
+                if let Some(why) = why {
+                    let why = format!(
+                        "{why}. {}",
+                        if what == "deploy" {
+                            "Roll back… on the result puts the earlier version back."
+                        } else {
+                            "The host's update rolls an unhealthy app back by itself."
+                        }
+                    );
+                    flow.fail(&row, why.clone(), self.now());
+                    self.show_flow(view, &flow);
+                    self.keep_flow_record(view, &flow, "failed").await;
+                    return Ok(done(false, why));
+                }
+            }
+            flow.set(&row, RowState::Ok, None, self.now());
+            self.show_flow(view, &flow);
         }
-        flow.set("deploy", RowState::Ok, None, self.now());
 
         // 5 · Verify: every container of every touched stack runs, and every
         // pinned app runs its new version, within 2 min.

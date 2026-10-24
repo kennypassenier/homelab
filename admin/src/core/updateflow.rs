@@ -219,26 +219,38 @@ impl FlowView {
             started_at: None,
             took_s: None,
         };
-        let mut rows = vec![row(
-            "backup",
-            3,
-            format!("Back up {}", stacks.join(", ")),
-            "a restic snapshot of each app's data; if it fails, nothing else happens",
-        )];
+        // flow-stage-by-stage-1 (Kenny, 2026-10-24): one row per stack in
+        // each stage, run in that order: every backup, then every commit,
+        // then every deploy, then the checks. Exactly one row runs at a time.
+        let mut rows: Vec<FlowRow> = stacks
+            .iter()
+            .map(|s| {
+                row(
+                    &format!("backup:{s}"),
+                    3,
+                    format!("Back up {s}"),
+                    "a restic snapshot of each app's data; if it fails, nothing else happens",
+                )
+            })
+            .collect();
         if pins {
+            for s in stacks.iter().filter(|s| !images_to(&items, s).is_empty()) {
+                rows.push(row(
+                    &format!("commit:{s}"),
+                    4,
+                    format!("Commit the new version for {s}"),
+                    "the image line moves to the new version, pushed to the repository",
+                ));
+            }
+        }
+        for s in &stacks {
             rows.push(row(
-                "commit",
+                &format!("deploy:{s}"),
                 4,
-                "Change the files and commit".into(),
-                "the image line moves to the new version, pushed to the repository",
+                format!("Deploy {s}: pull the image and restart"),
+                "only the chosen apps restart; nothing else",
             ));
         }
-        rows.push(row(
-            "deploy",
-            4,
-            "Deploy: pull the image and restart".into(),
-            "only the chosen apps restart; nothing else",
-        ));
         rows.push(row(
             "health",
             5,

@@ -1,0 +1,14 @@
+# keep-storage-name-1: the keep registry's own checks (moved from
+# stacks/registry/registry/checks.yml with the app).
+checks:
+  - name: "digests the keep registry holds"
+    command: >-
+      curl -s -m 15 'http://127.0.0.1:5004/v2/_catalog?n=1000' |
+      grep -o '"[a-z0-9./_-]*"' | grep -vc repositories
+    expect: never_decreases
+    layer: application
+    blind_spot: >-
+      Counts repositories, not tags: two digests of one image are one here.
+      The host's keep round logs the exact figure ("[keep] N pinned
+      digest(s)"); this only proves the registry answers and still holds
+      something.

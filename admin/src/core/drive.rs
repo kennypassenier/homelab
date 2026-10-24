@@ -1344,6 +1344,12 @@ impl DriveState {
     /// The silence after which the driver no longer holds the tabs: the
     /// idle limit, or [`PLAN_HOLD_S`] while a plan has steps left.
     pub fn idle_limit(&self) -> i64 {
+        // liveview-plan-runs-1: a plan the dashboard runs itself is silent
+        // while a long job works (a batch of eight deploys); it is never
+        // given back for that silence, only by its own end or a Stop.
+        if self.plan.as_ref().is_some_and(|p| p.running) {
+            return i64::MAX / 4;
+        }
         if self.plan_pending() {
             self.idle_s.max(PLAN_HOLD_S)
         } else {

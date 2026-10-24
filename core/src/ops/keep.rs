@@ -35,11 +35,11 @@ use crate::state::HostState;
 
 /// The compose app on the registry stack that holds the `keep` registry and
 /// the `keep-copy` tool (skopeo, profile `tool`).
-pub const KEEP_APP_DIR: &str = "/opt/registry/registry";
+pub const KEEP_APP_DIR: &str = "/opt/registry/keep";
 pub const KEEP_SERVICE: &str = "keep";
 pub const KEEP_COPY_SERVICE: &str = "keep-copy";
 /// Where the keep registry's data lives inside CT 117 (a stack-file mount).
-pub const KEEP_DATA_DIR: &str = "/appdata/registry/registry-keep";
+pub const KEEP_DATA_DIR: &str = "/appdata/registry/keep-config";
 /// Never more kept digests than this, whatever the stack files say.
 pub const KEEP_MAX_COPIES: usize = 80;
 /// At most this many new copies per round; the rest wait for the next one.

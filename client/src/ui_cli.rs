@@ -104,6 +104,73 @@ pub enum FinishNext {
     Stopped(String),
 }
 
+/// liveview-plan-runs-1: where an announced plan stands, from a `state`
+/// answer. The dashboard takes the steps itself once a viewer presses
+/// Start; `homelab ui plan` only follows it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PlanNext {
+    /// Still to start or running: the line to show (printed when it changes).
+    Wait(String),
+    /// Every step was taken and every job it started ended.
+    Done(String),
+    /// The run ended early at a named step (exit 1).
+    Failed(String),
+    /// A viewer pressed Stop (exit 1).
+    Stopped(String),
+    /// No plan any more (a `done` elsewhere let go of it).
+    Gone,
+}
+
+/// The next move of `ui plan`'s follow loop.
+pub fn plan_next(message: &str) -> Result<PlanNext, String> {
+    let v: Value =
+        serde_json::from_str(message).map_err(|_| format!("the host answered: {message}"))?;
+    let st = &v["state"];
+    if !st["stopped_by"].is_null() {
+        return Ok(PlanNext::Stopped(format!(
+            "stopped by {}: the plan ended and every next step is refused until `homelab ui done`",
+            text(&st["stopped_by"])
+        )));
+    }
+    let p = &st["plan"];
+    if p.is_null() {
+        return Ok(PlanNext::Gone);
+    }
+    let steps = p["steps"].as_array().cloned().unwrap_or_default();
+    let next = p["next"].as_u64().unwrap_or(0) as usize;
+    let count = format!("{} of {} steps done", next.min(steps.len()), steps.len());
+    if let Some(why) = p["failed"].as_str() {
+        return Ok(PlanNext::Failed(format!(
+            "plan   {count} · ended early: {why}"
+        )));
+    }
+    if p["finished"].as_bool().unwrap_or(false) {
+        return Ok(PlanNext::Done(format!("plan   {count} · finished")));
+    }
+    let how = if p["running"].as_bool().unwrap_or(false) {
+        "running".to_string()
+    } else {
+        "waiting for Start in the dashboard".to_string()
+    };
+    let now = steps
+        .get(next)
+        .map(|s| format!(" · now {}", text(&s["text"])))
+        .unwrap_or_default();
+    let job = &st["form"]["job"];
+    let job = if job.is_null() {
+        String::new()
+    } else {
+        format!(" · job {} {}", text(&job["job"]), text(&job["state"]))
+    };
+    Ok(PlanNext::Wait(format!("plan   {count} · {how}{now}{job}")))
+}
+
+/// A reply that only says the dashboard is away for a moment (a step that
+/// restarts it or the host): wait and ask again (restart-wait-1).
+pub fn dashboard_away(message: &str) -> bool {
+    message.contains("no dashboard is attached to the host")
+}
+
 /// The next move of `finish` from the dashboard's answer to `state`.
 pub fn finish_next(message: &str) -> Result<FinishNext, String> {
     let v: Value =
@@ -801,6 +868,51 @@ mod tests {
         assert!(parse_call(&words("finish now")).is_err());
         assert!(STEPS.contains("finish"));
         assert!(STEPS.contains("press confirm [--wait]"));
+    }
+
+    /// liveview-plan-runs-1 / restart-wait-1: `ui plan` follows the plan the
+    /// dashboard runs, and a dashboard away for a restart is waited out.
+    #[test]
+    fn liveview_plan_runs_1_the_follow_loop_reads_the_plan() {
+        let st = |plan: serde_json::Value| {
+            serde_json::json!({"ok": true, "state": {"plan": plan, "form": null}}).to_string()
+        };
+        let steps =
+            serde_json::json!([{"text": "open Deploy · registry"}, {"text": "press Confirm"}]);
+        assert_eq!(
+            plan_next(&st(serde_json::json!({"steps": steps, "next": 0, "running": false}))).unwrap(),
+            PlanNext::Wait(
+                "plan   0 of 2 steps done · waiting for Start in the dashboard · now open Deploy · registry"
+                    .into()
+            )
+        );
+        assert!(matches!(
+            plan_next(&st(serde_json::json!({"steps": steps, "next": 1, "running": true}))).unwrap(),
+            PlanNext::Wait(l) if l.contains("running") && l.contains("now press Confirm")
+        ));
+        assert!(matches!(
+            plan_next(&st(
+                serde_json::json!({"steps": steps, "next": 2, "finished": true})
+            ))
+            .unwrap(),
+            PlanNext::Done(_)
+        ));
+        assert!(matches!(
+            plan_next(&st(serde_json::json!({"steps": steps, "next": 1, "failed": "step 2 (press) was refused: x"}))).unwrap(),
+            PlanNext::Failed(l) if l.contains("step 2 (press) was refused")
+        ));
+        assert_eq!(
+            plan_next(&st(serde_json::Value::Null)).unwrap(),
+            PlanNext::Gone
+        );
+        let stopped =
+            serde_json::json!({"ok": true, "state": {"stopped_by": "kenny", "plan": null}})
+                .to_string();
+        assert!(matches!(plan_next(&stopped).unwrap(), PlanNext::Stopped(_)));
+        assert!(dashboard_away(
+            "refused: ui done — no dashboard is attached to the host"
+        ));
+        assert!(!dashboard_away("{\"ok\": true}"));
     }
 
     #[test]

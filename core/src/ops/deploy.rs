@@ -534,7 +534,8 @@ pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
         }
         for (app, sc) in &spec.checks {
             let mut readings = Vec::new();
-            for c in &sc.checks {
+            // check-turn-off-1: a check turned off is never run.
+            for c in sc.checks.iter().filter(|c| c.off.is_none()) {
                 let out = pct_sh(exec, m.vmid, &c.command, 120)
                     .await
                     .map(|o| o.stdout.trim().to_string())
@@ -3765,7 +3766,7 @@ pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
         let mut origin: Vec<(String, String)> = Vec::new();
         for (app, sc) in &spec.checks {
             let before = baseline.get(app);
-            for c in &sc.checks {
+            for c in sc.checks.iter().filter(|c| c.off.is_none()) {
                 origin.push((app.clone(), c.command.clone()));
                 let after = pct_sh(exec, m.vmid, &c.command, 120)
                     .await

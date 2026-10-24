@@ -277,6 +277,14 @@ async fn redesign_flows_6_one_job_backs_up_commits_deploys_and_verifies() {
     assert!(deploy < verify, "{ran:?}");
     assert_eq!(w.commits.0.lock().unwrap()[0].1["api/api"], TO);
     assert!(rows(&j).iter().all(|(_, s)| s == "ok"), "{:?}", rows(&j));
+    // flow-stage-by-stage-1: one row per stack in each stage.
+    assert_eq!(
+        rows(&j)
+            .iter()
+            .map(|(id, _)| id.as_str())
+            .collect::<Vec<_>>(),
+        ["backup:media", "commit:media", "deploy:media", "health"]
+    );
     let undo = w.actions.update_records(Some("media")).await;
     assert_eq!(undo.len(), 1);
     assert_eq!(undo[0].job, j.job);
@@ -360,4 +368,41 @@ fn redesign_flows_6_the_undo_offers_seven_days() {
     let u = updateflow::undoable(&all, Some("media"), now);
     assert_eq!(u.len(), 1);
     assert_eq!(u[0].at, now - 86_400);
+}
+
+/// flow-stage-by-stage-1 (Kenny, 2026-10-24: "maak dat dan voor vijf apps
+/// stap 1-5, app per app. Ga dan verder naar de volgende stage"): every
+/// stack's backup, then every commit, then every deploy, then the checks;
+/// a pull-only stack has no commit row.
+#[test]
+fn flow_stage_by_stage_1_rows_go_stage_by_stage_and_stack_by_stack() {
+    let pin = |stack: &str| UpdateItem {
+        stack: stack.into(),
+        kind: ItemKind::Pin,
+        key: Some("api/api".into()),
+        app: Some("api".into()),
+        from: Some("a".into()),
+        to: Some("b".into()),
+    };
+    let pull = UpdateItem {
+        stack: "media".into(),
+        kind: ItemKind::Pull,
+        key: None,
+        app: Some("jellyfin".into()),
+        from: None,
+        to: None,
+    };
+    let f = updateflow::FlowView::new(vec![pin("gateway"), pull, pin("downloader")]);
+    let ids: Vec<&str> = f.rows.iter().map(|r| r.id.as_str()).collect();
+    let stacks = updateflow::stacks_of(&f.items);
+    let mut want: Vec<String> = stacks.iter().map(|s| format!("backup:{s}")).collect();
+    want.extend(
+        stacks
+            .iter()
+            .filter(|s| s.as_str() != "media")
+            .map(|s| format!("commit:{s}")),
+    );
+    want.extend(stacks.iter().map(|s| format!("deploy:{s}")));
+    want.push("health".into());
+    assert_eq!(ids, want.iter().map(String::as_str).collect::<Vec<_>>());
 }

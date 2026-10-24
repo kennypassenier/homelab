@@ -11,6 +11,7 @@ use homelab_core::state::HostState;
 
 fn missing_files() -> Probe {
     Probe {
+        off: None,
         name: "torrents on missingFiles".into(),
         command: "echo 0".into(),
         healthy: Healthy::Equals("0".into()),
@@ -177,4 +178,28 @@ fn the_repositorys_probes_are_well_formed() {
         }
     }
     let _ = seen;
+}
+
+/// check-turn-off-1 (Kenny, 2026-10-24: "ik wil een check ook kunnen
+/// uitschakelen, niet enkel snoozen"): `off: "<why>"` in checks.yml keeps the
+/// probe in the file but out of every fleet check, so it names no finding.
+#[test]
+fn check_turn_off_1_a_probe_turned_off_is_never_read_nor_reported() {
+    let yaml = "name: n\ncommand: c\nhealthy: {equals: ok}\nlayer: application\noff: stalled torrents are expected\n";
+    let p: Probe = serde_yaml::from_str(yaml).unwrap();
+    assert_eq!(p.off.as_deref(), Some("stalled torrents are expected"));
+    let mut off = missing_files();
+    off.off = Some("not wanted".into());
+    let mut s = HostState::default();
+    register(&mut s, "downloader", 105, &checks(vec![off], None));
+    assert!(s.probes.is_empty(), "an off probe is not registered");
+    let id = id_for("downloader", "qbittorrent", "torrents on missingFiles");
+    let f = evaluate(
+        &s,
+        &[ProbeReading {
+            id,
+            reading: Ok("3".into()),
+        }],
+    );
+    assert!(f.is_empty(), "{f:?}");
 }

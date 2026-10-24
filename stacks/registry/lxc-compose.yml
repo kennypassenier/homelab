@@ -77,12 +77,13 @@ storage:
   # pinned-digest-pruned-1: the keep registry's data. Backed up, unlike the
   # cache: when an upstream has deleted a pinned digest this is the only copy.
   # Bounded by the keep round (80 digests, `keep_max_mb` 12 GB).
-  - host_path: /appdata/registry/registry-keep
-    mount_point: /appdata/registry/registry-keep
+  # keep-storage-name-1: its own app, so its directory is named after it (O7).
+  - host_path: /appdata/registry/keep-config
+    mount_point: /appdata/registry/keep-config
     host_owner_uid: 100000
-    app: registry
+    app: keep
 
-apps: [registry]
+apps: [registry, keep]
 
 # No route: this is spoken to by Docker daemons on the LAN, never by a
 # browser from outside, and it holds no secrets worth reaching for.

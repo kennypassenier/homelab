@@ -790,6 +790,9 @@ fn liveview_final_button_a_running_plan_keeps_its_dialog_open() {
             steps: vec![step(true), step(false)],
             next: 1,
             changed: false,
+            running: false,
+            failed: None,
+            finished: false,
         }),
         ..DriveState::default()
     };

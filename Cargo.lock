@@ -1248,7 +1248,7 @@ version = "4.1.1"
 dependencies = [
  "aws-lc-rs",
  "axum",
- "base64 0.22.1",
+ "base64 0.23.1",
  "chassis",
  "futures-util",
  "homelab-client",
@@ -1272,7 +1272,7 @@ dependencies = [
 name = "homelab-client"
 version = "4.1.1"
 dependencies = [
- "base64 0.22.1",
+ "base64 0.23.1",
  "crossterm",
  "futures-util",
  "homelab-core",
@@ -1295,7 +1295,7 @@ name = "homelab-core"
 version = "4.1.1"
 dependencies = [
  "async-trait",
- "base64 0.22.1",
+ "base64 0.23.1",
  "futures-util",
  "homelab-core",
  "minisign-verify",
@@ -1316,7 +1316,7 @@ dependencies = [
  "async-trait",
  "axum",
  "axum-server",
- "base64 0.22.1",
+ "base64 0.23.1",
  "futures-util",
  "homelab-core",
  "homelab-proto",

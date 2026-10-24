@@ -419,6 +419,24 @@ export function mountFollow(region, ctx) {
     }
   };
 
+  /**
+   * Marks an announced step's target and sends the pointer to it, as soon as
+   * the target is on the page (a dialog the step before opened may still be
+   * drawing: looked for every 150 ms for 2 s while the announcement stands).
+   * @param {import("./driveview.js").DriveEvent} ev
+   */
+  const highlightAnnounced = async (ev) => {
+    const a = ev.state.announce;
+    if (!a || !following) return;
+    for (let i = 0; i < 14; i += 1) {
+      if (!following || state?.announce?.id !== a.id) return;
+      if (findTarget(a.step, ctl, state)) break;
+      await sleep(150);
+    }
+    if (following && state?.announce?.id === a.id && state)
+      await run({ op: "highlight", step: a.step }, state);
+  };
+
   /** @param {import("./driveview.js").DriveEvent} ev */
   const play = async (ev) => {
     local.page = location.pathname;
@@ -499,6 +517,14 @@ export function mountFollow(region, ctx) {
       unmark();
     }
     paint();
+    // An announcement is not a step: the pointer starts for it at once. It
+    // used to wait in the queue behind the animation of the step before it
+    // (typing, a dropdown's list, a press flash), so the countdown was half
+    // spent when the pointer set off and it hardly seemed to glide.
+    if (ev.kind === "announce") {
+      void highlightAnnounced(ev);
+      return;
+    }
     queue = queue.then(() => play(ev)).catch(() => {});
   });
   // The live channel came back (the dashboard restarted, e.g. during its

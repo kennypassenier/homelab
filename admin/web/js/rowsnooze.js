@@ -6,7 +6,7 @@
 
 import { send } from "./act.js";
 import { fetchJson } from "./dom.js";
-import { changed, setSnoozes } from "./inboxlist.js";
+import { changed, setSnoozes, snoozeKeyOf } from "./inboxlist.js";
 import { listen } from "./store.js";
 
 /** How far ahead the picker reaches (the server takes a year). */
@@ -68,7 +68,7 @@ export async function snoozeRow(row, untilS, remind) {
     "POST",
     "/data/inbox-snoozes",
     {
-      key: row.snoozeKey ?? row.key,
+      key: snoozeKeyOf(row),
       until: untilS,
       title: row.title,
       ...(row.href?.startsWith("/") ? { href: row.href } : {}),

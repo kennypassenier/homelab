@@ -206,11 +206,17 @@ export function mountHomeAddress(box, report) {
       setAgo(read, s.read_at);
       return;
     }
-    now.textContent = s.current ?? "Unknown";
+    now.textContent = s.current ?? "Not read";
     nowNote.textContent = s.current
       ? `Asked of ${s.lookup_url}`
       : "The address service did not answer";
-    held.textContent = s.held.length ? s.held.join(", ") : "None";
+    // home-address-none-1: an unread value says so; "none" only when
+    // Cloudflare was read and holds no single-address bypass.
+    held.textContent = s.held.length
+      ? s.held.join(", ")
+      : s.state === "not_configured"
+        ? "Not read"
+        : "No address";
     heldNote.textContent = s.held.length
       ? `${s.policies.length} bypass ${s.policies.length === 1 ? "rule" : "rules"} with a single address`
       : s.state === "not_configured"

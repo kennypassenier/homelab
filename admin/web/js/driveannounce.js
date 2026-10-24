@@ -33,7 +33,7 @@ import {
  */
 
 /**
- * @param {"pause" | "continue" | "stop"} what
+ * @param {"pause" | "continue" | "stop" | "start"} what
  * @param {number | null} seq the `seq` this button was last drawn against
  *   (fix-185): a press that arrives once the state has moved on (a delayed
  *   or duplicated click) is refused rather than acted on against whatever
@@ -179,6 +179,27 @@ export function makePlan() {
     "changed",
   );
   const counter = h("span", { class: "drive-plan__counter" });
+  // liveview-plan-runs-1 (Kenny's play button): the plan is shown first and
+  // runs only when Kenny presses Start; the dashboard then takes every step
+  // itself, waiting for each job, and names the step that failed.
+  /** @type {number | null} */
+  let seq = null;
+  const start = /** @type {HTMLButtonElement} */ (
+    h(
+      "button",
+      {
+        type: "button",
+        class: "kp-button kp-button--primary kp-button--sm drive-plan__start",
+        title: "Run every step of the plan, one after the other",
+      },
+      "Start",
+    )
+  );
+  start.addEventListener("click", () => {
+    start.disabled = true;
+    void press("start", seq);
+  });
+  const status = h("p", { class: "drive-plan__status", role: "status" });
   const el = h(
     "aside",
     { class: "drive-plan", "aria-label": "Claude's plan", hidden: "" },
@@ -190,6 +211,7 @@ export function makePlan() {
       changed,
     ),
     list,
+    h("div", { class: "drive-plan__foot" }, status, start),
   );
   /** @type {string} */
   let drawn = "";
@@ -198,8 +220,20 @@ export function makePlan() {
     const p = on ? planList(s) : null;
     el.hidden = !p;
     if (!p) return;
+    seq = s?.seq ?? null;
     counter.textContent = p.counter;
     changed.classList.toggle("drive-announce--off", !p.changed);
+    const waiting = !p.running && !p.finished && !p.failed;
+    start.hidden = !waiting;
+    start.disabled = !waiting;
+    status.textContent = p.failed
+      ? `Stopped: ${p.failed}`
+      : p.finished
+        ? "Every step ran."
+        : p.running
+          ? "Running every step by itself."
+          : "Press Start to run every step.";
+    status.dataset.tone = p.failed ? "danger" : p.finished ? "success" : "";
     const key = JSON.stringify(p.items);
     if (key === drawn) return;
     drawn = key;

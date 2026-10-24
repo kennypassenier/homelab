@@ -6,8 +6,8 @@
 // touches the page.
 
 import { formatDateTime, humanDuration } from "./format.js";
+import { byteFigure, stepStates } from "./progress.js";
 import {
-  bytesView,
   elapsedS,
   estimateRange,
   finished,
@@ -18,22 +18,13 @@ import {
   timeView,
 } from "./jobs.js";
 
-/** @type {Record<string, import("/static/kp/js/steplist.js").StepState>} */
-const STEP_STATE = {
-  ok: "done",
-  bad: "failed",
-  run: "running",
-  wait: "pending",
-  skip: "skipped",
-};
-
 /**
  * @typedef {{id?: string, title: string, desc: string, state: string,
  *   note?: string, time?: string}} StepRow
  * @typedef {{rows: StepRow[], times: Map<string, number>,
  *   historyLen?: number | null, now: number, progressAt: number | null,
  *   label: (action: string) => string, human: (n: number) => string | null,
- *   fixedFigures?: boolean}} RunCtx
+ *   fixedFigures?: boolean, byRows?: boolean}} RunCtx
  */
 
 /**
@@ -64,14 +55,26 @@ export function runSpec(j, ctx) {
     o && j.state !== "failed" && o.tone !== "success" ? o : null;
   const tv = timeView(rows, times, est?.median ?? null, ran, ended);
   // The bar never disappears: a finished run shows where it ended.
-  const pct = ended
-    ? j.state === "done"
-      ? 100
-      : fig.total
-        ? Math.round((fig.done / fig.total) * 100)
-        : 0
-    : v.percent;
-  const moved = bytesView(j.bytes, (n) => ctx.human(n));
+  // `byRows`: a flow that draws its own rows (the Update flow) counts the
+  // rows that finished, not the host's step events.
+  const finishedRows = rows.filter((r) => r.state === "ok").length;
+  const pct = ctx.byRows
+    ? ended
+      ? j.state === "done"
+        ? 100
+        : Math.round((finishedRows / Math.max(1, rows.length)) * 100)
+      : Math.min(
+          99,
+          Math.round((finishedRows / Math.max(1, rows.length)) * 100),
+        )
+    : ended
+      ? j.state === "done"
+        ? 100
+        : fig.total
+          ? Math.round((fig.done / fig.total) * 100)
+          : 0
+      : v.percent;
+  const moved = byteFigure(j.bytes);
   return {
     head: {
       title: v.title,
@@ -82,9 +85,9 @@ export function runSpec(j, ctx) {
       restarts: v.restarts,
     },
     figures: {
-      done: fig.done,
-      of: fig.of,
-      note: fig.note,
+      done: ctx.byRows ? finishedRows : fig.done,
+      of: ctx.byRows ? String(rows.length) : fig.of,
+      note: ctx.byRows ? "" : fig.note,
       took: ran == null ? "not started" : humanDuration(ran),
       median: med.text,
       delta: med.delta,
@@ -95,36 +98,38 @@ export function runSpec(j, ctx) {
         ? j.state === "done"
           ? "Finished."
           : `Stopped at ${pct} %.`
-        : v.percent == null
-          ? "Working; no earlier run to estimate from yet."
-          : `${v.percent} % done, by ${p?.m ? "steps" : "the time earlier runs took"}.`,
-      bytes: ended ? null : moved,
+        : ctx.byRows
+          ? `${pct} % done, by steps.`
+          : v.percent == null
+            ? "Working; no earlier run to estimate from yet."
+            : `${v.percent} % done, by ${p?.m ? "steps" : "the time earlier runs took"}.`,
+      bytes: ended || !moved || moved.kind === "complete" ? null : moved,
       line: ended
         ? null
         : {
-            step:
-              p && fig.total
+            step: ctx.byRows
+              ? Math.min(rows.length, finishedRows + 1)
+              : p && fig.total
                 ? Math.min(fig.total, Math.max(1, p.n))
                 : undefined,
-            steps: fig.total || undefined,
-            done: j.bytes ? j.bytes.done : undefined,
-            total: j.bytes?.total ? j.bytes.total : undefined,
+            steps: (ctx.byRows ? rows.length : fig.total) || undefined,
+            bytes: j.bytes ?? null,
             etaSeconds:
               left.s != undefined && !left.late
                 ? Math.round(left.s)
                 : undefined,
           },
     },
-    steps: rows.map((r, i) => {
+    steps: stepStates(rows).map((r, i) => {
       const s = times.get(r.title);
       return {
         id: r.id ?? String(i),
         title: r.title,
         note: r.note ? `${r.desc} · ${r.note}` : r.desc,
-        state: STEP_STATE[r.state] ?? "pending",
+        state: r.state,
         ...(r.time
           ? { time: r.time }
-          : s != null && r.state !== "wait" && r.state !== "skip"
+          : s != null && r.state !== "pending" && r.state !== "skipped"
             ? { time: humanDuration(s) }
             : {}),
       };

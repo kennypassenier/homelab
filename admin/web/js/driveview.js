@@ -32,7 +32,8 @@
  *   total_ms: number, left_ms: number}} DriveAnnounce
  * @typedef {{step: DriveStep, text: string, done: boolean}} DrivePlanStep
  * @typedef {{by: string, steps: DrivePlanStep[], next: number,
- *   changed: boolean}} DrivePlan
+ *   changed: boolean, running?: boolean, finished?: boolean,
+ *   failed?: string | null}} DrivePlan
  * @typedef {{active: boolean, by: string | null, seq: number, page: string,
  *   form: DriveForm | null, last_at: number, idle_s: number,
  *   announce?: DriveAnnounce | null, paused_by?: string | null,
@@ -461,7 +462,8 @@ export function announceView(s, left, driving = false) {
  * The plan beside the page: each step with its mark, the current one being
  * the plan's next; null without a plan.
  * @param {DriveState | null} s
- * @returns {{changed: boolean, counter: string,
+ * @returns {{changed: boolean, counter: string, running: boolean,
+ *   finished: boolean, failed: string | null,
  *   items: {text: string, mark: "done" | "current" | "todo"}[]} | null}
  */
 export function planList(s) {
@@ -470,6 +472,10 @@ export function planList(s) {
   return {
     changed: p.changed,
     counter: planCounter(s),
+    // liveview-plan-runs-1: the dashboard runs the plan once Start is pressed.
+    running: !!p.running,
+    finished: !!p.finished,
+    failed: p.failed ?? null,
     items: p.steps.map((x, i) => ({
       text: x.text,
       mark: x.done ? "done" : i === p.next ? "current" : "todo",

@@ -4,6 +4,7 @@ import { at } from "./support/clock.js";
 import {
   inboxNow,
   setSnoozes,
+  snoozeKeyOf,
   snoozedNow,
   wireInbox,
 } from "../js/inboxlist.js";
@@ -40,4 +41,22 @@ test("a snoozed row leaves the list and the counter until its moment", (t) => {
   setSnoozes([{ key, until: NOW - 1, title: "t", remind: false, set_at: NOW }]);
   assert.equal(inboxNow().items.length, 1);
   assert.equal(snoozedNow().length, 0);
+});
+
+test("snooze-key-1: a row's key past what the server keeps is snoozed under a short, stable digest", () => {
+  assert.equal(snoozeKeyOf({ key: "notice:7" }), "notice:7");
+  assert.equal(
+    snoozeKeyOf({ key: "x", snoozeKey: "notice-group:a" }),
+    "notice-group:a",
+  );
+  const long = "update:" + "media/jellyfin,".repeat(40);
+  const k = snoozeKeyOf({ key: long });
+  assert.ok(k.length <= 200, `${k.length}`);
+  assert.equal(snoozeKeyOf({ key: long }), k, "the same row, the same key");
+  assert.notEqual(
+    snoozeKeyOf({ key: long + "x" }),
+    k,
+    "another row, another key",
+  );
+  assert.ok(snoozeKeyOf({ key: "" }).length > 0, "never empty");
 });

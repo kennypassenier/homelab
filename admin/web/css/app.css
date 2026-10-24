@@ -760,8 +760,9 @@ tr.unread td:first-child {
    ("verschijnen mag, verschuiven niet"). The panel is no card of its own
    inside a dialog (run-dialog-double-frame-1): `.kp-card` only on a page. */
 .rv {
-  --rv-steps-h: 15rem;
-  --rv-result-h: 9rem;
+  --rv-steps-h: clamp(11rem, 30vh, 26rem);
+  --rv-log-h: clamp(11rem, 36vh, 30rem);
+  --rv-result-h: clamp(6.5rem, 14vh, 12rem);
   container: rv / inline-size;
   position: relative;
   display: grid;
@@ -788,8 +789,19 @@ tr.unread td:first-child {
 .rv-head {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
-  gap: 0.5rem;
+  gap: var(--kp-space-sm, 0.5rem) var(--kp-space-lg, 1.5rem);
   align-items: start;
+}
+.rv-head__main {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--kp-space-sm, 0.5rem) var(--kp-space-lg, 1.5rem);
+  align-items: start;
+  min-inline-size: 0;
+}
+.rv-head__id {
+  min-inline-size: 0;
+  min-block-size: 2.8em;
 }
 .rv-title,
 .rv-sub {
@@ -801,9 +813,18 @@ tr.unread td:first-child {
   gap: var(--kp-space-lg, 1.5rem);
   align-items: start;
 }
-@container rv (min-width: 46rem) {
+@container rv (min-width: 64rem) {
+  .rv-head {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  }
+  .rv-head__main {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+  .rv-head .rv-badge {
+    justify-self: end;
+  }
   .rv-grid {
-    grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr);
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   }
 }
 .rv-col {
@@ -812,8 +833,6 @@ tr.unread td:first-child {
   align-content: start;
   min-inline-size: 0;
 }
-/* A note is one line that never wraps (its full words are its title): a
-   note that grows or shrinks would move everything below it. */
 .rv-note {
   margin: 0;
   min-inline-size: 0;
@@ -821,22 +840,31 @@ tr.unread td:first-child {
   overflow: hidden;
   text-overflow: ellipsis;
 }
-/* The three figures: side by side where the column is wide, one column
-   (labels over one left edge) where it is narrow, like a drawer. */
 .rv-figures {
   display: grid;
-  grid-template-columns: minmax(0, 1fr);
-  gap: var(--kp-space-xs, 0.25rem) var(--kp-space-md, 0.75rem);
+  grid-template-columns: repeat(3, auto);
+  gap: var(--kp-space-xs, 0.25rem) var(--kp-space-lg, 1.5rem);
   margin: 0;
+  justify-content: start;
 }
-@container rv (min-width: 34rem) {
+.rv-figure {
+  display: grid;
+  align-content: start;
+  gap: 2px;
+  min-inline-size: 0;
+}
+/* On a phone the figures are three rows, each label with its value on the
+   same line, so no value wraps into three. */
+@container rv (max-width: 36rem) {
   .rv-figures {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-columns: minmax(0, 1fr);
+    gap: var(--kp-space-xs, 0.25rem);
   }
   .rv-figure {
-    display: grid;
-    align-content: start;
-    gap: 2px;
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: var(--kp-space-sm, 0.5rem);
   }
 }
 .rv-figure dt {
@@ -849,18 +877,21 @@ tr.unread td:first-child {
 .rv-fact {
   font-variant-numeric: tabular-nums;
 }
-.rv-steps-note {
-  block-size: 1.4em;
+.rv-col .rv-steps-note {
+  white-space: normal;
+  block-size: 2.9em;
+  overflow: hidden auto;
+  text-overflow: clip;
 }
 /* The bar and the time left: the bar takes the track, the dial its own
    fixed square; the dial is dimmed, never removed, when no estimate runs. */
 .rv-now {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 4.5rem;
+  grid-template-columns: minmax(0, 1fr) 6rem;
   gap: var(--kp-space-md, 0.75rem);
   align-items: start;
-  block-size: 7.5rem;
-  overflow: hidden auto;
+  block-size: 6.5rem;
+  overflow: visible;
 }
 .rv-bar {
   display: grid;
@@ -927,7 +958,7 @@ tr.unread td:first-child {
   display: none;
 }
 .rv-time-area {
-  block-size: var(--rv-time-h, 9rem);
+  block-size: var(--rv-time-h, clamp(6rem, 14vh, 12rem));
   overflow: auto;
   overscroll-behavior: contain;
   min-inline-size: 0;
@@ -935,8 +966,11 @@ tr.unread td:first-child {
 .rv-time {
   margin: 0;
 }
-.rv-time-note {
-  block-size: 1.4em;
+.rv-col .rv-time-note {
+  white-space: normal;
+  block-size: 3.9em;
+  overflow: hidden auto;
+  text-overflow: clip;
 }
 /* The log column: the log at a fixed height, then the result area that
    holds everything which can appear (a failure and its reason, the host's
@@ -1647,6 +1681,31 @@ td.stack-flags {
   color: var(--card-foreground, var(--foreground));
 }
 .drive-plan[hidden] {
+  display: none;
+}
+/* liveview-plan-runs-1: the plan's state and its Start button, one row
+   whose height never changes between its states. */
+.drive-plan__foot {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  min-block-size: 2rem;
+  margin-block-start: 8px;
+}
+.drive-plan__status {
+  margin: 0;
+  font-size: 0.85em;
+  color: var(--muted-foreground);
+  overflow-wrap: anywhere;
+}
+.drive-plan__status[data-tone="danger"] {
+  color: var(--destructive, currentColor);
+}
+.drive-plan__status[data-tone="success"] {
+  color: var(--success, currentColor);
+}
+.drive-plan__start[hidden] {
   display: none;
 }
 .drive-plan__head {
@@ -2955,4 +3014,49 @@ details.nx-card--fold[open] > summary::before {
    right after the number inside it, and nothing reaches the neighbour. */
 .kp-bar-cell {
   --kp-bar-cell-value: 7ch;
+}
+
+/* A running job's dialog (Kenny, 2026-10-24): about 90 % of the window, split
+   in two halves, as tall as the window allows; the body scrolls and the
+   footer with Open in Jobs and Close stays whole at the bottom. */
+.act-dialog.act-dialog--run,
+#action-dialog.act-dialog--run,
+#batch-dialog.act-dialog--run {
+  inline-size: 90vw;
+  max-inline-size: 90vw;
+  --kp-dialog-max-width: 90vw;
+}
+@media (max-width: 48rem) {
+  .act-dialog.act-dialog--run,
+  #action-dialog.act-dialog--run,
+  #batch-dialog.act-dialog--run {
+    inline-size: 96vw;
+    max-inline-size: 96vw;
+  }
+}
+.act-dialog--run .kp-dialog__actions {
+  position: sticky;
+  inset-block-end: -1px;
+  z-index: 6;
+  margin-block-start: var(--kp-space-md, 0.75rem);
+  padding-block: 0.75rem 1px;
+  background: var(--popover);
+  border-block-start: 1px solid var(--border);
+}
+/* The log's toolbar is one row: the search takes what is left, the tools
+   keep their size, so the log gets the height. */
+.rv-log .kp-logviewer__bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--kp-space-xs, 0.25rem) var(--kp-space-sm, 0.5rem);
+}
+.rv-log .kp-logviewer__search {
+  flex: 1 1 auto;
+  min-inline-size: min-content;
+}
+.rv-log .kp-logviewer__tools {
+  flex: 0 0 auto;
+  min-inline-size: min-content;
+  max-inline-size: 100%;
 }

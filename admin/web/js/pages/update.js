@@ -251,8 +251,6 @@ const scopeKey = (s) =>
 
 const now = () => Date.now() / 1000;
 
-/** How long a finished update stays on its flow's page after a reload. */
-const SHOW_DONE_S = 30 * 60;
 /** How long a finished update can be rolled back (the backup of step 3 stays for 7 days). */
 const UNDO_WINDOW_S = 7 * 24 * 3600;
 
@@ -573,7 +571,7 @@ export function mount(root, scope) {
   const view = buildRunView({
     label: "The running update",
     compact: true,
-    logHeight: "13rem",
+    logHeight: "12rem",
     logOpts: {
       whole: false,
       label: "What the host did",
@@ -671,7 +669,10 @@ export function mount(root, scope) {
     runCard.el.hidden = !(step >= 3 && step <= 5);
     doneCard.hidden = step !== 6;
   };
-  const chosenItems = () => items.filter((i) => chosen.has(i.id));
+  /** A move that can be made from here: a homelab release moves with the host. @param {import("../updateflow.js").Item} i */
+  const selectable = (i) => i.kind !== "release";
+  const chosenItems = () =>
+    items.filter((i) => chosen.has(i.id) && selectable(i));
 
   // ---- step 1 ----------------------------------------------------------
   /** @type {Map<string, string>} when each pin's newer version was released */
@@ -797,6 +798,24 @@ export function mount(root, scope) {
     attachVersionDeltas(table.tbody);
     table.ready();
     attachDisabledReasons(table.tbody);
+    // With nothing to choose, the header's select-all has nothing to select.
+    const all = table.wrap.querySelector(
+      'thead input[type="checkbox"][data-kp-select-all], thead input[type="checkbox"]',
+    );
+    if (all instanceof HTMLInputElement) {
+      all.disabled = !items.some(selectable);
+      if (all.disabled) {
+        all.checked = false;
+        all.indeterminate = false;
+        all.setAttribute(
+          "data-kp-disabled-reason",
+          "Nothing here can be updated from this page",
+        );
+      } else {
+        all.disabled = false;
+        all.removeAttribute("data-kp-disabled-reason");
+      }
+    }
     for (const b of /** @type {NodeListOf<HTMLInputElement>} */ (
       table.tbody.querySelectorAll("input[data-kp-select-row]")
     )) {
@@ -810,7 +829,29 @@ export function mount(root, scope) {
   };
   bar.addEventListener("kp-selection-change", (e) => {
     const ks = new Set(/** @type {CustomEvent} */ (e).detail.keys);
+    // Select-all ticks every row's box, the ones that cannot be chosen too:
+    // those are taken out again, so a move the row says cannot be made from
+    // here is never in the selection (and never sent).
+    const refused = items.filter((i) => !selectable(i) && ks.has(i.id));
+    for (const i of refused) {
+      ks.delete(i.id);
+      const box = table.tbody.querySelector(
+        `input[data-kp-select-row][value="${CSS.escape(i.id)}"]`,
+      );
+      if (box instanceof HTMLInputElement && box.checked) {
+        box.checked = false;
+        box.dispatchEvent(new Event("change", { bubbles: true }));
+      }
+    }
     chosen = ks;
+    // The header box reads "all" once every row that can be chosen is.
+    const head = table.wrap.querySelector('thead input[type="checkbox"]');
+    const can = items.filter(selectable);
+    if (head instanceof HTMLInputElement && can.length) {
+      const n = can.filter((i) => ks.has(i.id)).length;
+      head.checked = n === can.length;
+      head.indeterminate = n > 0 && n < can.length;
+    }
     syncGates();
     paintChosen();
   });
@@ -1342,57 +1383,29 @@ export function mount(root, scope) {
     });
     // The shared view's figures, bar and time bar, with the flow's own rows
     // as the steps: "Steps done" counts the rows that finished.
-    const finishedRows = rows.filter((r) => r.state === "ok").length;
-    const spec = runSpec(j, {
-      rows: rows.map((r) => ({
-        id: r.id,
-        title: r.title,
-        desc: r.desc,
-        state: r.state,
-        note: r.note,
-        time: r.time,
-      })),
-      times: new Map(
-        (flow?.rows ?? [])
-          .filter((/** @type {any} */ r) => r.took_s != null)
-          .map((/** @type {any} */ r) => [r.title, Number(r.took_s)]),
-      ),
-      historyLen: null,
-      now: now(),
-      progressAt: act.progressAt.get(j.job) ?? null,
-      label: actionLabel,
-      human: (n) => humanBytes(n),
-    });
-    const pct = done
-      ? j.state === "done"
-        ? 100
-        : Math.round((finishedRows / rows.length) * 100)
-      : Math.min(99, Math.round((finishedRows / rows.length) * 100));
-    view.paint({
-      ...spec,
-      figures: spec.figures && {
-        ...spec.figures,
-        done: finishedRows,
-        of: String(rows.length),
-        note: "",
-      },
-      bar: spec.bar && {
-        ...spec.bar,
-        percent: pct,
-        note: !done
-          ? `${pct} % done, by steps.`
-          : j.state === "done"
-            ? "Finished."
-            : `Stopped at ${pct} %.`,
-        line: done
-          ? null
-          : {
-              ...(spec.bar.line ?? {}),
-              step: Math.min(rows.length, finishedRows + 1),
-              steps: rows.length,
-            },
-      },
-    });
+    view.paint(
+      runSpec(j, {
+        byRows: true,
+        rows: rows.map((r) => ({
+          id: r.id,
+          title: r.title,
+          desc: r.desc,
+          state: r.state,
+          note: r.note,
+          time: r.time,
+        })),
+        times: new Map(
+          (flow?.rows ?? [])
+            .filter((/** @type {any} */ r) => r.took_s != null)
+            .map((/** @type {any} */ r) => [r.title, Number(r.took_s)]),
+        ),
+        historyLen: null,
+        now: now(),
+        progressAt: act.progressAt.get(j.job) ?? null,
+        label: actionLabel,
+        human: (n) => humanBytes(n),
+      }),
+    );
     jobLog.bind(j.job);
     if (done) {
       if (logsFor !== j.job) {
@@ -1433,9 +1446,25 @@ export function mount(root, scope) {
             return b;
           })
         : [];
-    const backups = (flow.rows ?? []).find(
-      (/** @type {any} */ r) => r.id === "backup",
+    // flow-stage-by-stage-1: one backup row per stack; the summary reads
+    // them together (all ok, their times summed).
+    const backupRows = (flow.rows ?? []).filter((/** @type {any} */ r) =>
+      String(r.id).startsWith("backup"),
     );
+    const backups = backupRows.length
+      ? {
+          state: backupRows.every((/** @type {any} */ r) => r.state === "ok")
+            ? "ok"
+            : "bad",
+          took_s: backupRows.some((/** @type {any} */ r) => r.took_s != null)
+            ? backupRows.reduce(
+                (/** @type {number} */ n, /** @type {any} */ r) =>
+                  n + (r.took_s ?? 0),
+                0,
+              )
+            : null,
+        }
+      : null;
     const took =
       j.started_at != null && j.finished_at != null
         ? humanDuration(j.finished_at - j.started_at)
@@ -1475,29 +1504,40 @@ export function mount(root, scope) {
       clocks.push(attachCountdowns(el));
       return el;
     };
+    // One verdict: the title and the sentence under it both come from it
+    // (the title once said "new errors in the logs" over a sentence that said
+    // "logs look like before").
+    const verdict = !ok
+      ? flow.rolled_back
+        ? {
+            title: "Not healthy — the earlier version is back",
+            text: j.message ?? flow.failed ?? "The job ended without a word.",
+          }
+        : {
+            title: "The update stopped",
+            text: j.message ?? flow.failed ?? "The job ended without a word.",
+          }
+      : logs?.state === "bad"
+        ? {
+            title: "Updated — new errors in the logs",
+            text: `${words}. It answered its health check, but the logs show errors that were not there before; the backup from step 3 stays for 7 days, so rolling back is one click.`,
+          }
+        : logs?.state === "ok"
+          ? {
+              title: "Updated and healthy",
+              text: `${words}. It answered its health check, logs look like before, and the backup from step 3 stays for 7 days.`,
+            }
+          : {
+              title: "Updated",
+              text: `${words}. It answered its health check; the logs were not compared (${logs?.note ?? "not read"}), and the backup from step 3 stays for 7 days.`,
+            };
     doneCard.replaceChildren(
       h(
         "div",
         { class: "uf-done__hero" },
         doneMark(ok ? "ok" : "bad"),
-        h(
-          "h2",
-          { id: "uf-done-h" },
-          !ok
-            ? flow.rolled_back
-              ? "Not healthy — the earlier version is back"
-              : "The update stopped"
-            : logs?.state === "bad"
-              ? "Updated — new errors in the logs"
-              : "Updated and healthy",
-        ),
-        h(
-          "p",
-          { class: "uf-hint uf-done__text" },
-          ok
-            ? `${words}. It answered its health check, logs look like before, and the backup from step 3 stays for 7 days.`
-            : (j.message ?? flow.failed ?? "The job ended without a word."),
-        ),
+        h("h2", { id: "uf-done-h" }, verdict.title),
+        h("p", { class: "uf-hint uf-done__text" }, verdict.text),
       ),
       h(
         "dl",
@@ -1533,29 +1573,27 @@ export function mount(root, scope) {
                 ]),
                 ".",
               ),
-              ...(j.finished_at != null
-                ? [
-                    h("dt", null, "Undo window"),
-                    h(
-                      "dd",
-                      null,
-                      undoClock(
-                        (j.finished_at + UNDO_WINDOW_S) * 1000,
-                        "The undo window closes in",
-                      ),
-                    ),
-                  ]
-                : []),
             ]
           : []),
       ),
+      // The countdown card spans the whole width: no label column.
+      ...(ok && runMoves.size && j.finished_at != null
+        ? [
+            undoClock(
+              (j.finished_at + UNDO_WINDOW_S) * 1000,
+              "The undo window closes in",
+            ),
+          ]
+        : []),
       h(
         "div",
         { class: "uf-foot" },
-        h("span", { class: "uf-foot__group" }, ...rollbacks),
+        ...(rollbacks.length
+          ? [h("div", { class: "uf-foot__rollbacks" }, ...rollbacks)]
+          : []),
         h(
           "span",
-          { class: "uf-foot__group" },
+          { class: "uf-foot__group uf-foot__actions" },
           drivable(
             h(
               "a",
@@ -1655,19 +1693,20 @@ export function mount(root, scope) {
   });
 
   /**
-   * An update job of this flow's scope the server runs now (any tab's), or
-   * the one this browser started and has not left with "Update more" yet,
-   * finished in the last half hour: a reload or a closed tab finds it.
+   * An update job of this flow's scope the server runs now (any tab's). A
+   * FINISHED job is shown only when it is named: this page started it, or
+   * the address says `&job=<n>` (Activity's job link). Opening the flow with
+   * a new selection always starts fresh at step 1; it once showed the
+   * previous run's Done screen for two other apps.
    */
   const adopt = () => {
     if (jobId != null && jobOf()) return;
-    const mine = TAB_JOB.get(key);
+    const asked = Number(new URLSearchParams(location.search).get("job"));
     const j = act.jobs.find(
       (x) =>
         x.action === "update-apps" &&
         scopeMatches(x.flow?.items ?? [], scope) &&
-        (!finishedJob(x) ||
-          (x.job === mine && now() - (x.finished_at ?? 0) < SHOW_DONE_S)),
+        (!finishedJob(x) || (asked > 0 && x.job === asked)),
     );
     if (!j) return;
     jobId = j.job;

@@ -447,39 +447,43 @@ export function commitSubject(pins) {
 }
 
 /**
- * The run's rows (flows/update.html steps 3-5), each with the step it
- * belongs to.
- * @typedef {{id: "backup" | "commit" | "deploy" | "health" | "logs",
- *   step: 3 | 4 | 5, title: string, desc: string}} RunRow
+ * The run's rows (flows/update.html steps 3-5), each with the stage it
+ * belongs to. flow-stage-by-stage-1 (Kenny, 2026-10-24): one row per stack
+ * in each stage, in the order the job runs them: every backup, every
+ * commit (pinned stacks only), every deploy, then the two checks; the
+ * host's own job (admin/src/core/updateflow.rs `FlowView::new`) builds the
+ * same rows.
+ * @typedef {{id: string, step: 3 | 4 | 5, title: string, desc: string}} RunRow
  * @param {Item[]} chosen
  * @returns {RunRow[]}
  */
 export function runRows(chosen) {
   const stacks = stacksOf(chosen);
-  const pins = chosen.filter((i) => i.kind === "pin");
+  const pinned = new Set(
+    chosen.filter((i) => i.kind === "pin").map((i) => i.stack),
+  );
   /** @type {RunRow[]} */
-  const rows = [
-    {
-      id: "backup",
-      step: 3,
-      title: `Back up ${stacks.join(", ")}`,
-      desc: "a restic snapshot of each app's data; if it fails, nothing else happens",
-    },
-  ];
-  if (pins.length)
+  const rows = stacks.map((s) => ({
+    id: `backup:${s}`,
+    step: /** @type {3} */ (3),
+    title: `Back up ${s}`,
+    desc: "a restic snapshot of each app's data; if it fails, nothing else happens",
+  }));
+  for (const s of stacks.filter((x) => pinned.has(x)))
     rows.push({
-      id: "commit",
+      id: `commit:${s}`,
       step: 4,
-      title: "Change the files and commit",
+      title: `Commit the new version for ${s}`,
       desc: "the image line moves to the new version, pushed to the repository",
     });
-  rows.push(
-    {
-      id: "deploy",
+  for (const s of stacks)
+    rows.push({
+      id: `deploy:${s}`,
       step: 4,
-      title: "Deploy: pull the image and restart",
-      desc: `${restartWords(chosen)} restart; nothing else`,
-    },
+      title: `Deploy ${s}: pull the image and restart`,
+      desc: `${restartWords(chosen.filter((i) => i.stack === s))} restart; nothing else`,
+    });
+  rows.push(
     {
       id: "health",
       step: 5,

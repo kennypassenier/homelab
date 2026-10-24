@@ -165,6 +165,33 @@ export function setSnoozes(list) {
   changed();
 }
 
+/** The longest key the server keeps (admin/src/core/rowsnooze.rs MAX_KEY). */
+const MAX_KEY = 200;
+
+/**
+ * snooze-key-1 (Kenny, 2026-10-24: "welke optie ik ook pak: Not snoozed ...
+ * the row has no usable key"): a row's key as a snooze keeps it. Some rows'
+ * keys (a group of notices, an update row naming every app) run past what
+ * the server keeps; those are kept under a short, stable digest of the key,
+ * computed the same way where the list hides snoozed rows.
+ * @param {{key: string, snoozeKey?: string}} row
+ * @returns {string}
+ */
+export function snoozeKeyOf(row) {
+  const key = (row.snoozeKey ?? row.key ?? "").replace(/[\u0000-\u001f]/g, " ");
+  if (key.trim() && key.length <= MAX_KEY) return key;
+  // FNV-1a over the UTF-16 units, two 32-bit lanes: stable and short.
+  let a = 0x811c9dc5;
+  let b = 0x01000193 ^ key.length;
+  for (let i = 0; i < key.length; i++) {
+    const c = key.charCodeAt(i);
+    a = Math.imul(a ^ c, 0x01000193) >>> 0;
+    b = Math.imul(b ^ (c + i), 0x01000193) >>> 0;
+  }
+  const hex = (/** @type {number} */ n) => n.toString(16).padStart(8, "0");
+  return `digest:${key.slice(0, 60).trim() || "row"}:${hex(a)}${hex(b)}`;
+}
+
 /**
  * The snoozes still running as of now, soonest first.
  * @param {number} [now] unix seconds
@@ -225,7 +252,7 @@ export function inboxNow() {
       notices: r.notices ?? [],
       now,
       extra: [...extras.values()].flat(),
-    }).filter((i) => !away.has(i.snoozeKey ?? i.key)),
+    }).filter((i) => !away.has(snoozeKeyOf(i))),
     ready: r.notices != null,
   };
 }

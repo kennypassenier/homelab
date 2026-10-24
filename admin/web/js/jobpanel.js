@@ -232,6 +232,7 @@ export function openJobDialog(job, opts = {}) {
     id: "job-dialog",
     wide: true,
   });
+  d.dialog.classList.add("act-dialog--run");
   void d.closed.then(() => {
     panel.stop();
     opts.onClose?.();

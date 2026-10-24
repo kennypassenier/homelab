@@ -8471,8 +8471,19 @@ test("invariants: the Update flow folds the file change, names each file once, a
     }
     assert.equal(seen?.action, "update-apps");
     assert.equal(seen?.state, "done", JSON.stringify(seen?.message));
-    // Back on the flow, it shows the job's end.
+    // The flow opened afresh starts at step 1 (a finished job is never put
+    // in front of a new selection); the job's end is one address away, the
+    // one Activity's job link gives.
     await page.goto(`${BASE}/update?all=1`);
+    await page
+      .locator("#page .uf-list")
+      .waitFor({ state: "visible", timeout: 20000 });
+    assert.equal(
+      await page.locator("#page .uf-done h2").isVisible(),
+      false,
+      "a finished earlier job was shown in front of a fresh selection",
+    );
+    await page.goto(`${BASE}/update?all=1&job=${job}`);
     await page
       .locator("#page .uf-done h2")
       .waitFor({ state: "visible", timeout: 20000 });
@@ -8484,6 +8495,32 @@ test("invariants: the Update flow folds the file change, names each file once, a
       await page.locator("#page .uf-done").innerText(),
       /7 days/,
       "the undo is not offered for 7 days",
+    );
+    // One verdict: the title and the sentence under it never contradict.
+    const title = await page.locator("#page .uf-done h2").innerText();
+    const text = await page.locator("#page .uf-done__text").innerText();
+    if (/new errors/.test(title))
+      assert.doesNotMatch(text, /look like before/, `${title} / ${text}`);
+    if (/healthy/.test(title))
+      assert.doesNotMatch(text, /not there before/, `${title} / ${text}`);
+    // The roll-backs flow in a grid across the width; the countdown card
+    // spans it, with no label column.
+    const geo = await page.evaluate(() => {
+      const card = document.querySelector("#page .uf-done");
+      const w = card?.getBoundingClientRect().width ?? 0;
+      const clock = document.querySelector("#page .uf-done .uf-clock");
+      const cr = clock?.getBoundingClientRect();
+      return {
+        clockWide: cr ? cr.width / w : 0,
+        undoLabel: [...document.querySelectorAll("#page .uf-done dt")].some(
+          (e) => /Undo window/.test(e.textContent ?? ""),
+        ),
+      };
+    });
+    assert.equal(geo.undoLabel, false, "an 'Undo window' label is back");
+    assert.ok(
+      geo.clockWide > 0.85,
+      `the countdown card is narrow (${geo.clockWide})`,
     );
   } finally {
     await browser.close();
@@ -9865,6 +9902,169 @@ test("invariants: redesign-final-m2: Back up says in plain words what will happe
     assert.ok(f.what && f.steps >= 3, "no 'what will happen' steps");
     assert.ok(f.cliQuiet, "the command line is the main content");
     assert.equal(f.box, 0, "an empty bordered box around a one-step form");
+  } finally {
+    await browser.close();
+  }
+});
+
+// live-cursor-scroll-1 (Kenny, 2026-10-24: "ik wil terug de cursor mooi naar
+// het element zien gaan, en als het nodig is scrollen"): a step whose target
+// is below the fold first scrolls it into view, smoothly; only then does the
+// pointer glide to it over the countdown, frame by frame toward the target;
+// then it clicks, with the target whole in the window.
+test("invariants: live-cursor-scroll-1: Live view scrolls a below-the-fold target into view first, then the pointer glides to it frame by frame, then it clicks", async () => {
+  const browser = await launch();
+  try {
+    const context = await browser.newContext({
+      viewport: { width: 1600, height: 600 },
+    });
+    const page = await freshPage(context);
+    await page.waitForSelector('[data-drive="stacks-tick"]');
+    await page.waitForTimeout(800);
+    await page.check("#live-view");
+    await page.waitForTimeout(500);
+    const row = await page.evaluate(() => {
+      const ticks = [
+        ...document.querySelectorAll('[data-drive="stacks-tick"]'),
+      ].filter((e) => e.getClientRects().length > 0);
+      return ticks[ticks.length - 1]?.getAttribute("data-drive-row") ?? null;
+    });
+    assert.ok(row, "no Stacks row to press");
+    const frames = await page.evaluate(async (r) => {
+      const sel = `[data-drive="stacks-tick"][data-drive-row="${r}"]`;
+      const target = () => document.querySelector(sel);
+      const below = (target()?.getBoundingClientRect().top ?? 0) > innerHeight;
+      void fetch("/data/drive/demo-step", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ do: "click", control: "stacks-tick", row: r }),
+      }).catch(() => {});
+      const out = [];
+      const t0 = performance.now();
+      await new Promise((done) => {
+        const frame = () => {
+          const ptr = document.querySelector(".drive-cursor__pointer");
+          const m = /translate\(([-\d.]+)px, ([-\d.]+)px\)/.exec(
+            /** @type {HTMLElement | null} */ (ptr)?.style.transform ?? "",
+          );
+          const tr = target()?.getBoundingClientRect();
+          out.push({
+            t: performance.now() - t0,
+            x: m ? Number(m[1]) : null,
+            y: m ? Number(m[2]) : null,
+            sy: scrollY,
+            top: tr ? tr.top : null,
+            bottom: tr ? tr.bottom : null,
+            cx: tr ? tr.left + tr.width / 2 : null,
+            cy: tr ? tr.top + tr.height / 2 : null,
+            pressed: !!target()?.classList.contains("drive-press"),
+            vh: innerHeight,
+            below,
+          });
+          if (out.at(-1)?.pressed || performance.now() - t0 > 6000) done(null);
+          else requestAnimationFrame(frame);
+        };
+        requestAnimationFrame(frame);
+      });
+      return out;
+    }, row);
+    const last = frames[frames.length - 1];
+    assert.ok(last.pressed, "the step never clicked its target");
+    assert.ok(
+      frames[0].below,
+      "the target was not below the fold to begin with",
+    );
+    // The target is whole in the window when the click shows.
+    assert.ok(
+      last.top >= 0 && last.bottom <= last.vh,
+      `the target is not whole in the window at the click (${last.top}..${last.bottom} of ${last.vh})`,
+    );
+    assert.ok(last.sy > 100, "the page never scrolled");
+    // The scroll has landed before the pointer sets off.
+    const first = frames.findIndex((f) => f.x != null);
+    const moved = frames.findIndex(
+      (f, i) =>
+        i > first &&
+        first >= 0 &&
+        f.x != null &&
+        Math.hypot(
+          f.x - (frames[first].x ?? 0),
+          (f.y ?? 0) - (frames[first].y ?? 0),
+        ) > 8,
+    );
+    assert.ok(moved > 0, "the pointer never moved");
+    for (const f of frames.slice(moved))
+      assert.ok(
+        Math.abs(f.sy - frames[moved].sy) < 3,
+        `the page was still scrolling (${f.sy} vs ${frames[moved].sy}) after the pointer set off`,
+      );
+    // From there to the click it only comes closer, over many frames.
+    const ends = frames.slice(moved);
+    const dist = ends.map((f) =>
+      Math.hypot((f.x ?? 0) - (f.cx ?? 0), (f.y ?? 0) - (f.cy ?? 0)),
+    );
+    for (let i = 1; i < dist.length; i += 1)
+      assert.ok(
+        dist[i] <= dist[i - 1] + 1.5,
+        `the pointer moved away from its target at frame ${i} (${dist[i - 1].toFixed(1)} -> ${dist[i].toFixed(1)})`,
+      );
+    assert.ok(
+      new Set(
+        ends.map(
+          (f) => `${Math.round((f.x ?? 0) / 4)},${Math.round((f.y ?? 0) / 4)}`,
+        ),
+      ).size >= 15,
+      "the pointer jumped instead of gliding",
+    );
+    assert.ok(
+      last.t > 1500,
+      "the step clicked before its countdown could show a glide",
+    );
+  } finally {
+    await browser.close();
+  }
+});
+
+// update-select-all-1 (Kenny, 2026-10-24): the header's select-all ticked
+// the rows that "move with the host" too, and the job was refused. Only rows
+// that can be chosen are ever ticked or sent.
+test("invariants: update-select-all-1: the Update flow's select-all ticks only the rows that can be chosen", async () => {
+  const browser = await launch();
+  try {
+    const context = await browser.newContext({
+      viewport: { width: 1600, height: 1000 },
+    });
+    const page = await freshPage(context);
+    await page.goto(`${BASE}/update?all=1`);
+    await page
+      .locator("#page .uf-list tbody tr[data-kp-row-key]")
+      .first()
+      .waitFor({ timeout: 20000 });
+    await page.getByRole("button", { name: "Untick all" }).click();
+    await page.locator("#page .uf-list thead input[type=checkbox]").click();
+    await page.waitForTimeout(400);
+    const rows = await page.$$eval(
+      "#page .uf-list tbody input[data-kp-select-row]",
+      (els) =>
+        els.map((e) => ({
+          key: /** @type {HTMLInputElement} */ (e).value,
+          checked: /** @type {HTMLInputElement} */ (e).checked,
+          disabled: /** @type {HTMLInputElement} */ (e).disabled,
+        })),
+    );
+    assert.ok(
+      rows.some((r) => r.disabled),
+      "the demo has no row that cannot be chosen",
+    );
+    for (const r of rows)
+      if (r.disabled) assert.equal(r.checked, false, `${r.key} was ticked`);
+    const count = await page
+      .locator("#page .uf-list .kp-selection__count")
+      .innerText();
+    assert.equal(
+      count.trim(),
+      `${rows.filter((r) => r.checked).length} selected`,
+    );
   } finally {
     await browser.close();
   }

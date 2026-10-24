@@ -30,7 +30,6 @@ import {
   applyOutcome,
   applyBytes,
   applyProgress,
-  bytesView,
   batchView,
   jobPanel,
   jobRows,
@@ -1000,20 +999,15 @@ test("pressGate keeps a typed-name action off until the name is exact", () => {
   assert.equal(pressGate(actionForm(find("backup"), ctx), {}, ok), ok);
 });
 
-test("a restic byte counter lays on its job and reads as a bar with a rate", () => {
-  const human = (/** @type {number} */ n) => `${n} B`;
-  const jobs = applyBytes(/** @type {any} */ ([{ job: 3 }, { job: 4 }]), {
-    job: 3,
-    bytes: { label: "media", done: 50, total: 200, rate_bps: 10 },
-  });
-  assert.equal(jobs[1].bytes, undefined);
-  const v = bytesView(jobs[0].bytes, human);
-  assert.equal(v?.percent, 25);
-  assert.equal(v?.text, "media: 50 B of 200 B (25 %), 10 B/s");
-  const scanning = bytesView(
-    { label: "media", done: 5, total: null, rate_bps: null },
-    human,
+test("a restic byte counter lays on its job and is kept per step", () => {
+  const jobs = applyBytes(
+    /** @type {any} */ ([{ job: 3, progress: { n: 2 } }, { job: 4 }]),
+    {
+      job: 3,
+      bytes: { label: "media", done: 50, total: 200, rate_bps: 10 },
+    },
   );
-  assert.equal(scanning?.percent, null);
-  assert.equal(bytesView(null, human), null);
+  assert.equal(jobs[1].bytes, undefined);
+  assert.equal(jobs[0].bytes?.done, 50);
+  assert.equal(jobs[0].bytes?.total, 200);
 });

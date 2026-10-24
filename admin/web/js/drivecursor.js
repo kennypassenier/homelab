@@ -178,6 +178,34 @@ export function bandScroll(box, band) {
 }
 
 /**
+ * How far to scroll each scrolling ancestor of a target, innermost first, and
+ * then the page, so the target ends inside the band whole: the dialog's body
+ * AND the page, when both must move (a table's own scroll box inside a dialog
+ * inside a long page). Each container's own visible rectangle clips the band
+ * it brings the target into, together with every container around it; what an
+ * inner scroll moves is taken off before the next one is worked out.
+ * @param {Box} box the target's client rectangle
+ * @param {{top: number, bottom: number}[]} containers visible rectangles of
+ *   the scrolling ancestors, innermost first
+ * @param {Band} band the window's band
+ * @returns {{containers: number[], page: number}}
+ */
+export function scrollPlan(box, containers, band) {
+  /** @type {number[]} */
+  const out = [];
+  let b = box;
+  for (let i = 0; i < containers.length; i += 1) {
+    let eff = band;
+    for (let j = i; j < containers.length; j += 1)
+      eff = clipBand(eff, containers[j].top, containers[j].bottom);
+    const dy = bandScroll(b, eff);
+    out.push(dy);
+    b = { ...b, top: b.top - dy };
+  }
+  return { containers: out, page: bandScroll(b, band) };
+}
+
+/**
  * Should the click show now?
  * @param {number} left countdown left (ms)
  * @param {number} totalMs
@@ -263,7 +291,8 @@ export function makeCursor() {
   let target = null;
   /** @type {null | {kind: "count", id: number, total: number,
    *   startLeft: number, left: () => number, paused: () => boolean,
-   *   clicked: boolean} | {kind: "timed", start: number, dur: number}} */
+   *   clicked: boolean} | {kind: "hold", id: number} |
+   *   {kind: "timed", start: number, dur: number}} */
   let move = null;
   let frame = 0;
   /** When `tick` last re-revealed a drifting target (ms, performance.now). */
@@ -335,7 +364,9 @@ export function makeCursor() {
     // target, keep it revealed: re-check at most every 300 ms.
     if (move && target?.isConnected) {
       const now = performance.now();
-      if (now - revealedAt > 300) {
+      // Never while a smooth scroll is still landing: a new scroll from the
+      // middle of one restarts it.
+      if (now - revealedAt > 300 && now - scrolledAt > 200) {
         revealedAt = now;
         reveal(target);
       }
@@ -354,6 +385,9 @@ export function makeCursor() {
         move.clicked = true;
         click();
       }
+    } else if (move?.kind === "hold") {
+      // The page is still scrolling the target into view: the pointer waits
+      // where it is; the glide starts once the scroll has landed.
     } else if (move?.kind === "timed") {
       const t = timedFraction(
         performance.now() - move.start,
@@ -393,9 +427,11 @@ export function makeCursor() {
     return safeBand(innerHeight, top, below);
   };
 
-  /** The element that scrolls `el` into view: its nearest scrolling
-   * ancestor (the dialog's body), else the page. */
-  const scroller = (/** @type {Element} */ el) => {
+  /** Every scrolling ancestor of `el`, innermost first (a dialog's body, a
+   * table's own scroll box), never the page itself. */
+  const scrollers = (/** @type {Element} */ el) => {
+    /** @type {Element[]} */
+    const out = [];
     for (let p = el.parentElement; p; p = p.parentElement) {
       if (p === document.body || p === document.documentElement) break;
       const oy = getComputedStyle(p).overflowY;
@@ -403,33 +439,65 @@ export function makeCursor() {
         (oy === "auto" || oy === "scroll" || oy === "overlay") &&
         p.scrollHeight > p.clientHeight + 1
       )
-        return p;
+        out.push(p);
     }
-    return null;
+    return out;
   };
 
-  /** Keep the target inside the safe band: scroll the page, or the
-   * dialog's body, so the pointer is seen reaching it and the announce bar
-   * never covers what it acts on. True when it scrolled. */
+  /** When a scroll last moved anything (performance.now), anywhere. */
+  let scrolledAt = 0;
+  addEventListener("scroll", () => (scrolledAt = performance.now()), {
+    capture: true,
+    passive: true,
+  });
+
+  /** Keep the target inside the safe band: scroll the dialog's body, any
+   * scroll box around it, and the page, so the pointer is seen reaching it
+   * and the announce bar never covers what it acts on. True when anything
+   * was told to scroll. */
   const reveal = (/** @type {HTMLElement} */ el) => {
     if (!el.isConnected) return false;
     const t = aimElement(el);
     const box = t.getBoundingClientRect();
     const behavior = reducedMotion() ? "auto" : "smooth";
-    let band = bandNow();
-    const box0 = scroller(t);
-    if (box0) {
-      const r = box0.getBoundingClientRect();
-      const top = r.top + box0.clientTop;
-      band = clipBand(band, top, top + box0.clientHeight);
-      const dy = bandScroll(box, band);
-      if (dy) box0.scrollBy({ top: dy, behavior });
-      return dy !== 0;
+    const boxes = scrollers(t);
+    const plan = scrollPlan(
+      box,
+      boxes.map((c) => {
+        const r = c.getBoundingClientRect();
+        return {
+          top: r.top + c.clientTop,
+          bottom: r.top + c.clientTop + c.clientHeight,
+        };
+      }),
+      bandNow(),
+    );
+    let moved = false;
+    plan.containers.forEach((dy, i) => {
+      if (!dy) return;
+      moved = true;
+      boxes[i].scrollBy({ top: dy, behavior });
+    });
+    if (plan.page) {
+      moved = true;
+      scrollBy({ top: plan.page, behavior });
     }
-    const dy = bandScroll(box, band);
-    if (dy) scrollBy({ top: dy, behavior });
-    return dy !== 0;
+    if (moved) scrolledAt = performance.now();
+    return moved;
   };
+
+  /** Resolves once nothing has scrolled for a moment (a smooth scroll has
+   * landed), or after `max` ms whatever happens. */
+  const scrollQuiet = (/** @type {number} */ max) =>
+    new Promise((resolve) => {
+      const t0 = performance.now();
+      const check = () => {
+        const now = performance.now();
+        if (now - scrolledAt > 140 || now - t0 > max) resolve(undefined);
+        else setTimeout(check, 40);
+      };
+      setTimeout(check, 40);
+    });
 
   const wait = (/** @type {number} */ ms) =>
     new Promise((r) => setTimeout(r, Math.max(0, ms)));
@@ -524,29 +592,61 @@ export function makeCursor() {
     },
     glide(el, id, total, left, paused) {
       if (move?.kind === "count" && move.id === id && target === el) return;
-      if (el) reveal(el);
+      if (move?.kind === "hold" && move.id === id && target === el) return;
+      // First the target is brought into view, smoothly, when it is not
+      // whole in the page or its dialog; then the pointer glides to it over
+      // what is left of the countdown, then it clicks.
+      const scrolled = el ? reveal(el) : false;
       begin();
       target = el;
-      move = el
-        ? {
-            kind: "count",
-            id,
-            total,
-            startLeft: left(),
-            left,
-            paused,
-            clicked: false,
-          }
-        : null;
+      if (!el) {
+        move = null;
+        start();
+        return;
+      }
+      const go = () => ({
+        kind: /** @type {const} */ ("count"),
+        id,
+        total,
+        startLeft: left(),
+        left,
+        paused,
+        clicked: false,
+      });
+      if (!scrolled) {
+        move = go();
+        start();
+        return;
+      }
+      move = { kind: "hold", id };
       start();
+      void scrollQuiet(1200).then(() => {
+        if (move?.kind === "hold" && move.id === id && target === el)
+          move = go();
+      });
     },
     sit(el) {
       if (!el) return;
-      reveal(el);
+      const scrolled = reveal(el);
       begin();
       target = el;
-      move = { kind: "timed", start: performance.now(), dur: TYPE_GLIDE_MS };
+      const go = () => ({
+        kind: /** @type {const} */ ("timed"),
+        start: performance.now(),
+        dur: TYPE_GLIDE_MS,
+      });
+      if (!scrolled) {
+        move = go();
+        start();
+        return;
+      }
+      // Scroll first, glide after, like an announced step.
+      const mine = { kind: /** @type {const} */ ("hold"), id: -1 };
+      move = mine;
       start();
+      void scrollQuiet(1200).then(() => {
+        if (move === mine && target === el) move = go();
+      });
     },
     async pick(el, value, commit) {
       const plan = pickPlan(
@@ -633,7 +733,16 @@ export function makeCursor() {
         move.clicked = true;
         click();
       }
-      if (move?.kind === "count") move = null;
+      if (move?.kind === "hold") {
+        // The step landed while the page was still scrolling: the pointer
+        // is on its target at once, and clicks.
+        const aim = aimNow();
+        if (aim) {
+          place(aim);
+          click();
+        }
+      }
+      if (move?.kind === "count" || move?.kind === "hold") move = null;
     },
   };
 }

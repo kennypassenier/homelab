@@ -13,6 +13,7 @@ import {
   glideFraction,
   pathAt,
   safeBand,
+  scrollPlan,
 } from "../js/drivecursor.js";
 
 test("the glide starts where the pointer was and lands before 0", () => {
@@ -116,4 +117,30 @@ test("the drawn list's box styles never reach the pointer", async () => {
       );
     }
   }
+});
+
+test("a target below the fold scrolls the page; one in a dialog scrolls the dialog and the page as far as each must", () => {
+  const band = { top: 80, bottom: 520 };
+  const box = { left: 0, top: 900, width: 100, height: 30 };
+  // In the page: only the page moves, the target's centre to the band's middle.
+  const page = scrollPlan(box, [], band);
+  assert.deepEqual(page.containers, []);
+  assert.equal(page.page, 900 + 15 - 300);
+  // Inside a dialog body that shows 200..500 of the window: the body moves
+  // to bring it inside that rectangle; what is left is the page's.
+  const inner = scrollPlan(box, [{ top: 200, bottom: 500 }], band);
+  assert.equal(inner.containers.length, 1);
+  assert.ok(inner.containers[0] > 0);
+  const after = { ...box, top: box.top - inner.containers[0] };
+  assert.ok(
+    after.top >= 200 && after.top + after.height <= 500,
+    `${after.top}`,
+  );
+  // Already whole in the band: nothing scrolls.
+  const here = scrollPlan(
+    { left: 0, top: 300, width: 80, height: 20 },
+    [],
+    band,
+  );
+  assert.deepEqual([here.containers, here.page], [[], 0]);
 });

@@ -4,6 +4,7 @@
 // as an argument, so `node --test` can drive every line.
 
 import { formatClock, formatDateTime, humanDuration } from "./format.js";
+import { mergeBytes } from "./progress.js";
 
 /**
  * @typedef {{op: string, step: string, n: number, m: number | null,
@@ -159,6 +160,10 @@ export function keepProgress(view, old) {
   if (old.progress && behind) out = { ...out, progress: old.progress };
   if (!view.bytes && old.bytes && !finished(view.state))
     out = { ...out, bytes: old.bytes };
+  // A byte figure belongs to the step it was counted in.
+  const b = /** @type {any} */ (out.bytes);
+  if (b?.step != null && out.progress && b.step !== String(out.progress.n))
+    out = { ...out, bytes: null };
   return out;
 }
 
@@ -263,45 +268,32 @@ export function applyProgress(jobs, ev) {
           ...j,
           progress: ev.progress,
           state: j.state === "queued" ? "running" : j.state,
+          bytes: j.progress && j.progress.n !== ev.progress.n ? null : j.bytes,
         }
       : j,
   );
 }
 
 /**
- * An `action_bytes` event laid on its job (ask-kp11be-5).
+ * An `action_bytes` event laid on its job (ask-kp11be-5). The host's readings
+ * are folded into one figure per step (progress.js, contract 2): readings of
+ * different transfers add up, never flip, never shrink; a new step starts a
+ * new figure.
  * @param {Job[]} jobs
  * @param {{job: number, bytes: JobBytes}} ev
  * @returns {Job[]}
  */
 export function applyBytes(jobs, ev) {
-  return jobs.map((j) => (j.job === ev.job ? { ...j, bytes: ev.bytes } : j));
-}
-
-/**
- * The byte counter of a running transfer as the job panel's second bar
- * reads it: how far in percent (null while the total is unknown, the bar
- * is then busy), and the words under it. `human` writes a byte count
- * (`humanBytes`), passed in so this stays free of other modules.
- * @param {JobBytes | null | undefined} b
- * @param {(n: number) => string | null} human
- * @returns {{percent: number | null, text: string} | null}
- */
-export function bytesView(b, human) {
-  if (!b) return null;
-  const done = human(b.done) ?? "0 B";
-  const rate =
-    b.rate_bps != null && b.rate_bps > 0 ? `, ${human(b.rate_bps)}/s` : "";
-  if (!b.total || b.total <= 0)
-    return {
-      percent: null,
-      text: `${b.label}: ${done} so far${rate}; restic is still counting what there is to move`,
-    };
-  const percent = Math.min(100, Math.floor((b.done / b.total) * 100));
-  return {
-    percent,
-    text: `${b.label}: ${done} of ${human(b.total)} (${percent} %)${rate}`,
-  };
+  return jobs.map((j) =>
+    j.job === ev.job
+      ? {
+          ...j,
+          bytes: /** @type {JobBytes} */ (
+            mergeBytes(j.bytes, ev.bytes, j.progress?.n ?? 0)
+          ),
+        }
+      : j,
+  );
 }
 
 /**

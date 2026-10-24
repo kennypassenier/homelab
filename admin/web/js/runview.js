@@ -7,10 +7,14 @@
 //
 // "ik haat het als elementen heen en weer springen"; "verschijnen mag,
 // verschuiven niet" (Kenny, 2026-10-22/23). So the layout is two columns,
-// each its own vertical section with a size of its own and its own scroll:
+// each its own section with a size of its own and its own scroll, in two
+// equal halves (Kenny, 2026-10-24: "deel het beeld in twee"); below 64rem
+// the halves stack, the progress first and the log under it, as the Update
+// flow page of 4.0.0 did:
 //
-//   progress column   figures · the bar · the step list (scrolls) · the time bar
-//   log column        the host's lines (scrolls) · the result area (scrolls)
+//   head              title + sub and the three figures · the state badge
+//   progress half     the bar · the step list (scrolls) · the time bar
+//   log half          the host's lines (scrolls) · the result area (scrolls)
 //
 // A part that appears (a failure, the host's words, the command to run it
 // again) appears INSIDE its own reserved area and moves nothing else; its
@@ -26,7 +30,7 @@ import { h, progressBar, setProgress } from "./dom.js";
 import { humanDuration } from "./format.js";
 import { jobLogViewer } from "./joblog.js";
 import { setCode } from "/static/kp/js/code.js";
-import { buildJobLine, setJobLine } from "/static/kp/js/job-line.js";
+import { progressLine, steadyEta } from "./progress.js";
 import { attachProblems, setProblems } from "/static/kp/js/problems.js";
 import { setStackbar } from "/static/kp/js/stackbar.js";
 import {
@@ -48,7 +52,9 @@ import { attachTimerDiscs, timerDiscOf } from "/static/kp/js/timer-disc.js";
  *   median: string, delta: {tone: string, text: string} | null}} RunFigures
  * @typedef {{percent: number | null, note: string,
  *   bytes: {percent: number | null, text: string} | null,
- *   line: import("/static/kp/js/job-line.js").JobReport | null}} RunBar
+ *   line: {step?: number, steps?: number,
+ *   bytes?: {done: number, total: number | null} | null,
+ *   etaSeconds?: number} | null}} RunBar
  * @typedef {{kind: "empty", message: string} | {kind: "bar", parts:
  *   {key: string, label: string, value: number, bad: boolean}[],
  *   whole: number, restLabel: string, medianS: number | null,
@@ -168,16 +174,34 @@ function followRunning(area) {
     '.kp-steplist__item[data-state="running"], .kp-steplist__item[data-state="failed"]',
   );
   if (!(row instanceof HTMLElement)) return;
-  // one-progress-view-1: the area moves only when the running row would
-  // otherwise be out of view, and then by the least that shows it whole
-  // (the row ends on the area's edge). A row that is in view keeps its
-  // place: centring the running row shifted every row at each step, so the
-  // list moved under the eye while nothing needed it to.
-  const top = row.offsetTop - area.offsetTop;
-  const bottom = top + row.offsetHeight;
-  if (top < area.scrollTop) area.scrollTop = Math.max(0, top);
-  else if (bottom > area.scrollTop + area.clientHeight)
-    area.scrollTop = bottom - area.clientHeight;
+  // The area moves only when the running row is not wholly in view, and then
+  // to a row boundary (the row before it stays above, for context): a half
+  // row is never left cut at the top. A row in view keeps its place.
+  const box = area.getBoundingClientRect();
+  const r = row.getBoundingClientRect();
+  const top = r.top - box.top + area.scrollTop;
+  const bottom = top + r.height;
+  if (top >= area.scrollTop && bottom <= area.scrollTop + area.clientHeight)
+    return;
+  area.scrollTop = Math.max(0, Math.round(top - r.height));
+}
+
+/**
+ * The step area shows whole rows only: its height is the CSS height rounded
+ * down to a number of rows, once the first row is there to measure, so a row
+ * is never left cut at the bottom (nor, with followRunning, at the top).
+ * @param {HTMLElement} area
+ */
+function fitRows(area) {
+  const row = area.querySelector(".kp-steplist__item");
+  if (!(row instanceof HTMLElement) || area.hidden) return;
+  const rowH = row.getBoundingClientRect().height;
+  if (!(rowH > 0)) return;
+  area.style.blockSize = "";
+  const want = area.getBoundingClientRect().height;
+  const borders = area.offsetHeight - area.clientHeight;
+  const rows = Math.max(2, Math.floor((want - borders) / rowH));
+  area.style.blockSize = `${rows * rowH + borders}px`;
 }
 
 /**
@@ -194,6 +218,7 @@ function followRunning(area) {
  */
 export function buildRunView(opts) {
   const seenSteps = new Map();
+  let fitted = false;
   const guard = signatureGuard();
   /** @type {Map<string, boolean>} whether each appearing part was shown */
   const shown = new Map();
@@ -202,12 +227,7 @@ export function buildRunView(opts) {
   const title = h("h3", { class: "rv-title" });
   const sub = h("p", { class: "measured rv-sub" });
   const badgeHost = h("span", { class: "rv-badge" });
-  const head = h(
-    "header",
-    { class: "rv-head" },
-    h("div", null, ...(opts.compact ? [] : [title]), sub),
-    badgeHost,
-  );
+  // The head is built after the figures (below), which sit in it.
 
   // ---- the progress column -----------------------------------------------
   const doneN = h("b", { "data-kp-tick": "" }, "0");
@@ -236,7 +256,12 @@ export function buildRunView(opts) {
   const bar = progressBar("How far the run is", null, "rv-progress");
   const barNote = h("p", { class: "measured rv-note rv-bar-note" });
   const bytesBar = progressBar("How much data has moved", null, "rv-bytes");
-  const jobLine = buildJobLine({ label: "Where the run stands" });
+  // The one line under the bar is written by progress.js (contract 5).
+  const jobLine = h("p", {
+    class: "kp-jobline",
+    "aria-label": "Where the run stands",
+  });
+  const eta = steadyEta();
   jobLine.setAttribute("role", "status");
   jobLine.setAttribute("aria-live", "off");
   jobLine.setAttribute("aria-atomic", "true");
@@ -283,23 +308,46 @@ export function buildRunView(opts) {
   // of its own with its own scroll, so a long legend moves nothing.
   const timeArea = h("div", { class: "rv-time-area" }, timeBar);
   const timeNote = h("p", { class: "measured rv-note rv-time-note" });
+  // The time bar closes the progress half: its legend and its footnote have
+  // a place of their own, whole.
+  const timeBlock = h(
+    "div",
+    {
+      class: "rv-time-block",
+      role: "group",
+      "aria-label": "Where the time went",
+    },
+    timeArea,
+    timeNote,
+  );
   const progressCol = h(
     "section",
     { class: "rv-col rv-col--progress", "aria-label": "Progress" },
-    figures,
     stepsNote,
     now,
     lead,
     stepsArea,
-    timeArea,
-    timeNote,
+    timeBlock,
+  );
+  // Title and sub on the left, the three figures on the right of the same
+  // line, both inside the left half; the state badge closes the right half.
+  const head = h(
+    "header",
+    { class: "rv-head" },
+    h(
+      "div",
+      { class: "rv-head__main" },
+      h("div", { class: "rv-head__id" }, ...(opts.compact ? [] : [title]), sub),
+      figures,
+    ),
+    badgeHost,
   );
 
   // ---- the log column ----------------------------------------------------
   const jobLog =
     opts.log ??
     jobLogViewer(opts.jobId ?? 0, {
-      height: opts.logHeight ?? "13rem",
+      height: opts.logHeight ?? "var(--rv-log-h)",
       tools: "search,wrap,level,copy",
       ...(opts.logOpts ?? {}),
     });
@@ -445,15 +493,24 @@ export function buildRunView(opts) {
         bytesBar.hidden = b.bytes == null;
         if (b.bytes) setProgress(bytesBar, b.bytes.percent);
       });
-      memo("line", b.line, () => {
-        if (b.line) setJobLine(jobLine, b.line);
-        jobLine.hidden = b.line == null;
+      // The estimate never grows within a step (progress.js, contract 6), so
+      // it is settled before the line's signature is read.
+      const line = b.line
+        ? { ...b.line, etaSeconds: eta(b.line.step, b.line.etaSeconds) }
+        : null;
+      memo("line", line, () => {
+        jobLine.textContent = line ? progressLine(line) : "";
+        jobLine.hidden = line == null;
       });
     }
     if (spec.steps && opts.steps !== false) {
       const items = spec.steps;
       memo("steps", items, () => {
         syncSteps(stepsList, items, seenSteps, "Steps of the run");
+        if (!fitted && items.length) {
+          fitted = true;
+          fitRows(stepsArea);
+        }
         followRunning(stepsArea);
       });
     }

@@ -904,6 +904,7 @@ function drawActionDialog(form, values, sources, driven, locked = []) {
     const panel = mountJobPanel(job, { compact: true });
     stopPanel = panel.stop;
     handle?.element.remove();
+    d.dialog.classList.add("act-dialog--run");
     body.replaceChildren(
       panel.element,
       h(
@@ -1157,6 +1158,7 @@ export async function openBatch(action, stacks) {
     body.dataset.batch = String(answer.batch);
     const panel = mountBatchPanel(answer.batch, answer.jobs ?? []);
     stop = panel.stop;
+    d.dialog.classList.add("act-dialog--run");
     body.replaceChildren(
       panel.element,
       h(
@@ -1602,6 +1604,7 @@ export async function reopenBatch(id) {
     id: "batch-dialog",
     wide: true,
   });
+  d.dialog.classList.add("act-dialog--run");
   d.closed.then(() => panel.stop());
   return true;
 }

@@ -454,21 +454,24 @@ test("redesign-flows-1: the impact in words — downtime from the last deploy, w
   assert.equal(safetyNet(pull).value, "Backup first, auto roll back");
 });
 
-test("redesign-flows-1: the run's rows — back up, commit only for pinned apps, deploy, two verifies", () => {
+test("flow-stage-by-stage-1: the run's rows — every backup, every commit (pinned only), every deploy, two verifies", () => {
   const pins = itemsFor(STALE, { all: true }).filter((i) => i.kind === "pin");
   assert.deepEqual(
     runRows(pins).map((r) => [r.id, r.step]),
     [
-      ["backup", 3],
-      ["commit", 4],
-      ["deploy", 4],
+      ["backup:beta-demo", 3],
+      ["backup:kp-soft", 3],
+      ["commit:beta-demo", 4],
+      ["commit:kp-soft", 4],
+      ["deploy:beta-demo", 4],
+      ["deploy:kp-soft", 4],
       ["health", 5],
       ["logs", 5],
     ],
   );
-  assert.equal(runRows(pins)[0].title, "Back up beta-demo, kp-soft");
+  assert.equal(runRows(pins)[0].title, "Back up beta-demo");
   const pull = itemsFor(STALE, { all: false, stack: "notes" });
-  assert.ok(!runRows(pull).some((r) => r.id === "commit"));
+  assert.ok(!runRows(pull).some((r) => r.id.startsWith("commit:")));
 });
 
 test("redesign-flows-1: the log check passes on no more errors per minute than the hour before", () => {

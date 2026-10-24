@@ -39,17 +39,29 @@
 }
 .uf-foot {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr);
   gap: 12px;
-  align-items: center;
   border-block-start: 1px solid var(--border);
   padding-block-start: 14px;
 }
-.uf-foot > :first-child {
-  justify-self: start;
+/* The roll-backs flow in rows across the whole width, every button the same
+   width whatever its label; the actions below them are their own group,
+   aligned to the end. */
+.uf-foot__rollbacks {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 16rem), 1fr));
+  gap: 8px;
 }
-.uf-foot > :last-child {
-  justify-self: end;
+.uf-foot__rollbacks > .kp-button {
+  justify-content: center;
+  min-inline-size: 0;
+  white-space: normal;
+}
+.uf-foot__actions {
+  justify-content: flex-end;
+}
+.uf-clock {
+  min-inline-size: 0;
 }
 /* kp's primary colour wins over its own :disabled look; a disabled step
    button must read as one (the cursor and aria carry it too). */
@@ -186,12 +198,9 @@
     grid-column: 1 / -1;
     white-space: normal;
   }
-  .uf-foot {
+  .uf-foot__actions {
+    display: grid;
     grid-template-columns: minmax(0, 1fr);
-  }
-  .uf-foot > :last-child {
-    justify-self: stretch;
-    inline-size: 100%;
   }
 }
 /* Review item 7: the Update flow at the demo's width. */

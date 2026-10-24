@@ -48,8 +48,8 @@ fails while this section is stale.
 | Stack | App | Service | Policy | Image | Note |
 |---|---|---|---|---|---|
 | downloader | qbittorrent | gluetun | `manual` | `qmcgaw/gluetun@sha256:89e3cbe22e0d…` |  |
-| downloader | qbittorrent | qbittorrent | `manual` | `lscr.io/linuxserver/qbittorrent:5.2.4_v2.0.15-ls479@sha256:b522f9f4b769…` |  |
-| gateway | cloudflared | cloudflared | `manual` | `cloudflare/cloudflared:2026.10.0@sha256:9b49eed8f628…` |  |
+| downloader | qbittorrent | qbittorrent | `manual` | `lscr.io/linuxserver/qbittorrent:5.3.0_v2.1.2-ls484@sha256:e887804fa9de…` |  |
+| gateway | cloudflared | cloudflared | `manual` | `cloudflare/cloudflared:2026.10.3@sha256:faa8e0a1475f…` |  |
 | gateway | crowdsec | crowdsec | `manual` | `crowdsecurity/crowdsec:v1.8.1@sha256:0f2523fa61ef…` |  |
 | gateway | socket-proxy | socket-proxy | `manual` | `tecnativa/docker-socket-proxy:v0.5.0@sha256:1f5038b54f06…` |  |
 | gateway | traefik | traefik | `manual` | `traefik:v3.7.16@sha256:c8a121e4bb13…` |  |
@@ -66,10 +66,10 @@ fails while this section is stale.
 | metrics | alertmanager | alertmanager | `manual` | `prom/alertmanager:v0.34.1@sha256:e9733bafb1bd…` |  |
 | metrics | loki | loki | `manual` | `grafana/loki:3.7.8@sha256:1107dd5274e0…` |  |
 | metrics | loki-push | loki-push | `auto` | `nginx:alpine` |  |
-| metrics | prometheus | prometheus | `manual` | `prom/prometheus:v3.15.0@sha256:efd719c99d83…` |  |
-| metrics | pve-exporter | pve-exporter | `manual` | `prompve/prometheus-pve-exporter:3.10.0@sha256:4867684c0a93…` |  |
-| paperwork | actual | actual | `manual` | `actualbudget/actual-server:26.9.0@sha256:552beab3dec8…` |  |
-| paperwork | paperless | paperless | `manual` | `ghcr.io/paperless-ngx/paperless-ngx:3.2.1@sha256:5fa76604a81d…` |  |
+| metrics | prometheus | prometheus | `manual` | `prom/prometheus:v3.15.1@sha256:fa3302279710…` |  |
+| metrics | pve-exporter | pve-exporter | `manual` | `prompve/prometheus-pve-exporter:3.10.1@sha256:5678b230735a…` |  |
+| paperwork | actual | actual | `manual` | `actualbudget/actual-server:26.10.0@sha256:24645e971da6…` |  |
+| paperwork | paperless | paperless | `manual` | `ghcr.io/paperless-ngx/paperless-ngx:3.3.4@sha256:9bc6e8248891…` |  |
 | paperwork | paperless-db | paperless-db | `manual` | `postgres:17.11-alpine@sha256:18cfe3ef5e68…` | mixed: the update reads one label for the whole app, the first container's |
 | paperwork | paperless-db | paperless-redis | `auto` | `redis:7-alpine` | mixed: the update reads one label for the whole app, the first container's |
 | paperwork | stirling | stirling | `auto` | `stirlingtools/stirling-pdf:2.14.3` |  |

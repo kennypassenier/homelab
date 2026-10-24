@@ -50,6 +50,8 @@ const TOKEN = process.env.INVARIANTS_TOKEN ?? "test-invariants-token-1234";
 
 /** @type {any[] | null} the session's cookies, after the one login */
 let session = null;
+/** @type {Promise<any[]> | null} the one login in flight, shared by contexts racing it */
+let loginInFlight = null;
 
 /**
  * Gives `context` a logged-in session: the suite logs in ONCE and every
@@ -61,22 +63,32 @@ let session = null;
  * @param {import("playwright").BrowserContext} context
  */
 async function logIn(context) {
-  if (session) {
-    await context.addCookies(session);
-    await wipePrefs(context);
-    return;
+  // Contexts that start side by side (liveSelectionOf sets a group of pages up
+  // at once) must not each log in: concurrent logins trip the per-address
+  // /login limit and one of them waits out its 10 s for a redirect that never
+  // comes. The first one logs in; the others wait for its cookies.
+  if (!session) {
+    loginInFlight ??= (async () => {
+      const page = await context.newPage();
+      await page.goto(`${BASE}/login`);
+      await page.fill("#token", TOKEN);
+      await Promise.all([
+        page.waitForURL((u) => !u.pathname.startsWith("/login"), {
+          timeout: 10000,
+        }),
+        page.click("button[type=submit]"),
+      ]);
+      const cookies = (await context.storageState()).cookies;
+      await page.close();
+      return cookies;
+    })();
+    try {
+      session = await loginInFlight;
+    } finally {
+      loginInFlight = null;
+    }
   }
-  const page = await context.newPage();
-  await page.goto(`${BASE}/login`);
-  await page.fill("#token", TOKEN);
-  await Promise.all([
-    page.waitForURL((u) => !u.pathname.startsWith("/login"), {
-      timeout: 10000,
-    }),
-    page.click("button[type=submit]"),
-  ]);
-  session = (await context.storageState()).cookies;
-  await page.close();
+  await context.addCookies(session);
   await wipePrefs(context);
 }
 
@@ -9658,7 +9670,12 @@ async function liveSelectionOf(cs) {
       const context = await browser.newContext({
         viewport: { width: 1894, height: 1000 },
       });
-      const page = await freshPage(context);
+      // No /stacks detour (freshPage): five pages loading side by side share
+      // one CPU, and each load costs ~1 s alone, ~4.7 s in company.
+      context.setDefaultTimeout(20000);
+      context.setDefaultNavigationTimeout(20000);
+      await logIn(context);
+      const page = await context.newPage();
       const home = c.href?.startsWith("/stacks/<stack>")
         ? c.href.replace("<stack>", "kp-soft").replace(/\/<[^>]+>.*$/, "")
         : !c.href || /[<{]/.test(c.href)
@@ -9766,12 +9783,18 @@ async function liveSelectionOf(cs) {
   return bad;
 }
 
-// Two cases, each a half of the catalog's selectable controls, set up side
-// by side in one browser; the first also holds that the catalog declares any.
+// Three cases, a third of the catalog's selectable controls each, set up side
+// by side in one browser: nine pages in two cases ran the setup (pages
+// loading in company, ~4.7 s each) plus the 10.5 s wait past the 20 s
+// deadline; three pages a case end near 15 s. The first also holds that the
+// catalog declares any.
 {
-  const half = Math.ceil(SELECTABLE.length / 2);
-  [SELECTABLE.slice(0, half), SELECTABLE.slice(half)].forEach((cs, i) =>
-    test(`invariants: redesign-final-extra-live-selection: on every page with selectable rows a live refresh keeps the ticks, the focus and the row nodes [${i + 1} of 2]`, async () => {
+  const parts = 3;
+  const size = Math.ceil(SELECTABLE.length / parts);
+  Array.from({ length: parts }, (_, i) =>
+    SELECTABLE.slice(i * size, (i + 1) * size),
+  ).forEach((cs, i) =>
+    test(`invariants: redesign-final-extra-live-selection: on every page with selectable rows a live refresh keeps the ticks, the focus and the row nodes [${i + 1} of ${parts}]`, async () => {
       if (i === 0)
         assert.ok(
           SELECTABLE.length >= 1,
@@ -10219,6 +10242,12 @@ test("invariants: refresh-no-replay-1 — the Host page's containers (table and 
 
 test("invariants: refresh-no-replay-1 — Stacks, the Inbox and Metrics update in place on a refresh: no entrance or loading animation", () =>
   noReplay(["/stacks", "/inbox", "/charts"]));
+
+// Metrics' traffic tab (its host, client and request tables) refreshes in
+// place too: a table that reads again keeps its rows and never goes back to
+// its loading state after the first load.
+test("invariants: refresh-no-replay-1 — Metrics' traffic tab (host, client and request tables) updates in place on a refresh: no loading state after the first load", () =>
+  noReplay(["/charts?tab=traffic"]));
 
 // one-progress-view-1 / progress-order-1 (Kenny, 2026-10-24, the restart
 // dialog while it runs): the head is split like the body, the bars take the

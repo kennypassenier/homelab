@@ -2703,6 +2703,9 @@ export function mount(root, ctx) {
         }),
       );
       attachIdmarks(hostsBody);
+      // The first load ends the loading state; a table left in "loading"
+      // re-marks itself (data-kp-state, aria-busy) on every refresh.
+      tableOf(hostsTable)?.state("ready");
       tableOf(hostsTable)?.refresh();
       fillRequestHosts(rows.map(([name]) => name));
       void readRequests();

@@ -149,10 +149,10 @@ pub enum ActionKind {
     UpdateHomeAddress,
     /// bundle-release-rollout (Kenny, 2026-10-24: "Host updaten, admin
     /// dashboard updaten, deployen. Ik wil een nieuwe optie die dit allemaal
-    /// in 1 sequence kan uitvoeren"): host-wide, one job of the dashboard's
-    /// own: update the host to the release, deploy every stack whose files
-    /// changed, and install the release on the dashboard last (its restart
-    /// ends the job).
+    /// in 1 sequence kan uitvoeren"; "enkel de homelab repo ... niet de
+    /// andere paketten"): host-wide, one job of the dashboard's own: update
+    /// the host to the release, then install it on the dashboard (its
+    /// restart ends the job). No other stack is touched.
     RollOutRelease,
 }
 
@@ -624,7 +624,7 @@ impl ActionKind {
                 "restarts the host daemon; running jobs are refused while a job runs; with Deploy what changed ticked, deploys every stack whose files changed once the host is back"
             }
             RollOutRelease => {
-                "one job: update the host to the release, deploy every stack whose files changed, then install the release on the dashboard, which restarts last"
+                "one job: update the host to the release, then install it on the dashboard, which restarts last; no other stack is touched"
             }
             ChangeSecret => {
                 "write one secret through latch (one .env or one latch_files entry); the other files latch holds for this stack are untouched; redeploy to apply it to the running container"

@@ -236,12 +236,14 @@ impl Actions {
         }
     }
 
-    /// bundle-release-rollout: update the host to the release, deploy every
-    /// stack whose files changed (the dashboard's own left out), then install
-    /// the release on the dashboard, whose restart ends the job (arch-self:
-    /// its end is read back after the restart). Each part is one sub-job of
-    /// this one job, so the page shows one progress view and stops at the
-    /// first part that fails.
+    /// bundle-release-rollout: a release of this repository moves the host
+    /// and the dashboard only (Kenny, 2026-10-24: "dat is enkel de homelab
+    /// repo he, dus host, admin dashboard en hun deploy, niet de andere
+    /// paketten"): update the host to the release, then install it on the
+    /// dashboard, whose restart ends the job (arch-self: its end is read
+    /// back after the restart). Each part is one sub-job of this one job, so
+    /// the page shows one progress view and stops at the first part that
+    /// fails.
     pub(super) async fn run_release_rollout(
         &self,
         req: &ActionRequest,
@@ -250,7 +252,7 @@ impl Actions {
         let mut tracker = Tracker::new(self.history().await);
         let tag = req.args.tag.clone();
         let host = crate::core::actions::HOST_TARGET.to_string();
-        let parts: [(&str, ActionRequest); 3] = [
+        let parts: [(&str, ActionRequest); 2] = [
             (
                 "updating the host",
                 ActionRequest {
@@ -263,14 +265,6 @@ impl Actions {
                 },
             ),
             (
-                "deploying what changed",
-                ActionRequest {
-                    stack: host.clone(),
-                    action: ActionKind::Apply,
-                    args: ActionArgs::default(),
-                },
-            ),
-            (
                 "installing the release on the dashboard",
                 ActionRequest {
                     stack: crate::core::actions::SELF_STACK.to_string(),
@@ -279,26 +273,9 @@ impl Actions {
                 },
             ),
         ];
-        for (i, (what, mut sub)) in parts.into_iter().enumerate() {
+        for (i, (what, sub)) in parts.into_iter().enumerate() {
             if i > 0 {
                 self.wait_host_link().await;
-            }
-            if sub.action == ActionKind::Apply {
-                // Planned now, against the host that was just updated: the
-                // dashboard's own stack is left for its last part, and with
-                // nothing else changed this part is skipped.
-                match self.apply_leaving_self().await {
-                    Ok(Some(args)) => sub.args = args,
-                    Ok(None) => continue,
-                    Err(r) => {
-                        return Ok(RpcResponse {
-                            id: 0,
-                            ok: false,
-                            message: format!("The roll-out stopped while {what}: {}", r.why),
-                            deferred: None,
-                        });
-                    }
-                }
             }
             // The host's own update keeps its full path (it waits for the
             // shipped version to answer, and rolls back when it does not).
@@ -324,7 +301,7 @@ impl Actions {
             id: 0,
             ok: true,
             message: format!(
-                "Rolled out {}: the host, every changed stack and the dashboard run it.",
+                "Rolled out {}: the host and the dashboard run it.",
                 tag.as_deref().unwrap_or("the newest release")
             ),
             deferred: None,

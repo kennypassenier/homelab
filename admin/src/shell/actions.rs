@@ -2982,10 +2982,10 @@ fn preview_line(a: &Actions, req: &ActionRequest, typed: bool) -> Result<String,
             .unwrap_or("")
             .to_string()
     };
-    // bundle-release-rollout: three parts, each with its own CLI line.
+    // bundle-release-rollout: two parts, each with its own CLI line.
     if req.action == ActionKind::RollOutRelease {
         return Ok(format!(
-            "homelab release-update {} && homelab apply && homelab release-update-native {}",
+            "homelab release-update {} && homelab release-update-native {}",
             tag(),
             actions::SELF_STACK
         )

@@ -105,6 +105,12 @@ fn args_for(kind: ActionKind, stack: &str) -> ActionArgs {
 #[test]
 fn feat_stacks_4_every_action_builds_a_command_whose_scope_the_catalog_names() {
     for kind in ActionKind::ALL {
+        // bundle-release-rollout: a job of the dashboard's own, made of
+        // other actions (each checked here on its own); it sends no command
+        // of its own.
+        if *kind == ActionKind::RollOutRelease {
+            continue;
+        }
         let stack = if kind.host_wide() {
             HOST_TARGET
         } else {

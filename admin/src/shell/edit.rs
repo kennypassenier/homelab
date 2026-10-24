@@ -2172,10 +2172,16 @@ fn restart_follow_up(c: &EditCtx, keys: &[String], origin: Origin) -> serde_json
     if !needs_restart {
         return serde_json::Value::Null;
     }
+    // bundle-hosttoml-deploys (Kenny, 2026-10-24): once the host is back
+    // with its new settings, every stack whose files changed is deployed in
+    // the same job, so a host.toml change never waits on a second press.
     let req = match actions::validate(
         actions::HOST_TARGET,
         ActionKind::RestartHost.slug(),
-        ActionArgs::default(),
+        ActionArgs {
+            then_apply: true,
+            ..ActionArgs::default()
+        },
     ) {
         Ok(r) => r,
         Err(r) => return serde_json::json!({ "refused": r }),

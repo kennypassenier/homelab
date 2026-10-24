@@ -18,7 +18,7 @@
 // master-detail) has no address since 3.71.0; each stack's Settings shows its
 // own (`opts.stack`), without the list.
 
-import { act, onAct, send } from "../act.js";
+import { send } from "../act.js";
 import { fetchJson, h } from "../dom.js";
 import { declare, declareField, drivable } from "../drivable.js";
 import { formatDateTime } from "../format.js";
@@ -206,42 +206,6 @@ async function readValue(stack, ref, purpose, driven) {
     { secret: ref, purpose, driven },
     purpose === "copy" ? "copy the secret" : "reveal the secret",
   );
-}
-
-/**
- * After a write's job is done, deploy the stack so the app reads the new
- * value ("restart"). Lives outside the page: it still happens when the page
- * was left meanwhile. A failed write deploys nothing.
- * @param {number} job
- * @param {string} stack
- */
-function deployAfter(job, stack) {
-  const off = onAct("jobs", () => {
-    const j = act.jobs.find((x) => x.job === job);
-    if (
-      !j ||
-      !["done", "failed", "refused", "deferred", "unknown"].includes(j.state)
-    )
-      return;
-    off();
-    if (j.state !== "done") {
-      say(`The write ${j.state}; ${stack} was not restarted`, 8000);
-      return;
-    }
-    void send(
-      "POST",
-      `/data/actions/${encodeURIComponent(stack)}/deploy`,
-      {},
-      `deploy ${stack}`,
-    ).then((r) =>
-      say(
-        r.ok
-          ? `Restarting ${stack}: deploy queued · see Activity`
-          : `Could not restart ${stack}: ${r.error.why}`,
-        8000,
-      ),
-    );
-  });
 }
 
 /**
@@ -928,13 +892,22 @@ export function mount(root, opts = {}) {
         const r = await send(
           "POST",
           `/data/actions/${encodeURIComponent(stack)}/change-secret`,
-          { secret_ref: JSON.stringify(row.ref), stage_token: token },
+          // bundle-secret-restart: the write and the deploy are one job on
+          // the server, so leaving the page never loses the deploy.
+          {
+            secret_ref: JSON.stringify(row.ref),
+            stage_token: token,
+            ...(restart ? { then_deploy: true } : {}),
+          },
           "change the secret",
         );
         if (!r.ok) throw new Error(r.error.why);
-        say(`Writing ${row.name} through latch · job queued`, 6000);
-        if (restart && typeof r.body?.job === "number")
-          deployAfter(r.body.job, stack);
+        say(
+          restart
+            ? `Writing ${row.name} through latch, then deploying ${stack} · one job queued`
+            : `Writing ${row.name} through latch · job queued`,
+          6000,
+        );
       },
       undo: () => say("Write cancelled before it ran"),
       // A refused write brings the staged value back.

@@ -448,7 +448,8 @@ export const ACTION_GROUPS = [
   {
     title: "Change the host",
     full: true,
-    ids: ["update-host", "apply", "exec", "restart-host"],
+    // bundle-release-rollout: the whole release in one job, first.
+    ids: ["roll-out-release", "update-host", "apply", "exec", "restart-host"],
   },
 ];
 

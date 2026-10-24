@@ -236,6 +236,217 @@ impl Actions {
         }
     }
 
+    /// bundle-release-rollout: update the host to the release, deploy every
+    /// stack whose files changed (the dashboard's own left out), then install
+    /// the release on the dashboard, whose restart ends the job (arch-self:
+    /// its end is read back after the restart). Each part is one sub-job of
+    /// this one job, so the page shows one progress view and stops at the
+    /// first part that fails.
+    pub(super) async fn run_release_rollout(
+        &self,
+        req: &ActionRequest,
+        view: &mut JobView,
+    ) -> Result<RpcResponse, Stop> {
+        let mut tracker = Tracker::new(self.history().await);
+        let tag = req.args.tag.clone();
+        let host = crate::core::actions::HOST_TARGET.to_string();
+        let parts: [(&str, ActionRequest); 3] = [
+            (
+                "updating the host",
+                ActionRequest {
+                    stack: host.clone(),
+                    action: ActionKind::UpdateHost,
+                    args: ActionArgs {
+                        tag: tag.clone(),
+                        ..Default::default()
+                    },
+                },
+            ),
+            (
+                "deploying what changed",
+                ActionRequest {
+                    stack: host.clone(),
+                    action: ActionKind::Apply,
+                    args: ActionArgs::default(),
+                },
+            ),
+            (
+                "installing the release on the dashboard",
+                ActionRequest {
+                    stack: crate::core::actions::SELF_STACK.to_string(),
+                    action: ActionKind::ReleaseUpdateNative,
+                    args: ActionArgs::default(),
+                },
+            ),
+        ];
+        for (i, (what, mut sub)) in parts.into_iter().enumerate() {
+            if i > 0 {
+                self.wait_host_link().await;
+            }
+            if sub.action == ActionKind::Apply {
+                // Planned now, against the host that was just updated: the
+                // dashboard's own stack is left for its last part, and with
+                // nothing else changed this part is skipped.
+                match self.apply_leaving_self().await {
+                    Ok(Some(args)) => sub.args = args,
+                    Ok(None) => continue,
+                    Err(r) => {
+                        return Ok(RpcResponse {
+                            id: 0,
+                            ok: false,
+                            message: format!("The roll-out stopped while {what}: {}", r.why),
+                            deferred: None,
+                        });
+                    }
+                }
+            }
+            // The host's own update keeps its full path (it waits for the
+            // shipped version to answer, and rolls back when it does not).
+            let ran = if sub.action == ActionKind::UpdateHost {
+                Box::pin(self.execute(&sub, view)).await
+            } else {
+                self.run_sub(sub, view, &mut tracker).await
+            };
+            match ran {
+                Ok(r) if r.ok => {}
+                Ok(r) => {
+                    return Ok(RpcResponse {
+                        id: 0,
+                        ok: false,
+                        message: format!("The roll-out stopped while {what}: {}", r.message),
+                        deferred: None,
+                    });
+                }
+                Err(e) => return Err(e),
+            }
+        }
+        Ok(RpcResponse {
+            id: 0,
+            ok: true,
+            message: format!(
+                "Rolled out {}: the host, every changed stack and the dashboard run it.",
+                tag.as_deref().unwrap_or("the newest release")
+            ),
+            deferred: None,
+        })
+    }
+
+    /// bundle-secret-restart: write the secret, then deploy the stack so the
+    /// new value is on the container (a latch file is written on deploy).
+    pub(super) async fn run_secret_then_deploy(
+        &self,
+        req: &ActionRequest,
+        view: &mut JobView,
+    ) -> Result<RpcResponse, Stop> {
+        let mut tracker = Tracker::new(self.history().await);
+        let mut write = req.clone();
+        write.args.then_deploy = false;
+        let r = self.run_sub(write, view, &mut tracker).await?;
+        if !r.ok {
+            return Ok(r);
+        }
+        let deploy = ActionRequest {
+            stack: req.stack.clone(),
+            action: ActionKind::Deploy,
+            args: ActionArgs::default(),
+        };
+        let d = self.run_sub(deploy, view, &mut tracker).await?;
+        Ok(RpcResponse {
+            message: if d.ok {
+                format!(
+                    "The secret is written and {} is deployed with it.",
+                    req.stack
+                )
+            } else {
+                format!(
+                    "The secret is written, but the deploy of {} ended: {}",
+                    req.stack, d.message
+                )
+            },
+            ..d
+        })
+    }
+
+    /// bundle-hosttoml-deploys: restart the host so a host.toml change takes
+    /// effect, then deploy every stack whose files changed.
+    pub(super) async fn run_restart_then_apply(
+        &self,
+        req: &ActionRequest,
+        view: &mut JobView,
+    ) -> Result<RpcResponse, Stop> {
+        let mut tracker = Tracker::new(self.history().await);
+        let mut restart = req.clone();
+        restart.args.then_apply = false;
+        // The restart's own path waits until the host answers again.
+        let r = Box::pin(self.execute(&restart, view)).await?;
+        if !r.ok {
+            return Ok(r);
+        }
+        self.wait_host_link().await;
+        let apply = ActionRequest {
+            stack: crate::core::actions::HOST_TARGET.to_string(),
+            action: ActionKind::Apply,
+            args: ActionArgs::default(),
+        };
+        let apply = match self.apply_leaving_self().await {
+            Ok(Some(args)) => ActionRequest { args, ..apply },
+            Ok(None) => {
+                return Ok(RpcResponse {
+                    id: 0,
+                    ok: true,
+                    message: "The host restarted with its new settings; no stack's files changed."
+                        .into(),
+                    deferred: None,
+                });
+            }
+            Err(r) => return Err(Stop::Refused(r)),
+        };
+        match self.run_sub(apply, view, &mut tracker).await {
+            Ok(a) => Ok(RpcResponse {
+                message: if a.ok {
+                    "The host restarted with its new settings and every changed stack is deployed."
+                        .into()
+                } else {
+                    format!("The host restarted, but the deploys ended: {}", a.message)
+                },
+                ..a
+            }),
+            Err(e) => Err(e),
+        }
+    }
+
+    /// The apply of every stack whose files changed, the dashboard's own
+    /// left out (its deploy restarts the job's own process); `None` when
+    /// nothing else changed. A stack that does not build refuses, as
+    /// Deploy all changes does.
+    async fn apply_leaving_self(&self) -> Result<Option<ActionArgs>, Refusal> {
+        let (plan, _) = self.apply_plan(true).await?;
+        let me = crate::core::actions::SELF_STACK;
+        if plan.deploy.iter().all(|s| s == me) {
+            return Ok(None);
+        }
+        Ok(Some(ActionArgs {
+            leave_out: plan.deploy.iter().any(|s| s == me).then(|| me.to_string()),
+            ..Default::default()
+        }))
+    }
+
+    /// After a part that restarts the host: wait (at most 2 min) until the
+    /// host answers again before sending the next part.
+    async fn wait_host_link(&self) {
+        for _ in 0..60 {
+            let r = self
+                .inner
+                .host
+                .ask_traced(Command::Ping, Duration::from_secs(5), None)
+                .await;
+            if r.is_ok_and(|r| r.ok) {
+                return;
+            }
+            tokio::time::sleep(Duration::from_secs(2)).await;
+        }
+    }
+
     /// The Update flow's job: back up → commit → deploy → verify, and the
     /// safety net. `Ok(ok=false)` for a stop the flow explains itself.
     pub(super) async fn run_update_flow(

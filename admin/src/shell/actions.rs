@@ -2264,6 +2264,17 @@ impl Actions {
         if req.action == ActionKind::UpdateHomeAddress {
             return self.run_home_address(req, view).await;
         }
+        // bundle-release-rollout / -secret-restart / -hosttoml-deploys: one
+        // job of several parts, each part an ordinary action.
+        if req.action == ActionKind::RollOutRelease {
+            return self.run_release_rollout(req, view).await;
+        }
+        if req.action == ActionKind::ChangeSecret && req.args.then_deploy {
+            return self.run_secret_then_deploy(req, view).await;
+        }
+        if req.action == ActionKind::RestartHost && req.args.then_apply {
+            return self.run_restart_then_apply(req, view).await;
+        }
         let material = self.material(req).await.map_err(Stop::Refused)?;
         let over = actions::cli_override(req, &material);
         let expected = match &material {
@@ -2971,6 +2982,15 @@ fn preview_line(a: &Actions, req: &ActionRequest, typed: bool) -> Result<String,
             .unwrap_or("")
             .to_string()
     };
+    // bundle-release-rollout: three parts, each with its own CLI line.
+    if req.action == ActionKind::RollOutRelease {
+        return Ok(format!(
+            "homelab release-update {} && homelab apply && homelab release-update-native {}",
+            tag(),
+            actions::SELF_STACK
+        )
+        .replace("  ", " "));
+    }
     match req.action.needs() {
         Needs::HostRelease => {
             return Ok(format!("homelab release-update {}", tag())

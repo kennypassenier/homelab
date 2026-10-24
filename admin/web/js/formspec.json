@@ -5,7 +5,8 @@
     "exec": ["vmid", "command"],
     "guards-ct": ["vmid"],
     "update-host": ["tag"],
-    "apply": ["destroy", "destroy_ids", "destroy_ack"]
+    "apply": ["destroy", "destroy_ids", "destroy_ack"],
+    "roll-out-release": ["tag"]
   },
   "intro": {
     "deploy": "Creates the container if it does not exist yet, or brings an existing one in line with these files: what the files declare is applied, what they no longer declare is removed from the container. The stack's own data is never touched by this.",
@@ -41,7 +42,8 @@
     "install-native": "Downloads the chosen (or newest) signed release of this native service, verifies it, installs its binary and unit file, then runs Adopt so the host starts managing it the same way as any other adopted service.",
     "apply": "Compares the whole stacks directory against the host and applies every difference in one batch: deploys what changed, and destroys only the stacks explicitly typed below to confirm — nothing is destroyed just because it is no longer in the working copy.",
     "restart-host": "Restarts the homelab-host.service daemon itself, so a host.toml change that needs a restart takes effect without a full host update.",
-    "change-secret": "Writes one new value for the named secret straight through latch into the stack's sealed env file. The value itself is never logged or kept in the job's own history."
+    "change-secret": "Writes one new value for the named secret straight through latch into the stack's sealed env file. The value itself is never logged or kept in the job's own history.",
+    "roll-out-release": "One job for a new homelab release, in this order: the host is updated to the chosen (or newest) signed release; every stack whose files changed is deployed, each backed up first; the dashboard installs the release last and restarts, which ends the job (its outcome is read back after the restart). It stops at the first part that fails."
   },
   "steps": {
     "options": "Options",
@@ -110,8 +112,14 @@
       "help": "Where the snapshot is read from: the local copy on the host's own disks, or Google Drive. Empty: Google Drive.",
       "required": false,
       "choices": [
-        { "value": "local", "label": "Local copy (this host's disks)" },
-        { "value": "remote", "label": "Google Drive" }
+        {
+          "value": "local",
+          "label": "Local copy (this host's disks)"
+        },
+        {
+          "value": "remote",
+          "label": "Google Drive"
+        }
       ]
     },
     "skip_backup": {
@@ -304,6 +312,18 @@
       "help": "Each is backed up and its backup restored as a check first; a stack whose backup does not restore is left untouched. Its data stays under Backups ▸ Kept from removed stacks until you wipe it.",
       "required": false,
       "danger": true
+    },
+    "then_deploy": {
+      "kind": "check",
+      "label": "Deploy the stack afterwards",
+      "help": "On by default: the stack is deployed right after the write, so the running container gets the new value in the same job (a latch file is written on deploy; a unit that reads it restarts).",
+      "required": false
+    },
+    "then_apply": {
+      "kind": "check",
+      "label": "Deploy what changed afterwards",
+      "help": "Once the host is back with its new settings, every stack whose files changed is deployed in the same job, each backed up first.",
+      "required": false
     }
   },
   "messages": {
@@ -353,6 +373,7 @@
     "restart-host",
     "restore",
     "restore-native",
+    "roll-out-release",
     "rollback",
     "rollback-native",
     "seal-env",

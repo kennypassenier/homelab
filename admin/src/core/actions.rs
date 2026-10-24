@@ -147,6 +147,13 @@ pub enum ActionKind {
     /// the Home address section of Settings and from the Inbox row that
     /// points at it, so it is not in the catalog.
     UpdateHomeAddress,
+    /// bundle-release-rollout (Kenny, 2026-10-24: "Host updaten, admin
+    /// dashboard updaten, deployen. Ik wil een nieuwe optie die dit allemaal
+    /// in 1 sequence kan uitvoeren"): host-wide, one job of the dashboard's
+    /// own: update the host to the release, deploy every stack whose files
+    /// changed, and install the release on the dashboard last (its restart
+    /// ends the job).
+    RollOutRelease,
 }
 
 /// What the shell has to read before the command can be built.
@@ -228,6 +235,12 @@ pub enum Arg {
     /// redesign-flows-6: update-apps: the moves, as JSON
     /// (`core::updateflow::UpdateItem`, a list).
     Updates,
+    /// bundle-secret-restart: change-secret: deploy the stack after the
+    /// write, so the new value is on the container in the same job.
+    ThenDeploy,
+    /// bundle-hosttoml-deploys: restart-host: once the host is back, deploy
+    /// every stack whose files changed (`apply`), in the same job.
+    ThenApply,
 }
 
 /// One row of the catalog the page draws its buttons from.
@@ -290,6 +303,7 @@ impl ActionKind {
         ActionKind::RestartHost,
         ActionKind::ChangeSecret,
         ActionKind::SealEnv,
+        ActionKind::RollOutRelease,
     ];
 
     /// The name in a URL: `deploy`, `backup-native`, ...
@@ -328,6 +342,7 @@ impl ActionKind {
             InstallNative => "install-native",
             Apply => "apply",
             RestartHost => "restart-host",
+            RollOutRelease => "roll-out-release",
             ChangeSecret => "change-secret",
             SealEnv => "seal-env",
             UpdateApps => "update-apps",
@@ -363,6 +378,7 @@ impl ActionKind {
                 | AnswerCheck
                 | Apply
                 | RestartHost
+                | RollOutRelease
                 | UpdateApps
                 | UpdateHomeAddress
         )
@@ -399,7 +415,9 @@ impl ActionKind {
             ],
             RestoreNative => &[Arg::Confirm, Arg::Snapshot, Arg::Unit, Arg::Source],
             VerifyRestore => &[Arg::App, Arg::Snapshot, Arg::Source],
-            ChangeSecret => &[Arg::SecretRef, Arg::StageToken],
+            ChangeSecret => &[Arg::SecretRef, Arg::StageToken, Arg::ThenDeploy],
+            RestartHost => &[Arg::ThenApply],
+            RollOutRelease => &[Arg::Tag],
             Update => &[Arg::App],
             RollbackNative => &[Arg::Unit],
             PruneOrphans | Forget => &[Arg::Confirm],
@@ -517,6 +535,7 @@ impl ActionKind {
             InstallNative => "Install a release",
             Apply => "Deploy all changes",
             RestartHost => "Restart the host",
+            RollOutRelease => "Roll out a release",
             ChangeSecret => "Change a secret",
             SealEnv => "Push the env",
             UpdateApps => "Update apps",
@@ -601,7 +620,12 @@ impl ActionKind {
             UpdateHomeAddress => {
                 "write the house's current public address into the Cloudflare Access bypass policies that hold the old one, so the house gets no login screens and eten lets it in again; no other policy is touched"
             }
-            RestartHost => "restarts the host daemon; running jobs are refused while a job runs",
+            RestartHost => {
+                "restarts the host daemon; running jobs are refused while a job runs; with Deploy what changed ticked, deploys every stack whose files changed once the host is back"
+            }
+            RollOutRelease => {
+                "one job: update the host to the release, deploy every stack whose files changed, then install the release on the dashboard, which restarts last"
+            }
             ChangeSecret => {
                 "write one secret through latch (one .env or one latch_files entry); the other files latch holds for this stack are untouched; redeploy to apply it to the running container"
             }
@@ -616,7 +640,7 @@ impl ActionKind {
         use ActionKind::*;
         match self {
             PruneOrphans | Destroy | Forget | Wipe | Exec | UpdateHost | Apply | RestartHost
-            | ChangeSecret => Scope::All,
+            | ChangeSecret | RollOutRelease => Scope::All,
             _ => Scope::Operate,
         }
     }
@@ -715,6 +739,12 @@ pub struct ActionArgs {
     /// `ActionKind::ChangeSecret`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub stage_token: Option<String>,
+    /// bundle-secret-restart: change-secret, then deploy the stack.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub then_deploy: bool,
+    /// bundle-hosttoml-deploys: restart-host, then deploy what changed.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub then_apply: bool,
     /// redesign-stacks-6: back the stack up before the deploy changes it
     /// (`DeploySpec::backup_first`). Never read from a request body: the
     /// server sets it for every deploy of a batch (`validate_batch`) unless
@@ -750,6 +780,12 @@ impl ActionArgs {
         }
         if self.skip_safety_copy {
             v.push(Arg::SkipSafetyCopy);
+        }
+        if self.then_deploy {
+            v.push(Arg::ThenDeploy);
+        }
+        if self.then_apply {
+            v.push(Arg::ThenApply);
         }
         if self.commit.is_some() {
             v.push(Arg::Commit);

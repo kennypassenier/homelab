@@ -107,6 +107,10 @@ const REDIRECTS = {
   apply: (s) => `/stacks${setParams(s, { "deploy-all": "1" })}`,
   health: (s) => {
     const block = new URLSearchParams(s).get("block");
+    // checks-notice-link-1: the nightly check's notice linked here; the
+    // Inbox has no "checks" kind, it has the latest round's findings.
+    if (block === "checks")
+      return `/inbox${setParams(s, { block: null, kind: null, section: "check-findings" })}`;
     return `/inbox${setParams(s, { block: null, kind: block })}`;
   },
   jobs: (s) => `/activity${setParams(s, { view: "running" })}`,
@@ -130,7 +134,8 @@ const REDIRECTS = {
   start: (s) => `/${s}`,
   today: (s) => `/inbox${setParams(s, { kind: "today" })}`,
   doctor: (s) => `/inbox${setParams(s, { kind: "doctor" })}`,
-  checks: (s) => `/inbox${setParams(s, { kind: "checks" })}`,
+  checks: (s) =>
+    `/inbox${setParams(s, { kind: null, section: "check-findings" })}`,
   traffic: (s) => `/charts${setParams(s, { tab: "traffic" })}`,
   timeline: (s) => `/activity${setParams(s, { view: "timeline" })}`,
   // Pre-3.1.0 address of the tile page.

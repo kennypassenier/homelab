@@ -30,6 +30,50 @@ import {
 } from "/static/kp/js/connection.js";
 
 /**
+ * The stack whose Traefik and cloudflared carry the dashboard's own
+ * connection: while one of its jobs runs (a backup pauses it, a deploy
+ * restarts it) the live channel drops for longer than the banner's grace.
+ */
+export const GATEWAY_STACK = "gateway";
+
+/**
+ * The running job of the gateway stack, if any (offline-flash-1).
+ * @param {{stack: string, action: string, state: string}[]} jobs
+ * @returns {string | null} the job's action, or null
+ */
+export function gatewayJob(jobs) {
+  const j = jobs.find(
+    (x) =>
+      x.stack === GATEWAY_STACK &&
+      (x.state === "running" || x.state === "queued"),
+  );
+  return j ? j.action : null;
+}
+
+/**
+ * The banner's words for a drop. While a gateway job runs the page says
+ * that, instead of a bare "You are offline".
+ * @param {string | null} action
+ * @returns {{title: string, why: string}}
+ */
+export function offlineWords(action) {
+  if (!action)
+    return {
+      title: "You are offline",
+      why: "The page keeps showing what it last read. The host keeps running what it already holds.",
+    };
+  const doing = /backup/.test(action)
+    ? "backed up"
+    : /deploy|update|apply|restart/.test(action)
+      ? "deployed"
+      : "worked on";
+  return {
+    title: `The gateway is being ${doing}`,
+    why: "The dashboard reaches you through the gateway, so the page lets go for a moment. It reconnects by itself when the gateway is back.",
+  };
+}
+
+/**
  * What the banner shows for what the live channel and the host link say.
  * @param {{stream: import("./store.js").Stream, up: boolean | null,
  *   link: string, queued: number}} s
@@ -95,6 +139,13 @@ export function mountConnectionBar(el) {
       link: current().link,
       queued: queuedJobs(),
     });
+    const words = offlineWords(gatewayJob(act.jobs));
+    setStrings(
+      /** @type {any} */ ({
+        connOffline: words.title,
+        connOfflineWhy: words.why,
+      }),
+    );
     const shown = connectionOf(el)?.state() !== "online";
     if (c.state === "offline") {
       if (outage && !shown) return;

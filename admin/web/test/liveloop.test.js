@@ -12,10 +12,10 @@ import {
 } from "../js/logs.js";
 import { ACTION_TOAST_MS, toastMs } from "../js/ui.js";
 
-test("the reopen wait doubles from 1 s and stops at 15 s", () => {
+test("the first reopen is immediate, then the wait doubles from 1 s and stops at 15 s", () => {
   assert.deepEqual(
     [0, 1, 2, 3, 4, 5, 9].map(reopenDelay),
-    [1000, 2000, 4000, 8000, 15000, 15000, 15000],
+    [0, 1000, 2000, 4000, 8000, 15000, 15000],
   );
 });
 

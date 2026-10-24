@@ -377,7 +377,12 @@ export function kpi(k) {
   );
   const value = h("span", { class: "kp-kpi__value" });
   const num = h("span");
+  const unitEl = h("small");
   const ctx = h("span", { class: "kp-kpi__trend" });
+  /** @type {HTMLElement | null} the context line's used-of-limit bar */
+  let ctxBarEl = null;
+  /** @type {string | null} what the context line's words say, to skip an equal repaint */
+  let ctxWords = null;
   /** The fourth row: a kp meter or a kp sparkline (an svg). @type {HTMLElement | SVGSVGElement | null} */
   let foot = k.meter ? tileMeter() : k.spark ? tileSpark() : null;
   // A same-site path (invariant 35), the card's id as its hash.
@@ -468,22 +473,48 @@ export function kpi(k) {
       if (num.parentNode === value && num.textContent !== text)
         setLive(num, text);
       else num.textContent = text;
-      value.replaceChildren(
-        num,
-        ...(cur.unit ? [h("small", null, cur.unit)] : []),
+      // refresh-no-replay-1: the figure keeps its element; only the unit
+      // beside it comes and goes.
+      if (num.parentNode !== value) value.replaceChildren(num);
+      if (cur.unit) {
+        if (!unitEl.parentNode) value.append(unitEl);
+        if (unitEl.textContent !== cur.unit) unitEl.textContent = cur.unit;
+      } else unitEl.remove();
+    }
+    // The context line: a used-of-limit bar, then words. A refresh that
+    // brings other numbers repaints the bar and the words where they stand;
+    // the bar is a new element only when the line gains one (the theme wipes
+    // a new meter in, so a redrawn one would wipe in again every minute).
+    const wantBar = !loading && cur.ctxMeter ? cur.ctxMeter : null;
+    if (wantBar) {
+      if (!ctxBarEl) {
+        ctxBarEl = ctxBar(wantBar, cur.label);
+        ctx.prepend(ctxBarEl);
+      } else {
+        paintMeter(ctxBarEl, wantBar);
+        ctxBarEl.setAttribute("aria-label", cur.label);
+      }
+    } else if (ctxBarEl) {
+      ctxBarEl.remove();
+      ctxBarEl = null;
+    }
+    const words = JSON.stringify([loading, cur.ctx, cur.ctxTone, cur.ctxParts]);
+    if (words !== ctxWords) {
+      ctxWords = words;
+      for (const n of [...ctx.childNodes]) if (n !== ctxBarEl) n.remove();
+      ctx.append(
+        ...(loading
+          ? [skeleton("80%")]
+          : cur.ctxParts?.length
+            ? cur.ctxParts.flatMap((p, i) => [
+                ...(i ? [" · "] : []),
+                p.tone ? dot(p.tone, p.text) : p.text,
+              ])
+            : [
+                cur.ctxTone ? dot(cur.ctxTone, cur.ctx ?? "") : (cur.ctx ?? ""),
+              ]),
       );
     }
-    ctx.replaceChildren(
-      ...(loading || !cur.ctxMeter ? [] : [ctxBar(cur.ctxMeter, cur.label)]),
-      ...(loading
-        ? [skeleton("80%")]
-        : cur.ctxParts?.length
-          ? cur.ctxParts.flatMap((p, i) => [
-              ...(i ? [" · "] : []),
-              p.tone ? dot(p.tone, p.text) : p.text,
-            ])
-          : [cur.ctxTone ? dot(cur.ctxTone, cur.ctx ?? "") : (cur.ctx ?? "")]),
-    );
     // kp-themes' tone: a coloured edge, the figure on its status plate.
     const tone = cur.tone ? KP_TONE[cur.tone] : undefined;
     if (tone) e.dataset.kpTone = tone;

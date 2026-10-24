@@ -919,6 +919,30 @@
       "twins": false
     },
     {
+      "id": "checks-turn-off",
+      "page": "stack",
+      "what": "turn a check or a probe of the stack's checks list off: asks a short reason, writes off: <reason> on it when the change is committed",
+      "opens": "dialog",
+      "row": "<list>:<row number>",
+      "href": "/stack",
+      "was": [],
+      "shows": null,
+      "reach": [],
+      "twins": false
+    },
+    {
+      "id": "checks-turn-on",
+      "page": "stack",
+      "what": "turn a check or a probe of the stack's checks list on again (removes its off: reason when the change is committed)",
+      "opens": "view",
+      "row": "<list>:<row number>",
+      "href": "/stack",
+      "was": [],
+      "shows": null,
+      "reach": [],
+      "twins": false
+    },
+    {
       "id": "close-schedule-form",
       "page": "schedules",
       "what": "close the schedule form (asks first when something is changed)",
@@ -2323,6 +2347,18 @@
       "twins": false
     },
     {
+      "id": "inbox-check-findings",
+      "page": "needs-you",
+      "what": "fold or unfold the latest fleet check round: every broken and drift finding with its remedy, the noted ones folded",
+      "opens": "view",
+      "row": null,
+      "href": "/inbox",
+      "was": [],
+      "shows": null,
+      "reach": [],
+      "twins": false
+    },
+    {
       "id": "inbox-explain-hide",
       "page": "needs-you",
       "what": "hide the note about what the Inbox replaces",
@@ -2331,6 +2367,18 @@
       "href": "/inbox",
       "was": [],
       "shows": null,
+      "reach": [],
+      "twins": false
+    },
+    {
+      "id": "inbox-finding-turn-off",
+      "page": "needs-you",
+      "what": "a finding's Turn off…: asks a short reason and writes off: <reason> on that check or probe in the stack's checks.yml (a commit)",
+      "opens": "dialog",
+      "row": "<stack>/<app>/<check name>",
+      "href": "/inbox",
+      "was": [],
+      "shows": "on a finding about one check or probe of an app",
       "reach": [],
       "twins": false
     },
@@ -2523,6 +2571,18 @@
       "href": "/inbox",
       "was": [],
       "shows": null,
+      "reach": [],
+      "twins": false
+    },
+    {
+      "id": "inbox-turn-off",
+      "page": "needs-you",
+      "what": "a check row's Turn off…: asks a short reason and writes off: <reason> on that check or probe in the stack's checks.yml (a commit)",
+      "opens": "dialog",
+      "row": "<row key>",
+      "href": "/inbox",
+      "was": [],
+      "shows": "on a check row that names one check or probe of an app",
       "reach": [],
       "twins": false
     },
@@ -5639,7 +5699,7 @@
     "start": "/",
     "today": "/inbox?kind=today",
     "doctor": "/inbox?kind=doctor",
-    "checks": "/inbox?kind=checks",
+    "checks": "/inbox?section=check-findings",
     "traffic": "/charts?tab=traffic",
     "timeline": "/activity?view=timeline",
     "home": "/apps",

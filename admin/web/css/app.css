@@ -788,20 +788,25 @@ tr.unread td:first-child {
 }
 .rv-head {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: var(--kp-space-sm, 0.5rem) var(--kp-space-lg, 1.5rem);
-  align-items: start;
-}
-.rv-head__main {
-  display: grid;
   grid-template-columns: minmax(0, 1fr);
   gap: var(--kp-space-sm, 0.5rem) var(--kp-space-lg, 1.5rem);
   align-items: start;
-  min-inline-size: 0;
 }
 .rv-head__id {
   min-inline-size: 0;
   min-block-size: 2.8em;
+}
+/* The right half of the head: the figures start where the right half
+   starts, the state badge closes it. */
+.rv-head__side {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 7rem;
+  gap: var(--kp-space-sm, 0.5rem) var(--kp-space-lg, 1.5rem);
+  align-items: start;
+  min-inline-size: 0;
+}
+.rv-head .rv-badge {
+  justify-self: end;
 }
 .rv-title,
 .rv-sub {
@@ -816,12 +821,6 @@ tr.unread td:first-child {
 @container rv (min-width: 64rem) {
   .rv-head {
     grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-  }
-  .rv-head__main {
-    grid-template-columns: minmax(0, 1fr) auto;
-  }
-  .rv-head .rv-badge {
-    justify-self: end;
   }
   .rv-grid {
     grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
@@ -842,7 +841,7 @@ tr.unread td:first-child {
 }
 .rv-figures {
   display: grid;
-  grid-template-columns: repeat(3, auto);
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: var(--kp-space-xs, 0.25rem) var(--kp-space-lg, 1.5rem);
   margin: 0;
   justify-content: start;
@@ -893,6 +892,12 @@ tr.unread td:first-child {
   block-size: 6.5rem;
   overflow: visible;
 }
+/* The bars take the whole track beside the dial (kp caps a lone bar at
+   32rem). */
+.rv .kp-progressbar {
+  --kp-progressbar-max-width: none;
+  max-inline-size: none;
+}
 .rv-bar {
   display: grid;
   gap: var(--kp-space-xs, 0.25rem);
@@ -928,7 +933,8 @@ tr.unread td:first-child {
 /* The step list: its own scroll area at a fixed height from the first
    frame to the end; the list inside never folds, reorders or rebuilds. */
 .rv-steps {
-  block-size: var(--rv-steps-h);
+  block-size: auto;
+  max-block-size: var(--rv-steps-h);
   overflow: auto;
   overscroll-behavior: contain;
   padding-inline-end: var(--kp-space-xs, 0.25rem);
@@ -958,7 +964,8 @@ tr.unread td:first-child {
   display: none;
 }
 .rv-time-area {
-  block-size: var(--rv-time-h, clamp(6rem, 14vh, 12rem));
+  block-size: auto;
+  max-block-size: var(--rv-time-h, clamp(6rem, 14vh, 12rem));
   overflow: auto;
   overscroll-behavior: contain;
   min-inline-size: 0;

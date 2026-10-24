@@ -187,9 +187,10 @@ function followRunning(area) {
 }
 
 /**
- * The step area shows whole rows only: its height is the CSS height rounded
- * down to a number of rows, once the first row is there to measure, so a row
- * is never left cut at the bottom (nor, with followRunning, at the top).
+ * The step area is as tall as its rows, up to its maximum, and the maximum
+ * is a whole number of rows, so a row is never left cut at the bottom (nor,
+ * with followRunning, at the top) and no empty band stands between the list
+ * and what is under it.
  * @param {HTMLElement} area
  */
 function fitRows(area) {
@@ -197,11 +198,12 @@ function fitRows(area) {
   if (!(row instanceof HTMLElement) || area.hidden) return;
   const rowH = row.getBoundingClientRect().height;
   if (!(rowH > 0)) return;
-  area.style.blockSize = "";
-  const want = area.getBoundingClientRect().height;
+  area.style.maxBlockSize = "";
+  const max = parseFloat(getComputedStyle(area).maxBlockSize);
+  if (!Number.isFinite(max)) return;
   const borders = area.offsetHeight - area.clientHeight;
-  const rows = Math.max(2, Math.floor((want - borders) / rowH));
-  area.style.blockSize = `${rows * rowH + borders}px`;
+  const rows = Math.max(2, Math.floor((max - borders) / rowH));
+  area.style.maxBlockSize = `${rows * rowH + borders}px`;
 }
 
 /**
@@ -284,8 +286,12 @@ export function buildRunView(opts) {
   // layout choice) puts it here: a row of its own, always there.
   const lead = h("div", { class: "rv-lead" });
   lead.hidden = true;
+  // A step that begins is listed at once, at full height: the run's own
+  // progress is not news to play an arrival for (Kenny, 2026-10-24: the
+  // running step was missing from the list while its row grew in).
   const stepsList = h("div", {
     class: "rv-steps-list",
+    "data-kp-arrive": "none",
     hidden: opts.steps === false ? "" : null,
   });
   // Another way to see the same steps (the Update flow's board) shares the
@@ -306,7 +312,11 @@ export function buildRunView(opts) {
   const timeBar = h("figure", { class: "kp-stackbar rv-time" });
   // The legend of a long run has a row per step: the bar lives in an area
   // of its own with its own scroll, so a long legend moves nothing.
-  const timeArea = h("div", { class: "rv-time-area" }, timeBar);
+  const timeArea = h(
+    "div",
+    { class: "rv-time-area", "data-kp-arrive": "none" },
+    timeBar,
+  );
   const timeNote = h("p", { class: "measured rv-note rv-time-note" });
   // The time bar closes the progress half: its legend and its footnote have
   // a place of their own, whole.
@@ -329,18 +339,15 @@ export function buildRunView(opts) {
     stepsArea,
     timeBlock,
   );
-  // Title and sub on the left, the three figures on the right of the same
-  // line, both inside the left half; the state badge closes the right half.
+  // The head is split like the body below it (Kenny, 2026-10-24: "het
+  // splitsen van het kader moet dus ook dat element omvatten"): title and
+  // sub in the left half; the three figures at the start of the right half,
+  // the state badge at its end.
   const head = h(
     "header",
     { class: "rv-head" },
-    h(
-      "div",
-      { class: "rv-head__main" },
-      h("div", { class: "rv-head__id" }, ...(opts.compact ? [] : [title]), sub),
-      figures,
-    ),
-    badgeHost,
+    h("div", { class: "rv-head__id" }, ...(opts.compact ? [] : [title]), sub),
+    h("div", { class: "rv-head__side" }, figures, badgeHost),
   );
 
   // ---- the log column ----------------------------------------------------

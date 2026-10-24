@@ -25,6 +25,10 @@ import {
   firewallBody,
   firewallChanged,
   firewallModel,
+  keepHidden,
+  offReasonField,
+  offWords,
+  switchedRows,
   latchBody,
   latchFileFields,
   latchFileFromValues,
@@ -105,6 +109,24 @@ import {
 import { declare, drivable, viaForm } from "./drivable.js";
 import { buttonGroup, gridRow } from "./gridrow.js";
 
+// check-turn-off-1: a check or probe row of the stack's checks list is turned
+// off (with a reason) or on again; both change the draft the list's Review
+// and commit… writes to checks.yml.
+const CHECK_OFF = declare({
+  id: "checks-turn-off",
+  page: "stack",
+  opens: "dialog",
+  row: "<list>:<row number>",
+  what: "turn a check or a probe of the stack's checks list off: asks a short reason, writes off: <reason> on it when the change is committed",
+});
+const CHECK_ON = declare({
+  id: "checks-turn-on",
+  page: "stack",
+  opens: "view",
+  row: "<list>:<row number>",
+  what: "turn a check or a probe of the stack's checks list on again (removes its off: reason when the change is committed)",
+});
+
 /**
  * fix-239: every card of a stack's settings tab is one edit form, which
  * Live view opens as `homelab ui open <form> <stack>`; the card says which,
@@ -142,6 +164,17 @@ const card = (node, form) => {
  *   presets: {name: string, description: string, apps: string[]}[],
  *   checks?: Record<string, import("./editforms.js").ChecksView>}} EditRead
  */
+
+/**
+ * Each app's checks.yml as the edit read carries it: under `manifest`
+ * (shell/edit.rs), where the stack's own parts are.
+ * @param {EditRead} e
+ * @returns {Record<string, import("./editforms.js").ChecksView>}
+ */
+const checksOf = (e) =>
+  e.checks ??
+  /** @type {any} */ (e.manifest)?.checks ??
+  /** @type {Record<string, import("./editforms.js").ChecksView>} */ ({});
 
 /**
  * Read what the editor needs.
@@ -886,7 +919,8 @@ function tableHooks(groups) {
  *   fromValues: (v: import("./editforms.js").Values) => Record<string, unknown>,
  *   problems?: (v: import("./editforms.js").Values) => Record<string, string>,
  *   datalists?: Record<string, string[]>,
- *   done: (row: Record<string, unknown>) => void}} opts
+ *   done: (row: Record<string, unknown>) => void,
+ *   cancelled?: () => void}} opts
  */
 function openRowDialog({
   title,
@@ -896,8 +930,10 @@ function openRowDialog({
   problems,
   datalists,
   done,
+  cancelled,
 }) {
   const steps = [{ id: "row", label: "Row", fields }];
+  let saved = false;
   const values = startValues({ steps });
   /** @type {Map<string, HTMLElement>} */
   const inputs = new Map();
@@ -950,6 +986,9 @@ function openRowDialog({
     close: () => d.close(),
   });
   d.closed.then(unregister);
+  void d.closed.then(() => {
+    if (!saved) cancelled?.();
+  });
   cancel.addEventListener("click", () => d.close());
   save.addEventListener("click", () => {
     // Live view: the row is kept on the dashboard's server.
@@ -968,8 +1007,79 @@ function openRowDialog({
       );
       return;
     }
+    saved = true;
     done(fromValues(values));
     d.close();
+  });
+}
+
+/**
+ * Asks for the short reason a check is turned off (the row dialog, one field).
+ * @param {string} title
+ * @returns {Promise<string | null>} the reason, or null when cancelled
+ */
+function askOffReason(title) {
+  return new Promise((resolve) => {
+    openRowDialog({
+      title,
+      fields: [offReasonField()],
+      saveLabel: "Turn it off",
+      fromValues: (v) => ({ off: String(v.off ?? "").trim() }),
+      done: (row) => resolve(String(row.off)),
+      cancelled: () => resolve(null),
+    });
+  });
+}
+
+/**
+ * check-turn-off-1: turn one check or probe of an app's checks.yml off, or on
+ * again, from outside the stack's own list (an Inbox row, the fleet check's
+ * findings): reads the stack's files, changes that one row and opens the plan
+ * dialog, so the change is a commit like any other, visible and undoable.
+ * @param {{stack: string, app: string, name: string, on?: boolean,
+ *   onCommitted?: () => void}} o
+ * @returns {Promise<void>}
+ */
+export async function switchCheck(o) {
+  const reason = o.on
+    ? null
+    : await askOffReason(`Turn off · ${o.name} · ${o.app} · ${o.stack}`);
+  if (!o.on && reason == null) return;
+  const r = await readEdit(o.stack, new AbortController().signal);
+  if (!r.ok) {
+    notify(`${r.error.what}: ${r.error.why}`, "warning");
+    return;
+  }
+  const e = /** @type {EditRead} */ (r.body);
+  const view = checksOf(e)[o.app];
+  if (!view || "error" in view) {
+    notify(`${o.app}'s checks.yml could not be read here.`, "warning");
+    return;
+  }
+  const hit = switchedRows(view, o.name, reason);
+  if (!hit) {
+    notify(
+      `${o.stack}/${o.app} has no check or probe named ${o.name} in its checks.yml.`,
+      "warning",
+    );
+    return;
+  }
+  const edit = checksBody({
+    app: o.app,
+    checks: hit.list === "checks" ? hit.rows : null,
+    manual: null,
+    probes: hit.list === "probes" ? hit.rows : null,
+    busyCheck: view.busy_check?.command ?? "",
+    url: view.url ?? "",
+  });
+  openPlanDialog({
+    id: `edit:checks-off:${o.stack}:${o.app}`,
+    title: `${o.on ? "Turn on" : "Turn off"} · ${o.name} · ${o.app} · ${o.stack}`,
+    planUrl: `/data/stacks/${encodeURIComponent(o.stack)}/plan`,
+    planBody: { edit },
+    commitUrl: `/data/stacks/${encodeURIComponent(o.stack)}/commit`,
+    commitBody: stackCommit(edit),
+    onCommitted: () => o.onCommitted?.(),
   });
 }
 
@@ -982,7 +1092,7 @@ function openRowDialog({
  *   fromValues: (v: import("./editforms.js").Values) => Record<string, unknown>,
  *   problems?: (v: import("./editforms.js").Values) => Record<string, string>,
  *   datalists?: Record<string, string[]>,
- *   addLabel: string, driveKey: string,
+ *   addLabel: string, driveKey: string, offable?: string,
  *   rows: import("./editforms.js").RowEdit[], onChange: () => void}} opts
  * @returns {RowTable}
  */
@@ -999,6 +1109,7 @@ function rowTable({
   datalists,
   addLabel,
   driveKey,
+  offable,
   rows: initialRows,
   onChange,
 }) {
@@ -1010,7 +1121,11 @@ function rowTable({
     caption,
     search: "Search rows",
     nothing,
-    columns: [...columns, { label: "Change", sort: "text" }],
+    columns: [
+      ...columns,
+      ...(offable ? [{ label: "Status", sort: "text" }] : []),
+      { label: "Change", sort: "text" },
+    ],
   });
   const paint = () => {
     t.tbody.replaceChildren(
@@ -1041,10 +1156,22 @@ function rowTable({
             class: r.origin === null ? "rule-new" : "",
           },
           ...toCells(r.row),
+          ...(offable
+            ? [td(offWords(r.row), r.row.off ? "off-reason" : "")]
+            : []),
           h(
             "td",
             { class: "row-buttons" },
             btn("Edit", "edit"),
+            ...(offable
+              ? [
+                  drivable(
+                    r.row.off ? btn("Turn on", "on") : btn("Turn off…", "off"),
+                    r.row.off ? CHECK_ON : CHECK_OFF,
+                    `${offable}:${i + 1}`,
+                  ),
+                ]
+              : []),
             btn("Up", "up", i === 0),
             btn("Down", "down", i === rows.length - 1),
             btn("Delete", "delete"),
@@ -1070,7 +1197,12 @@ function rowTable({
       datalists,
       done: (newRow) => {
         if (i == null) setRows([...rows, { origin: null, row: newRow }]);
-        else setRows(rows.map((r, j) => (j === i ? { ...r, row: newRow } : r)));
+        else
+          setRows(
+            rows.map((r, j) =>
+              j === i ? { ...r, row: keepHidden(r.row, newRow) } : r,
+            ),
+          );
       },
     });
   };
@@ -1093,6 +1225,28 @@ function rowTable({
         break;
       case "edit":
         openDialogFor(i);
+        break;
+      case "off": {
+        const row = rows[i].row;
+        void askOffReason(`Turn off · ${summary(row)}`).then((why) => {
+          if (why == null) return;
+          setRows(
+            rows.map((r, j) =>
+              j === i ? { ...r, row: { ...r.row, off: why } } : r,
+            ),
+          );
+        });
+        break;
+      }
+      case "on":
+        setRows(
+          rows.map((r, j) => {
+            if (j !== i) return r;
+            const { off, ...rest } = r.row;
+            void off;
+            return { ...r, row: rest };
+          }),
+        );
         break;
     }
   });
@@ -1754,7 +1908,7 @@ export function checksEditTab(panel, params) {
  * @param {() => Promise<void>} reload
  */
 function checksEditCard(stack, e, apps, reload) {
-  const checksByApp = e.checks ?? {};
+  const checksByApp = checksOf(e);
   const select = h(
     "select",
     { class: "kp-field__input", id: "checks-app" },
@@ -1845,6 +1999,7 @@ function checksEditCard(stack, e, apps, reload) {
       problems: checkRowProblems,
       addLabel: "Add a check…",
       driveKey: `row-table:checks:${stack}:${app}`,
+      offable: "checks",
       rows: startChecks,
       onChange: () => repaintStatus(),
     });
@@ -1886,6 +2041,7 @@ function checksEditCard(stack, e, apps, reload) {
       problems: probeRowProblems,
       addLabel: "Add a probe…",
       driveKey: `row-table:probes:${stack}:${app}`,
+      offable: "probes",
       rows: startProbes,
       onChange: () => repaintStatus(),
     });

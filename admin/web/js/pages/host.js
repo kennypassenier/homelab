@@ -109,6 +109,12 @@ import { attachHoverCards } from "/static/kp/js/hovercard.js";
 import { registerShortcuts } from "/static/kp/js/shortcuts.js";
 import { GROUP_HOST, unlessDialog } from "../shortcuts.js";
 import { gridRow, formGrid } from "../gridrow.js";
+import {
+  setBulletsQuiet,
+  setEntityGridQuiet,
+  syncNode,
+  syncRows,
+} from "../inplace.js";
 import { setParams } from "../urlstate.js";
 import { REFRESH_S, changeGate } from "../quiet.js";
 
@@ -585,6 +591,52 @@ export function mount(root, ctx) {
   );
   /** @param {number | null} used @param {number | null} max */
   const share = (used, max) => (used != null && max ? used / max : null);
+  /** @param {ReturnType<typeof guestTable>[number]} g */
+  function guestDetail(g) {
+    return formGrid([
+      gridRow({
+        label: g.name || `CT ${g.vmid}`,
+        control: h(
+          "p",
+          { class: "hk-detail" },
+          `${g.name || `CT ${g.vmid}`} is ${g.status}${g.lock ? `, locked by ${g.lock}` : ""}. ${g.ramUsed == null ? "It is not running, so it has no CPU or memory figures." : `It uses ${gib(g.ramUsed)} of its ${gib(g.ramMax ?? 0)} GiB and ${g.cpuPct ?? 0} % of one core.`}`,
+        ),
+        actions: [
+          g.stack
+            ? h(
+                "a",
+                {
+                  class: "kp-button kp-button--sm",
+                  href: stackHref(g.stack),
+                },
+                "Open stack",
+              )
+            : h(
+                "button",
+                {
+                  type: "button",
+                  class: "kp-button kp-button--sm",
+                  disabled: "",
+                  "data-kp-disabled-reason": "This guest is not a stack",
+                },
+                "Open stack",
+              ),
+          h(
+            "a",
+            {
+              class: "kp-button kp-button--sm",
+              href: `/activity?view=host-log${g.stack ? `&source=${encodeURIComponent(g.stack)}` : ""}`,
+            },
+            "Open its log",
+          ),
+        ],
+        buttons: true,
+      }),
+    ]);
+  }
+
+  // The table leaves its loading state once; later refreshes keep it ready.
+  let guestsReady = false;
   const paintGuests = () => {
     const dt = gDt();
     const showFor = (/** @type {typeof gView} */ v) => {
@@ -594,6 +646,7 @@ export function mount(root, ctx) {
     };
     showFor(gView);
     if (!guests) {
+      guestsReady = false;
       if (guestsWhy) {
         dt?.busy(null);
         dt?.fail(guestsWhy);
@@ -628,8 +681,12 @@ export function mount(root, ctx) {
       stopped: view.length - running,
     });
     // the table
-    gTbody.replaceChildren(
-      ...view.map((g) => {
+    // refresh-no-replay-1: the rows are built, filled and then merged into
+    // the rows already there, so an opened row stays open and no bar wipes in
+    // again; only a new guest arrives.
+    syncRows(
+      gTbody,
+      view.map((g) => {
         const tr = h(
           "tr",
           {
@@ -694,23 +751,20 @@ export function mount(root, ctx) {
             g.kind === "unmanaged" ? "not managed" : g.kind,
           ),
         );
-        return tr;
-      }),
-    );
-    attachBarCells(gTableEl);
-    for (const g of view) {
-      const cpu = gTbody.querySelector(`[data-hk-cpu="${g.vmid}"]`);
-      const mem = gTbody.querySelector(`[data-hk-mem="${g.vmid}"]`);
-      const s = share(g.ramUsed, g.ramMax);
-      if (cpu)
-        setBarCell(/** @type {HTMLElement} */ (cpu), {
+        const s = share(g.ramUsed, g.ramMax);
+        const cpu = /** @type {HTMLElement} */ (
+          tr.querySelector("[data-hk-cpu]")
+        );
+        const mem = /** @type {HTMLElement} */ (
+          tr.querySelector("[data-hk-mem]")
+        );
+        setBarCell(cpu, {
           value: g.cpuPct == null ? null : g.cpuPct / 100,
           text: g.cpuPct == null ? "—" : `${g.cpuPct} %`,
           sortValue: g.cpuPct ?? -1,
           label: "of one core",
         });
-      if (mem)
-        setBarCell(/** @type {HTMLElement} */ (mem), {
+        setBarCell(mem, {
           value: s,
           text:
             g.ramUsed == null || g.ramMax == null
@@ -721,10 +775,24 @@ export function mount(root, ctx) {
           badAt: 0.9,
           label: "of its memory",
         });
+        return tr;
+      }),
+    );
+    // An opened row's sentence says what the guest uses now.
+    for (const open of /** @type {NodeListOf<HTMLTableRowElement>} */ (
+      gTbody.querySelectorAll(":scope > tr[data-kp-row-detail]")
+    )) {
+      const key = open.previousElementSibling?.getAttribute("data-kp-row-key");
+      const g = view.find((x) => String(x.vmid) === key);
+      const mine = open.cells[0]?.firstElementChild;
+      if (g && mine) syncNode(mine, guestDetail(g));
     }
     dt?.refresh();
-    dt?.busy(null);
-    dt?.state("ready");
+    if (!guestsReady) {
+      dt?.busy(null);
+      dt?.state("ready");
+      guestsReady = true;
+    }
     const th2 = /** @type {HTMLElement[]} */ ([
       ...gTableEl.querySelectorAll("thead th[data-kp-sort]"),
     ]);
@@ -732,7 +800,7 @@ export function mount(root, ctx) {
       if (th2[i]) drivable(th2[i], SORT_GUESTS, k);
     });
     // the cards
-    setEntityGrid(
+    setEntityGridQuiet(
       gCards,
       view.map((g) => ({
         key: String(g.vmid),
@@ -780,7 +848,7 @@ export function mount(root, ctx) {
     );
     // the pressure list
     const withRam = view.filter((g) => g.ramUsed != null && g.ramMax);
-    setBullets(gBullets, {
+    setBulletsQuiet(gBullets, {
       threshold: 0.75,
       bad: 0.9,
       max: 1,
@@ -1889,47 +1957,7 @@ export function mount(root, ctx) {
             (x) => String(x.vmid) === row.dataset.kpRowKey,
           )
         : null;
-      if (!g) return null;
-      return formGrid([
-        gridRow({
-          label: g.name || `CT ${g.vmid}`,
-          control: h(
-            "p",
-            { class: "hk-detail" },
-            `${g.name || `CT ${g.vmid}`} is ${g.status}${g.lock ? `, locked by ${g.lock}` : ""}. ${g.ramUsed == null ? "It is not running, so it has no CPU or memory figures." : `It uses ${gib(g.ramUsed)} of its ${gib(g.ramMax ?? 0)} GiB and ${g.cpuPct ?? 0} % of one core.`}`,
-          ),
-          actions: [
-            g.stack
-              ? h(
-                  "a",
-                  {
-                    class: "kp-button kp-button--sm",
-                    href: stackHref(g.stack),
-                  },
-                  "Open stack",
-                )
-              : h(
-                  "button",
-                  {
-                    type: "button",
-                    class: "kp-button kp-button--sm",
-                    disabled: "",
-                    "data-kp-disabled-reason": "This guest is not a stack",
-                  },
-                  "Open stack",
-                ),
-            h(
-              "a",
-              {
-                class: "kp-button kp-button--sm",
-                href: `/activity?view=host-log${g.stack ? `&source=${encodeURIComponent(g.stack)}` : ""}`,
-              },
-              "Open its log",
-            ),
-          ],
-          buttons: true,
-        }),
-      ]);
+      return g ? guestDetail(g) : null;
     },
   });
   stops.push(

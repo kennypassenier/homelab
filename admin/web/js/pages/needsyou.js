@@ -33,6 +33,7 @@ import {
   askKey,
   askWords,
   chipsOf,
+  whenLabel,
   countWords,
   countSplit,
   groupRows,
@@ -44,6 +45,10 @@ import {
   worthRows,
 } from "../inboxrows.js";
 import { openJobDialog } from "../jobpanel.js";
+import { mountFindings } from "../checkfindings.js";
+import { FINDINGS_SECTION } from "../findingsview.js";
+import { checkRefOf } from "../editforms.js";
+import { switchCheck } from "../editpanels.js";
 import { mountBulk, mountQuestions, putState } from "../inboxcards.js";
 import { feedToday, feedUpdates } from "../inboxsources.js";
 import {
@@ -164,6 +169,14 @@ const SOURCE = declare({
   opens: "view",
   row: "<row key>:<chip label>",
   what: "a row's source chip: open its stack or Activity",
+});
+const TURN_OFF = declare({
+  id: "inbox-turn-off",
+  page: "needs-you",
+  opens: "dialog",
+  row: "<row key>",
+  what: "a check row's Turn off…: asks a short reason and writes off: <reason> on that check or probe in the stack's checks.yml (a commit)",
+  shows: "on a check row that names one check or probe of an app",
 });
 const WORTH = declare({
   id: "inbox-worth",
@@ -434,15 +447,26 @@ export function mount(root) {
     snoozedStage,
   );
 
+  // checks-notice-link-1: the latest fleet check round's findings. The
+  // nightly notice (and /health?block=checks) opens it.
+  const abort = new AbortController();
+  const findings = mountFindings(abort.signal);
+  const q = new URLSearchParams(location.search);
+  const wantFindings =
+    q.get("section") === FINDINGS_SECTION ||
+    (q.get("kind") ?? "").split(",").includes("checks");
+  if (wantFindings) findings.el.open = true;
   root.replaceChildren(
     head.el,
     ...(note ? [note.el] : []),
     questions.el,
     listCard,
     bulk.el,
+    findings.el,
     snoozed,
     worth,
   );
+  if (wantFindings) queueMicrotask(() => findings.open());
   cleanups.push(
     attachCardStates(root),
     attachSegmented(listCard),
@@ -461,7 +485,7 @@ export function mount(root) {
   // ---- one row ------------------------------------------------------------
   /**
    * A row's button or link, in its column.
-   * @param {{role: "open" | "act" | "seen" | "snooze", label: string, hint: string,
+   * @param {{role: "open" | "act" | "seen" | "snooze" | "off", label: string, hint: string,
    *   href?: string, primary?: boolean}} o
    */
   const rowButton = (o) => {
@@ -671,6 +695,29 @@ export function mount(root) {
   const actsOf = (r) => {
     const out = actsBase(r);
     if (r.source === "asks") return out;
+    // check-turn-off-1: a row about one check or probe can switch it off.
+    const ref = kindOf(r) === "check" ? checkRefOf(r.title) : null;
+    if (ref) {
+      const off = drivable(
+        rowButton({
+          role: "off",
+          label: "Turn off…",
+          hint: "Switch this check off, with a reason, in the stack's checks.yml. The nightly round skips it.",
+        }),
+        TURN_OFF,
+        r.key,
+      );
+      off.addEventListener(
+        "click",
+        () =>
+          void switchCheck({
+            stack: ref.stack,
+            app: ref.app,
+            name: ref.name,
+          }),
+      );
+      out.push(off);
+    }
     const b = drivable(
       rowButton({
         role: "snooze",
@@ -789,7 +836,11 @@ export function mount(root) {
                     SOURCE,
                     `${r.key}:${c.label}`,
                   )
-                : h("span", null, c.label),
+                : h(
+                    "span",
+                    c.label === whenLabel(r) ? { class: "ib-when" } : null,
+                    c.label,
+                  ),
             )),
     );
     const main = h(
@@ -880,7 +931,14 @@ export function mount(root) {
    * @param {import("../inboxrows.js").Row} r
    */
   const sigOf = (r) =>
-    JSON.stringify(r.source === "asks" ? { ...r, why: "" } : r);
+    JSON.stringify({
+      ...r,
+      // refresh-no-replay-1: a read that only moves the time redraws no row;
+      // the "when" chip is rewritten in place (below).
+      at: 0,
+      first_at: 0,
+      ...(r.source === "asks" ? { why: "" } : {}),
+    });
 
   /** Lay the wanted nodes in `list`, moving as few as the order allows. @param {Node[]} want */
   const reconcile = (want) => {
@@ -981,6 +1039,9 @@ export function mount(root) {
       for (const r of g.rows) {
         const had = old.get(r.key);
         want.push(had && had.dataset.sig === sigOf(r) ? had : rowEl(r));
+        const when = had?.querySelector(".ib-when");
+        const said = whenLabel(r);
+        if (when && said && when.textContent !== said) when.textContent = said;
         const node = /** @type {HTMLElement} */ (want[want.length - 1]);
         node.dataset.sig = sigOf(r);
       }
@@ -1140,7 +1201,6 @@ export function mount(root) {
   );
 
   // ---- worth a look -------------------------------------------------------
-  const abort = new AbortController();
   /**
    * @param {{key: string, title: string, why: string, href: string}} r
    * @param {string} label

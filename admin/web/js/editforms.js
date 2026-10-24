@@ -957,6 +957,88 @@ export function checksBody(parts) {
   return out;
 }
 
+// ── check-turn-off-1 (Kenny, 2026-10-24: "ik wil een check ook kunnen
+// uitschakelen, niet enkel snoozen"): `off: "<why>"` on a check or probe in
+// the stack's own checks.yml. The nightly round skips it (core/src/checks.rs);
+// these are the dashboard's pure parts: which row, the row with its reason,
+// and the words a list shows.
+
+/** The fields a row keeps when its edit dialog saves (the dialog's own fields
+ * do not carry them). */
+const KEPT_ON_EDIT = ["off", "id"];
+
+/**
+ * An edited row with what the dialog does not show carried over from the old
+ * row: its `off` reason and a probe's `id`.
+ * @param {Record<string, unknown> | null} old
+ * @param {Record<string, unknown>} next
+ * @returns {Record<string, unknown>}
+ */
+export function keepHidden(old, next) {
+  /** @type {Record<string, unknown>} */
+  const out = { ...next };
+  for (const k of KEPT_ON_EDIT)
+    if (old && old[k] != null && !(k in out)) out[k] = old[k];
+  return out;
+}
+
+/** @param {Record<string, unknown>} row the words a list's Status column shows */
+export const offWords = (row) =>
+  typeof row.off === "string" && row.off !== "" ? `Off: ${row.off}` : "On";
+
+/**
+ * The row of an app's checks.yml to switch, found by its name among the
+ * measured checks and then the probes. `reason` null turns it on again.
+ * @param {{checks?: Record<string, unknown>[], probes?: Record<string, unknown>[]}} view
+ * @param {string} name
+ * @param {string | null} reason
+ * @returns {{list: "checks" | "probes", rows: RowEdit[]} | null}
+ */
+export function switchedRows(view, name, reason) {
+  for (const list of /** @type {const} */ (["checks", "probes"])) {
+    const rows = view[list] ?? [];
+    if (!rows.some((r) => r.name === name)) continue;
+    return {
+      list,
+      rows: rowModel(
+        rows.map((r) => {
+          if (r.name !== name) return r;
+          const { off, ...rest } = r;
+          void off;
+          return reason == null ? rest : { ...rest, off: reason };
+        }),
+      ),
+    };
+  }
+  return null;
+}
+
+/**
+ * Which check or probe a fleet-check line is about: the line reads
+ * `<stack>/<app>: <name>: <what>` (core/src/ops/probes.rs).
+ * @param {string} text
+ * @returns {{stack: string, app: string, name: string} | null}
+ */
+export function checkRefOf(text) {
+  const m = /^([a-z0-9][a-z0-9._-]*)\/([a-z0-9][a-z0-9._-]*): ([^:]+?): /i.exec(
+    text,
+  );
+  return m ? { stack: m[1], app: m[2], name: m[3] } : null;
+}
+
+/** The reason field of the Turn off… dialog. @returns {EditField} */
+export function offReasonField() {
+  return /** @type {EditField} */ ({
+    name: "off",
+    id: "check-off-reason",
+    kind: "text",
+    label: "Why is it off?",
+    help: "Written beside the check in checks.yml, so anyone who reads the file sees it. The nightly round skips the check while it is off.",
+    required: true,
+    current: "",
+  });
+}
+
 /**
  * @param {RowEdit[]} rows
  * @param {Record<string, Record<string, unknown>>} originals

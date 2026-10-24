@@ -17,6 +17,35 @@ import { openBusyCard } from "/static/kp/js/busy-card.js";
 import { statePlate } from "/static/kp/js/state-plate.js";
 
 /**
+ * What the panel says when the dashboard no longer holds the job
+ * (selfupdate-job-kept-1, Kenny 2026-10-24: "de laatste 200 jobs, dus toch
+ * ook deze?"). A job that restarts the dashboard (its own update) is lost
+ * with the process: the jobs live in its memory. Say that, and where the
+ * result is, instead of blaming the 200-job limit.
+ * @param {number} jobId
+ * @param {{restarts_dashboard?: boolean} | null} last the job as the page last saw it
+ * @param {{ok: boolean, error?: string | null} | null} entry the host's history entry for it
+ * @returns {{title: string, text: string}}
+ */
+export function goneJobWords(jobId, last, entry) {
+  if (last?.restarts_dashboard) {
+    const ended = entry
+      ? entry.ok
+        ? "The host reports that it finished well. "
+        : `The host reports that it failed${entry.error ? `: ${entry.error}` : ""}. `
+      : "";
+    return {
+      title: "The dashboard restarted while this job ran",
+      text: `${ended}A job that updates the dashboard restarts it, and the dashboard keeps its jobs in memory, so the page cannot show this one any more. What the host did is in Activity, under History.`,
+    };
+  }
+  return {
+    title: `Job ${jobId} is no longer shown`,
+    text: "The dashboard keeps the last 200 jobs and forgets them all when it restarts. What the host did is in Activity, under History.",
+  };
+}
+
+/**
  * One job, live: the approved detail of the Activity demo (section 5), laid
  * out as the shared progress view. Its header says who started it and how it
  * stands; three figures tick (steps done, time taken, the median of earlier
@@ -59,9 +88,15 @@ export function mountJobPanel(jobId, opts = {}) {
   /** How many paints in a row found the job ended and nothing changed. */
   let settled = 0;
   let lastSig = "";
+  /** The job as the page last saw it, for the message after a restart. @type {import("./jobs.js").Job | null} */
+  let lastJob = null;
+  /** The host's history entry of a job that restarted the dashboard. @type {{ok: boolean, error?: string | null} | null} */
+  let goneEntry = null;
+  let goneTried = false;
 
   const paint = () => {
     const j = act.jobs.find((x) => x.job === jobId);
+    if (j) lastJob = j;
     if (!j) {
       // Not heard of yet: the central busy card over the whole panel. Once
       // the jobs are read and this one is still missing, the dashboard no
@@ -69,12 +104,21 @@ export function mountJobPanel(jobId, opts = {}) {
       if (act.jobsRead) {
         busy?.remove();
         busy = null;
-        if (!plate.firstChild) {
-          plate.append(
+        if (lastJob?.restarts_dashboard && !goneTried) {
+          goneTried = true;
+          void readGone(lastJob);
+        }
+        const words = goneJobWords(jobId, lastJob, goneEntry);
+        const sig = `${words.title}|${words.text}`;
+        if (plate.dataset.sig !== sig) {
+          plate.dataset.sig = sig;
+          plate.replaceChildren(
             statePlate(document, {
               kind: "empty",
-              title: `Job ${jobId} is no longer kept`,
-              text: "The dashboard keeps the last 200 jobs; the Activity page's History still lists what the host did.",
+              title: words.title,
+              text: words.text,
+              actionLabel: "Open Activity",
+              onAction: () => location.assign("/activity"),
             }),
           );
           plate.hidden = false;
@@ -87,6 +131,7 @@ export function mountJobPanel(jobId, opts = {}) {
       return;
     }
     plate.replaceChildren();
+    delete plate.dataset.sig;
     plate.hidden = true;
     busy?.remove();
     busy = null;
@@ -163,6 +208,24 @@ export function mountJobPanel(jobId, opts = {}) {
     if (settled >= 2 && historyTried && (hist != null || !j.reqs?.length)) {
       clearInterval(timer);
       timerOn = false;
+    }
+  };
+
+  /** The history entry of a job the restart took away, to say how it ended. @param {import("./jobs.js").Job} j */
+  const readGone = async (j) => {
+    const r = await fetchReport(
+      `/data/history?since=${Math.max(0, Math.floor(j.queued_at - 120))}&limit=200`,
+      "the job's end",
+      abort.signal,
+    ).catch(() => null);
+    if (!r?.ok) return;
+    const entry = (r.report?.entries ?? []).find(
+      (/** @type {import("./activity.js").Entry} */ e) =>
+        e.kind === "op" && e.req != null && j.reqs?.includes(e.req),
+    );
+    if (entry && entry.kind === "op") {
+      goneEntry = { ok: entry.ok, error: entry.error };
+      paint();
     }
   };
 

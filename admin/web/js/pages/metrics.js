@@ -118,6 +118,7 @@ import {
 } from "/static/kp/js/datatable.js";
 import { gridRow, formGrid } from "../gridrow.js";
 import { attachBarCells, setBarCell } from "/static/kp/js/barcell.js";
+import { syncRows } from "../inplace.js";
 import { attachUptimes, setUptime } from "/static/kp/js/uptime.js";
 import { periodsOf, uptimeQuery } from "../uptimeview.js";
 import { REFRESH_S } from "../quiet.js";
@@ -2634,8 +2635,9 @@ export function mount(root, ctx) {
           );
       }
       // … and the table.
-      hostsBody.replaceChildren(
-        ...rows.map(([name, n]) => {
+      syncRows(
+        hostsBody,
+        rows.map(([name, n]) => {
           const shown = name || "no hostname";
           const tr = h(
             "tr",
@@ -2711,8 +2713,9 @@ export function mount(root, ctx) {
       if (b.clients?.error)
         tableOf(clientsTable)?.fail(`Loki did not answer: ${b.clients.error}`);
       else {
-        clientsBody.replaceChildren(
-          ...clients.slice(0, 8).map(([c, n]) => {
+        syncRows(
+          clientsBody,
+          clients.slice(0, 8).map(([c, n]) => {
             const tr = h(
               "tr",
               { "data-kp-row-key": c || "-" },

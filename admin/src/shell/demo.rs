@@ -412,6 +412,25 @@ pub fn demo_stale_findings(repo: &std::path::Path, stacks: &[String]) -> Vec<ser
             }
         }
     }
+    // check-turn-off-1 / checks-notice-link-1: one broken and one drifting
+    // probe of beta-demo's api app (its checks.yml is part of the invariants
+    // fixture), in the shape the host's own findings have
+    // (`<name>: reads ...`, core/src/ops/probes.rs), so the findings view and
+    // its Turn off... have something to show.
+    if names.iter().any(|n| n == "beta-demo") {
+        out.push(serde_json::json!({
+            "severity": "Broken",
+            "subject": "beta-demo/api",
+            "what": "api answers: reads \"0\", healthy is at least 1",
+            "remedy": "open api and look at it (demo host)",
+        }));
+        out.push(serde_json::json!({
+            "severity": "Drift",
+            "subject": "beta-demo/api",
+            "what": "api queue drains: could not be read (timed out)",
+            "remedy": "the probe's command in checks.yml no longer answers; run it in the container to see why (demo host)",
+        }));
+    }
     let two: Vec<&String> = stacks.iter().take(2).collect();
     if !two.is_empty() {
         out.push(serde_json::json!({

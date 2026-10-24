@@ -148,6 +148,22 @@ services:
       - "com.homelab.update.policy=manual"
       - "com.homelab.update.upstream=github.com/example/demo-api"
 EOF
+# check-turn-off-1: two nightly probes on the api app, so the demo host's
+# fleet check can report one broken and one drifting (shell/demo.rs) and the
+# dashboard can turn one off in this file.
+cat > "$fixture_repo/stacks/beta-demo/api/checks.yml" <<'EOF'
+probes:
+  - name: "api answers"
+    command: "wget -q -O - http://127.0.0.1:8080/ready | wc -l"
+    healthy: {at_least: 1}
+    layer: application
+    id: api-answers
+  - name: "api queue drains"
+    command: "wget -q -O - http://127.0.0.1:8080/queue"
+    healthy: {equals: "0"}
+    layer: application
+    id: api-queue-drains
+EOF
 
 # redesign-presets-1: the repository's own presets/ (public files, no
 # secrets: preset.yml and docker-compose.yml templates), so the Presets

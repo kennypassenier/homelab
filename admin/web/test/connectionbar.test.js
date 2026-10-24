@@ -2,7 +2,11 @@
 // channel and the host link say.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { connectionFor } from "../js/connectionbar.js";
+import {
+  connectionFor,
+  gatewayJob,
+  offlineWords,
+} from "../js/connectionbar.js";
 
 const base = { up: true, link: "host 3.75.0", queued: 0 };
 
@@ -43,4 +47,32 @@ test("an open channel while the host link is down is refused, with the host's ow
   });
   assert.equal(c.state, "refused");
   assert.equal(c.detail.why, "host link down: connection refused");
+});
+
+// offline-flash-1 (Kenny, 2026-10-24): the gateway carries the dashboard's own
+// connection, so a job on it is the likely reason the live channel drops.
+test("a running job of the gateway stack is named; other jobs and finished ones are not", () => {
+  assert.equal(
+    gatewayJob([
+      { stack: "films", action: "deploy", state: "running" },
+      { stack: "gateway", action: "backup", state: "running" },
+    ]),
+    "backup",
+  );
+  assert.equal(
+    gatewayJob([{ stack: "gateway", action: "deploy", state: "done" }]),
+    null,
+  );
+  assert.equal(
+    gatewayJob([{ stack: "films", action: "deploy", state: "running" }]),
+    null,
+  );
+});
+
+test("the offline words say the gateway is being backed up or deployed when its job runs", () => {
+  assert.equal(offlineWords(null).title, "You are offline");
+  const backup = offlineWords("backup");
+  assert.match(backup.title, /gateway is being backed up/);
+  assert.match(backup.why, /reconnects by itself/);
+  assert.match(offlineWords("deploy").title, /gateway is being deployed/);
 });

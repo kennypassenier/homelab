@@ -10069,3 +10069,343 @@ test("invariants: update-select-all-1: the Update flow's select-all ticks only t
     await browser.close();
   }
 });
+
+// refresh-no-replay-1 (Kenny, 2026-10-24: "enkel bij pageload of als een
+// component nieuw op het scherm aankomt, NIET bij updates"): a refresh that
+// brings new numbers updates the page in place. Every self-refreshing page
+// is loaded at once; after the demo's readings moved, each is refreshed
+// (the page clock runs past the minute) and no element is built again: no
+// entrance or loading animation runs on an element that was already there
+// or on a new one, an opened container row stays the same open row.
+/**
+ * @param {string[]} paths the pages refreshed together
+ */
+async function noReplay(paths) {
+  const browser = await launch();
+  try {
+    const context = await browser.newContext({
+      viewport: { width: 1894, height: 1000 },
+    });
+    await logIn(context);
+    const recorder = () => {
+      /** @type {string[]} */
+      const log = /** @type {any} */ (window.__anim = []);
+      /** @type {any} */ (window).__rec = true;
+      const where = (/** @type {EventTarget | null} */ e) => {
+        /** @type {string[]} */
+        const out = [];
+        for (let t = e instanceof Element ? e : null; t && out.length < 4;) {
+          out.push(
+            `${t.tagName.toLowerCase()}${t.id ? `#${t.id}` : ""}.${String(
+              /** @type {any} */ (t.className)?.baseVal ?? t.className,
+            )
+              .split(/\s+/)
+              .slice(0, 2)
+              .join(".")}`,
+          );
+          t = t.parentElement;
+        }
+        return out.join(" < ");
+      };
+      document.addEventListener(
+        "animationstart",
+        (e) => {
+          const t = /** @type {any} */ (e.target);
+          if (/** @type {any} */ (window).__rec && !t.__seen)
+            log.push(`css ${e.animationName} on a NEW ${where(t)}`);
+        },
+        true,
+      );
+      const animate = Element.prototype.animate;
+      Element.prototype.animate = function (...a) {
+        if (
+          /** @type {any} */ (window).__rec &&
+          !(/** @type {any} */ (this).__seen)
+        )
+          log.push(`waapi on a NEW ${where(this)}`);
+        return animate.apply(this, a);
+      };
+      new MutationObserver((ms) => {
+        if (!(/** @type {any} */ (window).__rec)) return;
+        for (const m of ms) {
+          const t = /** @type {Element} */ (m.target);
+          if (t.closest?.(".kp-refresh")) continue;
+          const v = t.getAttribute(m.attributeName ?? "");
+          if (
+            (m.attributeName === "data-kp-state" && v === "loading") ||
+            (m.attributeName === "aria-busy" && v === "true") ||
+            (m.attributeName === "data-loading" && v !== null)
+          )
+            log.push(`${m.attributeName}=${v} on ${where(t)}`);
+        }
+      }).observe(document, {
+        subtree: true,
+        attributes: true,
+        attributeFilter: ["data-kp-state", "aria-busy", "data-loading"],
+      });
+    };
+    const pages = [];
+    for (const path of paths) {
+      const page = await context.newPage();
+      await page.clock.install({ time: clockNow() });
+      await page.addInitScript(recorder);
+      await page.goto(`${BASE}${path}`);
+      pages.push(page);
+    }
+    // The demo's readings move every few seconds; let them move once.
+    await pages[0].waitForTimeout(5200);
+    const host = pages[0];
+    const hosted = paths[0].startsWith("/host");
+    // Open the first container row (the table keeps its detail row).
+    if (hosted) {
+      await host.locator("#host-guests tr[data-kp-row-key]").first().waitFor();
+      await host
+        .locator("#host-guests tr[data-kp-row-key] .kp-datatable__expand")
+        .first()
+        .click();
+      await host.evaluate(() => {
+        const tr = document.querySelector("#host-guests tr[data-kp-row-key]");
+        /** @type {any} */ (window).__open = tr;
+      });
+      await pages[1]
+        .locator(".kp-entity-grid .kp-card--entity")
+        .first()
+        .waitFor();
+    }
+    for (const page of pages)
+      await page.evaluate(() => {
+        for (const e of document.querySelectorAll("*"))
+          /** @type {any} */ (e).__seen = true;
+        /** @type {any} */ (window).__anim.length = 0;
+      });
+    // Two refreshes: the first may find the readings as they were.
+    for (let round = 0; round < 2; round++) {
+      for (const page of pages) await page.clock.fastForward(61_000);
+      await host.waitForTimeout(800);
+    }
+    for (const [i, page] of pages.entries()) {
+      const log = await page.evaluate(() => /** @type {any} */ (window).__anim);
+      assert.deepEqual(
+        [...new Set(log)],
+        [],
+        `${paths[i]} played an entrance or loading animation on a refresh`,
+      );
+    }
+    if (hosted) {
+      const kept = await host.evaluate(() => {
+        const tr = document.querySelector("#host-guests tr[data-kp-row-key]");
+        return {
+          same: tr === /** @type {any} */ (window).__open,
+          open: tr?.nextElementSibling?.hasAttribute("data-kp-row-detail"),
+          shown: !(
+            /** @type {HTMLElement | null} */ (tr?.nextElementSibling ?? null)
+              ?.hidden
+          ),
+        };
+      });
+      assert.deepEqual(
+        kept,
+        { same: true, open: true, shown: true },
+        "the opened container row was built again or closed by the refresh",
+      );
+    }
+  } finally {
+    await browser.close();
+  }
+}
+
+test("invariants: refresh-no-replay-1 — the Host page's containers (table and cards) update in place on a refresh: no entrance or loading animation, an opened row stays open", () =>
+  noReplay(["/host?section=doctor", "/host?containers=cards"]));
+
+test("invariants: refresh-no-replay-1 — Stacks, the Inbox and Metrics update in place on a refresh: no entrance or loading animation", () =>
+  noReplay(["/stacks", "/inbox", "/charts"]));
+
+// one-progress-view-1 / progress-order-1 (Kenny, 2026-10-24, the restart
+// dialog while it runs): the head is split like the body, the bars take the
+// whole half beside the clock, the running step is listed as soon as it
+// begins, and no dead band stands between the step list and the time bar.
+test("invariants: run view — the head splits in two halves, the bar fills its half, the running step is listed, the time bar is drawn", async () => {
+  const browser = await launch();
+  try {
+    const context = await browser.newContext({
+      viewport: { width: 1894, height: 1000 },
+    });
+    const page = await freshPage(context);
+    await page.goto(`${BASE}/host`);
+    const tile = page.locator('[data-action="restart-host"]').first();
+    await tile.scrollIntoViewIfNeeded();
+    await tile.click();
+    await page.locator("#action-dialog #act-run").click();
+    // Step 1 done, step 2 running: the moment the whole view is drawn.
+    await page.waitForFunction(
+      () =>
+        document.querySelector(
+          '#action-dialog .rv-steps [data-state="done"]',
+        ) &&
+        document.querySelector(
+          '#action-dialog .rv-steps [data-state="running"]',
+        ) &&
+        document.querySelector("#action-dialog .rv-time .kp-stackbar__seg"),
+      null,
+      { timeout: 8000, polling: 50 },
+    );
+    const m = await page.evaluate(() => {
+      const box = (/** @type {string} */ s) => {
+        const r = document
+          .querySelector(`#action-dialog ${s}`)
+          ?.getBoundingClientRect();
+        return r ? { l: r.left, r: r.right, t: r.top, b: r.bottom } : null;
+      };
+      return {
+        grid: box(".rv-grid"),
+        progress: box(".rv-col--progress"),
+        log: box(".rv-col--log"),
+        figures: box(".rv-figures"),
+        badge: box(".rv-badge"),
+        bar: box(".rv-bar"),
+        progressbar: box(".rv-progress"),
+        now: box(".rv-now"),
+        steps: box(".rv-steps"),
+        timeBlock: box(".rv-time-block"),
+        runningRow: box('.rv-steps [data-state="running"]'),
+        seg: box(".rv-time .kp-stackbar__seg"),
+        timeBar: box(".rv-time .kp-stackbar__bar"),
+      };
+    });
+    assert.ok(
+      Object.values(m).every((v) => v),
+      `a part of the run view is missing: ${JSON.stringify(m)}`,
+    );
+    const g = /** @type {NonNullable<typeof m.grid>} */ (m.grid);
+    const mid = (g.l + g.r) / 2;
+    const f = /** @type {NonNullable<typeof m.figures>} */ (m.figures);
+    const bd = /** @type {NonNullable<typeof m.badge>} */ (m.badge);
+    assert.ok(
+      f.l >= mid - 2,
+      `the figures start in the right half (${f.l} < ${mid})`,
+    );
+    assert.ok(bd.l >= mid, "the state badge is in the right half");
+    const bar = /** @type {NonNullable<typeof m.progressbar>} */ (
+      m.progressbar
+    );
+    const half = /** @type {NonNullable<typeof m.progress>} */ (m.progress);
+    assert.ok(
+      bar.r - bar.l >= (half.r - half.l) * 0.8,
+      `the bar fills its half (${bar.r - bar.l} of ${half.r - half.l})`,
+    );
+    const rr = /** @type {NonNullable<typeof m.runningRow>} */ (m.runningRow);
+    assert.ok(rr.b - rr.t > 40, "the running step is listed at full height");
+    const st = /** @type {NonNullable<typeof m.steps>} */ (m.steps);
+    const tb = /** @type {NonNullable<typeof m.timeBlock>} */ (m.timeBlock);
+    assert.ok(
+      tb.t - st.b < 24,
+      `dead band under the step list (${tb.t - st.b} px)`,
+    );
+    const seg = /** @type {NonNullable<typeof m.seg>} */ (m.seg);
+    assert.ok(seg.r - seg.l > 20, "the time bar draws what it reports");
+  } finally {
+    await browser.close();
+  }
+});
+
+// a2 (Kenny, 2026-10-24: "de roll back knop staat niet verticaal op hetzelfde
+// niveau als de andere knoppen"): the Update flow's Done actions are one grid.
+test("invariants: update done — every action button, roll-backs included, shares one row grid", async () => {
+  const browser = await launch();
+  try {
+    const context = await browser.newContext({
+      viewport: { width: 1894, height: 1000 },
+    });
+    const page = await freshPage(context);
+    await page.goto(`${BASE}/update?all=1`);
+    await page.locator("#page .uf-list").first().waitFor({ timeout: 20000 });
+    const rows = await page.evaluate(() => {
+      const foot = document.createElement("div");
+      foot.className = "uf-foot";
+      const btn = (/** @type {string} */ t, primary = false) => {
+        const b = document.createElement("button");
+        b.className = `kp-button${primary ? " kp-button--primary" : ""}`;
+        b.textContent = t;
+        return b;
+      };
+      const rb = document.createElement("div");
+      rb.className = "uf-foot__rollbacks";
+      rb.append(btn("Roll back…"));
+      const act = document.createElement("span");
+      act.className = "uf-foot__actions";
+      act.append(
+        btn("See it in Activity"),
+        btn("Open the stack"),
+        btn("Update more"),
+        btn("Back to the Inbox · 3 left", true),
+      );
+      foot.append(rb, act);
+      const host = document.createElement("div");
+      host.style.cssText = "max-inline-size: 60rem; margin: 2rem";
+      host.append(foot);
+      document.querySelector("#page")?.append(host);
+      return [...foot.querySelectorAll("button")].map((b) => {
+        const r = b.getBoundingClientRect();
+        return { top: r.top, bottom: r.bottom, left: r.left };
+      });
+    });
+    assert.equal(rows.length, 5);
+    assert.ok(
+      rows.every((r) => r.top === rows[0].top && r.bottom === rows[0].bottom),
+      `the buttons are not on one line: ${JSON.stringify(rows)}`,
+    );
+  } finally {
+    await browser.close();
+  }
+});
+
+// checks-notice-link-1 (Kenny, 2026-10-24): the nightly check's notice links
+// /health?block=checks; it must land on the latest round's findings, not on
+// the plain Inbox.
+test("invariants: checks-notice-link-1 — the nightly check's address opens the latest round's findings, every broken and drift one with its remedy", async () => {
+  const browser = await launch();
+  try {
+    const context = await browser.newContext({
+      viewport: { width: 1894, height: 1000 },
+    });
+    const page = await freshPage(context);
+    await page.goto(`${BASE}/health?block=checks`);
+    await page.waitForURL(/\/inbox\?section=check-findings/);
+    const fold = page.locator("#inbox-check-findings");
+    await fold.waitFor();
+    assert.equal(await fold.getAttribute("open"), "");
+    await page
+      .locator("#inbox-check-findings .ib-findings-list > li")
+      .first()
+      .waitFor({ timeout: 15000 });
+    const rows = await page.$$eval(
+      "#inbox-check-findings .ib-findings-list > li",
+      (els) => els.map((e) => e.textContent ?? ""),
+    );
+    assert.ok(rows.length > 0, "no finding is listed");
+    assert.ok(
+      rows.every((t) => /What to do: \S/.test(t)),
+      "a finding has no remedy",
+    );
+    assert.ok(
+      rows.every((t) => /broken|drift/.test(t)),
+      "a row that is neither broken nor drift is listed outside the fold",
+    );
+    assert.equal(rows.length, 2, "the demo round has one broken, one drift");
+    // check-turn-off-1: a finding about one probe offers Turn off…; it asks
+    // a reason, then the plan shows `off: <reason>` written in checks.yml.
+    await page
+      .locator("#inbox-check-findings .ib-findings-list > li")
+      .first()
+      .getByRole("button", { name: "Turn off…" })
+      .click();
+    await page.fill("#check-off-reason", "retired in the demo");
+    await page.click("#row-save");
+    await page
+      .locator(".plan-box")
+      .filter({ hasText: "off: retired in the demo" })
+      .waitFor({ timeout: 15000 });
+  } finally {
+    await browser.close();
+  }
+});

@@ -183,8 +183,10 @@ export function listen(name, f) {
   return () => set.delete(f);
 }
 
-/** The wait before the live channel is reopened, in ms: it doubles from
- * the first to the last (fix-live-1). */
+/** The wait before the live channel is reopened, in ms: the first retry is
+ * immediate (offline-flash-1: a drop the edge ends in a moment should not
+ * wait a second more), then the wait doubles from the first to the last
+ * (fix-live-1). */
 export const REOPEN_FIRST_MS = 1000;
 export const REOPEN_LAST_MS = 15000;
 
@@ -193,7 +195,9 @@ export const REOPEN_LAST_MS = 15000;
  * @param {number} failures
  */
 export const reopenDelay = (failures) =>
-  Math.min(REOPEN_LAST_MS, REOPEN_FIRST_MS * 2 ** Math.max(0, failures));
+  failures <= 0
+    ? 0
+    : Math.min(REOPEN_LAST_MS, REOPEN_FIRST_MS * 2 ** (failures - 1));
 
 /** Open the live channel and read the first snapshot. */
 export function start() {

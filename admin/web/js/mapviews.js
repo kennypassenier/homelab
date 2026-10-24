@@ -22,7 +22,7 @@ import { firewallOf, isStack, staleGroups } from "./mapview.js";
 import { current } from "./store.js";
 import { section, segSwitch } from "./ui.js";
 import { setBarCell } from "/static/kp/js/barcell.js";
-import { setBullets } from "/static/kp/js/bullets.js";
+import { setBulletsQuiet } from "./inplace.js";
 import { attachCardStates, setCardState } from "/static/kp/js/card-state.js";
 import { attachDataTables } from "/static/kp/js/datatable.js";
 import { setDeplist } from "/static/kp/js/deplist.js";
@@ -796,7 +796,7 @@ export function capacityCard(deps) {
           : rows.length
             ? "ready"
             : "empty";
-    setBullets(bullets, {
+    setBulletsQuiet(bullets, {
       threshold: 75,
       bad: 90,
       max: 100,

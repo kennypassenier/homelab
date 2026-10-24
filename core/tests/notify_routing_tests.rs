@@ -380,7 +380,7 @@ fn notify_detail_host_events_and_the_nightly_check() {
         },
     ];
     let e = explain_fleet_check(&findings);
-    assert_eq!(e.page, "/health?block=checks");
+    assert_eq!(e.page, "/inbox?section=check-findings");
     assert!(
         e.title.contains("1 broken") && e.title.contains("1 drift"),
         "{}",

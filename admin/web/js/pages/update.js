@@ -1593,7 +1593,7 @@ export function mount(root, scope) {
           : []),
         h(
           "span",
-          { class: "uf-foot__group uf-foot__actions" },
+          { class: "uf-foot__actions" },
           drivable(
             h(
               "a",

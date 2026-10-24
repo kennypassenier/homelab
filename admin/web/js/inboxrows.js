@@ -241,6 +241,21 @@ export function todayRows(body, setupStacks = []) {
 }
 
 /**
+ * The words of a row's "when" chip, or null for a row with no time.
+ * refresh-no-replay-1: a read that only moves a row's time changes this text
+ * in place, it does not draw the row again.
+ * @param {Row} r
+ * @returns {string | null}
+ */
+export function whenLabel(r) {
+  if (!(r.at > 0)) return null;
+  const first = r.first_at ?? r.at;
+  return (r.count ?? 1) > 1
+    ? `${r.count}× since ${formatDateTime(first)}, last ${formatDateTime(r.at)}`
+    : formatDateTime(r.at);
+}
+
+/**
  * The source chips of a foundation row (a host question, a notice).
  * @param {Row} r
  * @returns {SrcChip[]}
@@ -251,15 +266,8 @@ export function chipsOf(r) {
   // several notices of the same thing.
   /** @type {SrcChip[]} */
   const when = [];
-  if (r.at > 0) {
-    const first = r.first_at ?? r.at;
-    when.push({
-      label:
-        (r.count ?? 1) > 1
-          ? `${r.count}× since ${formatDateTime(first)}, last ${formatDateTime(r.at)}`
-          : formatDateTime(r.at),
-    });
-  }
+  const label = whenLabel(r);
+  if (label) when.push({ label });
   if (r.chips) return [...r.chips, ...when];
   /** @type {SrcChip[]} */
   const out = [{ label: r.source === "asks" ? "question" : "failure" }];

@@ -12,7 +12,7 @@ import { formatDateTime, formatDay, gbText } from "./format.js";
 import { gb } from "./fleet.js";
 import { current } from "./store.js";
 import { section, segSwitch } from "./ui.js";
-import { setBullets } from "/static/kp/js/bullets.js";
+import { setBulletsQuiet } from "./inplace.js";
 import {
   setHeat,
   setHeatLegend,
@@ -211,7 +211,7 @@ export function fleetGlance(ctx) {
           ? "error"
           : "ready";
     const shown = hungryRows(rows, measure, capacity ?? new Map(), only, gb);
-    setBullets(list, {
+    setBulletsQuiet(list, {
       threshold: 75,
       bad: 90,
       max: 100,

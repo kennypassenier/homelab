@@ -36,10 +36,8 @@ import { current } from "./store.js";
 import { updateHrefFor } from "./updateflow.js";
 import { keyRow, section, segSwitch } from "./ui.js";
 import { setBarCell } from "/static/kp/js/barcell.js";
-import {
-  setEntityGrid,
-  setEntityGridState,
-} from "/static/kp/js/entity-card.js";
+import { setEntityGridState } from "/static/kp/js/entity-card.js";
+import { setEntityGridQuiet } from "./inplace.js";
 import { bindSelection } from "./selectbind.js";
 import { attachIdmarks } from "/static/kp/js/idmark.js";
 import {
@@ -1027,7 +1025,7 @@ export function fleetList(ctx) {
       });
     else {
       void readTrends();
-      setEntityGrid(
+      setEntityGridQuiet(
         grid,
         list.map((r) => entityOf(r, gb, trends.get(r.name))),
       );

@@ -37,28 +37,30 @@
   font-size: var(--kp-text-xs);
   color: var(--muted-foreground);
 }
+/* One action bar (Kenny, 2026-10-24: "de roll back knop staat niet
+   verticaal op hetzelfde niveau als de andere knoppen"): the roll-backs and
+   the actions are the items of ONE grid, so every button shares the column
+   tracks and the row lines; many roll-backs wrap into further rows of the
+   same grid, the actions close it. The two wrappers dissolve into it. */
 .uf-foot {
   display: grid;
-  grid-template-columns: minmax(0, 1fr);
-  gap: 12px;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 10.5rem), 1fr));
+  gap: 8px;
+  align-items: stretch;
   border-block-start: 1px solid var(--border);
   padding-block-start: 14px;
 }
-/* The roll-backs flow in rows across the whole width, every button the same
-   width whatever its label; the actions below them are their own group,
-   aligned to the end. */
-.uf-foot__rollbacks {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(min(100%, 16rem), 1fr));
-  gap: 8px;
+.uf-foot__rollbacks,
+.uf-foot__actions {
+  display: contents;
 }
-.uf-foot__rollbacks > .kp-button {
+.uf-foot > .kp-button,
+.uf-foot__rollbacks > .kp-button,
+.uf-foot__actions > .kp-button {
   justify-content: center;
   min-inline-size: 0;
   white-space: normal;
-}
-.uf-foot__actions {
-  justify-content: flex-end;
+  text-align: center;
 }
 .uf-clock {
   min-inline-size: 0;
@@ -67,11 +69,6 @@
    button must read as one (the cursor and aria carry it too). */
 .uf-panels .kp-button:disabled {
   opacity: 0.55;
-}
-.uf-foot__group {
-  display: flex;
-  gap: 8px;
-  flex-wrap: wrap;
 }
 .uf-impact {
   display: grid;
@@ -197,10 +194,6 @@
   .uf-major__ack {
     grid-column: 1 / -1;
     white-space: normal;
-  }
-  .uf-foot__actions {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr);
   }
 }
 /* Review item 7: the Update flow at the demo's width. */

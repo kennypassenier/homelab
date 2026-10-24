@@ -432,7 +432,7 @@ pub const DEFAULT_DASHBOARD_URL: &str = "";
 pub mod page {
     pub const NOTIFICATIONS: &str = "/notifications";
     pub const HOST: &str = "/host";
-    pub const CHECKS: &str = "/health?block=checks";
+    pub const CHECKS: &str = "/inbox?section=check-findings";
     pub const TODAY: &str = "/health?block=today";
     pub const JOBS: &str = "/jobs";
 
@@ -970,8 +970,8 @@ pub fn explain_fleet_check(findings: &[crate::ops::fleetcheck::Finding]) -> Expl
         } else {
             "Nothing is down; drift bites on the next deploy or outage.".into()
         },
-        remedy: "Each item carries its remedy above. The Checks page runs the check again; \
-                 `homelab today` lists what waits."
+        remedy: "Each item carries its remedy above. The Inbox lists the latest round's findings \
+                 and reads the check again; `homelab today` lists what waits."
             .into(),
         page: page::CHECKS.into(),
     }

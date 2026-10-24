@@ -406,3 +406,49 @@ fn flow_stage_by_stage_1_rows_go_stage_by_stage_and_stack_by_stack() {
     want.push("health".into());
     assert_eq!(ids, want.iter().map(String::as_str).collect::<Vec<_>>());
 }
+
+/// progress-order-1 (Kenny, 2026-10-24, a screenshot with Back up done, the
+/// logs check an empty circle and "Change the files and commit" running):
+/// the list is in the order the job runs, and as the job moves along exactly
+/// one row runs, every row before it is done and every row after it waits.
+#[test]
+fn progress_order_1_one_row_runs_at_a_time_in_run_order() {
+    use homelab_admin::core::updateflow::RowState;
+    let pin = |stack: &str| UpdateItem {
+        stack: stack.into(),
+        kind: ItemKind::Pin,
+        key: Some("api/api".into()),
+        app: Some("api".into()),
+        from: Some("a".into()),
+        to: Some("b".into()),
+    };
+    let mut f = updateflow::FlowView::new(vec![pin("gateway"), pin("downloader")]);
+    let order: Vec<String> = f.rows.iter().map(|r| r.id.clone()).collect();
+    // The run order of the shell (shell/actions_flow.rs): every backup, every
+    // commit, every deploy, then the health check.
+    let ran: Vec<String> = ["backup", "commit", "deploy"]
+        .iter()
+        .flat_map(|stage| {
+            updateflow::stacks_of(&f.items)
+                .into_iter()
+                .map(move |s| format!("{stage}:{s}"))
+        })
+        .chain(std::iter::once("health".to_string()))
+        .collect();
+    assert_eq!(order, ran, "the list is the run order");
+    for (i, id) in ran.iter().enumerate() {
+        f.set(id, RowState::Run, None, 100 + i as i64);
+        let states: Vec<RowState> = f.rows.iter().map(|r| r.state).collect();
+        assert_eq!(
+            states.iter().filter(|s| **s == RowState::Run).count(),
+            1,
+            "{id} runs alone: {states:?}"
+        );
+        assert!(states[..i].iter().all(|s| *s == RowState::Ok), "{states:?}");
+        assert!(
+            states[i + 1..].iter().all(|s| *s == RowState::Wait),
+            "{states:?}"
+        );
+        f.set(id, RowState::Ok, None, 101 + i as i64);
+    }
+}

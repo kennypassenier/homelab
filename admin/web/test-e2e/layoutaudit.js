@@ -771,3 +771,92 @@ export function dialogOnce(rootSel) {
     intro,
   };
 }
+
+/**
+ * width-fill-check-1 (Kenny, 2026-10-25: every part of a page fills the 80%
+ * page column): the parts that are narrower than the column although the
+ * box around them is as wide as the column. Run in the page.
+ * A part is a visible block-level box whose parent is as wide as the column
+ * (so nothing else made it narrow) and that is not a flex or grid item
+ * sharing its row, a cell, a chip or a control. Reports the width reached,
+ * what limits it (max-inline-size, a fixed width, the grid it sits in) and
+ * whose class it is (`kp-` is kp-themes', the rest the app's).
+ * @returns {{column: number, parts: {part: string, width: number, column: number, limit: string, owner: string}[]}}
+ */
+export function widthAudit() {
+  const page =
+    document.querySelector("#page") ??
+    document.querySelector("main") ??
+    document.body;
+  const pcs = getComputedStyle(page);
+  const column = Math.round(
+    page.getBoundingClientRect().width -
+      parseFloat(pcs.paddingInlineStart) -
+      parseFloat(pcs.paddingInlineEnd),
+  );
+  /** @type {{part: string, width: number, column: number, limit: string, owner: string}[]} */
+  const parts = [];
+  const seen = new Set();
+  const walk = (/** @type {Element} */ el, /** @type {number} */ depth) => {
+    if (depth > 7) return;
+    for (const c of /** @type {HTMLElement[]} */ ([...el.children])) {
+      if (!c.checkVisibility()) continue;
+      if (c.closest("dialog,template,svg,script,style,[hidden]")) continue;
+      const cs = getComputedStyle(c);
+      const r = c.getBoundingClientRect();
+      const ps = getComputedStyle(el);
+      const pw = el.getBoundingClientRect().width;
+      const block = ["block", "grid", "flex", "table", "list-item"].includes(
+        cs.display,
+      );
+      const sharesRow =
+        (ps.display.includes("flex") && ps.flexDirection.startsWith("row")) ||
+        (ps.display.includes("grid") &&
+          ps.gridTemplateColumns.split(" ").length > 1);
+      if (!block || r.height < 8 || r.width < 8) continue;
+      const pcs2 = getComputedStyle(el);
+      const inner =
+        pw -
+        parseFloat(pcs2.paddingInlineStart) -
+        parseFloat(pcs2.paddingInlineEnd);
+      // A part is "short" when it uses under 94 % of the room its parent
+      // gives it, and that parent is itself near the column (so the room is
+      // the column's, not a narrow card's).
+      if (
+        !sharesRow &&
+        pw >= column * 0.9 &&
+        r.width < inner * 0.94 &&
+        (c.textContent ?? "").trim() !== ""
+      ) {
+        const key = `${c.tagName}.${c.className}`;
+        if (!seen.has(key)) {
+          seen.add(key);
+          const cls = (c.getAttribute("class") ?? "").split(/\s+/)[0];
+          const text = (c.textContent ?? "").trim().replace(/\s+/g, " ");
+          parts.push({
+            part: `${c.tagName.toLowerCase()}${cls ? `.${cls}` : ""} "${text.slice(0, 40)}"`,
+            width: Math.round(r.width),
+            column,
+            limit: [
+              cs.maxInlineSize !== "none"
+                ? `max-inline-size ${cs.maxInlineSize}`
+                : "",
+              cs.inlineSize.endsWith("px") && cs.maxInlineSize === "none"
+                ? `width ${cs.inlineSize}`
+                : "",
+              cs.marginInline !== "0px" ? `margin ${cs.marginInline}` : "",
+            ]
+              .filter(Boolean)
+              .join(", "),
+            owner: /(^|\s)kp-/.test(c.getAttribute("class") ?? "")
+              ? "kp-themes"
+              : "homelab",
+          });
+        }
+      }
+      walk(c, depth + 1);
+    }
+  };
+  walk(page, 0);
+  return { column, parts };
+}

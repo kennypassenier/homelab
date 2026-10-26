@@ -9,7 +9,7 @@
 }
 .ap-top p {
   margin: 0;
-  max-inline-size: 72ch;
+  max-inline-size: none; /* width-fill-check-1: parts fill the page column */
 }
 .ap-top__right {
   display: flex;

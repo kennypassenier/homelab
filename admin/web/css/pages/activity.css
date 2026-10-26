@@ -170,7 +170,7 @@
 }
 /* The figures under a timeline: labels in one column as wide as the longest. */
 .ac-facts {
-  max-inline-size: 40rem;
+  max-inline-size: none; /* width-fill-check-1: parts fill the page column */
   margin: 0;
 }
 /* The grid keeps the height of every stack plus the fleet row, loading,

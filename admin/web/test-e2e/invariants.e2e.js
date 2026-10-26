@@ -10441,3 +10441,50 @@ for (const width of [1894, 2204, 3460]) {
     }
   });
 }
+
+// width-fill-check-1 (Kenny, 2026-10-25): an inventory, not a verdict. At
+// 3440 px every audited page is opened and each part narrower than the page
+// column (although its parent is as wide) is written to
+// INVARIANTS_WIDTH_REPORT (JSON) and printed. Run it on purpose:
+//   INVARIANTS_ONLY='width-fill' scripts/invariants-run.sh
+eachSlice(
+  "invariants: width-fill-check-1 inventory: every part narrower than the page column",
+  AUDIT_PAGES,
+  6,
+  async (part) => {
+    const { widthAudit } = await import("./layoutaudit.js");
+    const { appendFileSync } = await import("node:fs");
+    const browser = await launch();
+    try {
+      const context = await browser.newContext({
+        viewport: { width: 3440, height: 1400 },
+      });
+      const page = await freshPage(context);
+      for (const path of part) {
+        let found;
+        try {
+          await page.goto(BASE + path, { timeout: 8000 });
+          await page.waitForTimeout(900);
+          found = await page.evaluate(widthAudit);
+        } catch (e) {
+          found = { error: String(e).slice(0, 120) };
+        }
+        // The app's own caps are a fault; kp-themes' are listed in the report
+        // and fixed at the source (kp-themes' width-fill-1).
+        const capped = (found.parts ?? []).filter(
+          (/** @type {{owner: string, limit: string}} */ x) =>
+            x.owner === "homelab" && x.limit.includes("max-inline-size"),
+        );
+        assert.deepEqual(
+          capped,
+          [],
+          `${path}: parts of the app are capped narrower than the page column`,
+        );
+        const out = process.env.INVARIANTS_WIDTH_REPORT;
+        if (out) appendFileSync(out, `${JSON.stringify({ path, ...found })}\n`);
+      }
+    } finally {
+      await browser.close();
+    }
+  },
+);

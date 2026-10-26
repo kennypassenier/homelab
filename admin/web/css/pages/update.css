@@ -170,7 +170,7 @@
   margin: 0;
 }
 .uf-done__text {
-  max-inline-size: 60ch;
+  max-inline-size: none; /* width-fill-check-1: parts fill the page column */
   margin: 0;
   font-size: var(--kp-text-sm);
 }
@@ -200,8 +200,7 @@
 .uf-page {
   display: grid;
   gap: var(--nx-gap, 16px);
-  max-inline-size: min(64rem, 100%);
-  margin-inline: auto;
+  max-inline-size: none; /* width-fill-check-1: the page fills the column */
 }
 .uf-page > * {
   min-inline-size: 0;

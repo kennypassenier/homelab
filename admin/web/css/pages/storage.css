@@ -27,7 +27,7 @@
 }
 .st-desc {
   display: block;
-  max-inline-size: 60ch;
+  max-inline-size: none; /* width-fill-check-1: parts fill the page column */
 }
 .st-note {
   margin: 0;

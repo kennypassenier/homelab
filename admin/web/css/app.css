@@ -310,7 +310,7 @@ p:has(> .measured:only-child):first-child {
   text-align: start;
 }
 #host-bars .kp-progress-group {
-  max-inline-size: 40rem;
+  max-inline-size: none; /* width-fill-check-1: parts fill the page column */
 }
 
 /* feat-stacks-4: the actions area, grouped buttons that wrap on a phone. */
@@ -1071,7 +1071,7 @@ tr.unread td:first-child {
 .edit-card__desc {
   grid-area: desc;
   margin: 0;
-  max-inline-size: 70ch;
+  max-inline-size: none; /* width-fill-check-1: parts fill the page column */
 }
 .edit-card__bar {
   grid-area: bar;
@@ -1115,7 +1115,7 @@ tr.unread td:first-child {
 }
 .edit-block__head > .edit-group__desc {
   grid-area: desc;
-  max-inline-size: 70ch;
+  max-inline-size: none; /* width-fill-check-1: parts fill the page column */
 }
 .edit-block__action {
   grid-area: action;

@@ -314,3 +314,37 @@ test("remedy-stack-path-1: a remedy naming stacks/<name> runs on that stack, nev
   );
   assert.equal(/** @type {any} */ (d).fix.stack, "admin");
 });
+
+test("inbox-dup-finding-1: the fleet check and the doctor saying one stack has no backup are one row", () => {
+  const rows = todayRows({
+    today: {
+      items: [
+        {
+          level: "Broken",
+          source: "check",
+          what: "registry: has data to back up but no snapshot exists yet",
+          remedy: "run `homelab backup stacks/registry`",
+        },
+        {
+          level: "Warn",
+          source: "doctor",
+          what: "stack registry backup: has data but no backup yet",
+          remedy: "run `homelab backup stacks/registry`",
+        },
+        {
+          level: "Warn",
+          source: "doctor",
+          what: "stack media backup: has data but no backup yet",
+          remedy: "run `homelab backup stacks/media`",
+        },
+      ],
+    },
+  });
+  assert.deepEqual(
+    rows.map((r) => r.title),
+    [
+      "registry: has data to back up but no snapshot exists yet",
+      "stack media backup: has data but no backup yet",
+    ],
+  );
+});

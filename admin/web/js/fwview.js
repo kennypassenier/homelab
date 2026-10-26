@@ -178,7 +178,7 @@ export function fwAttention(stacks) {
         tone: "warn",
         title: `${s.stack}: a firewall runs on CT ${s.vmid}, but its stack file ${s.declared ? "says otherwise" : "declares none"}`,
         text: "The next apply would change what is in force. Compare the two, then declare the live rules or apply the file.",
-        fix: "Compare…",
+        fix: "Compare",
         hint: "Show the live-vs-file difference on the stack's Settings",
       });
     } else if (s.declared) {
@@ -190,7 +190,7 @@ export function fwAttention(stacks) {
             ? `${s.stack}: its stack file declares a firewall that is not in force on CT ${s.vmid}`
             : `${s.stack}: its firewall is declared but switched off`,
         text: "Every container may reach it on every port until the declaration is in force. Apply the stack, or switch the firewall on in its file.",
-        fix: "Compare…",
+        fix: "Compare",
         hint: "Show the stack's firewall on its Settings",
       });
     } else {
@@ -199,7 +199,7 @@ export function fwAttention(stacks) {
         tone: "bad",
         title: `${s.stack} (CT ${s.vmid}) has no firewall`,
         text: "Every container may reach it on every port. Declare one: start from the default (drop inbound, allow out) and add what it serves.",
-        fix: "Declare…",
+        fix: "Declare",
         hint: "Open this stack's firewall on its Settings to declare one",
       });
     }

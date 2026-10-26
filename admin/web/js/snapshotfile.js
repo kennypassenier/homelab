@@ -1,5 +1,5 @@
 // fix-241 (2026-10-02, Jellyfin 12.1): one file as a snapshot holds it,
-// read-only — the Backups page's "Show a file…" dialog. The host reads it
+// read-only — the Backups page's "Show a file" dialog. The host reads it
 // with `restic dump`, capped at 1 MiB; nothing is restored and nothing is
 // written. Pure, so what the dialog says about a cut or a binary file is
 // pinned by a node test without a DOM or a fetch.

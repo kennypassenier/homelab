@@ -1,6 +1,6 @@
 // feat-preset-1 (D): editing presets/ itself — a preset's metadata, its
 // app files, a new preset, removing one. The Presets page's preset-name
-// buttons and its "New preset…" button both open this one dialog; every
+// buttons and its "New preset" button both open this one dialog; every
 // change goes through the same edit plan → diff → commit flow a stack's
 // forms use (`editui.js`'s `openPlanDialog`), scoped to `presets/` instead
 // of `stacks/<stack>/` (`admin/src/core/presetedit.rs`,
@@ -183,7 +183,7 @@ function metaCard(name, meta, reload) {
       class: "kp-button kp-button--primary",
       id: "preset-meta-review",
     },
-    "Review and commit…",
+    "Review and commit",
   );
   save.addEventListener("click", () => {
     const useName = name ?? nameField?.input.value.trim() ?? "";
@@ -259,7 +259,7 @@ function filesCard(name, files, templates, reload) {
   const sel = h(
     "select",
     { class: "kp-field__input", id: "preset-file-select" },
-    h("option", { value: "" }, "New file…"),
+    h("option", { value: "" }, "New file"),
     ...known.map((f) => h("option", { value: f }, f)),
   );
   const pathInput = h("input", {
@@ -324,12 +324,12 @@ function filesCard(name, files, templates, reload) {
   const save = h(
     "button",
     { type: "button", class: "kp-button", id: "preset-file-save" },
-    "Review and commit…",
+    "Review and commit",
   );
   const rename = h(
     "button",
     { type: "button", class: "kp-button", id: "preset-file-rename" },
-    "Rename…",
+    "Rename",
   );
   const del = h(
     "button",
@@ -338,7 +338,7 @@ function filesCard(name, files, templates, reload) {
       class: "kp-button kp-button--destructive",
       id: "preset-file-delete",
     },
-    "Delete this file…",
+    "Delete this file",
   );
   save.addEventListener("click", () => {
     const path = pathInput.value.trim();
@@ -457,7 +457,7 @@ export async function openPresetEditor(name, onChanged) {
         class: "kp-button kp-button--destructive",
         id: "preset-remove",
       },
-      "Remove this preset…",
+      "Remove this preset",
     );
     removeBtn.addEventListener("click", () => {
       reviewEdit(

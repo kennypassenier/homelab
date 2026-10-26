@@ -26,7 +26,6 @@ import {
   firewallChanged,
   firewallModel,
   keepHidden,
-  offReasonField,
   offWords,
   switchedRows,
   latchBody,
@@ -110,7 +109,7 @@ import { declare, drivable, viaForm } from "./drivable.js";
 import { buttonGroup, gridRow } from "./gridrow.js";
 
 // check-turn-off-1: a check or probe row of the stack's checks list is turned
-// off (with a reason) or on again; both change the draft the list's Review
+// off or on again; both change the draft the list's Review
 // and commit… writes to checks.yml.
 const CHECK_OFF = declare({
   id: "checks-turn-off",
@@ -526,7 +525,7 @@ function addAppCard(stack, e, reload) {
       class: "kp-button kp-button--primary",
       id: "add-app-review",
     },
-    "Review and commit…",
+    "Review and commit",
   );
   review.addEventListener("click", () => {
     /** @type {Record<string, string>} */
@@ -661,7 +660,7 @@ export function openPublishDialog(stack, app, onCommitted) {
   const save = h(
     "button",
     { type: "button", class: "kp-button kp-button--primary" },
-    "Review and commit…",
+    "Review and commit",
   );
   const d = openDialog({
     title: `Publish ${app} · ${stack}`,
@@ -793,7 +792,7 @@ function settingsExtCard(stack, e, reload) {
     fieldsFor: retentionRowFields,
     fromValues: retentionRowFromValues,
     problems: retentionRowProblems,
-    addLabel: "Add a tier…",
+    addLabel: "Add a tier",
     driveKey: `row-table:retention:${stack}`,
     rows: startRetention,
     onChange: () => tg.sync(),
@@ -1014,19 +1013,19 @@ function openRowDialog({
 }
 
 /**
- * Asks for the short reason a check is turned off (the row dialog, one field).
+ * check-turn-off-confirm-1: one confirmation, no typing.
  * @param {string} title
- * @returns {Promise<string | null>} the reason, or null when cancelled
+ * @returns {Promise<boolean>}
  */
-function askOffReason(title) {
+function confirmOff(title) {
   return new Promise((resolve) => {
     openRowDialog({
       title,
-      fields: [offReasonField()],
+      fields: [],
       saveLabel: "Turn it off",
-      fromValues: (v) => ({ off: String(v.off ?? "").trim() }),
-      done: (row) => resolve(String(row.off)),
-      cancelled: () => resolve(null),
+      fromValues: () => ({}),
+      done: () => resolve(true),
+      cancelled: () => resolve(false),
     });
   });
 }
@@ -1041,10 +1040,12 @@ function askOffReason(title) {
  * @returns {Promise<void>}
  */
 export async function switchCheck(o) {
-  const reason = o.on
-    ? null
-    : await askOffReason(`Turn off · ${o.name} · ${o.app} · ${o.stack}`);
-  if (!o.on && reason == null) return;
+  const reason = o.on ? null : "off";
+  if (
+    !o.on &&
+    !(await confirmOff(`Turn off · ${o.name} · ${o.app} · ${o.stack}`))
+  )
+    return;
   const r = await readEdit(o.stack, new AbortController().signal);
   if (!r.ok) {
     notify(`${r.error.what}: ${r.error.why}`, "warning");
@@ -1166,7 +1167,7 @@ function rowTable({
             ...(offable
               ? [
                   drivable(
-                    r.row.off ? btn("Turn on", "on") : btn("Turn off…", "off"),
+                    r.row.off ? btn("Turn on", "on") : btn("Turn off", "off"),
                     r.row.off ? CHECK_ON : CHECK_OFF,
                     `${offable}:${i + 1}`,
                   ),
@@ -1228,11 +1229,11 @@ function rowTable({
         break;
       case "off": {
         const row = rows[i].row;
-        void askOffReason(`Turn off · ${summary(row)}`).then((why) => {
-          if (why == null) return;
+        void confirmOff(`Turn off · ${summary(row)}`).then((yes) => {
+          if (!yes) return;
           setRows(
             rows.map((r, j) =>
-              j === i ? { ...r, row: { ...r.row, off: why } } : r,
+              j === i ? { ...r, row: { ...r.row, off: true } } : r,
             ),
           );
         });
@@ -1341,7 +1342,7 @@ function appsEditCard(stack, e, reload) {
     summary: storageSummary,
     fieldsFor: (row) => storageFields(m, row),
     fromValues: storageFromValues,
-    addLabel: "Add a storage entry…",
+    addLabel: "Add a storage entry",
     driveKey: `row-table:storage:${stack}`,
     rows: startStorage,
     onChange: () => storageG.sync(),
@@ -1371,7 +1372,7 @@ function appsEditCard(stack, e, reload) {
     fieldsFor: dataMountFields,
     fromValues: dataMountFromValues,
     problems: dataMountProblems,
-    addLabel: "Add a data mount…",
+    addLabel: "Add a data mount",
     driveKey: `row-table:data_mounts:${stack}`,
     rows: startDataMounts,
     onChange: () => mountsG.sync(),
@@ -1393,7 +1394,7 @@ function appsEditCard(stack, e, reload) {
     summary: logFileSummary,
     fieldsFor: logFileFields,
     fromValues: logFileFromValues,
-    addLabel: "Add a log file…",
+    addLabel: "Add a log file",
     driveKey: `row-table:log_files:${stack}`,
     rows: startLogFiles,
     onChange: () => logsG.sync(),
@@ -1655,7 +1656,7 @@ function latchEditCard(stack, e, reload) {
     fieldsFor: (row) => latchFileFields(m, row),
     fromValues: latchFileFromValues,
     problems: latchFileProblems,
-    addLabel: "Add a latch file…",
+    addLabel: "Add a latch file",
     driveKey: `row-table:latch_files:${stack}`,
     rows: startFiles,
     onChange: () => filesG.sync(),
@@ -1779,7 +1780,7 @@ function tilesEditCard(stack, e, reload) {
     fromValues: tileRowFromValues,
     problems: tileRowProblems,
     datalists: { group: groups },
-    addLabel: "Add a tile…",
+    addLabel: "Add a tile",
     driveKey: `row-table:tiles:${stack}`,
     rows: startRows,
     onChange: () => {
@@ -1997,7 +1998,7 @@ function checksEditCard(stack, e, apps, reload) {
       fieldsFor: checkRowFields,
       fromValues: checkRowFromValues,
       problems: checkRowProblems,
-      addLabel: "Add a check…",
+      addLabel: "Add a check",
       driveKey: `row-table:checks:${stack}:${app}`,
       offable: "checks",
       rows: startChecks,
@@ -2013,7 +2014,7 @@ function checksEditCard(stack, e, apps, reload) {
       summary: manualRowSummary,
       fieldsFor: manualRowFields,
       fromValues: manualRowFromValues,
-      addLabel: "Add a question…",
+      addLabel: "Add a question",
       driveKey: `row-table:manual:${stack}:${app}`,
       rows: startManual,
       onChange: () => repaintStatus(),
@@ -2039,7 +2040,7 @@ function checksEditCard(stack, e, apps, reload) {
       fieldsFor: probeRowFields,
       fromValues: probeRowFromValues,
       problems: probeRowProblems,
-      addLabel: "Add a probe…",
+      addLabel: "Add a probe",
       driveKey: `row-table:probes:${stack}:${app}`,
       offable: "probes",
       rows: startProbes,
@@ -2100,7 +2101,7 @@ function checksEditCard(stack, e, apps, reload) {
   const review = h(
     "button",
     { type: "button", class: "kp-button", id: "checks-review" },
-    "Review and commit…",
+    "Review and commit",
   );
   review.addEventListener("click", () => {
     const app = select.value;
@@ -2407,7 +2408,7 @@ function nativeUnitForm(stack, natives, reload) {
       class: "kp-button kp-button--destructive",
       id: "native-remove",
     },
-    "Remove this unit…",
+    "Remove this unit",
   );
   const pathLine = h("p", { class: "measured", id: "native-path" });
   const unitRow = gridRow({
@@ -2584,7 +2585,7 @@ function addNativeCard(stack, reload) {
       class: "kp-button kp-button--primary",
       id: "add-native-review",
     },
-    "Review and commit…",
+    "Review and commit",
   );
   review.addEventListener("click", () => {
     const e = {
@@ -2802,12 +2803,12 @@ function drawFirewall(panel, stack, e, reload) {
   const add = h(
     "button",
     { type: "button", class: "kp-button", id: "fw-add" },
-    "Add a rule…",
+    "Add a rule",
   );
   const review = h(
     "button",
     { type: "button", class: "kp-button kp-button--primary", id: "fw-review" },
-    "Review and commit…",
+    "Review and commit",
   );
   const discard = h(
     "button",

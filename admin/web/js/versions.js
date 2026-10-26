@@ -38,7 +38,7 @@ export function mountVersions(root) {
           class: "kp-button kp-button--primary",
           id: "update-host-open",
         },
-        "Update the host…",
+        "Update the host",
       );
       b.addEventListener(
         "click",

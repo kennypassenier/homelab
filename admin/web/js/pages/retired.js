@@ -1,6 +1,6 @@
 // feat-retired-1: the Retired page — every `HostState::retired` entry (a
 // stack, app or native unit the host still KEEPS everything of, ask-9),
-// what it keeps, and a "Wipe…" button that opens the existing wipe dialog
+// what it keeps, and a "Wipe" button that opens the existing wipe dialog
 // (`ActionKind::Wipe`) on it.
 //
 // Kenny, 2026-10-02: "is there a way, from the admin dashboard, to delete
@@ -206,7 +206,7 @@ function wipeButton(entry) {
       type: "button",
       "data-action": "wipe",
     },
-    "Wipe…",
+    "Wipe",
   );
   btn.addEventListener("click", () => void openAction(entry.key, "wipe"));
   return btn;

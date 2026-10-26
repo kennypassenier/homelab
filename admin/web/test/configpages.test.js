@@ -191,8 +191,8 @@ test("redesign-firewall: one attention row per stack not in force, no firewall f
   assert.deepEqual(
     a.map((x) => [x.stack, x.tone, x.fix]),
     [
-      ["beta-demo", "bad", "Declare…"],
-      ["alpha-demo", "warn", "Compare…"],
+      ["beta-demo", "bad", "Declare"],
+      ["alpha-demo", "warn", "Compare"],
     ],
   );
   assert.equal(a[0].title, "beta-demo (CT 351) has no firewall");

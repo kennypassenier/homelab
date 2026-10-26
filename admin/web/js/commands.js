@@ -278,7 +278,7 @@ export const editCommands =
       {
         id: "edit:new-stack",
         group: "Do",
-        label: "New stack…",
+        label: "New stack",
         hint: "from a preset, a bundle or empty, with the wizard",
         words: "add create stack app wizard",
         featured: true,
@@ -298,7 +298,7 @@ export const editCommands =
         // newer version (a stack's own "Update · <stack>" opens it too).
         id: "edit:update-all",
         group: "Do",
-        label: "Update apps with a newer version…",
+        label: "Update apps with a newer version",
         hint: "see what is newer and what it changes, then back up, update and verify",
         words: "update upgrade newer version stale images all apps",
         href: "/inbox?update=all",
@@ -308,7 +308,7 @@ export const editCommands =
             {
               id: "edit:import",
               group: "Do",
-              label: "Import a stack…",
+              label: "Import a stack",
               hint: "from an export bundle",
               words: "bundle import",
               run: openImportBundle,

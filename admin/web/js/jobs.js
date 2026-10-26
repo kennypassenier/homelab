@@ -668,7 +668,15 @@ export function medianView(est, ran, state, op = "") {
   if (!est) return { text: "no median yet", delta: null, comparable: false };
   const comparable =
     ran == null || ran <= 0 || (ran <= est.median * 4 && ran * 4 >= est.median);
-  const text = `${humanDuration(est.median)}${
+  // run-view-min-max-1: the fastest and slowest earlier run beside the
+  // median; one run is said to be one run (median-outlier-1).
+  const spread =
+    est.runs <= 1
+      ? " (from one earlier run)"
+      : est.min != null && est.max != null
+        ? ` · fastest ${humanDuration(est.min)} · slowest ${humanDuration(est.max)}`
+        : "";
+  const text = `${humanDuration(est.median)}${spread}${
     !comparable && op ? ` (of ${op}, a part of this job)` : ""
   }`;
   if (!comparable || ran == null || state !== "done")

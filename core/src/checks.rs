@@ -91,8 +91,9 @@ pub struct Check {
     /// precisely the one that gets mistaken for proof.
     #[serde(default)]
     pub blind_spot: Option<String>,
-    /// check-turn-off-1: `off: "<why>"` turns the check off; nothing runs it.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    /// check-turn-off-1: `off: true` turns the check off; nothing runs it.
+    /// (`off: "<why>"` of 4.1.0 and 4.1.1 still reads; check-turn-off-confirm-1.)
+    #[serde(default, skip_serializing_if = "Option::is_none", with = "off_flag")]
     pub off: Option<String>,
 }
 
@@ -248,7 +249,7 @@ pub struct Probe {
     /// uitschakelen, niet enkel snoozen"): `off: "<why>"` turns the probe off
     /// without deleting it; the fleet check no longer reads it, and the
     /// reason stays in the stack's own file.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", with = "off_flag")]
     pub off: Option<String>,
 }
 
@@ -602,4 +603,67 @@ pub fn regressions(verdicts: &[Verdict]) -> Vec<String> {
             _ => None,
         })
         .collect()
+}
+
+/// check-turn-off-confirm-1 (Kenny, 2026-10-24: "Gewoon een bevestiging
+/// (zonder typen) is genoeg"): `off: true` is the file's spelling. A text
+/// written by 4.1.0 or 4.1.1 still reads and is kept as it is; an empty text
+/// is the flag.
+mod off_flag {
+    use serde::{Deserialize, Deserializer, Serializer};
+
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum Off {
+        Flag(bool),
+        Why(String),
+    }
+
+    #[allow(clippy::ref_option)]
+    pub fn serialize<S: Serializer>(v: &Option<String>, s: S) -> Result<S::Ok, S::Error> {
+        match v {
+            Some(why) if why.is_empty() => s.serialize_bool(true),
+            Some(why) => s.serialize_str(why),
+            None => s.serialize_none(),
+        }
+    }
+
+    pub fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<Option<String>, D::Error> {
+        Ok(match Option::<Off>::deserialize(d)? {
+            Some(Off::Flag(true)) => Some(String::new()),
+            Some(Off::Flag(false)) | None => None,
+            Some(Off::Why(why)) => Some(why),
+        })
+    }
+}
+
+#[cfg(test)]
+mod off_flag_tests {
+    use super::Probe;
+
+    const BASE: &str = "name: p\ncommand: \"true\"\nhealthy: {equals: \"0\"}\nlayer: application\n";
+
+    fn read(extra: &str) -> Probe {
+        serde_yaml::from_str(&format!("{BASE}{extra}")).expect("the probe reads")
+    }
+
+    #[test]
+    fn check_turn_off_confirm_1_off_true_is_the_flag_and_writes_back_as_true() {
+        let p = read("off: true\n");
+        assert_eq!(p.off.as_deref(), Some(""));
+        assert!(serde_yaml::to_string(&p).unwrap().contains("off: true"));
+    }
+
+    #[test]
+    fn check_turn_off_confirm_1_an_older_reason_still_reads_and_is_kept() {
+        let p = read("off: retired app\n");
+        assert_eq!(p.off.as_deref(), Some("retired app"));
+        assert!(serde_yaml::to_string(&p).unwrap().contains("retired app"));
+    }
+
+    #[test]
+    fn check_turn_off_confirm_1_off_false_or_absent_is_on() {
+        assert_eq!(read("off: false\n").off, None);
+        assert_eq!(read("").off, None);
+    }
 }

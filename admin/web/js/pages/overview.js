@@ -149,7 +149,7 @@ export function mount(root, ctx) {
         id: "new-stack",
         title: "Add a stack from a preset or from an exported bundle",
       },
-      "New stack…",
+      "New stack",
     ),
     NEW_STACK,
   );

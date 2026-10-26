@@ -1437,7 +1437,7 @@ export function mount(root, scope) {
                   title:
                     "Put the previous version back the same way: backup, files, deploy",
                 },
-                runMoves.size > 1 ? `Roll back ${m.key}…` : "Roll back…",
+                runMoves.size > 1 ? `Roll back ${m.key}` : "Roll back",
               ),
               ROLL_BACK,
               id,

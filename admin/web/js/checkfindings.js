@@ -102,9 +102,9 @@ function findingRow(r, again) {
                     type: "button",
                     class: "kp-button kp-button--sm",
                     title:
-                      "Switch this check off, with a reason, in the stack's checks.yml. The nightly round skips it.",
+                      "Switch this check off (`off: true`) in the stack's checks.yml. The nightly round skips it.",
                   },
-                  "Turn off…",
+                  "Turn off",
                 ),
                 TURN_OFF,
                 `${ref.stack}/${ref.app}/${ref.name}`,
@@ -167,7 +167,7 @@ export function mountFindings(signal) {
       h(
         "span",
         { class: "inbox-worth__desc" },
-        "Everything the latest fleet check round found: what is broken now and what only drifts, each with what to do. Turn off… switches one check off with a reason.",
+        "Everything the latest fleet check round found: what is broken now and what only drifts, each with what to do. Turn off switches one check off.",
       ),
     ),
     FOLD,

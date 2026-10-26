@@ -49,9 +49,7 @@ export function goPlan(p, ticked, skipBackups = false) {
     note: deploy.length
       ? `${left.length ? `${left.join("; ")}. ` : ""}One confirmed batch; ${skipBackups ? "no stack is backed up first (Skip the backups is ticked)" : "each stack is backed up first"} and shows its own progress in the stack list. Nothing is destroyed here.`
       : "Tick a stack under Will deploy to deploy it.",
-    label: deploy.length
-      ? `Apply ${count(deploy.length, "deploy")}…`
-      : "Apply…",
+    label: deploy.length ? `Apply ${count(deploy.length, "deploy")}` : "Apply",
     /** The apply form's preset: the whole plan sends nothing extra. */
     preset: /** @type {Record<string, string | boolean>} */ ({
       ...(leaveOut.length ? { leave_out: leaveOut.join(", ") } : {}),
@@ -89,7 +87,7 @@ export function destroyStep(p, typed, vmidOf, o) {
       ? `Destroy ${count(armed.length, "stack")}: ${armed.map((s, i) => `${s}${ids[i] != null ? ` (CT ${ids[i]})` : ""}`).join(", ")}`
       : `Nothing armed: ${count(p.destroy.length, "stack")} gone from the files`,
     ackLabel: `Yes, destroy ${armed.length ? armed.join(", ") : "the armed stacks"}. Each is backed up and its backup restored as a check first; one that does not restore is left untouched.`,
-    label: armed.length ? `Destroy ${armed.length}…` : "Destroy…",
+    label: armed.length ? `Destroy ${armed.length}` : "Destroy",
     /** The apply form's preset: every deploy left out, the destroys typed. */
     preset: {
       leave_out: [...p.deploy, ...p.broken.map(([s]) => s)].join(", "),

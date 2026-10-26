@@ -44,7 +44,7 @@ test("feat-kp11demo-13: a problem keeps its fix button, its remedy and the comma
         text: "Deploy makes it match",
         act: {
           kind: "none",
-          label: "Deploy…",
+          label: "Deploy",
           title: "Make the container match its files",
         },
       },

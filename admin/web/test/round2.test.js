@@ -142,7 +142,7 @@ test("checks-notice-link-1: the view lists every broken and drift finding with i
   assert.ok([...v.broken, ...v.drift].every((r) => r.remedy));
 });
 
-test("check-turn-off-1: a probe finding names its check, and only that row gets its reason", () => {
+test("check-turn-off-1: a probe finding names its check, and only that row is switched off", () => {
   assert.deepEqual(
     checkRefOf('media/jellyfin: films in the library: reads "3", healthy is 5'),
     { stack: "media", app: "jellyfin", name: "films in the library" },
@@ -156,7 +156,7 @@ test("check-turn-off-1: a probe finding names its check, and only that row gets 
   assert.equal(off?.list, "probes");
   assert.deepEqual(
     off?.rows.map((r) => r.row),
-    [{ name: "p", id: "p1", off: "retired app" }, { name: "q" }],
+    [{ name: "p", id: "p1", off: true }, { name: "q" }],
   );
   const on = switchedRows({ probes: [{ name: "p", off: "x" }] }, "p", null);
   assert.deepEqual(on?.rows[0].row, { name: "p" });

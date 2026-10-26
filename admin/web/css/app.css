@@ -378,7 +378,7 @@ p:has(> .measured:only-child):first-child {
 .act-wizard .kp-wizard__actions {
   position: sticky;
   inset-block-end: -1px;
-  padding-block: 0.75rem 1px;
+  padding-block: 0.75rem;
   background: var(--popover);
   border-block-start: 1px solid var(--border);
 }
@@ -910,6 +910,12 @@ tr.unread td:first-child {
   display: grid;
   justify-items: center;
   align-content: start;
+  /* run-dialog-clock-1: the clock lives in its own cell at every width and
+     is clipped to it, so it never grows over the step rows. */
+  inline-size: 6rem;
+  block-size: 6rem;
+  overflow: clip;
+  contain: layout paint;
 }
 .rv-disc > * {
   grid-area: 1 / 1;
@@ -3046,7 +3052,7 @@ details.nx-card--fold[open] > summary::before {
   inset-block-end: -1px;
   z-index: 6;
   margin-block-start: var(--kp-space-md, 0.75rem);
-  padding-block: 0.75rem 1px;
+  padding-block: 0.75rem;
   background: var(--popover);
   border-block-start: 1px solid var(--border);
 }
@@ -3066,4 +3072,13 @@ details.nx-card--fold[open] > summary::before {
   flex: 0 0 auto;
   min-inline-size: min-content;
   max-inline-size: 100%;
+}
+
+/* dialog-buttons-cut-1 (Kenny, 2026-10-24: "al in verschillende dialogen
+   gezien"): a dialog's button row keeps room for the buttons' full height and
+   their raised shadow in every theme; nothing on the row clips them. */
+.kp-dialog__actions,
+.kp-wizard__actions {
+  overflow: visible;
+  padding-block-end: max(0.75rem, 1px);
 }

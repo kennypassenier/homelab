@@ -1,4 +1,4 @@
-// fix-241: the Backups page's "Show a file…" dialog — one file of a
+// fix-241: the Backups page's "Show a file" dialog — one file of a
 // snapshot, read-only, capped at 1 MiB — as pure data.
 import { test } from "node:test";
 import assert from "node:assert/strict";

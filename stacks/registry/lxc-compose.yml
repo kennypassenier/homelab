@@ -74,14 +74,19 @@ storage:
       Measured 2026-09-02: backing it up cost 1381 MB and 457 s per night,
       a fifth of the whole round, for data that protects nothing
 
-  # pinned-digest-pruned-1: the keep registry's data. Backed up, unlike the
-  # cache: when an upstream has deleted a pinned digest this is the only copy.
-  # Bounded by the keep round (80 digests, `keep_max_mb` 12 GB).
+  # pinned-digest-pruned-1: the keep registry's data. Bounded by the keep
+  # round (80 digests, `keep_max_mb` 12 GB).
+  # keep-no-backup-1 (Kenny, 2026-10-25: "het is een cache, geen backup"): not
+  # in the nightly backup; it measured 5.6 GB and 1391 files a night.
   # keep-storage-name-1: its own app, so its directory is named after it (O7).
   - host_path: /appdata/registry/keep-config
     mount_point: /appdata/registry/keep-config
     host_owner_uid: 100000
     app: keep
+    no_backup: >-
+      a cache of copies kept for pinned digests: the next keep round fetches
+      them again from upstream, and the pins in the stack files say which.
+      Measured 2026-10-25: 5.6 GB and 1391 files in the nightly backup
 
 apps: [registry, keep]
 

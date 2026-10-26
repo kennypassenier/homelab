@@ -546,7 +546,7 @@ export function mount(root) {
             role: "act",
             label: "Answer",
             hint: "Go to the question: its card says what each answer does and how long the host waits",
-            primary: bad,
+            primary: first,
           });
           b.addEventListener("click", () => questions.focusAsk(r.key.slice(4)));
           out.push(b);
@@ -559,7 +559,7 @@ export function mount(root) {
               drivable(
                 rowButton({
                   role: "open",
-                  label: `Only ${stacks[0]}…`,
+                  label: `Only ${stacks[0]}`,
                   hint: `Update only ${stacks[0]}'s apps`,
                   href: updateHref(stacks[0]),
                 }),
@@ -573,8 +573,8 @@ export function mount(root) {
                 role: "act",
                 label:
                   stacks.length === 1 && f.n === 1
-                    ? "Review and update…"
-                    : `Review and update all ${f.n}…`,
+                    ? "Review and update"
+                    : `Review and update all ${f.n}`,
                 hint: "See what changes, then back up, update and verify; nothing runs until you confirm",
                 href:
                   stacks.length === 1
@@ -591,7 +591,7 @@ export function mount(root) {
           const b = drivable(
             rowButton({
               role: "act",
-              label: "Push the envs…",
+              label: "Push the envs",
               hint: "Deploy each of these stacks so the host's vault takes a copy of its secrets; one confirm for all",
             }),
             PUSH_ENVS,
@@ -606,7 +606,7 @@ export function mount(root) {
               role: first ? "act" : "open",
               label: "Open the job",
               hint: "The job that failed: its steps, what the host said and its log",
-              primary: first && bad,
+              primary: first,
             }),
             OPEN_JOB,
             r.key,
@@ -619,13 +619,11 @@ export function mount(root) {
           const b = drivable(
             rowButton({
               role: "act",
-              label: f.fix.label.endsWith("…")
-                ? f.fix.label
-                : `${f.fix.label}…`,
+              label: f.fix.label,
               hint: f.retry
                 ? "Run this job again: its own dialog, prefilled as it was; nothing runs until you confirm"
                 : "The action's own dialog, prefilled; nothing runs until you confirm",
-              primary: bad,
+              primary: first,
             }),
             FIX,
             r.key,
@@ -651,7 +649,7 @@ export function mount(root) {
                     ? "The page its remedy names"
                     : "Open where this happened",
                 href: f.href || "/activity",
-                primary: first && bad,
+                primary: first,
               }),
               f.why === "remedy" ? REMEDY_PAGE : SEE_WHAT,
               r.key,
@@ -701,8 +699,8 @@ export function mount(root) {
       const off = drivable(
         rowButton({
           role: "off",
-          label: "Turn off…",
-          hint: "Switch this check off, with a reason, in the stack's checks.yml. The nightly round skips it.",
+          label: "Turn off",
+          hint: "Switch this check off (`off: true`) in the stack's checks.yml. The nightly round skips it.",
         }),
         TURN_OFF,
         r.key,
@@ -721,7 +719,7 @@ export function mount(root) {
     const b = drivable(
       rowButton({
         role: "snooze",
-        label: "Snooze…",
+        label: "Snooze",
         hint: "Hide this row until a moment you pick; it comes back by itself, optionally with a reminder",
       }),
       SNOOZE_OPEN,
@@ -1295,7 +1293,7 @@ export function mount(root) {
       ...rows.map((r) =>
         worthRow(
           r,
-          r.key === "worth:drills" ? "Drill them now…" : "Update the host…",
+          r.key === "worth:drills" ? "Drill them now" : "Update the host",
           r.key === "worth:drills"
             ? "Backups, showing only the repositories never drilled"
             : "The Host page, where the host updates itself",

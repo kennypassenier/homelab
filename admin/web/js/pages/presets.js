@@ -76,19 +76,19 @@ const NEW_PRESET = ctl(
 const NEW_STACK = ctl("presets-new-stack", "open the New stack wizard");
 const NONE_IMPORT = ctl(
   "presets-import-first",
-  "the empty page's Import a bundle…",
+  "the empty page's Import a bundle",
   undefined,
   { shows: "while there is no preset" },
 );
 const NONE_NEW_PRESET = ctl(
   "presets-new-preset-first",
-  "the empty page's New preset…",
+  "the empty page's New preset",
   undefined,
   { shows: "while there is no preset" },
 );
 const NONE_NEW_STACK = ctl(
   "presets-new-stack-first",
-  "the empty page's New stack…",
+  "the empty page's New stack",
   undefined,
   { shows: "while there is no preset" },
 );
@@ -196,14 +196,14 @@ export function mount(root, ctx) {
     titleMeta: [h("span", { class: "cf-live" }, ago)],
     actions: [
       action(
-        "Import a bundle…",
+        "Import a bundle",
         "Add a stack from a bundle someone shared (an export of another homelab)",
         "import",
         IMPORT,
         () => void openImport(ctx.navigate),
       ),
       action(
-        "New preset…",
+        "New preset",
         "Write a new preset into presets/: its size, apps and files",
         "new-preset",
         NEW_PRESET,
@@ -211,7 +211,7 @@ export function mount(root, ctx) {
       ),
     ],
     primary: action(
-      "New stack…",
+      "New stack",
       "Start a new stack; choose a preset in the first step",
       "new-stack",
       NEW_STACK,
@@ -456,7 +456,7 @@ export function mount(root, ctx) {
           data.working_copy === false
             ? "The dashboard has no working copy yet, so it lists no presets."
             : "The working copy's presets/ directory is empty or missing.",
-        actionLabel: "New preset…",
+        actionLabel: "New preset",
       });
       below.replaceChildren(noPresets());
       return;
@@ -558,9 +558,9 @@ export function mount(root, ctx) {
           "div",
           null,
           h("strong", null, "Write one"),
-          "New preset… asks for a name, sizes and apps and commits the folder.",
+          "New preset asks for a name, sizes and apps and commits the folder.",
           action(
-            "New preset…",
+            "New preset",
             "Write a new preset into presets/",
             "new-preset",
             NONE_NEW_PRESET,
@@ -574,7 +574,7 @@ export function mount(root, ctx) {
           h("strong", null, "Import one"),
           "A bundle from another homelab or a backup of your own.",
           action(
-            "Import a bundle…",
+            "Import a bundle",
             "Add a stack from a bundle",
             "import",
             NONE_IMPORT,
@@ -588,7 +588,7 @@ export function mount(root, ctx) {
           h("strong", null, "Or start a stack"),
           "The New stack wizard says what it needs before anything is written.",
           action(
-            "New stack…",
+            "New stack",
             "Start a new stack",
             "new-stack",
             NONE_NEW_STACK,

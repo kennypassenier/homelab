@@ -577,14 +577,14 @@ test("redesign-openpoints-3: the shared more menu hands kp its grouped entries, 
       group: "Data",
       items: [
         {
-          label: "Restore…",
+          label: "Restore",
           hint,
           onClick: () => ran.push("restore"),
           attrs: { "data-action": "restore" },
           mark: (/** @type {any} */ e) => marked.push(e),
         },
         {
-          label: "Change a secret…",
+          label: "Change a secret",
           hint: "rotate one",
           disabled: "Never on the dashboard's own stack",
           onClick: () => ran.push("secret"),
@@ -595,7 +595,7 @@ test("redesign-openpoints-3: the shared more menu hands kp its grouped entries, 
       group: "Remove",
       items: [
         {
-          label: "Remove…",
+          label: "Remove",
           hint: "gone",
           danger: true,
           onClick: () => ran.push("remove"),

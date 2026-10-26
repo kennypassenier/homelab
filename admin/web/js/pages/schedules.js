@@ -977,7 +977,7 @@ export function mount(root, opts = {}) {
         text,
       );
     const edit = drivable(
-      btn("edit", "Edit…", "Change what, where or when", ""),
+      btn("edit", "Edit", "Change what, where or when", ""),
       EDIT_SCHEDULE,
       s.id,
     );

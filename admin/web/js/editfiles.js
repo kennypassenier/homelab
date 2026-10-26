@@ -133,7 +133,7 @@ export function filesCard(stack, e, reload, pending) {
   const newBtn = h(
     "button",
     { type: "button", class: "kp-button", id: "files-new" },
-    "New file…",
+    "New file",
   );
 
   // ── the detail: path/template (create), the text, rename ──
@@ -165,7 +165,7 @@ export function filesCard(stack, e, reload, pending) {
   const renameGo = h(
     "button",
     { type: "button", class: "kp-button", id: "files-rename-go" },
-    "Rename…",
+    "Rename",
   );
   const area = /** @type {HTMLTextAreaElement} */ (
     h("textarea", {
@@ -185,7 +185,7 @@ export function filesCard(stack, e, reload, pending) {
   const renameBtn = h(
     "button",
     { type: "button", class: "kp-button", id: "files-rename" },
-    "Rename this file…",
+    "Rename this file",
   );
   const deleteBtn = h(
     "button",
@@ -194,7 +194,7 @@ export function filesCard(stack, e, reload, pending) {
       class: "kp-button kp-button--destructive",
       id: "files-delete",
     },
-    "Delete this file…",
+    "Delete this file",
   );
   const cancelBtn = h(
     "button",
@@ -209,7 +209,7 @@ export function filesCard(stack, e, reload, pending) {
       id: "raw-review",
       hidden: "",
     },
-    "Review and commit…",
+    "Review and commit",
   );
 
   const pathRow = gridRow({

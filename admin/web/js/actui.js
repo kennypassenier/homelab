@@ -111,7 +111,7 @@ function fixButton(f) {
       "data-action": f.action,
       title: `Open the ${f.action} dialog for ${f.stack}; nothing runs until you confirm`,
     },
-    `${capital(f.action)} ${f.stack}…`,
+    `${capital(f.action)} ${f.stack}`,
   );
   drivable(b, REFUSAL_FIX, f.stack);
   b.addEventListener("click", () => {

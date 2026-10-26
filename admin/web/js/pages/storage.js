@@ -284,7 +284,7 @@ export function mount(root) {
   // ── header ────────────────────────────────────────────────────────────
   const ago = agoEl("read");
   const compact = drivable(
-    button("Compact…", {
+    button("Compact", {
       cls: "kp-button--secondary",
       title:
         "Give the free space inside the database file back to the disk (nothing is deleted)",
@@ -446,7 +446,7 @@ export function mount(root) {
                 `${lv.word}: the database holds ${sizeText(b.total_bytes)} of ${sizeText(b.budget_bytes)}. Nothing was deleted; ${biggest.label} is the biggest kind.`,
               ),
               (() => {
-                const bt = button(`Clean up ${biggest.label}…`, {
+                const bt = button(`Clean up ${biggest.label}`, {
                   cls: "kp-button--secondary",
                   onClick: () => openClean(biggest),
                 });
@@ -534,7 +534,7 @@ export function mount(root) {
             title: `Choose what to delete from ${k.label}; nothing is deleted until you type its name`,
             "aria-label": `Clean up ${k.label}`,
           },
-          "Clean up…",
+          "Clean up",
         );
         markClean(open, k.id);
         open.addEventListener("click", () => openClean(k));

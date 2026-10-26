@@ -127,7 +127,7 @@ const TREND_EVERY_S = 60;
 
 // Live view (invariant 39): every control on this page that runs
 // something or opens a menu is declared here; the action tiles and
-// "Build a template…" reach their dialogs as catalog forms.
+// "Build a template" reach their dialogs as catalog forms.
 // review M5: every page field Live view may set is declared (drivable.js
 // `declareField`); the client and the dashboard refuse any other.
 const KPI_CHART = declare({
@@ -1056,7 +1056,7 @@ export function mount(root, ctx) {
     ),
     poolBar,
   );
-  const growthLine = h("span", { id: "host-growth" }, "Growth: reading…");
+  const growthLine = h("span", { id: "host-growth" }, "Growth: reading");
   const diskAgo = agoEl("read");
   const diskCard = section({
     id: "host-disk-card",
@@ -1540,7 +1540,7 @@ export function mount(root, ctx) {
         title: "Bake a fresh golden template: opens the dialog first",
         onclick: () => void openAction("_host", "template-build"),
       },
-      "Build a template…",
+      "Build a template",
     ),
     "template-build",
   );

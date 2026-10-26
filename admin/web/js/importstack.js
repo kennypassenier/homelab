@@ -95,7 +95,7 @@ export async function openImport(navigate) {
       class: "kp-button kp-button--primary",
       id: "import-review",
     },
-    "Review…",
+    "Review",
   );
   const note = h("p", { class: "measured", role: "status" });
   const d = openDialog({

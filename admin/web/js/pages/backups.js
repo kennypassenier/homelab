@@ -20,7 +20,7 @@
 // night range and any month need no further read), one stack at a time so a
 // slow repository holds up only its own row (fix-177, fix-224);
 // `/data/retired`. Restore, Verify restore (fix-237) and the drills are the
-// existing action dialogs; "Show a file…" (fix-241) is the existing
+// existing action dialogs; "Show a file" (fix-241) is the existing
 // read-only dialog.
 
 import { bindTableUrl, ensureStyle, fetchJson, h, slowRead } from "../dom.js";
@@ -364,7 +364,7 @@ const NIGHT_REPAIR = declare({
   what: "back up a stack that missed the night on show",
   shows: "on a stack that missed the night",
 });
-// fix-239/241: "Show a file…" opens a page dialog (no catalog action).
+// fix-239/241: "Show a file" opens a page dialog (no catalog action).
 const SNAPSHOT_FILE = declare({
   id: "snapshot-file",
   page: "backups",
@@ -500,7 +500,7 @@ export function mount(root) {
     REFRESH,
   );
   const backupBtn = viaForm(
-    button("Back up now…", {
+    button("Back up now", {
       cls: "kp-button--secondary",
       title:
         "Run a backup now of every stack that keeps data (or only the stacks you turned on in the grid); the dialog lists them first",
@@ -519,7 +519,7 @@ export function mount(root) {
     "batch",
   );
   const restoreBtn = drivable(
-    button("Restore…", {
+    button("Restore", {
       cls: "kp-button--primary",
       title: "Open the Restore flow: pick an app and a night, then restore it",
       onClick: () => openRestorePicker(),
@@ -1076,7 +1076,7 @@ export function mount(root) {
         title: `${k.drills.never} of ${k.drills.total} repositories were never restore-drilled`,
         text: "A drill restores the newest snapshot into a scratch directory and compares it; nothing live is touched.",
         action: drivable(
-          button("Drill them now…", {
+          button("Drill them now", {
             cls: "kp-button--sm kp-button--secondary",
             title:
               "List every repository that never had a drill, each with its own Verify restore",
@@ -1528,7 +1528,7 @@ export function mount(root) {
       let act = null;
       if (r.status === "ok" && total)
         act = viaForm(
-          button("Restore…", {
+          button("Restore", {
             cls: "kp-button--sm",
             title: `Restore one of ${g.stack}'s apps`,
             attrs: {
@@ -1571,7 +1571,7 @@ export function mount(root) {
         refs.set(key, { stack: g.stack, native, repo, read: r });
         const newest = repo.newest_snapshot;
         const restore = viaForm(
-          button("Restore…", {
+          button("Restore", {
             cls: "kp-button--sm",
             title: newest
               ? "Restore this app; the newest snapshot is picked, change it in the dialog"
@@ -1735,7 +1735,7 @@ export function mount(root) {
   /** @param {{stack: string, native: boolean, repo: Repo}} ref @param {import("../backupsview.js").Snap} x */
   const snapshotActions = (ref, x) => {
     const restore = viaForm(
-      button("Restore…", {
+      button("Restore", {
         cls: "kp-button--sm",
         title: `Restore ${ref.repo.owner} to ${x.short_id}`,
         attrs: {
@@ -1755,7 +1755,7 @@ export function mount(root) {
     // its row has no Show a file (restore is the way back for it).
     if (!ref.native) {
       const file = drivable(
-        button("Show a file…", {
+        button("Show a file", {
           cls: "kp-button--sm kp-button--ghost",
           title:
             "Read one file as this snapshot holds it, without restoring anything",
@@ -1949,7 +1949,7 @@ export function mount(root) {
       { class: "bk-drill-list" },
       ...repoList.map((r) => {
         const b = viaForm(
-          button("Verify restore…", {
+          button("Verify restore", {
             cls: "kp-button--sm kp-button--secondary",
             title:
               "Restore the newest snapshot into the drill's scratch directory and judge it",
@@ -2309,7 +2309,7 @@ function plannedMs(iso) {
 }
 
 /**
- * fix-241: "Show a file…" — one file of one snapshot of this app,
+ * fix-241: "Show a file" — one file of one snapshot of this app,
  * read-only.
  * @param {string} stack
  * @param {Repo} r

@@ -316,7 +316,7 @@ export function mount(root) {
         "aria-controls": "nr-push-gate",
         title: "Open the box with the tick that lets push be turned off",
       },
-      "Turn push off…",
+      "Turn push off",
     ),
     PUSH_OFF_OPEN,
   );

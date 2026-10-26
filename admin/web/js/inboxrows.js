@@ -199,9 +199,21 @@ export function todayRows(body, setupStacks = []) {
   const at = Number(body?.measured_at) || 0;
   /** @type {Row[]} */
   const out = [];
-  for (const i of body?.today?.items ?? []) {
+  const items = body?.today?.items ?? [];
+  // inbox-dup-finding-1: the fleet check and the host's doctor both say a
+  // stack has no backup; one fact is one row, and the fleet check's wins
+  // (it carries the remedy that names the stack).
+  const fleetBackup = new Set(
+    items
+      .filter((i) => i.source === "check")
+      .map((i) => /^(\S+): .*(backup|snapshot)/.exec(i.what)?.[1])
+      .filter((s) => s != null),
+  );
+  for (const i of items) {
     const env = /^stack (\S+) env:/.exec(i.what);
     if (env && skip.has(env[1])) continue;
+    const dupe = /^stack (\S+) backup:/.exec(i.what);
+    if (i.source === "doctor" && dupe && fleetBackup.has(dupe[1])) continue;
     out.push({
       key: `today:${i.source}:${i.what}`,
       severity: i.level === "Broken" ? "bad" : "warn",

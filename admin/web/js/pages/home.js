@@ -246,7 +246,7 @@ export function mount(root) {
       type: "search",
       class: "kp-field__input nx-search ap-search",
       placeholder: matchMedia("(max-width: 30rem)").matches
-        ? "Open an app…"
+        ? "Open an app"
         : "Open an app… type its name, Enter opens it",
       "aria-label": "Find an app",
       "aria-keyshortcuts": "/",

@@ -1409,7 +1409,7 @@ function resolveButton(choice, reload) {
         drop: "Throw the commits away; the working copy goes back to the remote",
       }[choice],
     },
-    { push: "Push", rebase: "Rebase and push", drop: "Drop them…" }[choice],
+    { push: "Push", rebase: "Rebase and push", drop: "Drop them" }[choice],
   );
   drivable(b, REPO_CHOICE, choice);
   b.addEventListener("click", async () => {

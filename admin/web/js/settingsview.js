@@ -9,7 +9,7 @@
 
 /**
  * Who changes a key, in the demo's words: the short label beside the
- * "when" dot, and the sentence the "How to…" box and its tip say.
+ * "when" dot, and the sentence the "How to" box and its tip say.
  * `browser` keys need no word: they are simply edited here.
  */
 export const ACCESS_WORDS = /** @type {const} */ ({

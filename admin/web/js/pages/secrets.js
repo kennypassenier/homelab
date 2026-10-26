@@ -344,7 +344,7 @@ export function mount(root, opts = {}) {
         type: "button",
         title: "Stage a new value for the first secret of this stack",
       },
-      "Change a secret…",
+      "Change a secret",
     ),
     CHANGE_A_SECRET,
   );

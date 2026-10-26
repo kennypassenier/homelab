@@ -87,15 +87,15 @@ test("More is grouped Data · Change · Pause · Tools · Remove and keeps every
   );
   const labels = g.flatMap((x) => x.items.map((i) => i.label));
   for (const l of [
-    "Restore…",
-    "Change a secret…",
-    "Roll back…",
+    "Restore",
+    "Change a secret",
+    "Roll back",
     "Resize",
     "Add log guards",
     "Park this stack",
     "Export bundle",
     "Open the console",
-    "Destroy, forget, wipe…",
+    "Destroy, forget, wipe",
   ])
     assert.ok(labels.includes(l), l);
   // a parked stack offers Unpark; a native one its own group
@@ -614,7 +614,7 @@ test("review 2: the no-env row offers Push the env as its own host action", () =
   assert.ok(i);
   assert.equal(i.act.kind, "action");
   assert.equal(i.act.kind === "action" && i.act.action, "seal-env");
-  assert.equal(i.act.label, "Push the env…");
+  assert.equal(i.act.label, "Push the env");
   assert.equal(
     attentionItems({ stack: "gateway", s: stack({ env_sealed: null }), now: 1 })
       .length,

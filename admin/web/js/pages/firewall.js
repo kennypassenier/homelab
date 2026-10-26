@@ -936,7 +936,7 @@ export function mount(root) {
         class: "kp-button kp-button--primary",
         id: "fw-edit-go",
       },
-      "Edit rules…",
+      "Edit rules",
     ),
     EDIT_RULES,
   );
@@ -1219,7 +1219,7 @@ export function mount(root) {
         "span",
         { class: "fw-fixes" },
         drivable(
-          button("Compare…", {
+          button("Compare", {
             cls: "kp-button--sm",
             title:
               "Show the stack in the matrix with only the pairs where live and files differ",
@@ -1241,7 +1241,7 @@ export function mount(root) {
               href: fwHref(a.stack),
               title: a.hint,
             },
-            a.fix === "Compare…" ? "Fix…" : a.fix,
+            a.fix === "Compare" ? "Fix" : a.fix,
           ),
           FIX,
           a.stack,
@@ -1345,7 +1345,7 @@ export function mount(root) {
                         ? "Edit on the stack's Settings"
                         : "Declare a firewall for this stack on its Settings",
                     },
-                    s.declared ? "Edit" : "Declare…",
+                    s.declared ? "Edit" : "Declare",
                   ),
                   EDIT_STACK,
                   s.stack,

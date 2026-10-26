@@ -27,7 +27,7 @@ const vmid = (/** @type {string} */ s) =>
 
 test("redesign-flows-5: Apply deploys the ticked subset and names what it leaves alone", () => {
   const g = goPlan(PLAN, new Set(["beta"]));
-  assert.equal(g.label, "Apply 1 deploy…");
+  assert.equal(g.label, "Apply 1 deploy");
   assert.deepEqual(g.preset, { leave_out: "alpha, gamma" });
   assert.match(g.note, /alpha left out/);
   assert.match(g.note, /gamma cannot be planned/);

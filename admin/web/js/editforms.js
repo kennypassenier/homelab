@@ -984,11 +984,16 @@ export function keepHidden(old, next) {
 
 /** @param {Record<string, unknown>} row the words a list's Status column shows */
 export const offWords = (row) =>
-  typeof row.off === "string" && row.off !== "" ? `Off: ${row.off}` : "On";
+  typeof row.off === "string" && row.off !== ""
+    ? `Off: ${row.off}`
+    : row.off
+      ? "Off"
+      : "On";
 
 /**
  * The row of an app's checks.yml to switch, found by its name among the
- * measured checks and then the probes. `reason` null turns it on again.
+ * measured checks and then the probes. `reason` null turns it on again; any
+ * other value turns it off (no reason is asked: check-turn-off-confirm-1).
  * @param {{checks?: Record<string, unknown>[], probes?: Record<string, unknown>[]}} view
  * @param {string} name
  * @param {string | null} reason
@@ -1005,7 +1010,7 @@ export function switchedRows(view, name, reason) {
           if (r.name !== name) return r;
           const { off, ...rest } = r;
           void off;
-          return reason == null ? rest : { ...rest, off: reason };
+          return reason == null ? rest : { ...rest, off: true };
         }),
       ),
     };
@@ -1024,19 +1029,6 @@ export function checkRefOf(text) {
     text,
   );
   return m ? { stack: m[1], app: m[2], name: m[3] } : null;
-}
-
-/** The reason field of the Turn off… dialog. @returns {EditField} */
-export function offReasonField() {
-  return /** @type {EditField} */ ({
-    name: "off",
-    id: "check-off-reason",
-    kind: "text",
-    label: "Why is it off?",
-    help: "Written beside the check in checks.yml, so anyone who reads the file sees it. The nightly round skips the check while it is off.",
-    required: true,
-    current: "",
-  });
 }
 
 /**

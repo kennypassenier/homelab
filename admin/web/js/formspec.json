@@ -1391,7 +1391,7 @@
         "name": "healthy_kind",
         "id": "probe-healthy-kind",
         "kind": "choice",
-        "label": "Healthy when the reading…",
+        "label": "Healthy when the reading",
         "required": true,
         "choices": [
           {

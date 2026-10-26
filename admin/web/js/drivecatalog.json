@@ -3184,7 +3184,7 @@
     {
       "id": "presets-import-first",
       "page": "presets",
-      "what": "the empty page's Import a bundle…",
+      "what": "the empty page's Import a bundle",
       "opens": "dialog",
       "row": null,
       "href": "/presets",
@@ -3220,7 +3220,7 @@
     {
       "id": "presets-new-preset-first",
       "page": "presets",
-      "what": "the empty page's New preset…",
+      "what": "the empty page's New preset",
       "opens": "dialog",
       "row": null,
       "href": "/presets",
@@ -3244,7 +3244,7 @@
     {
       "id": "presets-new-stack-first",
       "page": "presets",
-      "what": "the empty page's New stack…",
+      "what": "the empty page's New stack",
       "opens": "dialog",
       "row": null,
       "href": "/presets",
@@ -4200,7 +4200,7 @@
     {
       "id": "stack-backups-card",
       "page": "stack",
-      "what": "the Backups card's Back up now or Restore…",
+      "what": "the Backups card's Back up now or Restore",
       "opens": "dialog",
       "row": "<stack>/<backup|restore>",
       "href": "/stacks/<stack>/backups",
@@ -4449,7 +4449,7 @@
     {
       "id": "stack-open-editor",
       "page": "stack",
-      "what": "open the file editor: Files' Open the editor…, Size and network's Edit…",
+      "what": "open the file editor: Files' Open the editor, Size and network's Edit",
       "opens": "view",
       "row": "<stack>/<files|size>",
       "href": "/stacks/<stack>/settings",

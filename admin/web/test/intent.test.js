@@ -151,7 +151,7 @@ test("feat-shell-2: an action that does not apply to a stack is left out", () =>
 test("feat-shell-2: nothing typed shows a short start, never every stack's actions", () => {
   const rows = shown("");
   assert.ok(rows.includes("Inbox: Backup of gateway failed"));
-  assert.ok(rows.includes("Do: New stack…"));
+  assert.ok(rows.includes("Do: New stack"));
   assert.ok(rows.includes("Do: Deploy all changes"));
   assert.ok(rows.includes("Go to: gateway"));
   assert.ok(!rows.some((r) => r.startsWith("Do: Update ·")));

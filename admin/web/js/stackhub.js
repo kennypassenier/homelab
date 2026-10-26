@@ -145,14 +145,14 @@ export function moreGroups(x) {
           key: "restore",
           kind: "action",
           action: native === true ? "restore-native" : "restore",
-          label: "Restore…",
+          label: "Restore",
           hint: "An app's data back from a dated snapshot",
         },
         {
           key: "verify-restore",
           kind: "action",
           action: "verify-restore",
-          label: "Verify a restore…",
+          label: "Verify a restore",
           hint: "Prove a snapshot restores, without touching live data",
         },
         {
@@ -160,7 +160,7 @@ export function moreGroups(x) {
           kind: "go",
           tab: "settings",
           section: "secrets",
-          label: "Change a secret…",
+          label: "Change a secret",
           hint: "Write one value through latch (in Settings ▸ Secrets)",
         },
       ],
@@ -171,7 +171,7 @@ export function moreGroups(x) {
         {
           key: "rollback",
           kind: "rollback",
-          label: "Roll back…",
+          label: "Roll back",
           hint: "To an earlier deployed version",
         },
         {
@@ -236,7 +236,7 @@ export function moreGroups(x) {
           key: "restore-native",
           kind: "action",
           action: "restore-native",
-          label: "Restore (native)…",
+          label: "Restore (native)",
           hint: "An adopted service's data back from a snapshot",
         },
       );
@@ -252,14 +252,14 @@ export function moreGroups(x) {
         key: "install-native",
         kind: "action",
         action: "install-native",
-        label: "Install a release…",
+        label: "Install a release",
         hint: "A chosen release of one native service",
       },
       {
         key: "rollback-native",
         kind: "action",
         action: "rollback-native",
-        label: "Roll back binary…",
+        label: "Roll back binary",
         hint: "Put a native service's previous binary back",
       },
       {
@@ -302,7 +302,7 @@ export function moreGroups(x) {
           tab: "settings",
           section: "danger",
           danger: true,
-          label: "Destroy, forget, wipe…",
+          label: "Destroy, forget, wipe",
           hint: "In Settings ▸ Danger zone, each with its own confirm",
         },
       ],
@@ -315,18 +315,18 @@ export function moreGroups(x) {
 export const DANGER = /** @type {const} */ ([
   {
     action: "destroy",
-    label: "Destroy…",
+    label: "Destroy",
     hint: "Back up, then delete the container",
   },
   {
     action: "forget",
-    label: "Forget…",
+    label: "Forget",
     hint: "Drop the record of a container already gone",
   },
-  { action: "wipe", label: "Wipe…", hint: "Delete what a removed stack kept" },
+  { action: "wipe", label: "Wipe", hint: "Delete what a removed stack kept" },
   {
     action: "prune-orphans",
-    label: "Prune orphans…",
+    label: "Prune orphans",
     hint: "Remove files the repository dropped",
   },
 ]);
@@ -449,7 +449,7 @@ export function attentionItems(x) {
       act: {
         kind: "action",
         action: "deploy",
-        label: "Deploy…",
+        label: "Deploy",
         title: "Create the container from its files",
       },
     });
@@ -495,7 +495,7 @@ export function attentionItems(x) {
       act: {
         kind: "action",
         action: s?.native ? "backup-native" : "backup",
-        label: "Back up now…",
+        label: "Back up now",
         title: "Take a snapshot of every app's data now",
       },
     });
@@ -511,7 +511,7 @@ export function attentionItems(x) {
         ? {
             kind: "pin",
             stale: st,
-            label: "Review the update…",
+            label: "Review the update",
             title: `Back up ${name}, move ${st.container} to ${st.latest}, commit and deploy`,
           }
         : {
@@ -530,7 +530,7 @@ export function attentionItems(x) {
       act: {
         kind: "action",
         action: "seal-env",
-        label: "Push the env…",
+        label: "Push the env",
         title:
           "Copy every secret file on the container that the host's vault lacks into the vault; nothing in the container changes",
       },
@@ -544,7 +544,7 @@ export function attentionItems(x) {
       act: {
         kind: "action",
         action: "enable",
-        label: "Unpark…",
+        label: "Unpark",
         title: "Back into the nightly round; starts on boot again",
       },
     });
@@ -557,7 +557,7 @@ export function attentionItems(x) {
       act: {
         kind: "action",
         action: "deploy",
-        label: "Deploy…",
+        label: "Deploy",
         title: "Make the container match its files",
       },
     });
@@ -582,7 +582,7 @@ export function attentionItems(x) {
           action: i.fix.action,
           stack: i.fix.stack,
           ...(i.fix.args ? { preset: i.fix.args } : {}),
-          label: `${i.fix.label}…`,
+          label: i.fix.label,
           title:
             "The action's own dialog, prefilled; nothing runs until you confirm",
         };

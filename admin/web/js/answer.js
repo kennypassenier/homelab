@@ -16,7 +16,7 @@ export function answerButton(id, after) {
   const b = h(
     "button",
     { type: "button", class: "kp-button kp-button--ghost", "data-check": id },
-    "Answer…",
+    "Answer",
   );
   b.addEventListener("click", async () => {
     const c = await openAction("_host", "answer-check", {

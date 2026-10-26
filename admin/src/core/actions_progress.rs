@@ -28,6 +28,31 @@ pub fn median(values: &[u64]) -> Option<u64> {
     })
 }
 
+/// median-outlier-1 (Kenny, 2026-10-24: a deploy of the registry read
+/// "5 days"): no operation here takes longer than this, so a longer run is a
+/// job left open or a clock jump, not a duration.
+pub const PLAUSIBLE_MAX_S: u64 = 12 * 3600;
+/// With at least three durations, one this many times the median of them all
+/// is left out as well.
+const OUTLIER_FACTOR: u64 = 20;
+
+/// The durations that can be real: none past [`PLAUSIBLE_MAX_S`], and, when
+/// three or more are left, none past [`OUTLIER_FACTOR`] times their median.
+pub fn plausible(values: &[u64]) -> Vec<u64> {
+    let kept: Vec<u64> = values
+        .iter()
+        .copied()
+        .filter(|v| *v <= PLAUSIBLE_MAX_S)
+        .collect();
+    match median(&kept) {
+        Some(m) if kept.len() >= 3 => kept
+            .into_iter()
+            .filter(|v| *v <= m.max(1).saturating_mul(OUTLIER_FACTOR))
+            .collect(),
+        _ => kept,
+    }
+}
+
 /// What past runs of one operation say about the next.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
 pub struct Expectation {
@@ -139,7 +164,9 @@ pub fn expectation(history: &[HistoryEntry], subject: &str) -> Expectation {
                 .iter()
                 .map(|t| ExpectedStep {
                     step: t.step.clone(),
-                    median_s: per_step.get(t.step.as_str()).and_then(|v| median(v)),
+                    median_s: per_step
+                        .get(t.step.as_str())
+                        .and_then(|v| median(&plausible(v))),
                 })
                 .fold(Vec::<ExpectedStep>::new(), |mut acc, s| {
                     if !acc.iter().any(|a| a.step == s.step) {
@@ -149,7 +176,7 @@ pub fn expectation(history: &[HistoryEntry], subject: &str) -> Expectation {
                 })
         })
         .unwrap_or_default();
-    let totals: Vec<u64> = ok_runs.iter().map(|r| r.2).collect();
+    let totals: Vec<u64> = plausible(&ok_runs.iter().map(|r| r.2).collect::<Vec<_>>());
     Expectation {
         subject: subject.to_string(),
         steps: plan,
@@ -1211,5 +1238,30 @@ mod tracker_m_tests {
         let p = t.on_mark(&mark("deploy-drill", "validate", false), 100);
         assert_eq!(p.n, 29, "n keeps counting across the job's commands");
         assert_eq!(p.m, Some(56));
+    }
+}
+
+#[cfg(test)]
+mod plausible_tests {
+    use super::{PLAUSIBLE_MAX_S, median, plausible};
+
+    #[test]
+    fn median_outlier_1_five_days_among_five_second_deploys_is_left_out() {
+        let five_days = 5 * 86_400;
+        let kept = plausible(&[5, 6, 5, five_days]);
+        assert_eq!(kept, vec![5, 6, 5]);
+        assert_eq!(median(&kept), Some(5));
+    }
+
+    #[test]
+    fn median_outlier_1_a_slow_run_among_a_few_stays_unless_far_out() {
+        assert_eq!(plausible(&[60, 80, 70, 300]), vec![60, 80, 70, 300]);
+        assert_eq!(plausible(&[5, 6, 7, 6 * 20 + 1]), vec![5, 6, 7]);
+    }
+
+    #[test]
+    fn median_outlier_1_one_long_run_alone_is_not_a_duration() {
+        assert!(plausible(&[PLAUSIBLE_MAX_S + 1]).is_empty());
+        assert_eq!(plausible(&[90]), vec![90]);
     }
 }

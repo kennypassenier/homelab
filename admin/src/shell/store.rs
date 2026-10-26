@@ -705,7 +705,7 @@ mod tests {
     fn the_schema_and_the_kinds_agree() {
         // `memory_db` validates every kind against the tables.
         let db = memory_db();
-        assert_eq!(db.kinds().len(), 6);
+        assert_eq!(db.kinds().len(), 7);
         let tables: Vec<String> = db
             .read_blocking(|c| {
                 let mut s = c.prepare(
@@ -719,6 +719,7 @@ mod tests {
             tables,
             [
                 "inbox_snoozes",
+                "jobs",
                 "notices",
                 "notify_state",
                 "schedules",

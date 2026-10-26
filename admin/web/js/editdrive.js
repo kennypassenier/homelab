@@ -432,7 +432,7 @@ async function presetEdit(first) {
 }
 
 /**
- * feat-publish-1: the Apps tab's "Publish…" dialog — opened by a click,
+ * feat-publish-1: the Apps tab's "Publish" dialog — opened by a click,
  * not by a page already showing it (the same shape `presetEdit` and
  * `newStack` use), so driving calls `openPublishDialog` directly. The app
  * is not one of the form's own fields (the dialog is opened per app by

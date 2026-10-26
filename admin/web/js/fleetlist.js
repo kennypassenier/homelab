@@ -397,7 +397,7 @@ export function fleetList(ctx) {
       ),
       batchButton(
         "update",
-        "Update…",
+        "Update",
         "kp-button",
         "Update the ticked stacks in the Update flow: see what changes, then back up, update and verify",
       ),

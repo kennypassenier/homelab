@@ -453,7 +453,7 @@ export function mountSignin(box, report) {
         id: "tokens-issue",
         title: "Issue a bearer token for one machine; it is shown once",
       },
-      "Issue token…",
+      "Issue token",
     ),
     ISSUE_TOKEN,
   );

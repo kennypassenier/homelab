@@ -133,7 +133,7 @@ function updateButton(g) {
       ...(g.major ? { "data-major": "" } : {}),
       title: `Back up ${stack}, move ${g.key} from ${g.pinned} to ${g.latest}, commit and deploy, in the Update flow${g.major ? "; a major version: the flow asks you to read the release notes first" : ""}`,
     },
-    `Update to ${g.latest}${g.major ? "…" : ""}`,
+    `Update to ${g.latest}`,
   );
   drivable(btn, PIN_UPDATE, `${stack}/${g.key}`);
   btn.addEventListener("click", () => {

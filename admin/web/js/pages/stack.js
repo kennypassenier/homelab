@@ -388,7 +388,7 @@ const BACKUP_CARD = declare({
   opens: "dialog",
   row: "<stack>/<backup|restore>",
   at: at("backups"),
-  what: "the Backups card's Back up now or Restore…",
+  what: "the Backups card's Back up now or Restore",
 });
 const BACKUP_ROW = declare({
   id: "stack-backup-row",
@@ -429,7 +429,7 @@ const OPEN_EDITOR = declare({
   opens: "view",
   row: "<stack>/<files|size>",
   at: at("settings"),
-  what: "open the file editor: Files' Open the editor…, Size and network's Edit…",
+  what: "open the file editor: Files' Open the editor, Size and network's Edit",
 });
 const DANGER_BTN = declare({
   id: "stack-danger",
@@ -2186,7 +2186,7 @@ function appsTab(panel, c) {
                 class: "kp-button kp-button--sm kp-button--primary",
                 title: `Back up ${name}, move ${st.container} from ${st.pinned} to ${st.latest}, commit and deploy`,
               },
-              "Update…",
+              "Update",
             ),
             APP_UPDATE,
             `${name}/${st.key}`,
@@ -2217,7 +2217,7 @@ function appsTab(panel, c) {
             c,
             S.s?.native ? "update-native" : "update",
             {
-              label: "Update…",
+              label: "Update",
               title: `Pull the newest image for ${r.name} and recreate it, with rollback`,
               cls: "kp-button--sm",
               preset: S.s?.native ? undefined : { app: r.name },
@@ -2237,7 +2237,7 @@ function appsTab(panel, c) {
                 class: "kp-button kp-button--sm kp-button--ghost",
                 title: `Give ${r.name} a hostname on the gateway (and a tile)`,
               },
-              "Publish…",
+              "Publish",
             ),
             "publish",
           );
@@ -2487,7 +2487,7 @@ function backupsTab(panel, c) {
     drive: [BACKUP_CARD, `${name}/backup`],
   });
   const restore = actionButton(c, "restore", {
-    label: "Restore…",
+    label: "Restore",
     title: "Bring one app's data back to a chosen night (a safety copy first)",
     cls: "kp-button--primary",
     drive: [BACKUP_CARD, `${name}/restore`],
@@ -2616,7 +2616,7 @@ function backupsTab(panel, c) {
             "div",
             { class: "kp-row-actions" },
             actionButton(c, nat ? "restore-native" : "restore", {
-              label: "Restore…",
+              label: "Restore",
               title: `Bring ${r.app}'s data back from a snapshot`,
               // the card's own Restore… size, so the two stand as one column
               slot: "restore",
@@ -2635,7 +2635,7 @@ function backupsTab(panel, c) {
             nat
               ? null
               : actionButton(c, "verify-restore", {
-                  label: "Verify…",
+                  label: "Verify",
                   title: `Prove ${r.app}'s newest snapshot restores, without touching live data`,
                   cls: "kp-button--ghost",
                   slot: "verify",
@@ -3110,7 +3110,7 @@ function settingsHub(panel, c) {
         title:
           "Open the editor at the container's settings (a change is saved as a commit and needs a deploy)",
       },
-      "Edit…",
+      "Edit",
     ),
     OPEN_EDITOR,
     `${name}/size`,
@@ -3157,7 +3157,7 @@ function settingsHub(panel, c) {
       class: "kp-button kp-button--sm",
       title: "Open the editor: edit, review the change, commit",
     },
-    "Open the editor…",
+    "Open the editor",
   );
   drivable(openEditor, OPEN_EDITOR, `${name}/files`);
   const files = section({
@@ -3522,7 +3522,7 @@ function updatesCard(stack, signal) {
                 class: "kp-button kp-button--sm",
                 title: `Put ${m.from_version} back: backup, files, deploy`,
               },
-              `Roll back to ${m.from_version}…`,
+              `Roll back to ${m.from_version}`,
             ),
             UNDO_UPDATE,
             `${stack}/${m.key}`,

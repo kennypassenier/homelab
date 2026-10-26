@@ -10534,7 +10534,7 @@ test("invariants: planned-tab-hang-1 measurement: the Planned tab's main thread 
       await page.route("**/data/schedules", async (route) => {
         const r = await route.fetch();
         const body = await r.json();
-        const nowS = Math.floor(Date.now() / 1000);
+        const nowS = clockNowS();
         body.schedules = Array.from({ length: scale }, (_, i) => ({
           schedule: {
             id: `s${i}`,
@@ -10572,9 +10572,9 @@ test("invariants: planned-tab-hang-1 measurement: the Planned tab's main thread 
         await route.fulfill({ response: r, json: body });
       });
     }
-    const t0 = Date.now();
+    const t0 = performance.now();
     await page.goto(`${BASE}/activity?view=planned`);
-    const loaded = Date.now() - t0;
+    const loaded = Math.round(performance.now() - t0);
     const probe = await page.evaluate(
       () =>
         new Promise((resolve) => {

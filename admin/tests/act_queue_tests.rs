@@ -766,3 +766,67 @@ fn recorder_is_a_publish() {
     r.publish("x", serde_json::json!(1));
     assert_eq!(r.events("x").len(), 1);
 }
+
+/// jobs-kept-1 (Kenny, 2026-10-26): a job outlives the dashboard process. A
+/// second queue on the same database (the dashboard after its own update)
+/// lists the finished job with its steps and its log.
+#[tokio::test]
+async fn jobs_kept_1_a_restarted_dashboard_still_lists_a_finished_job_and_its_log() {
+    let w = world("kept", MemFiles::default(), steady());
+    let db = homelab_admin::shell::store::file_db(&w.dir.join("homelab-admin.db"));
+    w.actions.set_job_store(db.clone());
+    let job = w.actions.submit(
+        validate("media", "deploy", ActionArgs::default()).unwrap(),
+        Origin::Manual,
+    );
+    let done = finished(&w, job.job).await;
+    assert_eq!(done.state, JobState::Done);
+    let lines = w.actions.job_log_lines(job.job).unwrap().len();
+    assert!(lines > 0);
+    // The writer task is asynchronous: wait for the row, as a person would.
+    until("the job on disk", || {
+        homelab_admin::shell::store::read(&db, |c| {
+            Ok(
+                c.query_row("SELECT count(*) FROM jobs WHERE state = 'done'", [], |r| {
+                    r.get::<_, i64>(0)
+                })?,
+            )
+        })
+        .unwrap()
+            == 1
+    })
+    .await;
+
+    let second = world("kept-restart", MemFiles::default(), steady());
+    let db2 = homelab_admin::shell::store::file_db(&w.dir.join("homelab-admin.db"));
+    second.actions.set_job_store(db2);
+    let back = second.actions.job(job.job).expect("the job is kept");
+    assert_eq!(back.state, JobState::Done);
+    assert_eq!(back.cli, done.cli);
+    assert_eq!(second.actions.job_log_lines(job.job).unwrap().len(), lines);
+}
+
+/// jobs-kept-1: a job that was still running when the process died is shown
+/// as unknown, not as running for ever; one that restarts the dashboard keeps
+/// its state for the tab that reads its end from the host's history.
+#[tokio::test]
+async fn jobs_kept_1_a_job_cut_off_by_the_restart_is_unknown_not_running() {
+    let w = world("cut", MemFiles::default(), steady());
+    let db = homelab_admin::shell::store::file_db(&w.dir.join("homelab-admin.db"));
+    let req = validate("media", "deploy", ActionArgs::default()).unwrap();
+    let mut view = w.actions.submit(req, Origin::Manual);
+    view.state = JobState::Running;
+    let json = serde_json::to_string(&view).unwrap();
+    db.write_blocking(move |tx| {
+        tx.execute(
+            "INSERT OR REPLACE INTO jobs (job, queued_at, state, view) VALUES (?1,?2,'running',?3)",
+            chassis::storage::rusqlite::params![view.job as i64, view.queued_at, json],
+        )?;
+        Ok(())
+    })
+    .unwrap();
+    let second = world("cut-restart", MemFiles::default(), steady());
+    second.actions.set_job_store(db);
+    let back = second.actions.jobs();
+    assert!(back.iter().all(|j| j.state != JobState::Running));
+}

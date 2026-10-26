@@ -229,6 +229,19 @@ pub fn migrations() -> Vec<Migration> {
                 PRIMARY KEY (slot, stack)
             ) STRICT, WITHOUT ROWID;",
         ),
+        // 8 · the jobs the dashboard keeps (jobs-kept-1). `view` is the
+        // job as the pages see it, `log` its newest action_log lines; both
+        // JSON. Only the newest `keep_jobs` rows stay.
+        Migration::sql(
+            "CREATE TABLE jobs (
+                job       INTEGER PRIMARY KEY,
+                queued_at INTEGER NOT NULL,
+                state     TEXT    NOT NULL,
+                view      TEXT    NOT NULL,
+                log       TEXT    NOT NULL DEFAULT '[]'
+            ) STRICT;
+            CREATE INDEX jobs_queued_at ON jobs (queued_at);",
+        ),
     ]
 }
 
@@ -287,6 +300,23 @@ pub fn kinds() -> Vec<DataKind> {
                 "Outcome",
                 "outcome",
                 ["done", "failed", "rolled back"],
+            )),
+        DataKind::new("jobs", "Jobs")
+            .description(
+                "The actions the dashboard ran (deploys, updates, backups) with their \
+                 steps and log, so the Jobs page still shows them after the dashboard \
+                 restarted. Only the newest 200 are kept on their own.",
+            )
+            .unit("jobs")
+            .table("jobs")
+            .time_column("queued_at", TimeFormat::UnixSeconds)
+            .filter(Filter::choice(
+                "state",
+                "State",
+                "state",
+                [
+                    "queued", "running", "done", "failed", "deferred", "refused", "unknown",
+                ],
             )),
         DataKind::new("uptime", "Uptime history")
             .description(

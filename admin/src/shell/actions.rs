@@ -41,6 +41,8 @@ use tokio::sync::{broadcast, mpsc, oneshot};
 mod flow;
 #[path = "actions_home.rs"]
 mod home;
+#[path = "actions_jobs.rs"]
+mod jobs_store;
 pub use flow::ImageCommitter;
 pub(crate) use flow::stacks_cell;
 #[cfg(test)]
@@ -551,7 +553,7 @@ impl StackFiles for RepoFiles {
 }
 
 /// Where a job came from.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "from", rename_all = "snake_case")]
 pub enum Origin {
     Manual,
@@ -569,7 +571,7 @@ pub enum Origin {
     },
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum JobState {
     Queued,
@@ -591,7 +593,7 @@ impl JobState {
 }
 
 /// One job as the page shows it (the `action` event, `GET …/jobs`).
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct JobView {
     pub job: u64,
     pub origin: Origin,
@@ -708,6 +710,9 @@ struct Inner {
     /// and the verify's timing (mount and tests set them).
     committer: std::sync::OnceLock<Arc<dyn ImageCommitter>>,
     flow_store: std::sync::OnceLock<chassis::storage::AppDb>,
+    /// jobs-kept-1: tells the writer task which job to write down again
+    /// (`true`: with its log). Set by `Actions::set_job_store` (mount).
+    job_writes: std::sync::OnceLock<mpsc::UnboundedSender<(u64, bool)>>,
     flow_timing: std::sync::OnceLock<(Duration, Duration)>,
     /// fix-stale-refresh-1: told the stack of every deploy, update or
     /// restart that finished well (the fleet check forgets its stale rows).
@@ -803,6 +808,7 @@ impl Actions {
             pause_gate: std::sync::OnceLock::new(),
             committer: std::sync::OnceLock::new(),
             flow_store: std::sync::OnceLock::new(),
+            job_writes: std::sync::OnceLock::new(),
             flow_timing: std::sync::OnceLock::new(),
             settled: std::sync::OnceLock::new(),
             cancelling: std::sync::Mutex::new(std::collections::HashMap::new()),
@@ -961,6 +967,7 @@ impl Actions {
                 }
             }
         }
+        self.note_job(view);
         self.inner
             .publish
             .publish("action", serde_json::to_value(view).unwrap_or_default());
@@ -3296,6 +3303,8 @@ pub fn mount(
     // and keeps its undo records beside the notifications.
     actions.set_committer(Arc::new(super::edit::EditCommitter(edit_ctx.clone())));
     actions.set_flow_store(db.clone());
+    // jobs-kept-1: the kept jobs survive a restart of the dashboard.
+    actions.set_job_store(db.clone());
     // feat-backup-1/3: the Backups page's read-only routes.
     app.dashboard_routes(super::backups::router(host.clone()));
     // feat-retired-1: the Retired page's one read-only route.

@@ -10,7 +10,7 @@ use std::collections::BTreeMap;
 
 use homelab_core::history::HistoryEntry;
 use homelab_proto::StepMark;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 /// The median of whole seconds; the mean of the two middle values when the
 /// count is even. None for no values.
@@ -161,7 +161,7 @@ pub fn expectation(history: &[HistoryEntry], subject: &str) -> Expectation {
 }
 
 /// One progress event, as the page draws it.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Progress {
     /// The operation the steps belong to (`deploy-media`).
     pub op: String,
@@ -202,7 +202,7 @@ pub struct Progress {
 /// ask-kp11be-5: how many bytes the operation has moved in its current
 /// transfer (a restic backup or restore of one repository), as the job
 /// panel's bar shows it.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct JobBytes {
     /// What is moving: the repository's owning app.
     pub label: String,

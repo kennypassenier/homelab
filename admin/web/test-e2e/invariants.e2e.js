@@ -10506,3 +10506,110 @@ eachSlice(
     }
   },
 );
+
+// planned-tab-hang-1 (Kenny, 2026-10-26: the Planned tab "lang duurt",
+// Firefox sometimes asks whether to close the tab): a measurement, not a
+// verdict. Opens the page, then for 8 s samples the longest gap between two
+// animation frames (a busy main thread shows as a long gap), the DOM size,
+// and how many requests the page makes; the numbers go to
+// INVARIANTS_PERF_REPORT.
+test("invariants: planned-tab-hang-1 measurement: the Planned tab's main thread and requests", async () => {
+  const browser = await launch();
+  try {
+    const context = await browser.newContext({
+      viewport: { width: 3440, height: 1400 },
+    });
+    const page = await freshPage(context);
+    /** @type {string[]} */
+    const reqs = [];
+    page.on("request", (r) =>
+      reqs.push(
+        `${r.method()} ${new URL(r.url()).pathname}${new URL(r.url()).search}`,
+      ),
+    );
+    // PERF_SCALE n: the schedules and jobs the demo answers are repeated n
+    // times (distinct ids), the size of a real fleet's week.
+    const scale = Number(process.env.INVARIANTS_PERF_SCALE ?? 1);
+    if (scale > 1) {
+      await page.route("**/data/schedules", async (route) => {
+        const r = await route.fetch();
+        const body = await r.json();
+        const nowS = Math.floor(Date.now() / 1000);
+        body.schedules = Array.from({ length: scale }, (_, i) => ({
+          schedule: {
+            id: `s${i}`,
+            stack: ["media", "home", "gateway", "kp-soft", "admin"][i % 5],
+            action: ["backup", "deploy", "update"][i % 3],
+            args: {},
+            when:
+              i % 2
+                ? {
+                    every: "day",
+                    at: `0${i % 9}:${String((i * 7) % 60).padStart(2, "0")}`,
+                  }
+                : { every: "week", days: [0, 2, 4], at: "04:30" },
+            enabled: true,
+            note: "",
+            created_at: nowS - 9e6,
+            handled_until: nowS - 3600,
+          },
+          next_run: nowS + 3600 * (i + 1),
+          next_run_local: null,
+          last_job: null,
+        }));
+        await route.fulfill({ response: r, json: body });
+      });
+      await page.route("**/data/actions/jobs", async (route) => {
+        const r = await route.fetch();
+        const body = await r.json();
+        const base = body.jobs ?? [];
+        body.jobs = Array.from({ length: scale }, (_, k) =>
+          base.map((/** @type {any} */ j) => ({
+            ...j,
+            job: j.job + k * 100000,
+          })),
+        ).flat();
+        await route.fulfill({ response: r, json: body });
+      });
+    }
+    const t0 = Date.now();
+    await page.goto(`${BASE}/activity?view=planned`);
+    const loaded = Date.now() - t0;
+    const probe = await page.evaluate(
+      () =>
+        new Promise((resolve) => {
+          const start = performance.now();
+          let last = start;
+          let worst = 0;
+          let frames = 0;
+          const samples = /** @type {number[]} */ ([]);
+          const tick = (/** @type {number} */ now) => {
+            worst = Math.max(worst, now - last);
+            last = now;
+            frames += 1;
+            if (frames % 30 === 0)
+              samples.push(document.querySelectorAll("*").length);
+            if (now - start < 8000) requestAnimationFrame(tick);
+            else
+              resolve({
+                worstFrameGapMs: Math.round(worst),
+                frames,
+                domNodes: samples,
+                finalNodes: document.querySelectorAll("*").length,
+              });
+          };
+          requestAnimationFrame(tick);
+        }),
+    );
+    const byPath = /** @type {Record<string, number>} */ ({});
+    for (const r of reqs) byPath[r] = (byPath[r] ?? 0) + 1;
+    const out = process.env.INVARIANTS_PERF_REPORT;
+    if (out)
+      (await import("node:fs")).writeFileSync(
+        out,
+        JSON.stringify({ loaded, probe, requests: byPath }, null, 1),
+      );
+  } finally {
+    await browser.close();
+  }
+});

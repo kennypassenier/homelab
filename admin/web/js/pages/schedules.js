@@ -822,8 +822,24 @@ export function mount(root, opts = {}) {
   let heroNext = null;
   let heroTimer = 0;
 
+  // planned-tab-hang-1 (Kenny, 2026-10-26: the Planned tab "blijft hangen"):
+  // the week, the busy hours and the history are the page's heavy parts (the
+  // week alone draws every run of 77 days). A draw whose inputs did not change
+  // since the last one is skipped, so a live event that moved nothing they
+  // show costs nothing. Measured at 60 schedules: one 2.4 s freeze per draw.
+  /** @type {Map<string, string>} */
+  const drawn = new Map();
+  /** @param {string} part @param {unknown} inputs */
+  const unchanged = (part, inputs) => {
+    const sig = JSON.stringify(inputs);
+    if (drawn.get(part) === sig) return true;
+    drawn.set(part, sig);
+    return false;
+  };
   const drawWeek = () => {
     const all = list();
+    if (unchanged("week", [all, nightly, zone(), Math.floor(now() / 60)]))
+      return;
     if (!all.length) {
       setWeekEvents(weekEl, []);
       setWeekState(weekEl, "empty", "No schedule has a run in this week.");
@@ -1131,6 +1147,8 @@ export function mount(root, opts = {}) {
 
   const drawBusy = () => {
     const all = list();
+    if (unchanged("busy", [all, nightly, zone(), Math.floor(now() / 3600)]))
+      return;
     const { grid, clashes } = busyModel(all, { now: now(), ...ctx() });
     const columns = hourColumns();
     if (!all.length) {
@@ -1307,6 +1325,15 @@ export function mount(root, opts = {}) {
 
   /** The jobs the schedules started: the history and the strips follow them. */
   const drawHistory = () => {
+    if (
+      unchanged("history", [
+        list(),
+        act.jobs.map((j) => [j.job, j.state, j.finished_at]),
+        zone(),
+        Math.floor(now() / 60),
+      ])
+    )
+      return;
     const m = historyModel(list(), act.jobs, {
       now: now(),
       zone: zone(),

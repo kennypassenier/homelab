@@ -860,3 +860,96 @@ export function widthAudit() {
   walk(page, 0);
   return { column, parts };
 }
+
+/**
+ * width-use-1 (Kenny, 2026-10-26: "check of alle elementen op pagina's hun
+ * breedte deftig benutten en niet gewoon links aligned zijn, maar grid
+ * gebruiken"): boxes as wide as the page column whose content hugs the left
+ * edge. For every such box with at least two things in it (or one block of
+ * text), the right edge of the content is measured; a box that uses under
+ * 55 % of its width while it is tall enough to be a part is reported with
+ * how its children are laid out (block, flex or grid). Run in the page.
+ * @returns {{column: number, boxes: {part: string, display: string, kids: number, used: number, width: number, height: number, owner: string}[]}}
+ */
+export function widthUseAudit() {
+  const page =
+    document.querySelector("#page") ??
+    document.querySelector("main") ??
+    document.body;
+  const pcs = getComputedStyle(page);
+  const column = Math.round(
+    page.getBoundingClientRect().width -
+      parseFloat(pcs.paddingInlineStart) -
+      parseFloat(pcs.paddingInlineEnd),
+  );
+  /** @type {{part: string, display: string, kids: number, used: number, width: number, height: number, owner: string}[]} */
+  const boxes = [];
+  const SKIP =
+    "dialog,template,svg,script,style,canvas,[hidden],button,input,select,textarea,table,thead,tbody,tr,pre,code,kbd,[role=progressbar],.kp-progressbar,.kp-gantt,.kp-chart,.kp-graph,.kp-heat,.kp-tabs__list,.kp-datatable";
+  const textRight = (/** @type {Element} */ el) => {
+    let right = 0;
+    const w = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+    for (let n = w.nextNode(); n; n = w.nextNode()) {
+      if (!(n.textContent ?? "").trim()) continue;
+      const pe = /** @type {Element} */ (n.parentElement);
+      if (!pe?.checkVisibility()) continue;
+      const r = document.createRange();
+      r.selectNodeContents(n);
+      for (const q of r.getClientRects()) right = Math.max(right, q.right);
+    }
+    return right;
+  };
+  const visit = (/** @type {Element} */ el, /** @type {number} */ depth) => {
+    if (depth > 8) return;
+    for (const c of /** @type {HTMLElement[]} */ ([...el.children])) {
+      if (!c.checkVisibility() || c.matches(SKIP)) continue;
+      const r = c.getBoundingClientRect();
+      const cs = getComputedStyle(c);
+      if (
+        r.width >= column * 0.9 &&
+        r.height >= 40 &&
+        !["inline", "inline-block", "none", "contents"].includes(cs.display)
+      ) {
+        const kids = [...c.children].filter(
+          (k) =>
+            /** @type {HTMLElement} */ (k).checkVisibility() &&
+            k.getBoundingClientRect().height > 0,
+        );
+        let right = textRight(c);
+        for (const k of kids) {
+          if (
+            k.matches(
+              "img,svg,canvas,table,.kp-datatable,.kp-progressbar,.kp-chart",
+            )
+          )
+            right = Math.max(right, k.getBoundingClientRect().right);
+        }
+        const left = r.left + parseFloat(cs.paddingInlineStart);
+        const used = Math.max(0, right - left);
+        const inner =
+          r.width -
+          parseFloat(cs.paddingInlineStart) -
+          parseFloat(cs.paddingInlineEnd);
+        const text = (c.textContent ?? "").trim().replace(/\s+/g, " ");
+        if (text && used < inner * 0.55 && (kids.length >= 2 || depth <= 3)) {
+          const cls = (c.getAttribute("class") ?? "").split(/\s+/)[0];
+          boxes.push({
+            part: `${c.tagName.toLowerCase()}${cls ? `.${cls}` : ""} "${text.slice(0, 40)}"`,
+            display: cs.display,
+            kids: kids.length,
+            used: Math.round(used),
+            width: Math.round(inner),
+            height: Math.round(r.height),
+            owner: /(^|\s)kp-/.test(c.getAttribute("class") ?? "")
+              ? "kp-themes"
+              : "homelab",
+          });
+          continue; // its content is already in this finding
+        }
+      }
+      visit(c, depth + 1);
+    }
+  };
+  visit(page, 0);
+  return { column, boxes };
+}

@@ -10452,7 +10452,7 @@ eachSlice(
   AUDIT_PAGES,
   6,
   async (part) => {
-    const { widthAudit } = await import("./layoutaudit.js");
+    const { widthAudit, widthUseAudit } = await import("./layoutaudit.js");
     const { appendFileSync } = await import("node:fs");
     const browser = await launch();
     try {
@@ -10465,7 +10465,14 @@ eachSlice(
         try {
           await page.goto(BASE + path, { timeout: 8000 });
           await page.waitForTimeout(900);
-          found = await page.evaluate(widthAudit);
+          if (process.env.INVARIANTS_SHOT_DIR)
+            await page.screenshot({
+              path: `${process.env.INVARIANTS_SHOT_DIR}/${path.replace(/[^a-z0-9]+/gi, "_")}.png`,
+            });
+          found = {
+            ...(await page.evaluate(widthAudit)),
+            ...(await page.evaluate(widthUseAudit)),
+          };
         } catch (e) {
           found = { error: String(e).slice(0, 120) };
         }

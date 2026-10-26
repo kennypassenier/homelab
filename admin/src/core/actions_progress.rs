@@ -75,6 +75,40 @@ pub struct Expectation {
 pub struct ExpectedStep {
     pub step: String,
     pub median_s: Option<u64>,
+    /// run-view-min-max-1: the fastest and slowest plausible earlier run of
+    /// this step, and how many runs those are. The history is per operation
+    /// of one stack (`deploy-media`), so a step is compared with the same
+    /// step of the same operation, never with another stack's.
+    pub min_s: Option<u64>,
+    pub max_s: Option<u64>,
+    pub runs: usize,
+}
+
+impl Expectation {
+    /// The per-step view sent with a progress event.
+    pub fn step_stats(&self) -> Vec<StepStat> {
+        self.steps
+            .iter()
+            .map(|e| StepStat {
+                step: e.step.clone(),
+                median_s: e.median_s,
+                min_s: e.min_s,
+                max_s: e.max_s,
+                runs: e.runs,
+            })
+            .collect()
+    }
+}
+
+/// What earlier runs say about one step; sent with the progress event so the
+/// run view can show it beside the time the step took this run.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct StepStat {
+    pub step: String,
+    pub median_s: Option<u64>,
+    pub min_s: Option<u64>,
+    pub max_s: Option<u64>,
+    pub runs: usize,
 }
 
 /// The expectation for `subject` from the host's history. Successful runs
@@ -162,11 +196,18 @@ pub fn expectation(history: &[HistoryEntry], subject: &str) -> Expectation {
         .map(|(_, steps, _)| {
             steps
                 .iter()
-                .map(|t| ExpectedStep {
-                    step: t.step.clone(),
-                    median_s: per_step
+                .map(|t| {
+                    let kept = per_step
                         .get(t.step.as_str())
-                        .and_then(|v| median(&plausible(v))),
+                        .map(|v| plausible(v))
+                        .unwrap_or_default();
+                    ExpectedStep {
+                        step: t.step.clone(),
+                        median_s: median(&kept),
+                        min_s: kept.iter().copied().min(),
+                        max_s: kept.iter().copied().max(),
+                        runs: kept.len(),
+                    }
                 })
                 .fold(Vec::<ExpectedStep>::new(), |mut acc, s| {
                     if !acc.iter().any(|a| a.step == s.step) {
@@ -224,6 +265,9 @@ pub struct Progress {
     pub elapsed_s: u64,
     /// How many past runs the expectation rests on.
     pub runs: usize,
+    /// run-view-min-max-1: what earlier runs say about each planned step.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub step_stats: Vec<StepStat>,
 }
 
 /// ask-kp11be-5: how many bytes the operation has moved in its current
@@ -452,6 +496,7 @@ impl Tracker {
             expected_total_min_s: plan.total_min_s,
             expected_total_max_s: plan.total_max_s,
             expected_remaining_s: plan.total_s,
+            step_stats: plan.step_stats(),
             elapsed_s: 0,
             runs: plan.runs,
         })
@@ -522,6 +567,7 @@ impl Tracker {
             expected_total_min_s: plan.total_min_s,
             expected_total_max_s: plan.total_max_s,
             expected_remaining_s,
+            step_stats: plan.step_stats(),
             elapsed_s: ts.saturating_sub(first),
             runs: plan.runs,
         }

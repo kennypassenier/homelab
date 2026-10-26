@@ -15,6 +15,7 @@ import {
   medianView,
   remaining,
   stepFigures,
+  stepStatText,
   timeView,
 } from "./jobs.js";
 
@@ -53,7 +54,8 @@ export function runSpec(j, ctx) {
   const o = v.outcome;
   const shownOutcome =
     o && j.state !== "failed" && o.tone !== "success" ? o : null;
-  const tv = timeView(rows, times, est?.median ?? null, ran, ended);
+  const stats = new Map((p?.step_stats ?? []).map((x) => [x.step, x]));
+  const tv = timeView(rows, times, est?.median ?? null, ran, ended, stats);
   // The bar never disappears: a finished run shows where it ended.
   // `byRows`: a flow that draws its own rows (the Update flow) counts the
   // rows that finished, not the host's step events.
@@ -125,7 +127,9 @@ export function runSpec(j, ctx) {
       return {
         id: r.id ?? String(i),
         title: r.title,
-        note: r.note ? `${r.desc} · ${r.note}` : r.desc,
+        note: [r.desc, r.note, stepStatText(stats.get(r.title))]
+          .filter(Boolean)
+          .join(" · "),
         state: r.state,
         ...(r.time
           ? { time: r.time }

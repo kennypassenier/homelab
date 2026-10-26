@@ -11,7 +11,8 @@ import { mergeBytes } from "./progress.js";
  *   finished: boolean, changed: boolean, expected_step_s: number | null,
  *   expected_total_s: number | null, expected_remaining_s: number | null,
  *   elapsed_s: number, runs: number, expected_total_min_s?: number | null,
- *   expected_total_max_s?: number | null}} Progress
+ *   expected_total_max_s?: number | null,
+ *   step_stats?: StepStat[]}} Progress
  *   `expected_total_s` is the median of the earlier runs; the fastest and
  *   slowest (feat-timing-1) are optional until the host sends them.
  * @typedef {{from: "manual"} | {from: "batch", batch: number} |
@@ -385,6 +386,30 @@ export function remaining(j, progressAt, now) {
 }
 
 /**
+ * @typedef {{step: string, median_s: number | null, min_s: number | null,
+ *   max_s: number | null, runs: number}} StepStat
+ */
+
+/**
+ * run-view-min-max-1: what earlier runs say about one step, in words: the
+ * median, and the fastest and slowest run when there are several. The
+ * history is that step of the same operation on the same stack, so a step
+ * named after an app is that app's, and a general one ("pull") covers every
+ * app of the stack.
+ * @param {StepStat | undefined} st
+ * @returns {string}
+ */
+export function stepStatText(st) {
+  if (!st || st.median_s == null || st.runs <= 0) return "";
+  if (st.runs === 1) return `${humanDuration(st.median_s)} in one earlier run`;
+  const range =
+    st.min_s != null && st.max_s != null
+      ? `, fastest ${humanDuration(st.min_s)}, slowest ${humanDuration(st.max_s)}`
+      : "";
+  return `median ${humanDuration(st.median_s)}${range}`;
+}
+
+/**
  * What the earlier runs say about the whole job (feat-timing-1): the
  * median, and the fastest and slowest when the host sends them.
  * @param {Progress | null} p
@@ -704,21 +729,24 @@ export function medianView(est, ran, state, op = "") {
  * @param {number | null} medianS
  * @param {number | null} ran seconds the job took
  * @param {boolean} ended
+ * @param {Map<string, StepStat>} [stats] what earlier runs say per step
  * @returns {{kind: "empty", message: string} |
  *   {kind: "bar", parts: {key: string, label: string, value: number,
  *     bad: boolean}[], sum: number, whole: number, note: string}}
  */
-export function timeView(rows, times, medianS, ran, ended) {
+export function timeView(rows, times, medianS, ran, ended, stats) {
   const parts = [];
   for (const r of rows) {
     const s = times.get(r.title);
-    if (s != null && s > 0)
+    if (s != null && s > 0) {
+      const said = stepStatText(stats?.get(r.title));
       parts.push({
         key: r.title,
-        label: r.title,
+        label: said ? `${r.title} (${said})` : r.title,
         value: s,
         bad: r.state === "bad",
       });
+    }
   }
   if (!parts.length) {
     const anyDone = rows.some((r) => r.state === "ok");

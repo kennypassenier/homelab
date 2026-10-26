@@ -417,3 +417,20 @@ fn timebar_after_done_1_scheduled_no_op_runs_do_not_set_the_median() {
     assert_eq!(e.runs, 1, "only the run a person started");
     assert_eq!(e.total_s, Some(28));
 }
+
+#[test]
+fn run_view_min_max_1_each_step_keeps_its_fastest_and_slowest_run_of_the_same_operation() {
+    let h = vec![
+        run("deploy-media", 100, &[("pull", 10), ("up", 5)], true),
+        run("deploy-media", 1_000, &[("pull", 30), ("up", 7)], true),
+        run("deploy-media", 2_000, &[("pull", 20), ("up", 6)], true),
+        // Another stack's pull does not count.
+        run("deploy-home", 4_000, &[("pull", 999)], true),
+    ];
+    let stats = expectation(&h, "deploy-media").step_stats();
+    let pull = stats.iter().find(|s| s.step == "pull").unwrap();
+    assert_eq!(
+        (pull.median_s, pull.min_s, pull.max_s, pull.runs),
+        (Some(20), Some(10), Some(30), 3)
+    );
+}

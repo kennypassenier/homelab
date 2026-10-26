@@ -37,3 +37,17 @@ test("buttons-no-ellipsis-1: no capitalised label ends in an ellipsis unless it 
   }
   assert.deepEqual(bad, []);
 });
+
+import { stepStatText } from "../js/jobs.js";
+
+test("run-view-min-max-1: a step says its median, fastest and slowest earlier run, and one run is one run", () => {
+  assert.equal(
+    stepStatText({ step: "pull", median_s: 5, min_s: 3, max_s: 9, runs: 4 }),
+    "median 5 s, fastest 3 s, slowest 9 s",
+  );
+  assert.equal(
+    stepStatText({ step: "pull", median_s: 5, min_s: 5, max_s: 5, runs: 1 }),
+    "5 s in one earlier run",
+  );
+  assert.equal(stepStatText(undefined), "");
+});

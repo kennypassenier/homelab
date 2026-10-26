@@ -10465,6 +10465,17 @@ eachSlice(
         try {
           await page.goto(BASE + path, { timeout: 8000 });
           await page.waitForTimeout(900);
+          // A card still reading is a skeleton, not a layout: wait for it.
+          await page
+            .waitForFunction(
+              () =>
+                !document.querySelector(
+                  '#page [aria-busy="true"], #page [data-kp-state="loading"], #page [data-kp-resizing]',
+                ),
+              null,
+              { timeout: 6000 },
+            )
+            .catch(() => {});
           if (process.env.INVARIANTS_SHOT_DIR)
             await page.screenshot({
               path: `${process.env.INVARIANTS_SHOT_DIR}/${path.replace(/[^a-z0-9]+/gi, "_")}.png`,

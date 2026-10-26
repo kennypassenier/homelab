@@ -546,6 +546,25 @@ main.shell.ap-page > [hidden] {
   justify-items: start;
   gap: var(--kp-space-sm, 0.5rem);
 }
+/* width-use-1 (Kenny, 2026-10-26: "grid gebruiken"): the Apps filter bar puts
+   the filters in the room that is there and the refresh controls against the
+   right edge, one grid row on a wide page; under 60rem they stack again. */
+.ap-bar--wide {
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  column-gap: var(--kp-space-lg, 1.5rem);
+}
+.ap-bar--wide > :nth-child(2) {
+  justify-self: end;
+}
+@media (max-width: 60rem) {
+  .ap-bar--wide {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .ap-bar--wide > :nth-child(2) {
+    justify-self: start;
+  }
+}
 .ap-hover {
   display: grid;
   gap: var(--kp-space-xs, 0.25rem);

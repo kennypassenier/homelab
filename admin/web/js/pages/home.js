@@ -296,7 +296,7 @@ export function mount(root) {
     "data-kp-remember": "apps-refresh",
     "data-kp-stale-after": String(EVERY_S * 3),
   });
-  const bar = h("div", { class: "ap-bar" }, facets, refreshEl);
+  const bar = h("div", { class: "ap-bar ap-bar--wide" }, facets, refreshEl);
   const data = h("div", { class: "ap-launcher" }, bar, body);
   const connection = h("div", {
     class: "kp-connection",

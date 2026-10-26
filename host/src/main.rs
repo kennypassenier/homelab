@@ -11037,6 +11037,15 @@ async fn gather_backup_snapshot_facts(
                 nothing_to_back_up: !st.is_native()
                     && st.manifest.as_ref().is_some_and(|m| m.backs_up_nothing()),
                 is_native: st.is_native(),
+                empty_owners: owners
+                    .iter()
+                    .filter(|o| {
+                        snapshot_cache
+                            .get(o.as_str())
+                            .is_some_and(|c| c.snapshots.is_empty())
+                    })
+                    .cloned()
+                    .collect(),
             }
         })
         .collect()

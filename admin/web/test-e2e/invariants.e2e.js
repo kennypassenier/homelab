@@ -10350,3 +10350,94 @@ test("invariants: checks-notice-link-1 — the nightly check's address opens the
     await browser.close();
   }
 });
+
+// run-dialog-clock-1 / dialog-buttons-cut-1 (Kenny, 2026-10-24: the clock
+// "mocht niet de grenzen van zijn vak overgaan"; dialog buttons "al in
+// verschillende dialogen" cut at the bottom): at the three widths he
+// looked at, the clock stays inside its cell and clear of the step rows,
+// and the dialog's button row keeps its buttons whole, shadow included.
+for (const width of [1894, 2204, 3460]) {
+  test(`invariants: run-dialog-clock-1 and dialog-buttons-cut-1: the clock stays in its cell and the buttons keep their edge at ${width} px`, async () => {
+    const browser = await launch();
+    try {
+      const context = await browser.newContext({
+        viewport: { width, height: 1100 },
+      });
+      const page = await freshPage(context);
+      await page.goto(`${BASE}/stacks/films`);
+      await page.waitForTimeout(600);
+      await page.locator('[data-drive="stack-more"]').click({ timeout: 5000 });
+      await page
+        .locator('[role=menuitem][data-action="disable"]')
+        .click({ timeout: 5000 });
+      await page.waitForTimeout(300);
+      // The confirm step of the dialog: its buttons first.
+      const before = await page.evaluate(() => {
+        const dlg = document.querySelector("#action-dialog");
+        const btn = dlg?.querySelector("#act-run");
+        if (!dlg || !btn) return null;
+        const b = btn.getBoundingClientRect();
+        let clip = /** @type {Element | null} */ (btn.parentElement);
+        while (clip && clip !== dlg.parentElement) {
+          const o = getComputedStyle(clip).overflowY;
+          if (o !== "visible") break;
+          clip = clip.parentElement;
+        }
+        const c = clip ? clip.getBoundingClientRect() : null;
+        const shadow = getComputedStyle(btn).boxShadow;
+        const m = [...shadow.matchAll(/(-?\d+(?:\.\d+)?)px/g)].map((x) =>
+          Number(x[1]),
+        );
+        // box-shadow: x y blur [spread]; the part below the button is y+blur+spread.
+        const below =
+          m.length >= 3 ? Math.max(0, m[1] + m[2] + (m[3] ?? 0)) : 0;
+        return { bottom: b.bottom, below, clipBottom: c?.bottom ?? Infinity };
+      });
+      assert.ok(before, "the dialog's Run button was not found");
+      assert.ok(
+        before.bottom + before.below <= before.clipBottom + 0.5,
+        `the buttons' shadow is cut: button bottom ${before.bottom} + shadow ${before.below} > clip ${before.clipBottom}`,
+      );
+      await page.locator("#action-dialog #act-run").click();
+      await page
+        .locator("#action-dialog .rv-steps .kp-steplist__item")
+        .first()
+        .waitFor({ timeout: 5000 });
+      await page.waitForTimeout(500);
+      if (process.env.INVARIANTS_SHOT)
+        await page.screenshot({
+          path: `${process.env.INVARIANTS_SHOT}-${width}.png`,
+        });
+      const geo = await page.evaluate(() => {
+        const box = (/** @type {string} */ s) =>
+          document
+            .querySelector(`#action-dialog ${s}`)
+            ?.getBoundingClientRect();
+        const cell = box(".rv-disc");
+        const dial = box(".rv-disc__dial");
+        const steps = box(".rv-steps");
+        return {
+          cell: cell && [cell.left, cell.top, cell.right, cell.bottom],
+          dial: dial && [dial.left, dial.top, dial.right, dial.bottom],
+          steps: steps && [steps.left, steps.top, steps.right, steps.bottom],
+        };
+      });
+      assert.ok(geo.cell && geo.steps, "the run view did not draw");
+      if (geo.dial) {
+        assert.ok(
+          geo.dial[0] >= geo.cell[0] - 1 &&
+            geo.dial[2] <= geo.cell[2] + 1 &&
+            geo.dial[3] <= geo.cell[3] + 1,
+          `the clock leaves its cell: dial ${geo.dial} cell ${geo.cell}`,
+        );
+      }
+      // The clock's cell is above the step list, never over it.
+      assert.ok(
+        geo.cell[3] <= geo.steps[1] + 1,
+        `the clock's cell reaches the step rows: cell ${geo.cell} steps ${geo.steps}`,
+      );
+    } finally {
+      await browser.close();
+    }
+  });
+}

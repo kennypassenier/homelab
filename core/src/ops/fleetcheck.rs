@@ -155,6 +155,30 @@ pub struct StackSnapshotFact {
     /// Mirrors `doctor::StackProbe::nothing_to_back_up`.
     pub nothing_to_back_up: bool,
     pub is_native: bool,
+    /// inbox-dup-finding-1: the owning apps (`keep`, `registry`) whose
+    /// repository was read and holds no snapshot. Names the app in the
+    /// finding instead of only the stack. Empty from an older host.
+    #[serde(default)]
+    pub empty_owners: Vec<String>,
+}
+
+/// The finding for a stack with no snapshot at all. When the empty
+/// repositories belong to apps other than the stack's own name, those apps
+/// are named, so "registry" does not hide that it is `keep` that has none.
+fn no_snapshot_words(stack: &str, empty_owners: &[String]) -> String {
+    let apps: Vec<&str> = empty_owners
+        .iter()
+        .map(String::as_str)
+        .filter(|o| *o != stack)
+        .collect();
+    if apps.is_empty() {
+        "has data to back up but no snapshot exists yet".into()
+    } else {
+        format!(
+            "has data to back up but no snapshot exists yet (app {})",
+            apps.join(", ")
+        )
+    }
 }
 
 /// fix-92 / fix-130: every name in the gateway's routes directory that no
@@ -2118,7 +2142,7 @@ pub fn evaluate(
                 None => out.push(Finding {
                     severity: Severity::Broken,
                     subject: name.clone(),
-                    what: "has data to back up but no snapshot exists yet".into(),
+                    what: no_snapshot_words(name, &f.empty_owners),
                     remedy: if f.is_native {
                         format!("run `homelab backup-native {}` and check why the nightly one never did", name)
                     } else {
@@ -2622,4 +2646,25 @@ pub fn evaluate_boot(state: &HostState, facts: &[BootFact]) -> Vec<Finding> {
         }
     }
     out
+}
+
+#[cfg(test)]
+mod no_snapshot_words_tests {
+    use super::no_snapshot_words;
+
+    #[test]
+    fn inbox_dup_finding_1_an_empty_app_other_than_the_stack_is_named() {
+        assert_eq!(
+            no_snapshot_words("registry", &["keep".into()]),
+            "has data to back up but no snapshot exists yet (app keep)"
+        );
+        assert_eq!(
+            no_snapshot_words("media", &["media".into()]),
+            "has data to back up but no snapshot exists yet"
+        );
+        assert_eq!(
+            no_snapshot_words("media", &[]),
+            "has data to back up but no snapshot exists yet"
+        );
+    }
 }

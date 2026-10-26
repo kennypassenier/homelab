@@ -10613,3 +10613,136 @@ test("invariants: planned-tab-hang-1 measurement: the Planned tab's main thread 
     await browser.close();
   }
 });
+
+// planned-tab-hang-1: the same frame probe on every audited page, to tell a
+// page that is slow from a page that is only the one noticed.
+eachSlice(
+  "invariants: planned-tab-hang-1 sweep: the longest frame gap of every page",
+  AUDIT_PAGES,
+  6,
+  async (part) => {
+    const { appendFileSync } = await import("node:fs");
+    const browser = await launch();
+    try {
+      const context = await browser.newContext({
+        viewport: { width: 3440, height: 1400 },
+      });
+      const page = await freshPage(context);
+      for (const path of part) {
+        await page.goto(BASE + path, { timeout: 8000 }).catch(() => {});
+        const probe = await page.evaluate(
+          () =>
+            new Promise((resolve) => {
+              const start = performance.now();
+              let last = start;
+              let worst = 0;
+              let frames = 0;
+              const tick = (/** @type {number} */ now) => {
+                worst = Math.max(worst, now - last);
+                last = now;
+                frames += 1;
+                if (now - start < 4000) requestAnimationFrame(tick);
+                else
+                  resolve({
+                    worst: Math.round(worst),
+                    frames,
+                    nodes: document.querySelectorAll("*").length,
+                  });
+              };
+              requestAnimationFrame(tick);
+            }),
+        );
+        const out = process.env.INVARIANTS_PERF_REPORT;
+        if (out) appendFileSync(out, `${JSON.stringify({ path, ...probe })}\n`);
+      }
+    } finally {
+      await browser.close();
+    }
+  },
+);
+
+// planned-tab-hang-1: the way Kenny goes there, from the Activity page by its
+// Planned tab, measured from the click, five times round trip.
+test("invariants: planned-tab-hang-1 tab switch: the frame gaps when Activity's tabs are used", async () => {
+  const browser = await launch();
+  try {
+    const context = await browser.newContext({
+      viewport: { width: 3440, height: 1400 },
+    });
+    const page = await freshPage(context);
+    await page.goto(`${BASE}/activity`);
+    await page.waitForTimeout(1500);
+    const rows = [];
+    for (const name of (
+      process.env.INVARIANTS_TABS ??
+      "Planned,Now and history,Planned,Host log,Planned"
+    ).split(",")) {
+      await page.evaluate(() => {
+        // @ts-ignore a probe the page keeps for this case
+        window.__gap = { worst: 0, last: performance.now(), stop: false };
+        const tick = (/** @type {number} */ now) => {
+          // @ts-ignore
+          const g = window.__gap;
+          g.worst = Math.max(g.worst, now - g.last);
+          g.last = now;
+          if (!g.stop) requestAnimationFrame(tick);
+        };
+        requestAnimationFrame(tick);
+      });
+      await page.evaluate(() => {
+        // @ts-ignore
+        const log = (window.__marks = {
+          click: 0,
+          firstMut: 0,
+          lastMut: 0,
+          afterRaf: 0,
+        });
+        document.addEventListener(
+          "click",
+          () => (log.click = performance.now()),
+          { capture: true, once: true },
+        );
+        const root = document.querySelector("#page") ?? document.body;
+        const mo = new MutationObserver(() => {
+          const t = performance.now();
+          if (!log.firstMut) log.firstMut = t;
+          log.lastMut = t;
+        });
+        mo.observe(root, { childList: true, subtree: true });
+        // @ts-ignore
+        window.__mo = mo;
+      });
+      const t0 = performance.now();
+      await page.getByRole("tab", { name }).click({ timeout: 5000 });
+      await page.waitForTimeout(800);
+      const worst = await page.evaluate(() => {
+        // @ts-ignore
+        window.__gap.stop = true;
+        // @ts-ignore
+        return Math.round(window.__gap.worst);
+      });
+      const marks = await page.evaluate(() => {
+        // @ts-ignore
+        const m = window.__marks;
+        return {
+          toFirstMutationMs: Math.round(m.firstMut - m.click),
+          toLastMutationMs: Math.round(m.lastMut - m.click),
+        };
+      });
+      rows.push({
+        ...marks,
+        tab: name,
+        worstGapMs: worst,
+        ms: Math.round(performance.now() - t0),
+      });
+    }
+    const out = process.env.INVARIANTS_PERF_REPORT;
+    if (out)
+      (await import("node:fs")).writeFileSync(
+        out,
+        JSON.stringify(rows, null, 1),
+      );
+  } finally {
+    await browser.close();
+  }
+});

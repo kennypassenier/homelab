@@ -300,8 +300,17 @@ function render() {
     render();
     return;
   }
+  // planned-tab-hang-1 (Kenny, 2026-10-26: leaving Activity's Now view hangs
+  // the tab): kp's detach of a table puts every row back in the markup, and on
+  // a page that is on screen each step makes the browser lay it out again
+  // (1.8 s for the 175 operations of the demo, 2 s from Now to Planned). The
+  // page is about to be replaced, so what it drew leaves the document first
+  // and every part is detached there, where nothing is laid out.
+  const leaving = document.createDocumentFragment();
+  leaving.append(...page.childNodes);
   cleanup();
   cleanup = () => {};
+  leaving.replaceChildren();
   const r = route(location.pathname);
   renderNav();
   const q = new URLSearchParams(location.search);

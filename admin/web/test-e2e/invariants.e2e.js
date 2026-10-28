@@ -10652,6 +10652,10 @@ eachSlice(
               }).observe(document.body, { childList: true, subtree: true });
             });
           });
+        if (process.env.INVARIANTS_PERF_CARDS)
+          page.on("console", (m) => {
+            if (m.text().startsWith("CARD")) console.log(m.text());
+          });
         if (process.env.INVARIANTS_PERF_SIZES)
           page.on("response", async (r) => {
             if (r.url().includes("/data/"))

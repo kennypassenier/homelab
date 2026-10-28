@@ -45,6 +45,13 @@ function eachSlice(name, items, size, body) {
       body(items.slice(i * size, (i + 1) * size)));
 }
 
+// Measurements, not checks (planned-tab-hang-1): they run only on purpose,
+// INVARIANTS_PERF=1 INVARIANTS_ONLY='planned-tab-hang-1' scripts/invariants-run.sh
+const perf = process.env.INVARIANTS_PERF === "1";
+const perfTest = /** @type {typeof test} */ (perf ? test : () => {});
+const perfSlices = /** @type {typeof eachSlice} */ (
+  perf ? eachSlice : () => {}
+);
 const BASE = process.env.INVARIANTS_BASE_URL ?? "http://127.0.0.1:8099";
 const TOKEN = process.env.INVARIANTS_TOKEN ?? "test-invariants-token-1234";
 
@@ -3380,7 +3387,7 @@ test("invariants: every Inbox row says what and why and carries its fix, and a p
       // The row's fix; Snooze… (every row has one) stands beside it.
       assert.deepEqual(
         await setup.locator(".kp-row-actions button").allInnerTexts(),
-        ["Push the envs…", "Snooze…"],
+        ["Push the envs", "Snooze"],
       );
       // Counter = rows, here as on every page.
       const rows = await page
@@ -3952,11 +3959,7 @@ test("invariants: Stacks has the host strip, Deploy all changes and New stack; N
       heads.some((t) => t?.startsWith("Deploy all changes")),
       "no Deploy all changes in the header",
     );
-    assert.equal(
-      heads[heads.length - 1],
-      "New stack…",
-      "New stack is not last",
-    );
+    assert.equal(heads[heads.length - 1], "New stack", "New stack is not last");
     await page.click("#new-stack");
     const forms = await page.$$eval("dialog[open] [data-drive-form]", (els) =>
       els.map((e) => /** @type {HTMLElement} */ (e).dataset.driveForm),
@@ -7953,7 +7956,7 @@ test("invariants: stack hub review — the no-env row's Push the env… opens th
       '[data-drive="stack-fix"][data-drive-row="kp-soft/no-env"]',
     );
     await fix.waitFor({ timeout: 10000 });
-    assert.equal((await fix.textContent())?.trim(), "Push the env…");
+    assert.equal((await fix.textContent())?.trim(), "Push the env");
     assert.equal(await fix.getAttribute("data-action"), "seal-env");
     await fix.click();
     const dialog = page.locator("dialog#action-dialog[open]");
@@ -8283,11 +8286,11 @@ test("invariants: the Update flow has its own address, the old one redirects, an
     await page.goto(`${BASE}/update?all=1`);
     await page.locator("#page ol.uf-steps").waitFor({ timeout: 10000 });
     assert.match((await current()).trim(), /^Inbox/);
-    // The page is capped at the demo's width.
+    // The page fills the page column (width-fill-check-1).
     const w = await page
       .locator("#page .uf-page")
       .evaluate((e) => e.getBoundingClientRect().width);
-    assert.ok(w <= 1024 + 1, `the Update page is ${w}px wide`);
+    assert.ok(w > 1100, `the Update page fills its column, it is ${w}px wide`);
   } finally {
     await browser.close();
   }
@@ -10333,18 +10336,18 @@ test("invariants: checks-notice-link-1 — the nightly check's address opens the
       "a row that is neither broken nor drift is listed outside the fold",
     );
     assert.equal(rows.length, 2, "the demo round has one broken, one drift");
-    // check-turn-off-1: a finding about one probe offers Turn off…; it asks
-    // a reason, then the plan shows `off: <reason>` written in checks.yml.
+    // check-turn-off-1: a finding about one probe offers Turn off; one
+    // confirmation, then the plan shows `off: true` written in checks.yml.
     await page
       .locator("#inbox-check-findings .ib-findings-list > li")
       .first()
-      .getByRole("button", { name: "Turn off…" })
+      .getByRole("button", { name: "Turn off", exact: true })
       .click();
-    await page.fill("#check-off-reason", "retired in the demo");
+    // check-turn-off-confirm-1: one confirmation, no typed reason.
     await page.click("#row-save");
     await page
       .locator(".plan-box")
-      .filter({ hasText: "off: retired in the demo" })
+      .filter({ hasText: "off: true" })
       .waitFor({ timeout: 15000 });
   } finally {
     await browser.close();
@@ -10356,12 +10359,14 @@ test("invariants: checks-notice-link-1 — the nightly check's address opens the
 // verschillende dialogen" cut at the bottom): at the three widths he
 // looked at, the clock stays inside its cell and clear of the step rows,
 // and the dialog's button row keeps its buttons whole, shadow included.
-for (const width of [1894, 2204, 3460]) {
-  test(`invariants: run-dialog-clock-1 and dialog-buttons-cut-1: the clock stays in its cell and the buttons keep their edge at ${width} px`, async () => {
+{
+  // One job, three window widths: the demo host's state is shared between
+  // cases, so a second Park of the same stack would find nothing to park.
+  test("invariants: run-dialog-clock-1 and dialog-buttons-cut-1: the clock stays in its cell and the buttons keep their edge at 1894, 2204 and 3460 px", async () => {
     const browser = await launch();
     try {
       const context = await browser.newContext({
-        viewport: { width, height: 1100 },
+        viewport: { width: 1894, height: 1100 },
       });
       const page = await freshPage(context);
       await page.goto(`${BASE}/stacks/films`);
@@ -10404,38 +10409,42 @@ for (const width of [1894, 2204, 3460]) {
         .first()
         .waitFor({ timeout: 5000 });
       await page.waitForTimeout(500);
-      if (process.env.INVARIANTS_SHOT)
-        await page.screenshot({
-          path: `${process.env.INVARIANTS_SHOT}-${width}.png`,
+      for (const width of [1894, 2204, 3460]) {
+        await page.setViewportSize({ width, height: 1100 });
+        await page.waitForTimeout(300);
+        if (process.env.INVARIANTS_SHOT)
+          await page.screenshot({
+            path: `${process.env.INVARIANTS_SHOT}-${width}.png`,
+          });
+        const geo = await page.evaluate(() => {
+          const box = (/** @type {string} */ s) =>
+            document
+              .querySelector(`#action-dialog ${s}`)
+              ?.getBoundingClientRect();
+          const cell = box(".rv-disc");
+          const dial = box(".rv-disc__dial");
+          const steps = box(".rv-steps");
+          return {
+            cell: cell && [cell.left, cell.top, cell.right, cell.bottom],
+            dial: dial && [dial.left, dial.top, dial.right, dial.bottom],
+            steps: steps && [steps.left, steps.top, steps.right, steps.bottom],
+          };
         });
-      const geo = await page.evaluate(() => {
-        const box = (/** @type {string} */ s) =>
-          document
-            .querySelector(`#action-dialog ${s}`)
-            ?.getBoundingClientRect();
-        const cell = box(".rv-disc");
-        const dial = box(".rv-disc__dial");
-        const steps = box(".rv-steps");
-        return {
-          cell: cell && [cell.left, cell.top, cell.right, cell.bottom],
-          dial: dial && [dial.left, dial.top, dial.right, dial.bottom],
-          steps: steps && [steps.left, steps.top, steps.right, steps.bottom],
-        };
-      });
-      assert.ok(geo.cell && geo.steps, "the run view did not draw");
-      if (geo.dial) {
+        assert.ok(geo.cell && geo.steps, "the run view did not draw");
+        if (geo.dial) {
+          assert.ok(
+            geo.dial[0] >= geo.cell[0] - 1 &&
+              geo.dial[2] <= geo.cell[2] + 1 &&
+              geo.dial[3] <= geo.cell[3] + 1,
+            `the clock leaves its cell: dial ${geo.dial} cell ${geo.cell}`,
+          );
+        }
+        // The clock's cell is above the step list, never over it.
         assert.ok(
-          geo.dial[0] >= geo.cell[0] - 1 &&
-            geo.dial[2] <= geo.cell[2] + 1 &&
-            geo.dial[3] <= geo.cell[3] + 1,
-          `the clock leaves its cell: dial ${geo.dial} cell ${geo.cell}`,
+          geo.cell[3] <= geo.steps[1] + 1,
+          `the clock's cell reaches the step rows: cell ${geo.cell} steps ${geo.steps}`,
         );
       }
-      // The clock's cell is above the step list, never over it.
-      assert.ok(
-        geo.cell[3] <= geo.steps[1] + 1,
-        `the clock's cell reaches the step rows: cell ${geo.cell} steps ${geo.steps}`,
-      );
     } finally {
       await browser.close();
     }
@@ -10513,110 +10522,113 @@ eachSlice(
 // animation frames (a busy main thread shows as a long gap), the DOM size,
 // and how many requests the page makes; the numbers go to
 // INVARIANTS_PERF_REPORT.
-test("invariants: planned-tab-hang-1 measurement: the Planned tab's main thread and requests", async () => {
-  const browser = await launch();
-  try {
-    const context = await browser.newContext({
-      viewport: { width: 3440, height: 1400 },
-    });
-    const page = await freshPage(context);
-    /** @type {string[]} */
-    const reqs = [];
-    page.on("request", (r) =>
-      reqs.push(
-        `${r.method()} ${new URL(r.url()).pathname}${new URL(r.url()).search}`,
-      ),
-    );
-    // PERF_SCALE n: the schedules and jobs the demo answers are repeated n
-    // times (distinct ids), the size of a real fleet's week.
-    const scale = Number(process.env.INVARIANTS_PERF_SCALE ?? 1);
-    if (scale > 1) {
-      await page.route("**/data/schedules", async (route) => {
-        const r = await route.fetch();
-        const body = await r.json();
-        const nowS = clockNowS();
-        body.schedules = Array.from({ length: scale }, (_, i) => ({
-          schedule: {
-            id: `s${i}`,
-            stack: ["media", "home", "gateway", "kp-soft", "admin"][i % 5],
-            action: ["backup", "deploy", "update"][i % 3],
-            args: {},
-            when:
-              i % 2
-                ? {
-                    every: "day",
-                    at: `0${i % 9}:${String((i * 7) % 60).padStart(2, "0")}`,
-                  }
-                : { every: "week", days: [0, 2, 4], at: "04:30" },
-            enabled: true,
-            note: "",
-            created_at: nowS - 9e6,
-            handled_until: nowS - 3600,
-          },
-          next_run: nowS + 3600 * (i + 1),
-          next_run_local: null,
-          last_job: null,
-        }));
-        await route.fulfill({ response: r, json: body });
+perfTest(
+  "invariants: planned-tab-hang-1 measurement: the Planned tab's main thread and requests",
+  async () => {
+    const browser = await launch();
+    try {
+      const context = await browser.newContext({
+        viewport: { width: 3440, height: 1400 },
       });
-      await page.route("**/data/actions/jobs", async (route) => {
-        const r = await route.fetch();
-        const body = await r.json();
-        const base = body.jobs ?? [];
-        body.jobs = Array.from({ length: scale }, (_, k) =>
-          base.map((/** @type {any} */ j) => ({
-            ...j,
-            job: j.job + k * 100000,
-          })),
-        ).flat();
-        await route.fulfill({ response: r, json: body });
-      });
-    }
-    const t0 = performance.now();
-    await page.goto(`${BASE}/activity?view=planned`);
-    const loaded = Math.round(performance.now() - t0);
-    const probe = await page.evaluate(
-      () =>
-        new Promise((resolve) => {
-          const start = performance.now();
-          let last = start;
-          let worst = 0;
-          let frames = 0;
-          const samples = /** @type {number[]} */ ([]);
-          const tick = (/** @type {number} */ now) => {
-            worst = Math.max(worst, now - last);
-            last = now;
-            frames += 1;
-            if (frames % 30 === 0)
-              samples.push(document.querySelectorAll("*").length);
-            if (now - start < 8000) requestAnimationFrame(tick);
-            else
-              resolve({
-                worstFrameGapMs: Math.round(worst),
-                frames,
-                domNodes: samples,
-                finalNodes: document.querySelectorAll("*").length,
-              });
-          };
-          requestAnimationFrame(tick);
-        }),
-    );
-    const byPath = /** @type {Record<string, number>} */ ({});
-    for (const r of reqs) byPath[r] = (byPath[r] ?? 0) + 1;
-    const out = process.env.INVARIANTS_PERF_REPORT;
-    if (out)
-      (await import("node:fs")).writeFileSync(
-        out,
-        JSON.stringify({ loaded, probe, requests: byPath }, null, 1),
+      const page = await freshPage(context);
+      /** @type {string[]} */
+      const reqs = [];
+      page.on("request", (r) =>
+        reqs.push(
+          `${r.method()} ${new URL(r.url()).pathname}${new URL(r.url()).search}`,
+        ),
       );
-  } finally {
-    await browser.close();
-  }
-});
+      // PERF_SCALE n: the schedules and jobs the demo answers are repeated n
+      // times (distinct ids), the size of a real fleet's week.
+      const scale = Number(process.env.INVARIANTS_PERF_SCALE ?? 1);
+      if (scale > 1) {
+        await page.route("**/data/schedules", async (route) => {
+          const r = await route.fetch();
+          const body = await r.json();
+          const nowS = clockNowS();
+          body.schedules = Array.from({ length: scale }, (_, i) => ({
+            schedule: {
+              id: `s${i}`,
+              stack: ["media", "home", "gateway", "kp-soft", "admin"][i % 5],
+              action: ["backup", "deploy", "update"][i % 3],
+              args: {},
+              when:
+                i % 2
+                  ? {
+                      every: "day",
+                      at: `0${i % 9}:${String((i * 7) % 60).padStart(2, "0")}`,
+                    }
+                  : { every: "week", days: [0, 2, 4], at: "04:30" },
+              enabled: true,
+              note: "",
+              created_at: nowS - 9e6,
+              handled_until: nowS - 3600,
+            },
+            next_run: nowS + 3600 * (i + 1),
+            next_run_local: null,
+            last_job: null,
+          }));
+          await route.fulfill({ response: r, json: body });
+        });
+        await page.route("**/data/actions/jobs", async (route) => {
+          const r = await route.fetch();
+          const body = await r.json();
+          const base = body.jobs ?? [];
+          body.jobs = Array.from({ length: scale }, (_, k) =>
+            base.map((/** @type {any} */ j) => ({
+              ...j,
+              job: j.job + k * 100000,
+            })),
+          ).flat();
+          await route.fulfill({ response: r, json: body });
+        });
+      }
+      const t0 = performance.now();
+      await page.goto(`${BASE}/activity?view=planned`);
+      const loaded = Math.round(performance.now() - t0);
+      const probe = await page.evaluate(
+        () =>
+          new Promise((resolve) => {
+            const start = performance.now();
+            let last = start;
+            let worst = 0;
+            let frames = 0;
+            const samples = /** @type {number[]} */ ([]);
+            const tick = (/** @type {number} */ now) => {
+              worst = Math.max(worst, now - last);
+              last = now;
+              frames += 1;
+              if (frames % 30 === 0)
+                samples.push(document.querySelectorAll("*").length);
+              if (now - start < 8000) requestAnimationFrame(tick);
+              else
+                resolve({
+                  worstFrameGapMs: Math.round(worst),
+                  frames,
+                  domNodes: samples,
+                  finalNodes: document.querySelectorAll("*").length,
+                });
+            };
+            requestAnimationFrame(tick);
+          }),
+      );
+      const byPath = /** @type {Record<string, number>} */ ({});
+      for (const r of reqs) byPath[r] = (byPath[r] ?? 0) + 1;
+      const out = process.env.INVARIANTS_PERF_REPORT;
+      if (out)
+        (await import("node:fs")).writeFileSync(
+          out,
+          JSON.stringify({ loaded, probe, requests: byPath }, null, 1),
+        );
+    } finally {
+      await browser.close();
+    }
+  },
+);
 
 // planned-tab-hang-1: the same frame probe on every audited page, to tell a
 // page that is slow from a page that is only the one noticed.
-eachSlice(
+perfSlices(
   "invariants: planned-tab-hang-1 sweep: the longest frame gap of every page",
   AUDIT_PAGES,
   6,
@@ -10704,103 +10716,106 @@ eachSlice(
 
 // planned-tab-hang-1: the way Kenny goes there, from the Activity page by its
 // Planned tab, measured from the click, five times round trip.
-test("invariants: planned-tab-hang-1 tab switch: the frame gaps when Activity's tabs are used", async () => {
-  const browser = await launch();
-  try {
-    const context = await browser.newContext({
-      viewport: { width: 3440, height: 1400 },
-    });
-    const page = await freshPage(context);
-    // INVARIANTS_KP_JS_DIR: serve kp-themes' js from a checkout (an
-    // unreleased fix) over the bundled copy, to measure it before a release.
-    if (process.env.INVARIANTS_KP_JS_DIR) {
-      const { readFileSync, existsSync } = await import("node:fs");
-      await page.route("**/static/kp/js/**", async (route) => {
-        const f = new URL(route.request().url()).pathname.replace(
-          "/static/kp/js/",
-          "",
-        );
-        const file = `${process.env.INVARIANTS_KP_JS_DIR}/${f}`;
-        if (!existsSync(file)) return route.continue();
-        await route.fulfill({
-          body: readFileSync(file),
-          contentType: "text/javascript",
-        });
+perfTest(
+  "invariants: planned-tab-hang-1 tab switch: the frame gaps when Activity's tabs are used",
+  async () => {
+    const browser = await launch();
+    try {
+      const context = await browser.newContext({
+        viewport: { width: 3440, height: 1400 },
       });
-    }
-    await page.goto(`${BASE}/activity`);
-    await page.waitForTimeout(1500);
-    const rows = [];
-    for (const name of (
-      process.env.INVARIANTS_TABS ??
-      "Planned,Now and history,Planned,Host log,Planned"
-    ).split(",")) {
-      await page.evaluate(() => {
-        // @ts-ignore a probe the page keeps for this case
-        window.__gap = { worst: 0, last: performance.now(), stop: false };
-        const tick = (/** @type {number} */ now) => {
+      const page = await freshPage(context);
+      // INVARIANTS_KP_JS_DIR: serve kp-themes' js from a checkout (an
+      // unreleased fix) over the bundled copy, to measure it before a release.
+      if (process.env.INVARIANTS_KP_JS_DIR) {
+        const { readFileSync, existsSync } = await import("node:fs");
+        await page.route("**/static/kp/js/**", async (route) => {
+          const f = new URL(route.request().url()).pathname.replace(
+            "/static/kp/js/",
+            "",
+          );
+          const file = `${process.env.INVARIANTS_KP_JS_DIR}/${f}`;
+          if (!existsSync(file)) return route.continue();
+          await route.fulfill({
+            body: readFileSync(file),
+            contentType: "text/javascript",
+          });
+        });
+      }
+      await page.goto(`${BASE}/activity`);
+      await page.waitForTimeout(1500);
+      const rows = [];
+      for (const name of (
+        process.env.INVARIANTS_TABS ??
+        "Planned,Now and history,Planned,Host log,Planned"
+      ).split(",")) {
+        await page.evaluate(() => {
+          // @ts-ignore a probe the page keeps for this case
+          window.__gap = { worst: 0, last: performance.now(), stop: false };
+          const tick = (/** @type {number} */ now) => {
+            // @ts-ignore
+            const g = window.__gap;
+            g.worst = Math.max(g.worst, now - g.last);
+            g.last = now;
+            if (!g.stop) requestAnimationFrame(tick);
+          };
+          requestAnimationFrame(tick);
+        });
+        await page.evaluate(() => {
           // @ts-ignore
-          const g = window.__gap;
-          g.worst = Math.max(g.worst, now - g.last);
-          g.last = now;
-          if (!g.stop) requestAnimationFrame(tick);
-        };
-        requestAnimationFrame(tick);
-      });
-      await page.evaluate(() => {
-        // @ts-ignore
-        const log = (window.__marks = {
-          click: 0,
-          firstMut: 0,
-          lastMut: 0,
-          afterRaf: 0,
+          const log = (window.__marks = {
+            click: 0,
+            firstMut: 0,
+            lastMut: 0,
+            afterRaf: 0,
+          });
+          document.addEventListener(
+            "click",
+            () => (log.click = performance.now()),
+            { capture: true, once: true },
+          );
+          const root = document.querySelector("#page") ?? document.body;
+          const mo = new MutationObserver(() => {
+            const t = performance.now();
+            if (!log.firstMut) log.firstMut = t;
+            log.lastMut = t;
+          });
+          mo.observe(root, { childList: true, subtree: true });
+          // @ts-ignore
+          window.__mo = mo;
         });
-        document.addEventListener(
-          "click",
-          () => (log.click = performance.now()),
-          { capture: true, once: true },
+        const t0 = performance.now();
+        await page.getByRole("tab", { name }).click({ timeout: 5000 });
+        await page.waitForTimeout(800);
+        const worst = await page.evaluate(() => {
+          // @ts-ignore
+          window.__gap.stop = true;
+          // @ts-ignore
+          return Math.round(window.__gap.worst);
+        });
+        const marks = await page.evaluate(() => {
+          // @ts-ignore
+          const m = window.__marks;
+          return {
+            toFirstMutationMs: Math.round(m.firstMut - m.click),
+            toLastMutationMs: Math.round(m.lastMut - m.click),
+          };
+        });
+        rows.push({
+          ...marks,
+          tab: name,
+          worstGapMs: worst,
+          ms: Math.round(performance.now() - t0),
+        });
+      }
+      const out = process.env.INVARIANTS_PERF_REPORT;
+      if (out)
+        (await import("node:fs")).writeFileSync(
+          out,
+          JSON.stringify(rows, null, 1),
         );
-        const root = document.querySelector("#page") ?? document.body;
-        const mo = new MutationObserver(() => {
-          const t = performance.now();
-          if (!log.firstMut) log.firstMut = t;
-          log.lastMut = t;
-        });
-        mo.observe(root, { childList: true, subtree: true });
-        // @ts-ignore
-        window.__mo = mo;
-      });
-      const t0 = performance.now();
-      await page.getByRole("tab", { name }).click({ timeout: 5000 });
-      await page.waitForTimeout(800);
-      const worst = await page.evaluate(() => {
-        // @ts-ignore
-        window.__gap.stop = true;
-        // @ts-ignore
-        return Math.round(window.__gap.worst);
-      });
-      const marks = await page.evaluate(() => {
-        // @ts-ignore
-        const m = window.__marks;
-        return {
-          toFirstMutationMs: Math.round(m.firstMut - m.click),
-          toLastMutationMs: Math.round(m.lastMut - m.click),
-        };
-      });
-      rows.push({
-        ...marks,
-        tab: name,
-        worstGapMs: worst,
-        ms: Math.round(performance.now() - t0),
-      });
+    } finally {
+      await browser.close();
     }
-    const out = process.env.INVARIANTS_PERF_REPORT;
-    if (out)
-      (await import("node:fs")).writeFileSync(
-        out,
-        JSON.stringify(rows, null, 1),
-      );
-  } finally {
-    await browser.close();
-  }
-});
+  },
+);

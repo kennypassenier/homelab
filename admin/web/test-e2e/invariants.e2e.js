@@ -10707,6 +10707,23 @@ test("invariants: planned-tab-hang-1 tab switch: the frame gaps when Activity's 
       viewport: { width: 3440, height: 1400 },
     });
     const page = await freshPage(context);
+    // INVARIANTS_KP_JS_DIR: serve kp-themes' js from a checkout (an
+    // unreleased fix) over the bundled copy, to measure it before a release.
+    if (process.env.INVARIANTS_KP_JS_DIR) {
+      const { readFileSync, existsSync } = await import("node:fs");
+      await page.route("**/static/kp/js/**", async (route) => {
+        const f = new URL(route.request().url()).pathname.replace(
+          "/static/kp/js/",
+          "",
+        );
+        const file = `${process.env.INVARIANTS_KP_JS_DIR}/${f}`;
+        if (!existsSync(file)) return route.continue();
+        await route.fulfill({
+          body: readFileSync(file),
+          contentType: "text/javascript",
+        });
+      });
+    }
     await page.goto(`${BASE}/activity`);
     await page.waitForTimeout(1500);
     const rows = [];

@@ -476,9 +476,9 @@ One section per directory under `stacks/`, read from its `lxc-compose.yml` and, 
 - Container: hostname `117-app-registry`, ip `CT 117 (registry)` on `vmbr0` VLAN 10, 2 core(s), 1024 MiB RAM, 0 MiB swap, 32 GiB disk on `local-lvm`, unprivileged, template `clone:996`, boot order 10.
 - Apps (docker compose, started in this order): registry, keep. Files in the container under `/opt/registry/<app>/`.
 - Rebuild (needs the daemon): `homelab deploy stacks/registry`, which also refills every empty data directory from its latest snapshot before the apps start. Without the daemon: Layer 2.
-- Data, one restic repository per owning app:
-  - `rclone:gdrive:homelab-backups/keep-config`: `/appdata/registry/keep-config`
+- Data: no backed-up paths, so nothing to restore.
 - NOT backed up, on purpose: `/appdata/registry/registry-config`. The stack file's reason: a pull-through cache: every layer is re-downloadable from its upstream registry, so a lost cache costs one slow pull and nothing else. Measured 2026-09-02: backing it up cost 1381 MB and 457 s per night, a fifth of the whole round, for data that protects nothing.
+- NOT backed up, on purpose: `/appdata/registry/keep-config`. The stack file's reason: a cache of copies kept for pinned digests: the next keep round fetches them again from upstream, and the pins in the stack files say which. Measured 2026-10-25: 5.6 GB and 1391 files in the nightly backup.
 
 ### syncthing (vmid 108)
 

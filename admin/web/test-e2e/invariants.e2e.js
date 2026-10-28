@@ -10455,8 +10455,8 @@ test("invariants: checks-notice-link-1 — the nightly check's address opens the
 // 3440 px every audited page is opened and each part narrower than the page
 // column (although its parent is as wide) is written to
 // INVARIANTS_WIDTH_REPORT (JSON) and printed. Run it on purpose:
-//   INVARIANTS_ONLY='width-fill' scripts/invariants-run.sh
-eachSlice(
+//   INVARIANTS_PERF=1 INVARIANTS_ONLY="width-fill" scripts/invariants-run.sh
+perfSlices(
   "invariants: width-fill-check-1 inventory: every part narrower than the page column",
   AUDIT_PAGES,
   6,

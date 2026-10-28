@@ -1911,7 +1911,7 @@ export function mount(root) {
     else if (names.includes(id)) void retryOne(id);
   });
 
-  const paintAll = () => {
+  const paintNow = () => {
     paintLive();
     paintKpis();
     paintCoverage();
@@ -1919,6 +1919,34 @@ export function mount(root) {
     paintNight();
     paintRepos();
   };
+  // planned-tab-hang-1 / responsive pages (Kenny, 2026-10-26): every stack's
+  // read ended in a full repaint of the KPIs, the grid and the table, about
+  // 100 ms each at 14 stacks (a burst of ~200 DOM changes every 100 ms for
+  // 1.4 s, a 1 s frame gap in Firefox). While reads are still under way a
+  // repaint waits until the last one is 400 ms old; the state with nothing
+  // pending, and every click on the page, still paints at once.
+  const PAINT_GAP_MS = 400;
+  let paintTimer = 0;
+  let lastPaint = 0;
+  const paintAll = () => {
+    const pending = names.some((n) => reads[n]?.status === "pending");
+    const wait = PAINT_GAP_MS - (performance.now() - lastPaint);
+    if (!pending || wait <= 0) {
+      clearTimeout(paintTimer);
+      paintTimer = 0;
+      lastPaint = performance.now();
+      paintNow();
+      return;
+    }
+    if (paintTimer) return;
+    paintTimer = window.setTimeout(() => {
+      paintTimer = 0;
+      if (abort.signal.aborted) return;
+      lastPaint = performance.now();
+      paintNow();
+    }, wait);
+  };
+  cleanups.push(() => clearTimeout(paintTimer));
 
   // ── dialogs ───────────────────────────────────────────────────────────
   // redesign-final-h3: Restore… opens the Restore flow (FLOWS.md §5), on

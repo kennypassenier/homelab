@@ -10629,6 +10629,36 @@ eachSlice(
       });
       const page = await freshPage(context);
       for (const path of part) {
+        if (
+          process.env.INVARIANTS_PERF_PATHS &&
+          !process.env.INVARIANTS_PERF_PATHS.split(",").includes(path)
+        )
+          continue;
+        if (process.env.INVARIANTS_PERF_BURSTS)
+          await page.addInitScript(() => {
+            // @ts-ignore
+            window.__bursts = [];
+            const t0 = performance.now();
+            document.addEventListener("DOMContentLoaded", () => {
+              new MutationObserver((recs) => {
+                const t = Math.round(performance.now() - t0);
+                const first = /** @type {Element} */ (recs[0].target);
+                // @ts-ignore
+                window.__bursts.push([
+                  t,
+                  recs.length,
+                  `${first.tagName?.toLowerCase()}.${(first.getAttribute?.("class") ?? "").split(" ")[0]}#${first.id ?? ""}`,
+                ]);
+              }).observe(document.body, { childList: true, subtree: true });
+            });
+          });
+        if (process.env.INVARIANTS_PERF_SIZES)
+          page.on("response", async (r) => {
+            if (r.url().includes("/data/"))
+              console.log(
+                `SIZE ${(await r.body().catch(() => Buffer.alloc(0))).length} ${new URL(r.url()).pathname}${new URL(r.url()).search}`,
+              );
+          });
         await page.goto(BASE + path, { timeout: 8000 }).catch(() => {});
         const probe = await page.evaluate(
           () =>
@@ -10653,7 +10683,14 @@ eachSlice(
             }),
         );
         const out = process.env.INVARIANTS_PERF_REPORT;
-        if (out) appendFileSync(out, `${JSON.stringify({ path, ...probe })}\n`);
+        const bursts = process.env.INVARIANTS_PERF_BURSTS
+          ? await page.evaluate(() => /** @type {any} */ (window).__bursts)
+          : undefined;
+        if (out)
+          appendFileSync(
+            out,
+            `${JSON.stringify({ path, ...probe, bursts })}\n`,
+          );
       }
     } finally {
       await browser.close();

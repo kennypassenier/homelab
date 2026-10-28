@@ -10819,3 +10819,130 @@ perfTest(
     }
   },
 );
+
+const ACTION_CASES =
+  /** @type {[string, string, Record<string, unknown>][]} */ ([
+    ["kp-soft", "deploy", {}],
+    ["kp-soft", "deploy-commit", { commit: "0000000" }],
+    ["kp-soft", "backup", {}],
+    [
+      "kp-soft",
+      "restore",
+      {
+        confirm: "kp-soft",
+        app: "kp-soft",
+        snapshot: "latest",
+        source: "local",
+      },
+    ],
+    [
+      "kp-soft",
+      "restore-native",
+      {
+        confirm: "kp-soft",
+        snapshot: "latest",
+        unit: "kp-soft",
+        source: "local",
+      },
+    ],
+    [
+      "kp-soft",
+      "verify-restore",
+      { app: "kp-soft", snapshot: "latest", source: "local" },
+    ],
+    ["kp-soft", "update", {}],
+    ["kp-soft", "resize", {}],
+    ["kp-soft", "enable", {}],
+    ["kp-soft", "disable", {}],
+    ["kp-soft", "adopt", {}],
+    ["kp-soft", "backup-native", {}],
+    ["kp-soft", "update-native", {}],
+    ["kp-soft", "release-update-native", {}],
+    ["kp-soft", "rollback-native", { unit: "kp-soft" }],
+    ["kp-soft", "guards", {}],
+    ["kp-soft", "prune-orphans", { confirm: "kp-soft" }],
+    ["kp-soft", "destroy", { confirm: "kp-soft" }],
+    ["kp-soft", "forget", { confirm: "kp-soft" }],
+    ["kp-soft", "wipe", { confirm: "kp-soft" }],
+    ["_host", "patch", {}],
+    ["_host", "zfs-replicate", {}],
+    ["_host", "backup-host-meta", {}],
+    ["_host", "backup-devices", {}],
+    ["_host", "exec", { vmid: "101", command: "true" }],
+    ["_host", "guards-ct", { vmid: "101" }],
+    [
+      "_host",
+      "template-build",
+      { vmid: "9001", version: "13", privileged: false, base: "debian" },
+    ],
+    ["_host", "update-host", { tag: "latest" }],
+    [
+      "_host",
+      "answer-check",
+      { check: "x", verdict: "ok", days: "7", note: "demo" },
+    ],
+    ["kp-soft", "install-native", { unit: "kp-soft", tag: "latest" }],
+    ["kp-soft", "change-secret", {}],
+    ["kp-soft", "seal-env", {}],
+    ["_host", "roll-out-release", { tag: "latest" }],
+
+    ["_host", "apply", {}],
+    ["_host", "restart-host", {}],
+  ]);
+
+// every-action-1 (Kenny, 2026-10-28: "alle mogelijke handelingen moeten
+// getest worden"): on the demo host every action of the catalog is pressed
+// through the dashboard's own route with the arguments its entry asks for,
+// and its job must end (done, failed with a reason, or a named refusal),
+// never stand still. A report to INVARIANTS_ACTIONS_REPORT; run on purpose
+// with INVARIANTS_PERF=1 INVARIANTS_ONLY='every-action-1'.
+perfSlices(
+  "invariants: every-action-1: every catalog action runs to an end on the demo host",
+  ACTION_CASES,
+  5,
+  async (part) => {
+    const { appendFileSync } = await import("node:fs");
+    const browser = await launch();
+    try {
+      const context = await browser.newContext();
+      await freshPage(context);
+      for (const [stack, action, args] of part) {
+        const r = await context.request.post(
+          `${BASE}/data/actions/${stack}/${action}`,
+          { data: args, headers: { Origin: BASE }, failOnStatusCode: false },
+        );
+        const status = r.status();
+        const body = await r.json().catch(() => ({}));
+        let end = null;
+        if (status < 300 && body.job) {
+          for (let i = 0; i < 100 && !end; i += 1) {
+            await new Promise((res) => setTimeout(res, 100));
+            const jobs = await (
+              await context.request.get(`${BASE}/data/actions/jobs`)
+            ).json();
+            const j = (jobs.jobs ?? []).find(
+              (/** @type {any} */ x) => x.job === body.job,
+            );
+            if (j && !["queued", "running"].includes(j.state))
+              end = {
+                state: j.state,
+                message: (j.message ?? "").slice(0, 120),
+              };
+          }
+        }
+        const row = {
+          action,
+          stack,
+          status,
+          job: body.job ?? null,
+          end,
+          refusal: status >= 300 ? JSON.stringify(body).slice(0, 160) : null,
+        };
+        const out = process.env.INVARIANTS_ACTIONS_REPORT;
+        if (out) appendFileSync(out, `${JSON.stringify(row)}\n`);
+      }
+    } finally {
+      await browser.close();
+    }
+  },
+);

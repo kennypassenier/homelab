@@ -276,6 +276,14 @@ echo "invariants: pre-flight: /, /js/main.js and /css/app.css answer 200"
 echo "invariants: running the Playwright smoke"
 cd admin/web
 [ -d node_modules/playwright ] || PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1 npm ci --no-audit --no-fund
+# host-restart-wait-1 / release 4.1.2 (2026-10-29): the installed Playwright asked
+# for Firefox build 1543 while this machine holds 1538, so every whole-screen case
+# failed at launch inside a release run. Unless a Firefox is named, use the newest
+# one Playwright has downloaded; the harness passes it as the executable.
+if [ -z "${INVARIANTS_FIREFOX:-}" ]; then
+  newest="$(ls -d "$HOME"/.cache/ms-playwright/firefox-*/firefox/firefox 2>/dev/null | sort -V | tail -1 || true)"
+  [ -n "$newest" ] && export INVARIANTS_FIREFOX="$newest"
+fi
 # INVARIANTS_ONLY: run just the cases whose name matches (a fix's own
 # fail-before / pass-after run), never a substitute for the full run a
 # release gate makes. INVARIANTS_SCRIPT: run another script against the same

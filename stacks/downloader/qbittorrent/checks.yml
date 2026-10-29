@@ -46,7 +46,7 @@ probes:
   # Read 2026-09-30: 0.
   - name: "torrents on missingFiles"
     command: |
-      K=$(sed -n 's/^WebUI\\APIKey=//p' /appdata/downloader/qbittorrent-config/qBittorrent/qBittorrent.conf)
+      K=$(sed -n 's/^WebUI\\APIKey=//p;/^\[WebUI\]/,/^\[/{s/^APIKey=//p}' /appdata/downloader/qbittorrent-config/qBittorrent/qBittorrent.conf)
       T=$(printf 'header = "Authorization: Bearer %s"\n' "$K" | docker exec -i qbittorrent curl -sf -K - http://localhost:8080/api/v2/torrents/info) || exit 1
       echo "$T" | jq '[.[]|select(.state=="missingFiles")]|length'
     healthy: {equals: "0"}
@@ -55,7 +55,7 @@ probes:
   # Read 2026-09-30: ok (nothing was downloading).
   - name: "active downloads moving"
     command: |
-      K=$(sed -n 's/^WebUI\\APIKey=//p' /appdata/downloader/qbittorrent-config/qBittorrent/qBittorrent.conf)
+      K=$(sed -n 's/^WebUI\\APIKey=//p;/^\[WebUI\]/,/^\[/{s/^APIKey=//p}' /appdata/downloader/qbittorrent-config/qBittorrent/qBittorrent.conf)
       T=$(printf 'header = "Authorization: Bearer %s"\n' "$K" | docker exec -i qbittorrent curl -sf -K - http://localhost:8080/api/v2/torrents/info) || exit 1
       echo "$T" | jq -r '[.[]|select(.state|test("^(downloading|stalledDL|metaDL|forcedDL)$"))] as $a | if ($a|length)==0 or ([$a[]|select(.dlspeed>0)]|length)>0 then "ok" else "stalled" end'
     healthy: {equals: "ok"}
@@ -65,7 +65,7 @@ probes:
   # Read 2026-09-30: 0.
   - name: "completed downloads outside /downloads/completed"
     command: |
-      K=$(sed -n 's/^WebUI\\APIKey=//p' /appdata/downloader/qbittorrent-config/qBittorrent/qBittorrent.conf)
+      K=$(sed -n 's/^WebUI\\APIKey=//p;/^\[WebUI\]/,/^\[/{s/^APIKey=//p}' /appdata/downloader/qbittorrent-config/qBittorrent/qBittorrent.conf)
       T=$(printf 'header = "Authorization: Bearer %s"\n' "$K" | docker exec -i qbittorrent curl -sf -K - http://localhost:8080/api/v2/torrents/info) || exit 1
       echo "$T" | jq '[.[]|select(.progress==1 and ((.content_path // .save_path)|startswith("/downloads/completed")|not))]|length'
     healthy: {equals: "0"}
@@ -80,7 +80,7 @@ probes:
   # loses the list shows up the next night.
   - name: "fake-release file types excluded"
     command: |
-      K=$(sed -n 's/^WebUI\\APIKey=//p' /appdata/downloader/qbittorrent-config/qBittorrent/qBittorrent.conf)
+      K=$(sed -n 's/^WebUI\\APIKey=//p;/^\[WebUI\]/,/^\[/{s/^APIKey=//p}' /appdata/downloader/qbittorrent-config/qBittorrent/qBittorrent.conf)
       P=$(printf 'header = "Authorization: Bearer %s"\n' "$K" | docker exec -i qbittorrent curl -sf -K - http://localhost:8080/api/v2/app/preferences) || exit 1
       printf "%s" "$P" | jq -r 'if (.excluded_file_names_enabled // true) and (.excluded_file_names|test("\\*\\.7z")) and (.excluded_file_names|test("\\*\\.iso")) then "ok" else "missing" end'
     healthy: {equals: "ok"}

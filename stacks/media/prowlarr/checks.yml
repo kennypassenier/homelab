@@ -39,12 +39,13 @@ probes:
     layer: application
     id: prowlarr-indexers-failing-or-disabled
     blind_spot: "Prowlarr's own view of its indexers; no search is run (that would load the indexers every night)"
-  # Read 2026-09-30: 0.
+  # Read 2026-09-30: 0. 2026-10-29: "New update is available" (source UpdateCheck)
+  # counted as broken; new versions are the Update flow's business, not a fault.
   - name: "health notifications from Prowlarr"
     command: |
       K=$(sed -n 's:.*<ApiKey>\(.*\)</ApiKey>.*:\1:p' /appdata/media/prowlarr-config/config.xml)
       C=$(mktemp); trap 'rm -f "$C"' EXIT; printf "header = %s\n" "X-Api-Key: $K" > "$C"
-      wget --config="$C" -qO- http://localhost:9696/api/v1/health | jq length
+      wget --config="$C" -qO- http://localhost:9696/api/v1/health | jq '[.[]|select(.source!="UpdateCheck")]|length'
     healthy: {equals: "0"}
     layer: application
     id: prowlarr-health-notifications

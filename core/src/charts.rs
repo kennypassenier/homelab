@@ -468,12 +468,17 @@ pub fn host_panels(host: &str) -> Vec<Panel> {
         ),
         p(
             // replace-grafana parity (2026-10-01): "Network in per host".
+            // charts-network-in-1 (found 2026-10-29 on the real dashboard,
+            // Prometheus 422 "vector cannot contain metrics with the same
+            // labelset"): two NICs of one container (veth120i0, veth120i1)
+            // became one device name before the sum. The vmid goes into its
+            // own label, is summed, and only then named as the device.
             "Network in",
             "How much network traffic the hypervisor's own uplink and each \
              container's virtual network device is receiving, labelled by \
              the container it belongs to.",
             format!(
-                "sum by (device) (label_replace(rate(node_network_receive_bytes_total{{host=\"{h}\",device=~\"(veth|tap)[0-9]+i[0-9]+\"}}[5m]), \"device\", \"veth${{1}}i0\", \"device\", \"(?:veth|tap)([0-9]+)i[0-9]+\")) or sum by (device) (rate(node_network_receive_bytes_total{{host=\"{h}\",device=~\"vmbr[0-9]+\"}}[5m]))"
+                "sum by (device) (label_replace(sum by (vmid) (label_replace(rate(node_network_receive_bytes_total{{host=\"{h}\",device=~\"(veth|tap)[0-9]+i[0-9]+\"}}[5m]), \"vmid\", \"$1\", \"device\", \"(?:veth|tap)([0-9]+)i[0-9]+\")), \"device\", \"veth${{1}}i0\", \"vmid\", \"(.*)\")) or sum by (device) (rate(node_network_receive_bytes_total{{host=\"{h}\",device=~\"vmbr[0-9]+\"}}[5m]))"
             ),
             Unit::Bytes,
             Some("device"),

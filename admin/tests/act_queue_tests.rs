@@ -234,6 +234,15 @@ async fn feat_stacks_5_one_failure_in_a_batch_does_not_hide_the_others() {
         states,
         vec![JobState::Done, JobState::Failed, JobState::Done]
     );
+    // The batch's closing event follows the last job's state a moment later;
+    // reading it at once raced (3 of 12 runs under load, 2026-10-29).
+    until("the batch's closing event", || {
+        w.live
+            .events("action_batch")
+            .last()
+            .is_some_and(|e| e["done"].as_bool() == Some(true))
+    })
+    .await;
     let last = w.live.events("action_batch").last().cloned().unwrap();
     assert_eq!(last["batch"], batch);
     assert_eq!(

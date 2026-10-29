@@ -10875,19 +10875,24 @@ const ACTION_CASES =
       "template-build",
       { vmid: "9001", version: "13", privileged: false, base: "debian" },
     ],
-    ["_host", "update-host", { tag: "latest" }],
     [
       "_host",
       "answer-check",
-      { check: "x", verdict: "ok", days: "7", note: "demo" },
+      { check: "x", verdict: "accept", days: "7", note: "demo" },
     ],
-    ["kp-soft", "install-native", { unit: "kp-soft", tag: "latest" }],
     ["kp-soft", "change-secret", {}],
+  ]);
+
+/** The actions that run longer than a plain job (they wait for the host or walk the whole fleet): one per case. */
+const SLOW_ACTION_CASES =
+  /** @type {[string, string, Record<string, unknown>][]} */ ([
+    ["kp-soft", "install-native", { unit: "kp-soft", tag: "latest" }],
     ["kp-soft", "seal-env", {}],
     ["_host", "roll-out-release", { tag: "latest" }],
-
     ["_host", "apply", {}],
     ["_host", "restart-host", {}],
+
+    ["_host", "update-host", { tag: "latest" }],
   ]);
 
 // every-action-1 (Kenny, 2026-10-28: "alle mogelijke handelingen moeten
@@ -10896,51 +10901,109 @@ const ACTION_CASES =
 // and its job must end (done, failed with a reason, or a named refusal),
 // never stand still. A report to INVARIANTS_ACTIONS_REPORT; run on purpose
 // with INVARIANTS_PERF=1 INVARIANTS_ONLY='every-action-1'.
+const pressActions = async (/** @type {typeof ACTION_CASES} */ part) => {
+  const { appendFileSync } = await import("node:fs");
+  const browser = await launch();
+  try {
+    const context = await browser.newContext();
+    await freshPage(context);
+    for (const [stack, action, args] of part) {
+      const r = await context.request.post(
+        `${BASE}/data/actions/${stack}/${action}`,
+        { data: args, headers: { Origin: BASE }, failOnStatusCode: false },
+      );
+      const status = r.status();
+      const body = await r.json().catch(() => ({}));
+      let end = null;
+      if (status < 300 && body.job) {
+        for (let i = 0; i < 180 && !end; i += 1) {
+          await new Promise((res) => setTimeout(res, 100));
+          const jobs = await (
+            await context.request.get(`${BASE}/data/actions/jobs`)
+          ).json();
+          const j = (jobs.jobs ?? []).find(
+            (/** @type {any} */ x) => x.job === body.job,
+          );
+          if (j && !["queued", "running"].includes(j.state))
+            end = {
+              state: j.state,
+              message: (j.message ?? "").slice(0, 120),
+            };
+        }
+      }
+      const row = {
+        action,
+        stack,
+        status,
+        job: body.job ?? null,
+        end,
+        refusal: status >= 300 ? JSON.stringify(body).slice(0, 160) : null,
+      };
+      const out = process.env.INVARIANTS_ACTIONS_REPORT;
+      if (out) appendFileSync(out, `${JSON.stringify(row)}\n`);
+    }
+  } finally {
+    await browser.close();
+  }
+};
+
 perfSlices(
   "invariants: every-action-1: every catalog action runs to an end on the demo host",
   ACTION_CASES,
-  5,
-  async (part) => {
-    const { appendFileSync } = await import("node:fs");
+  3,
+  pressActions,
+);
+perfSlices(
+  "invariants: every-action-1 slow: the longer actions run to an end on the demo host",
+  SLOW_ACTION_CASES,
+  1,
+  pressActions,
+);
+
+// every-action-1 probe: what a slow action is doing while it runs.
+perfTest(
+  "invariants: every-action-1 probe: a slow action's job, second by second",
+  async () => {
     const browser = await launch();
     try {
       const context = await browser.newContext();
       await freshPage(context);
-      for (const [stack, action, args] of part) {
-        const r = await context.request.post(
-          `${BASE}/data/actions/${stack}/${action}`,
-          { data: args, headers: { Origin: BASE }, failOnStatusCode: false },
+      const [stack, action, args] = JSON.parse(
+        process.env.INVARIANTS_PROBE ?? '["kp-soft","seal-env",{}]',
+      );
+      const r = await context.request.post(
+        `${BASE}/data/actions/${stack}/${action}`,
+        {
+          data: args,
+          headers: { Origin: BASE },
+          failOnStatusCode: false,
+        },
+      );
+      const body = await r.json().catch(() => ({}));
+      const rows = [];
+      for (let i = 0; i < 8; i += 1) {
+        await new Promise((res) => setTimeout(res, 2000));
+        const jobs = await (
+          await context.request.get(`${BASE}/data/actions/jobs`)
+        ).json();
+        rows.push(
+          (jobs.jobs ?? [])
+            .filter(
+              (/** @type {any} */ j) =>
+                ["queued", "running"].includes(j.state) || j.job === body.job,
+            )
+            .map(
+              (/** @type {any} */ j) =>
+                `${j.job}:${j.action}:${j.state}:${j.progress?.step ?? ""}:${(j.message ?? "").slice(0, 60)}`,
+            ),
         );
-        const status = r.status();
-        const body = await r.json().catch(() => ({}));
-        let end = null;
-        if (status < 300 && body.job) {
-          for (let i = 0; i < 100 && !end; i += 1) {
-            await new Promise((res) => setTimeout(res, 100));
-            const jobs = await (
-              await context.request.get(`${BASE}/data/actions/jobs`)
-            ).json();
-            const j = (jobs.jobs ?? []).find(
-              (/** @type {any} */ x) => x.job === body.job,
-            );
-            if (j && !["queued", "running"].includes(j.state))
-              end = {
-                state: j.state,
-                message: (j.message ?? "").slice(0, 120),
-              };
-          }
-        }
-        const row = {
-          action,
-          stack,
-          status,
-          job: body.job ?? null,
-          end,
-          refusal: status >= 300 ? JSON.stringify(body).slice(0, 160) : null,
-        };
-        const out = process.env.INVARIANTS_ACTIONS_REPORT;
-        if (out) appendFileSync(out, `${JSON.stringify(row)}\n`);
       }
+      const out = process.env.INVARIANTS_ACTIONS_REPORT;
+      if (out)
+        (await import("node:fs")).writeFileSync(
+          out,
+          JSON.stringify({ status: r.status(), body, rows }, null, 1),
+        );
     } finally {
       await browser.close();
     }

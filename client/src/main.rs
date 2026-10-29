@@ -2379,6 +2379,8 @@ async fn wait_for_updated_host(host: &str, token: &str, expected: Option<String>
     // The old daemon may finish a running operation first (up to 60 s,
     // fix-52), then the restart and a possible rollback follow.
     const WAIT_S: u64 = 150;
+    /// How long a host that was never seen down has to keep answering before a restart without a version counts as done.
+    const UNSEEN_RESTART_S: u64 = 10;
     println!(
         "{}… waiting up to {} s for the host to come back{}{}",
         C_DIM,
@@ -2389,16 +2391,39 @@ async fn wait_for_updated_host(host: &str, token: &str, expected: Option<String>
             .unwrap_or_default(),
         C_RESET
     );
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(WAIT_S);
+    let started = std::time::Instant::now();
+    let deadline = started + std::time::Duration::from_secs(WAIT_S);
     let mut seen_down = false;
     let mut last: Option<String> = None;
     while std::time::Instant::now() < deadline {
-        tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+        // host-restart-wait-1 (measured 2026-10-29 on the real host: `homelab
+        // host restart` waited its whole 150 s and failed): the daemon
+        // restarts within about 2 s, faster than a 3 s look, so "went down"
+        // was never seen. With no version to wait for, look every 300 ms; and
+        // a host that has answered throughout for `UNSEEN_RESTART_S` has
+        // restarted between two looks (the restart was accepted by the host).
+        let quick = expected.is_none();
+        tokio::time::sleep(std::time::Duration::from_millis(if quick {
+            300
+        } else {
+            3000
+        }))
+        .await;
         let answered = host_version(host, token).await;
         if answered.is_none() {
             seen_down = true;
         } else {
             last = answered.clone();
+            if quick
+                && !seen_down
+                && started.elapsed() >= std::time::Duration::from_secs(UNSEEN_RESTART_S)
+            {
+                println!(
+                    "{}✓ the host answers; its restart was faster than a look{}",
+                    C_GREEN, C_RESET
+                );
+                return rpc_with(host, token, Command::Ping).await;
+            }
         }
         match after_update(expected.as_deref(), seen_down, answered.as_deref()) {
             AfterUpdate::Wait => continue,

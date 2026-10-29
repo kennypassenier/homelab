@@ -838,6 +838,7 @@ function mountNow(body, x) {
     if (value !== "table" && value !== "feed") return;
     localStorage.setItem(lookKey, value);
     applyLook(value);
+    if (value === "feed" && feedBehind) paintFeed();
   });
   const historyCard = section({
     title: "History: every operation, grouped by day",
@@ -1755,6 +1756,8 @@ function mountNow(body, x) {
 
   /** What was painted last, so a reread that changed nothing repaints nothing. */
   let sig = "";
+  /** The feed look has not been drawn from the rows on show yet (it is hidden). */
+  let feedBehind = false;
   const paintFeed = () => {
     syncNarrow();
     if (!historyRead) {
@@ -1787,39 +1790,49 @@ function mountNow(body, x) {
       );
     }
     const shown = visibleRows();
-    setFeed(feedEl, {
-      state: shown.length ? "ready" : "empty",
-      rows: shown.map((r) => ({
-        key: r.key,
-        title: r.what,
-        at: r.start * 1000,
-        state:
-          r.state === "running"
-            ? "running"
-            : r.state === "failed"
-              ? "failed"
-              : r.state === "deferred"
-                ? "warn"
-                : r.state === "round"
-                  ? "info"
-                  : "ok",
-        actor: {
-          name: r.actor.text,
-          kind:
-            r.actor.kind === "claude"
-              ? "agent"
-              : r.actor.kind === "person"
-                ? "person"
-                : "schedule",
-        },
-        detail:
-          r.error ?? (r.took != null ? `took ${humanDuration(r.took)}` : ""),
-        more: r.error ? [r.error] : undefined,
-      })),
-      emptyText: rows.length
-        ? "Nothing is left of the picks made on the timeline and the grid: drop one to see more."
-        : `Nothing ran in the last ${days === 1 ? "day" : `${days} days`}.`,
-    });
+    // activity-open-1 (measured 2026-10-29 on the real dashboard: /activity held
+    // 20,844 DOM nodes and froze the tab 1.2 s at open, 1,170 operations drawn
+    // twice, as table rows and as feed rows): the look that is not on show is
+    // not drawn. Switching the look draws it from the same rows.
+    if (feedEl.hidden) {
+      feedBehind = true;
+      setFeed(feedEl, { state: "loading" });
+    } else {
+      feedBehind = false;
+      setFeed(feedEl, {
+        state: shown.length ? "ready" : "empty",
+        rows: shown.map((r) => ({
+          key: r.key,
+          title: r.what,
+          at: r.start * 1000,
+          state:
+            r.state === "running"
+              ? "running"
+              : r.state === "failed"
+                ? "failed"
+                : r.state === "deferred"
+                  ? "warn"
+                  : r.state === "round"
+                    ? "info"
+                    : "ok",
+          actor: {
+            name: r.actor.text,
+            kind:
+              r.actor.kind === "claude"
+                ? "agent"
+                : r.actor.kind === "person"
+                  ? "person"
+                  : "schedule",
+          },
+          detail:
+            r.error ?? (r.took != null ? `took ${humanDuration(r.took)}` : ""),
+          more: r.error ? [r.error] : undefined,
+        })),
+        emptyText: rows.length
+          ? "Nothing is left of the picks made on the timeline and the grid: drop one to see more."
+          : `Nothing ran in the last ${days === 1 ? "day" : `${days} days`}.`,
+      });
+    }
     const next = JSON.stringify([
       dayStart(now()),
       shown.map((r) => [r.key, r.state, r.took]),

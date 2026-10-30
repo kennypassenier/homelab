@@ -59,8 +59,8 @@ services:
       # Zone:Zone:Read on kp-soft.dev only). The challenge is checked against
       # a public resolver on purpose: the house resolver answers *.kp-soft.dev
       # itself and would never see the _acme-challenge record. Renewal is
-      # Traefik's own, 30 days before expiry. The staging CA is the first
-      # run; switching to the real one is removing the caServer line.
+      # Traefik's own, 30 days before expiry. The first run used Let's Encrypt's
+      # staging CA (2026-10-30); this is the real one.
       - "--entrypoints.websecure.http.tls=true"
       - "--entrypoints.websecure.http.tls.certResolver=le"
       - "--entrypoints.websecure.http.tls.domains[0].main=kp-soft.dev"
@@ -68,7 +68,6 @@ services:
       - "--certificatesresolvers.le.acme.storage=/etc/traefik/acme.json"
       - "--certificatesresolvers.le.acme.dnschallenge.provider=cloudflare"
       - "--certificatesresolvers.le.acme.dnschallenge.resolvers=1.1.1.1:53,8.8.8.8:53"
-      - "--certificatesresolvers.le.acme.caServer=https://acme-staging-v02.api.letsencrypt.org/directory"
       - "--accesslog=true"
       - "--accesslog.filepath=/var/log/traefik/access.log"
       - "--accesslog.format=json"

@@ -10,7 +10,7 @@ http:
   routers:
     jobtracker:
       rule: "Host(`job.kp-soft.dev`)"
-      entryPoints: [web]
+      entryPoints: [web, websecure]
       service: jobtracker
 
   services:

@@ -8,7 +8,7 @@ http:
   routers:
     qbittorrent:
       rule: "Host(`qbit.kp-soft.dev`)"
-      entryPoints: [web]
+      entryPoints: [web, websecure]
       service: qbittorrent
 
   services:

@@ -9,22 +9,22 @@
 # Chosen hostnames: budget (household ledger), pdf (PDF toolbox), docs
 # (document archive). None collide with the fifteen already routed.
 #
-# entryPoints: [web] throughout, matching every other route here: cloudflared
+# entryPoints: [web, websecure] throughout, matching every other route here: cloudflared
 # terminates TLS at the edge and forwards plain HTTP to the gateway.
 
 http:
   routers:
     actual:
       rule: "Host(`budget.kp-soft.dev`)"
-      entryPoints: [web]
+      entryPoints: [web, websecure]
       service: actual
     stirling:
       rule: "Host(`pdf.kp-soft.dev`)"
-      entryPoints: [web]
+      entryPoints: [web, websecure]
       service: stirling
     paperless:
       rule: "Host(`docs.kp-soft.dev`)"
-      entryPoints: [web]
+      entryPoints: [web, websecure]
       service: paperless
 
   services:

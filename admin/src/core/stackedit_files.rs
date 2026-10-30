@@ -279,7 +279,7 @@ http:
   routers:
     <app>:
       rule: "Host(`<app>.example.org`)"
-      entryPoints: [web]
+      entryPoints: [web, websecure]
       service: <app>
 
   services:
@@ -296,7 +296,7 @@ http:
   routers:
     <name>:
       rule: "Host(`<name>.example.org`)"
-      entryPoints: [web]
+      entryPoints: [web, websecure]
       service: <name>
 
   services:

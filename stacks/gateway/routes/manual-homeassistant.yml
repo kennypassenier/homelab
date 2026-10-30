@@ -18,7 +18,7 @@ http:
   routers:
     homeassistant:
       rule: "Host(`ha.kp-soft.dev`)"
-      entryPoints: [web]
+      entryPoints: [web, websecure]
       service: homeassistant
 
   services:

@@ -6,12 +6,12 @@ http:
   routers:
     opnsense:
       rule: "Host(`opn.kp-soft.dev`)"
-      entryPoints: [web]
+      entryPoints: [web, websecure]
       service: opnsense
 
     proxmox:
       rule: "Host(`prox.kp-soft.dev`)"
-      entryPoints: [web]
+      entryPoints: [web, websecure]
       service: proxmox
 
   services:

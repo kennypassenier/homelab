@@ -14,7 +14,7 @@ http:
   routers:
     kyu:
       rule: "Host(`kyu.kp-soft.dev`)"
-      entryPoints: [web]
+      entryPoints: [web, websecure]
       service: kyu
 
   services:

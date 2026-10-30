@@ -5,7 +5,7 @@ http:
   routers:
     admin:
       rule: "Host(`admin.kp-soft.dev`)"
-      entryPoints: [web]
+      entryPoints: [web, websecure]
       service: admin
 
   services:

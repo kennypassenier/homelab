@@ -1427,10 +1427,33 @@ fn fetch_latch_secrets(
         // rather than letting latch overwrite is deliberate — this map is
         // filled from disk first, so removing the refusal without skipping
         // would silently give latch precedence, the opposite of the decision.
-        if env.contains_key(app) {
+        let rel = format!("{}/{}/.env", stack, app);
+        if let Some(local) = env.get(app) {
+            // The local file is what this deploy uses; say when latch no
+            // longer agrees with it. Failing to compare is a note, never a
+            // failed deploy: the file the deploy needs is already in hand.
+            let latch_copy = std::process::Command::new("latch")
+                .args(["cat", &rel, "--env", &latch_env, "--expand"])
+                .current_dir(project_root)
+                .output();
+            match latch_copy {
+                Ok(o) if o.status.success() => {
+                    let theirs = String::from_utf8_lossy(&o.stdout);
+                    let drift = crate::envdrift::compare(local, &theirs);
+                    notes.extend(crate::envdrift::note(app, &drift));
+                }
+                Ok(o) => notes.push(format!(
+                    "[env] {} :: could not compare the local .env with latch ({})",
+                    app,
+                    String::from_utf8_lossy(&o.stderr).trim()
+                )),
+                Err(e) => notes.push(format!(
+                    "[env] {} :: could not compare the local .env with latch ({})",
+                    app, e
+                )),
+            }
             continue;
         }
-        let rel = format!("{}/{}/.env", stack, app);
         let out = std::process::Command::new("latch")
             .args(["cat", &rel, "--env", &latch_env, "--expand"])
             .current_dir(project_root)

@@ -8,6 +8,7 @@ pub mod cli_args;
 pub mod cli_help;
 
 pub mod edge;
+pub mod envdrift;
 pub mod link;
 pub mod netredact;
 pub mod output;

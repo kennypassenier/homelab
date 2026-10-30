@@ -92,3 +92,37 @@ pub(crate) fn log_refused(state: &AppState, peer: SocketAddr, path: &str) {
         n
     );
 }
+
+/// fix-120 (expert panel, api-token-is-root, 2026-09-27): the 401 branch
+/// logged nothing, so a probe from a compromised container or a stolen token
+/// tried from a new machine left no trace. Kept in memory: a flood of bad
+/// attempts must not turn into a flood of state writes.
+#[derive(Default)]
+pub(crate) struct AuthFailures {
+    pub(crate) count: std::sync::atomic::AtomicU64,
+    pub(crate) last: std::sync::Mutex<Option<(String, u64)>>,
+}
+
+impl AuthFailures {
+    /// Count one refusal from `peer` and return the running total.
+    pub(crate) fn record(&self, peer: &str, now: u64) -> u64 {
+        *self.last.lock().unwrap_or_else(PoisonError::into_inner) = Some((peer.to_string(), now));
+        self.count
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+            + 1
+    }
+
+    /// What has been seen, in the shape doctor reads.
+    pub(crate) fn snapshot(&self) -> homelab_core::doctor::FailedAuth {
+        let last = self
+            .last
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone();
+        homelab_core::doctor::FailedAuth {
+            count: self.count.load(std::sync::atomic::Ordering::Relaxed),
+            last_peer: last.as_ref().map(|(p, _)| p.clone()),
+            last_at: last.map(|(_, t)| t).unwrap_or(0),
+        }
+    }
+}

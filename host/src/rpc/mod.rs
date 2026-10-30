@@ -4,9 +4,14 @@
 mod backups;
 mod cleanup;
 mod config;
+mod exec;
+mod host_update;
+mod listing;
+mod live;
 mod native;
 mod native_install;
 mod questions;
+mod restores;
 mod secrets;
 mod snapshots;
 mod stacks;
@@ -69,7 +74,7 @@ pub(crate) async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse
             app,
             source,
         } => {
-            backups::restore_stack(
+            restores::restore_stack(
                 state,
                 req.id,
                 manifest,
@@ -169,18 +174,18 @@ pub(crate) async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse
             )
             .await
         }
-        Rpc::ExecIn { vmid, command } => questions::exec_in(state, req.id, vmid, command).await,
-        Rpc::CancelExec { request } => questions::cancel_exec(state, req.id, request).await,
-        Rpc::GetApplied { stack } => views::get_applied(state, req.id, stack).await,
+        Rpc::ExecIn { vmid, command } => exec::exec_in(state, req.id, vmid, command).await,
+        Rpc::CancelExec { request } => exec::cancel_exec(state, req.id, request).await,
+        Rpc::GetApplied { stack } => live::get_applied(state, req.id, stack).await,
         Rpc::GetFirewallLive { stack_files } => {
-            views::get_firewall_live(state, req.id, stack_files).await
+            live::get_firewall_live(state, req.id, stack_files).await
         }
         Rpc::GetBackups {
             stack,
             force,
             source,
-        } => snapshots::get_backups(state, req.id, stack, force, source).await,
-        Rpc::GetRetired => views::get_retired(state, req.id).await,
+        } => listing::get_backups(state, req.id, stack, force, source).await,
+        Rpc::GetRetired => live::get_retired(state, req.id).await,
         Rpc::BrowseSnapshot {
             owner,
             snapshot,
@@ -208,7 +213,7 @@ pub(crate) async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse
             confirm,
             unit,
             source,
-        } => native::restore_native(state, req.id, stack, snapshot, confirm, unit, source).await,
+        } => restores::restore_native(state, req.id, stack, snapshot, confirm, unit, source).await,
         Rpc::RevealSecret {
             stack,
             secret,
@@ -235,9 +240,9 @@ pub(crate) async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse
             allow,
         } => config::apply_host_config(state, req.id, declared, expect_sha256, allow).await,
         Rpc::SelfUpdateHost { binary_b64, proof } => {
-            system::self_update_host(state, req.id, binary_b64, proof).await
+            host_update::self_update_host(state, req.id, binary_b64, proof).await
         }
-        Rpc::RestartHost => system::restart_host(state, req.id).await,
+        Rpc::RestartHost => host_update::restart_host(state, req.id).await,
         Rpc::Doctor { json } => system::doctor(state, req.id, json).await,
         Rpc::GetState => system::get_state(state, req.id).await,
         Rpc::IncidentShow { name } => system::incident_show(state, req.id, name).await,

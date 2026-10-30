@@ -3,6 +3,7 @@
 //! per responsibility; everything is re-exported, so callers say
 //! `crate::config::Config` and never name the file.
 
+mod apply;
 mod defaults;
 mod derive;
 mod file;
@@ -16,6 +17,7 @@ mod tokens;
 mod unknown;
 mod warnings;
 
+pub(crate) use apply::*;
 pub(crate) use defaults::*;
 pub(crate) use derive::*;
 pub(crate) use file::*;

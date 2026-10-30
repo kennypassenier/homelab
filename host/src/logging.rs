@@ -194,3 +194,10 @@ pub(crate) fn rpc_stack(command: &Rpc) -> Option<String> {
         _ => None,
     }
 }
+
+impl<'a> tracing_subscriber::fmt::MakeWriter<'a> for RingWriter {
+    type Writer = RingWriter;
+    fn make_writer(&'a self) -> Self::Writer {
+        self.clone()
+    }
+}

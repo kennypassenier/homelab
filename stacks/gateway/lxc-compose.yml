@@ -294,6 +294,12 @@ firewall:
       note: Loki push from every container's Alloy and from pve
     - dir: in
       action: ACCEPT
+      source: 10.10.10.0/24
+      proto: tcp
+      dport: "443"
+      note: the home route (2026-10-30, Kenny chose the Trusted network) - TLS on Traefik for every device at home that resolves *.kp-soft.dev here
+    - dir: in
+      action: ACCEPT
       source: 10.10.10.13
       proto: tcp
       dport: "8081,8082,9100"

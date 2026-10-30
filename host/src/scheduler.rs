@@ -567,6 +567,9 @@ pub(crate) async fn scheduler_loop(state: AppState) {
             run_nightly_edge_check(&state, &exec, now).await;
         }
 
+        // Managed tools (latch): keep them current under their follow rule.
+        tools_round(&state, &exec).await;
+
         // Y4: after the night's work, hold the record against the machine.
         // Unconditional, because the findings this exists for are precisely
         // the ones that produce no failure of their own: a stack whose

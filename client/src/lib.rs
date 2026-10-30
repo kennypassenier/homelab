@@ -21,6 +21,7 @@ pub mod spec;
 pub mod status;
 pub mod testplan;
 pub mod tls;
+pub mod tools_cli;
 #[cfg(feature = "tui")]
 pub mod tui;
 pub mod ui_catalog;

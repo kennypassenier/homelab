@@ -5,6 +5,7 @@ mod backups;
 mod cleanup;
 mod config;
 mod native;
+mod native_install;
 mod questions;
 mod secrets;
 mod snapshots;
@@ -17,7 +18,6 @@ mod views;
 use crate::*;
 
 pub(crate) async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse {
-    let exec = RealExecutor;
     match req.command {
         Rpc::History {
             since,
@@ -53,7 +53,7 @@ pub(crate) async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse
             stack,
             unit,
             binary_b64,
-        } => native::stage_native_binary(state, req.id, stack, unit, binary_b64).await,
+        } => native_install::stage_native_binary(state, req.id, stack, unit, binary_b64).await,
         Rpc::DeployStack(spec) => stacks::deploy_stack(state, req.id, spec).await,
         Rpc::DestroyStack {
             manifest,
@@ -87,17 +87,17 @@ pub(crate) async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse
         Rpc::PatchFleet => stacks::patch_fleet(state, req.id).await,
         Rpc::ApplyResources(manifest) => stacks::apply_resources(state, req.id, manifest).await,
         Rpc::BackupHostMeta => backups::backup_host_meta(state, req.id).await,
-        Rpc::AdoptService(m) => native::adopt_service(state, req.id, m).await,
+        Rpc::AdoptService(m) => native_install::adopt_service(state, req.id, m).await,
         Rpc::InstallNative {
             manifest,
             binary_b64,
             unit_file,
-        } => native::install_native(state, req.id, manifest, binary_b64, unit_file).await,
+        } => native_install::install_native(state, req.id, manifest, binary_b64, unit_file).await,
         Rpc::InstallNativeRelease {
             manifest,
             unit_file,
             tag,
-        } => native::install_native_release(state, req.id, manifest, unit_file, tag).await,
+        } => native_install::install_native_release(state, req.id, manifest, unit_file, tag).await,
         Rpc::BackupNative { stack } => native::backup_native(state, req.id, stack).await,
         Rpc::UpdateNative { stack } => native::update_native(state, req.id, stack).await,
         Rpc::RollbackNative { stack, unit } => {
@@ -147,42 +147,7 @@ pub(crate) async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse
             ok,
             note,
             accept_days,
-        } => {
-            let store = homelab_core::state::StateStore::new(&exec, &state.config.state_dir);
-            let now = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .map(|d| d.as_secs())
-                .unwrap_or(0);
-            // fix-65: a deliberate nok, accepted until a date.
-            let until = accept_days.map(|d| now + u64::from(d) * 86_400);
-            let found = record_state(&store, "manual check answer", |st| match until {
-                Some(u) => homelab_core::ops::manualchecks::accept(st, &id, u, &note, now),
-                None => homelab_core::ops::manualchecks::answer(st, &id, ok, &note, now),
-            })
-            .await
-            .unwrap_or(false);
-            let message = if found {
-                match until {
-                    Some(u) => format!(
-                        "{} recorded as NOT ok, accepted until {}",
-                        id,
-                        homelab_core::state::ymd(u)
-                    ),
-                    None => format!("{} recorded as {}", id, if ok { "ok" } else { "NOT ok" }),
-                }
-            } else {
-                format!(
-                    "no manual check has id {} — run `homelab checks` for the list",
-                    id
-                )
-            };
-            RpcResponse {
-                id: req.id,
-                ok: found,
-                message,
-                deferred: None,
-            }
-        }
+        } => questions::answer_manual_check(state, req.id, id, ok, note, accept_days).await,
         Rpc::SetStackEnabled { stack, enabled } => {
             stacks::set_stack_enabled(state, req.id, stack, enabled).await
         }
@@ -264,64 +229,11 @@ pub(crate) async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse
         Rpc::TokenIssue { name, scope } => tokens::token_issue(state, req.id, name, scope).await,
         Rpc::TokenList => tokens::token_list(state, req.id).await,
         Rpc::TokenRevoke { name } => tokens::token_revoke(state, req.id, name).await,
-        // fix-110: `config/host.toml` sent whole — `homelab host apply`, or
-        // the dashboard's declarative commit of it. Same outcome shape as
-        // `SetHostConfig`: the G8 keys go live immediately, the rest waits
-        // for the host's next start.
         Rpc::ApplyHostConfig {
             toml: declared,
             expect_sha256,
             allow,
-        } => {
-            let path = state.config.config_path.clone();
-            let raw = std::fs::read_to_string(&path).unwrap_or_default();
-            let outcome =
-                apply_host_config_whole(&raw, &declared, expect_sha256.as_deref(), &allow)
-                    .and_then(|(text, saved)| {
-                        write_config_file(&path, &text).map(|()| (text, saved))
-                    });
-            match outcome {
-                Ok((text, saved)) => {
-                    if let Ok(file) = toml::from_str::<FileConfig>(&text) {
-                        let new_level = file
-                            .log_level
-                            .clone()
-                            .filter(|s| !s.trim().is_empty())
-                            .unwrap_or_else(|| "info".to_string());
-                        {
-                            let mut live = state
-                                .settings
-                                .write()
-                                .unwrap_or_else(PoisonError::into_inner);
-                            live.backup_hour = file.backup_hour;
-                            live.notify_webhook = file.notify_webhook;
-                            live.retention = file
-                                .retention
-                                .unwrap_or_else(homelab_core::retention::default_tiers);
-                            live.log_level = new_level.clone();
-                        }
-                        // fix-122: same live reload as `SetHostConfig`.
-                        let _ = state.log_filter.reload(
-                            tracing_subscriber::EnvFilter::try_new(&new_level)
-                                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),
-                        );
-                    }
-                    info!("host.toml applied from config/host.toml");
-                    RpcResponse {
-                        id: req.id,
-                        ok: true,
-                        message: serde_json::to_string(&saved).unwrap_or_default(),
-                        deferred: None,
-                    }
-                }
-                Err(e) => RpcResponse {
-                    id: req.id,
-                    ok: false,
-                    message: e,
-                    deferred: None,
-                },
-            }
-        }
+        } => config::apply_host_config(state, req.id, declared, expect_sha256, allow).await,
         Rpc::SelfUpdateHost { binary_b64, proof } => {
             system::self_update_host(state, req.id, binary_b64, proof).await
         }

@@ -267,3 +267,50 @@ pub(crate) async fn cancel_exec(state: &AppState, req_id: u64, request: u64) -> 
         }
     }
 }
+
+/// fix-65: record a person's answer to one manual check, or accept a not-ok
+/// until a date.
+pub(crate) async fn answer_manual_check(
+    state: &AppState,
+    req_id: u64,
+    id: String,
+    ok: bool,
+    note: String,
+    accept_days: Option<u32>,
+) -> RpcResponse {
+    let exec = RealExecutor;
+    let store = homelab_core::state::StateStore::new(&exec, &state.config.state_dir);
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    // fix-65: a deliberate nok, accepted until a date.
+    let until = accept_days.map(|d| now + u64::from(d) * 86_400);
+    let found = record_state(&store, "manual check answer", |st| match until {
+        Some(u) => homelab_core::ops::manualchecks::accept(st, &id, u, &note, now),
+        None => homelab_core::ops::manualchecks::answer(st, &id, ok, &note, now),
+    })
+    .await
+    .unwrap_or(false);
+    let message = if found {
+        match until {
+            Some(u) => format!(
+                "{} recorded as NOT ok, accepted until {}",
+                id,
+                homelab_core::state::ymd(u)
+            ),
+            None => format!("{} recorded as {}", id, if ok { "ok" } else { "NOT ok" }),
+        }
+    } else {
+        format!(
+            "no manual check has id {} — run `homelab checks` for the list",
+            id
+        )
+    };
+    RpcResponse {
+        id: req_id,
+        ok: found,
+        message,
+        deferred: None,
+    }
+}

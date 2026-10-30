@@ -175,3 +175,61 @@ pub(crate) async fn set_host_config(
         },
     }
 }
+
+// fix-110: `config/host.toml` sent whole — `homelab host apply`, or
+// the dashboard's declarative commit of it. Same outcome shape as
+// `SetHostConfig`: the G8 keys go live immediately, the rest waits
+// for the host's next start.
+pub(crate) async fn apply_host_config(
+    state: &AppState,
+    req_id: u64,
+    declared: String,
+    expect_sha256: Option<String>,
+    allow: Vec<String>,
+) -> RpcResponse {
+    let path = state.config.config_path.clone();
+    let raw = std::fs::read_to_string(&path).unwrap_or_default();
+    let outcome = apply_host_config_whole(&raw, &declared, expect_sha256.as_deref(), &allow)
+        .and_then(|(text, saved)| write_config_file(&path, &text).map(|()| (text, saved)));
+    match outcome {
+        Ok((text, saved)) => {
+            if let Ok(file) = toml::from_str::<FileConfig>(&text) {
+                let new_level = file
+                    .log_level
+                    .clone()
+                    .filter(|s| !s.trim().is_empty())
+                    .unwrap_or_else(|| "info".to_string());
+                {
+                    let mut live = state
+                        .settings
+                        .write()
+                        .unwrap_or_else(PoisonError::into_inner);
+                    live.backup_hour = file.backup_hour;
+                    live.notify_webhook = file.notify_webhook;
+                    live.retention = file
+                        .retention
+                        .unwrap_or_else(homelab_core::retention::default_tiers);
+                    live.log_level = new_level.clone();
+                }
+                // fix-122: same live reload as `SetHostConfig`.
+                let _ = state.log_filter.reload(
+                    tracing_subscriber::EnvFilter::try_new(&new_level)
+                        .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),
+                );
+            }
+            info!("host.toml applied from config/host.toml");
+            RpcResponse {
+                id: req_id,
+                ok: true,
+                message: serde_json::to_string(&saved).unwrap_or_default(),
+                deferred: None,
+            }
+        }
+        Err(e) => RpcResponse {
+            id: req_id,
+            ok: false,
+            message: e,
+            deferred: None,
+        },
+    }
+}

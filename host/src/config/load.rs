@@ -71,6 +71,8 @@ pub(crate) struct Config {
     /// Window for the log-coverage question; see the file field.
     pub(crate) logs_window: String,
     /// D5: git remote URL for the offsite intent mirror; None = off.
+    /// The latch environment the Secrets page writes to; None until set.
+    pub(crate) latch_env: Option<String>,
     pub(crate) mirror_remote: Option<String>,
     /// H1 (hardening): safety values configurable via host.toml so M5 can
     /// migrate the gateway / adjust the no-touch list without a release.
@@ -339,6 +341,11 @@ pub(crate) fn load_config_from(path: String) -> Config {
         loki_url: file.loki_url.clone(),
         loki_vmid: file.loki_vmid,
         logs_window: file.logs_window.clone().unwrap_or_else(default_logs_window),
+        latch_env: file
+            .latch_env
+            .clone()
+            .or_else(|| std::env::var("HOMELAB_LATCH_ENV").ok())
+            .filter(|e| !e.trim().is_empty()),
         mirror_remote: file.mirror_remote,
         safety: {
             let mut sc = SafetyConfig::default();

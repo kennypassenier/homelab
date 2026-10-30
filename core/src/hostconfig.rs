@@ -367,6 +367,19 @@ pub const KEYS: &[KeyInfo] = &[
         Access::Browser,
         Apply::Restart,
     ),
+    // The latch environment the Secrets page writes to. Kept in the settings
+    // file rather than the process environment: a systemd unit the binary
+    // carries cannot be extended by hand without the units check flagging it.
+    k(
+        "latch_env",
+        "Access to the host",
+        "Latch environment",
+        "The latch environment the Secrets page writes to, e.g. prod; empty: the page cannot write.",
+        "empty",
+        Kind::Text,
+        Access::Browser,
+        Apply::Restart,
+    ),
     k(
         "mirror_remote",
         "Nightly round and backups",

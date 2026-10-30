@@ -149,6 +149,8 @@ pub(crate) struct FileConfig {
     pub(crate) logs_window: Option<String>,
     pub(crate) retention: Option<Vec<homelab_proto::RetentionTier>>,
     pub(crate) exec_enabled: Option<bool>,
+    /// The latch environment the Secrets page writes to (`prod`).
+    pub(crate) latch_env: Option<String>,
     pub(crate) mirror_remote: Option<String>,
     pub(crate) no_touch: Option<Vec<u16>>,
     /// fix-120 (api-token-is-root, 2026-09-27): vmids a deploy may make a

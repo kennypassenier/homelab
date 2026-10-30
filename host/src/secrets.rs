@@ -45,8 +45,8 @@ pub fn latch_put(project_root: &str, env: &str, rel: &str, content: &str) -> Res
     use std::process::Stdio;
     if env.trim().is_empty() {
         return Err(
-            "HOMELAB_LATCH_ENV is not set on the host :: set it to the latch environment to \
-             write (e.g. HOMELAB_LATCH_ENV=prod) and restart the host"
+            "no latch environment is set on the host :: set latch_env = \"prod\" in host.toml \
+             (or HOMELAB_LATCH_ENV) and restart the host"
                 .to_string(),
         );
     }

@@ -102,8 +102,10 @@ pub(crate) async fn set_secret(
     if let Err(e) = append_audit(&format!("{}/audit.log", state.config.state_dir), &audit) {
         tracing::warn!("audit.log: could not record the write :: {}", e);
     }
-    let env = std::env::var("HOMELAB_LATCH_ENV").unwrap_or_default();
-    let project_root = format!("{}/repo", state.config.state_dir);
+    let env = state.config.latch_env.clone().unwrap_or_default();
+    // latch's project root is the `stacks/` directory of the intent repo, the
+    // directory the relative path `<stack>/<app>/.env` is read from.
+    let project_root = format!("{}/repo/stacks", state.config.state_dir);
     let result = tokio::task::spawn_blocking(move || {
         crate::secrets::latch_put(&project_root, &env, &rel, &content)
     })

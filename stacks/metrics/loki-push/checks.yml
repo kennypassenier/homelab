@@ -2,7 +2,7 @@
 # loki-unauthenticated-open, 2026-09-27). Two readings, one for each half of
 # its job: what must pass does, and what must not pass does not.
 checks:
-  # The question every Alloy and Uptime Kuma asks, through the front.
+  # The question every Alloy and the dashboard's check ask, through the front.
   - name: "loki is ready through the front door"
     command: "curl -s -m 10 http://127.0.0.1:3100/ready"
     expect: must_match

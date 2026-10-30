@@ -3658,7 +3658,7 @@ span_days = 7\n";
             "probed and absent: not running"
         );
         assert_eq!(
-            live_app(Some(&r), 107, "kuma"),
+            live_app(Some(&r), 107, "jellyfin"),
             (true, 0),
             "guest not probed: unknown"
         );

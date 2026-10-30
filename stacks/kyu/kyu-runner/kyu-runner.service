@@ -61,7 +61,7 @@ Environment=KYU_RUNNER_TIMEOUT_STOP_SECS=60
 # 0.2.2 refused to start over it — unknown keys are rejected on purpose, so a
 # typo fails loudly, and so does a setting that moved.
 #
-# 8082 is what Uptime Kuma probes, and it is not localhost: this container
+# 8082 is what the dashboard's watch probes, and it is not localhost: this container
 # holds three services and each binds its own address on 10.10.10.9.
 Environment=KYU_RUNNER_LISTEN=10.10.10.9:8082
 # trusted-sources (Kenny, 2026-10-22: "alle software moet de trusted-admin

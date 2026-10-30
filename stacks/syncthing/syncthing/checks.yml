@@ -7,7 +7,7 @@
 # entry in its config with an empty id, label and path (F163).
 #
 # Everything above it was green the whole time. `/rest/noauth/health` answers
-# `{"status": "OK"}` — which is exactly what the Uptime Kuma monitor asks —
+# `{"status": "OK"}` — which is exactly what a plain liveness probe asks —
 # and the container reports healthy. The service was up. It was not a service.
 checks:
   - name: "folders syncthing synchronizes"

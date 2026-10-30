@@ -15,7 +15,8 @@ http:
   routers:
     kitchen:
       rule: "Host(`kitchen.kp-soft.dev`)"
-      entryPoints: [web]
+      # websecure: the home route (2026-10-30), the pilot hostname.
+      entryPoints: [web, websecure]
       service: kitchen
 
     eten:

@@ -35,7 +35,7 @@ the fleet flawlessly, makes adding services trivial, and is fun to operate.
   in the critical path.
 - No multi-user/RBAC, no policy-as-code, no canary updates (single-admin
   homelab).
-- No rebuild of monitoring (Grafana/Loki/Uptime-Kuma exist); the
+- No rebuild of monitoring (Grafana and Loki exist; the dashboard replaced Uptime Kuma); the
   orchestrator reports what it *does*, monitoring reports what *runs*.
 - No Kubernetes; the k3s cluster is out of scope and untouchable.
 - PBS/vzdump whole-container backups: separate infrastructure project

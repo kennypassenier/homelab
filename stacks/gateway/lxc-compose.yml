@@ -177,8 +177,8 @@ firewall:
     replaced them).
     Port 80 is open to nobody (traefik-lan-host-header-bypass): the tunnel reaches
     Traefik over gateway_net inside this container (172.18.0.1 in the access log),
-    which never crosses the veth. Uptime Kuma's bare-Host monitor on :80 has to move
-    before this is enabled.
+    which never crosses the veth. The home route (2026-10-30) comes in on :443 instead,
+    from the trusted workstation only.
   rules:
     - comment: "pve's rescue address: never from a container"
       dir: out

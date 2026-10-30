@@ -6,7 +6,8 @@ use super::version::{Step, Version, step};
 /// How a tool follows its releases (Kenny, 2026-10-30: "nieuwste, major
 /// wacht"). `Latest` keeps minor and patch current by itself and holds a
 /// major for a person; `Pinned` never moves by itself.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Deserialize, serde::Serialize)]
+#[serde(rename_all = "lowercase")]
 pub enum Follow {
     Latest,
     Pinned,

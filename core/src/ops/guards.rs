@@ -605,7 +605,7 @@ pub async fn ensure_latch(
     Ok(true)
 }
 
-async fn fetch(exec: &dyn Executor, url: &str, what: &str) -> Result<String, CoreError> {
+pub(crate) async fn fetch(exec: &dyn Executor, url: &str, what: &str) -> Result<String, CoreError> {
     let out = exec
         .run(&Cmd::new(
             "curl",

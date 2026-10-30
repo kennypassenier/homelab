@@ -4,4 +4,5 @@
 //! decide the same way.
 
 pub mod policy;
+pub mod spec;
 pub mod version;

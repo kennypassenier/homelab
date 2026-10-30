@@ -76,6 +76,7 @@ pub mod snapshot_cache;
 pub mod template;
 pub mod tiles;
 pub mod today;
+pub mod tools;
 pub mod update;
 pub mod util;
 pub mod watched;

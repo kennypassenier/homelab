@@ -1,7 +1,6 @@
 //! Reading the settings: the resolved `Config`, loading from file and environment, the startup checks and persisting a change.
 
 use super::*;
-use crate::{orphan_watchers, plaintext_bearer_routes};
 use homelab_core::safety::SafetyConfig;
 use std::net::SocketAddr;
 
@@ -234,79 +233,12 @@ pub(crate) fn load_config() -> Config {
 }
 
 pub(crate) fn load_config_from(path: String) -> Config {
-    // A missing file is legal — every field has a default. A file that
-    // exists but does not parse is not: the old code answered that with
-    // `FileConfig::default()`, so a single typo turned every configured
-    // feature off at once and said nothing (F186).
-    let file: FileConfig = match std::fs::read_to_string(&path) {
-        Err(_) => FileConfig::default(),
-        Ok(raw) => {
-            let parsed: toml::Table = match toml::from_str(&raw) {
-                Ok(t) => t,
-                Err(e) => {
-                    eprintln!("FATAL: {} does not parse as TOML: {}", path, e);
-                    std::process::exit(1);
-                }
-            };
-            for key in unknown_keys(&parsed) {
-                eprintln!(
-                    "WARNING: {}: '{}' is not a setting this daemon reads and is being \
-                     ignored. A key written after a [table] header belongs to that table \
-                     - move it above the first one.",
-                    path, key
-                );
-            }
-            match toml::Table::try_into::<FileConfig>(parsed) {
-                Ok(f) => f,
-                Err(e) => {
-                    eprintln!("FATAL: {} is not a valid host config: {}", path, e);
-                    std::process::exit(1);
-                }
-            }
-        }
-    };
+    let file = read_file_config(&path);
     let as_read = file.clone();
+    let (token, log_level, tokens) = start_checks(&file, &path);
+    let safety = safety_config(&file);
+    let backup = backup_config(&file);
 
-    let token = std::env::var("HOMELAB_TOKEN")
-        .ok()
-        .or(file.token)
-        .unwrap_or_default();
-    if token.len() < 16 {
-        eprintln!(
-            "FATAL: token must be set (>=16 chars) via {} or HOMELAB_TOKEN",
-            path
-        );
-        std::process::exit(1);
-    }
-    if file.status_interval_s.is_some_and(|s| s < 10) {
-        eprintln!(
-            "FATAL: {}: status_interval_s must be at least 10 (each reading runs one probe per container)",
-            path
-        );
-        std::process::exit(1);
-    }
-    // fix-122: the runtime debug toggle, checked the same way at start as it
-    // is at `SetHostConfig` (`startup_problems`) — a directive string
-    // `EnvFilter` cannot parse would otherwise be written to host.toml and
-    // only fail the NEXT restart, silently, with the daemon logging nothing
-    // at all.
-    let log_level = file
-        .log_level
-        .clone()
-        .filter(|s| !s.trim().is_empty())
-        .unwrap_or_else(|| "info".to_string());
-    if !log_level_is_valid(&log_level) {
-        eprintln!(
-            "FATAL: {}: log_level {:?} is not a tracing/EnvFilter directive (e.g. \"info\", \"debug\")",
-            path, log_level
-        );
-        std::process::exit(1);
-    }
-    let tokens = file.tokens.clone().unwrap_or_default();
-    if let Err(e) = validate_tokens(&tokens) {
-        eprintln!("FATAL: {}: {}", path, e);
-        std::process::exit(1);
-    }
     let listen = std::env::var("HOMELAB_LISTEN")
         .ok()
         .or(file.listen)
@@ -358,42 +290,7 @@ pub(crate) fn load_config_from(path: String) -> Config {
             })
             .collect(),
         mirror_remote: file.mirror_remote,
-        safety: {
-            let mut sc = SafetyConfig::default();
-            // F8: the file ADDS to the compiled list, it does not replace it.
-            // It used to assign, so `no_touch = [200]` in host.toml would
-            // have quietly dropped Home Assistant and the router out of
-            // protection — a typo away from making the two machines this
-            // project may never touch touchable. The list is law and its home
-            // is `core/src/safety.rs`; config can only widen it.
-            if let Some(list) = file.no_touch {
-                for vmid in list {
-                    if !sc.no_touch.contains(&vmid) {
-                        sc.no_touch.push(vmid);
-                    }
-                }
-            }
-            if let Some(gw) = file.gateway_vmid {
-                sc.gateway_vmid = gw;
-            }
-            if let Some(dir) = file.gateway_routes_dir {
-                sc.gateway_routes_dir = dir;
-            }
-            // fix-120: the daemon always runs with a policy; without the
-            // keys it is what the fleet uses today, so nothing is refused
-            // that deployed yesterday.
-            sc.privileged_vmids = Some(
-                file.privileged_vmids
-                    .unwrap_or_else(|| homelab_core::safety::FLEET_PRIVILEGED_VMIDS.to_vec()),
-            );
-            sc.data_mount_roots = Some(file.data_mount_roots.unwrap_or_else(|| {
-                homelab_core::safety::FLEET_DATA_MOUNT_ROOTS
-                    .iter()
-                    .map(|s| s.to_string())
-                    .collect()
-            }));
-            sc
-        },
+        safety,
         zfs_jobs: file.zfs_jobs.unwrap_or_default(),
         watched_backups: file.watched_backups.unwrap_or_default(),
         device_backups: file.device_backups.unwrap_or_default(),
@@ -405,32 +302,7 @@ pub(crate) fn load_config_from(path: String) -> Config {
         // rule-20: absent from host.toml = the audit's own defaults.
         capacity_thresholds: file.capacity_thresholds.unwrap_or_default(),
         tsdb_retention_size_mib: file.tsdb_retention_size_mib,
-        backup: {
-            let d = homelab_core::ops::backup::BackupCfg::default();
-            homelab_core::ops::backup::BackupCfg {
-                restic_base: file.restic_base.unwrap_or(d.restic_base),
-                password_file: file.restic_password_file.unwrap_or(d.password_file),
-                snapshot_timeout_s: file
-                    .restic_snapshot_timeout_s
-                    .unwrap_or(d.snapshot_timeout_s),
-                restore_timeout_s: file.restic_restore_timeout_s.unwrap_or(d.restore_timeout_s),
-                // Unset: the default staging dir. "none" or empty: no staging.
-                staging_dir: match file.native_backup_staging_dir {
-                    None => d.staging_dir,
-                    Some(s) if s.trim().is_empty() || s.trim() == "none" => None,
-                    Some(s) => Some(s),
-                },
-                staging_cap_mib: file
-                    .native_backup_staging_cap_mib
-                    .unwrap_or(d.staging_cap_mib),
-                tiers: d.tiers,
-                trigger: d.trigger,
-                // backup-local-first: the second repository set is where a
-                // compose stack's snapshot is written first.
-                local_dataset: file.second_copy_dataset.clone(),
-                stall_s: file.backup_stall_s.unwrap_or(d.stall_s),
-            }
-        },
+        backup,
         metrics_targets_dir: file.metrics_targets_dir,
         tile_watch_source: file.tile_watch_source.filter(|s| !s.trim().is_empty()),
         trusted_sources: file
@@ -498,61 +370,7 @@ pub(crate) fn load_config_from(path: String) -> Config {
         },
         file: as_read,
     };
-    // F259: a watcher whose path no writer targets watches nothing — it
-    // reports "holds no files at all" forever while looking like a working
-    // check. Said out loud at load, where every other config fault is said.
-    for w in orphan_watchers(
-        &cfg.watched_backups,
-        &cfg.device_backups,
-        &cfg.backup.restic_base,
-    ) {
-        tracing::warn!(
-            "watched_backups entry {} matches no device_backups writer — it will report \
-             'holds no files at all' whatever happens",
-            w
-        );
-    }
-    // fix-126: said at every start until the route moves to TLS.
-    for route in plaintext_bearer_routes(
-        cfg.initial_settings.notify_webhook.as_deref(),
-        cfg.notify_auth_bearer.as_deref(),
-        cfg.notify_fallback_webhook.as_deref(),
-        cfg.notify_fallback_auth_bearer.as_deref(),
-    ) {
-        tracing::warn!(
-            "notification route {} sends its bearer token over plain HTTP — anything on that \
-             network segment can read it; an https:// route closes this",
-            route
-        );
-    }
-    // fix-126: an https:// route is already refused at start without a pin
-    // (`startup_problems`); this is the one check that needs the file on
-    // disk, so it runs here instead — a mismatch means the hub's
-    // certificate changed (or notify_tls_cert points at the wrong file) and
-    // is as loud as a client refusing a changed host certificate.
-    if let (Some(path), Some(want)) = (&cfg.notify_tls_cert, &cfg.notify_tls_fingerprint) {
-        match std::fs::read_to_string(path).map(|pem| homelab_core::notify::cert_fingerprint(&pem))
-        {
-            Ok(Ok(got)) if &got != want => {
-                tracing::error!(
-                    "notify_tls_cert {} does not match notify_tls_fingerprint ({}; the file is \
-                     {}) — notifications over https will be refused until this is fixed: either \
-                     the hub's certificate changed (read its fingerprint again and update \
-                     notify_tls_fingerprint) or notify_tls_cert is the wrong file",
-                    path,
-                    want,
-                    got
-                );
-            }
-            Ok(Err(e)) => {
-                tracing::error!("notify_tls_cert {} is not a valid certificate: {}", path, e);
-            }
-            Err(e) => {
-                tracing::error!("notify_tls_cert {} could not be read: {}", path, e);
-            }
-            Ok(Ok(_)) => {}
-        }
-    }
+    warn_at_load(&cfg);
     cfg
 }
 

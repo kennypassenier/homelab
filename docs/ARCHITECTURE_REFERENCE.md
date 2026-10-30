@@ -78,8 +78,8 @@ flowchart LR
 |---|---|---|
 | `core` | decide everything: manifests, safety gates, runner, state, operations (`core/src/lib.rs:1-7`) | touch the world itself. Dependencies: serde, thiserror, async-trait, sha2, minisign-verify (`core/Cargo.toml:8-15`); no `std::fs`, `std::process`, `std::env`, `SystemTime` or `tokio::` in `core/src`. Time arrives as `OpCtx.now_unix` (`core/src/ops/mod.rs:98-99`) |
 | `proto` | wire types, re-exporting core's domain types (`proto/src/lib.rs:11-16`) | depend on more than core and serde (`proto/Cargo.toml:8-11`) |
-| `host` | the real `Executor` (`host/src/main.rs:1518-1585`), config, TLS and websocket server, journal, scheduler, notifications | run `latch` or `gh` (neither occurs in `host/src`) |
-| `client` | CLI verbs, TUI, local validation, scaffolding; the only crate that runs `latch` (`client/src/spec.rs:375`) and `gh` (`client/src/release.rs:15`) | change the host except through an RPC |
+| `host` | the real `Executor` (`host/src/main.rs:1518-1585`), config, TLS and websocket server, journal, scheduler, notifications | run `gh` (it does not occur in `host/src`) or `latch` beyond the one `latch put` in `host/src/secrets.rs:53`, which stores a secret the dashboard edited |
+| `client` | CLI verbs, TUI, local validation, scaffolding; the crate that runs `latch` for deploys and reads (`client/src/spec.rs:375`; the host only writes, see above) and the only one that runs `gh` (`client/src/release.rs:15`) | change the host except through an RPC |
 
 The dependency arrows point one way, towards `core`; `+` is what a crate
 may do and `-` what it may not.

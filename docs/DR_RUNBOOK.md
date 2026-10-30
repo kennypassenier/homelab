@@ -368,6 +368,10 @@ One section per directory under `stacks/`, read from its `lxc-compose.yml` and, 
   - `rclone:gdrive:homelab-backups/crowdsec-config`: `/appdata/gateway/crowdsec-config`
 - Holds nothing by declaration (`no_data`), so no repository: `/appdata/gateway/cloudflared-config`.
 - Host directory mounted in, never created or backed up by this suite: `/HDD2TB/logs/traefik` at `/mnt/traefik-logs` (Traefik access + rotated logs. Regenerable, deliberately outside the backup).
+- Outside the stack (set by hand, not rebuilt by any deploy; check these after a rebuild or when this stack's address changes):
+  - **OPNsense**, Services > Unbound DNS > Overrides > Host Overrides: kitchen.kp-soft.dev  A  CT 104 (gateway) (the home route: at home the name goes straight to Traefik instead of through Cloudflare) (read-only check declared: `unbound-override kitchen.kp-soft.dev`; no round runs it yet)
+  - **Cloudflare**, Zero Trust > Networks > Tunnels > the tunnel > Public hostnames: the origin the tunnel sends *.kp-soft.dev to (an address in this container); check it when Traefik moves (traffic from outside the house reaches Traefik through this tunnel)
+  - **Cloudflare**, My Profile > API Tokens: a token with Zone:DNS:Edit and Zone:Zone:Read on kp-soft.dev only; its value is in latch as gateway/traefik/.env CF_DNS_API_TOKEN (Traefik proves it owns kp-soft.dev for the wildcard certificate (DNS-01))
 
 ### inbox (vmid 118)
 

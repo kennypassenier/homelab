@@ -351,3 +351,22 @@ tiles:
 log_files:
   - path: /mnt/traefik-logs/access.log
     job: access
+
+# Settings outside the stacks that depend on this one (Kenny, 2026-10-30: "als
+# ik traefik op een ander ip wil hosten dan moeten die dingen ook aangepast
+# worden"). Nothing deploys them; the runbook lists them, and {ip} below is
+# this file's own address.
+external:
+  - system: OPNsense
+    where: "Services > Unbound DNS > Overrides > Host Overrides"
+    what: "kitchen.kp-soft.dev  A  {ip}"
+    check: "unbound-override kitchen.kp-soft.dev"
+    why: "the home route: at home the name goes straight to Traefik instead of through Cloudflare"
+  - system: Cloudflare
+    where: "Zero Trust > Networks > Tunnels > the tunnel > Public hostnames"
+    what: "the origin the tunnel sends *.kp-soft.dev to (an address in this container); check it when Traefik moves"
+    why: "traffic from outside the house reaches Traefik through this tunnel"
+  - system: Cloudflare
+    where: "My Profile > API Tokens"
+    what: "a token with Zone:DNS:Edit and Zone:Zone:Read on kp-soft.dev only; its value is in latch as gateway/traefik/.env CF_DNS_API_TOKEN"
+    why: "Traefik proves it owns kp-soft.dev for the wildcard certificate (DNS-01)"

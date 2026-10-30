@@ -53,6 +53,11 @@ struct StackFile {
     /// only by name. Client-side only, so it never reaches the intent hash.
     #[serde(default)]
     ephemeral: bool,
+    /// Settings this stack depends on that live outside the stacks (a DNS
+    /// override in OPNsense, a tunnel in Cloudflare); see `crate::external`.
+    /// Client-side only, like `ephemeral`: never part of the intent hash.
+    #[serde(default)]
+    external: Vec<crate::external::ExternalSetting>,
 }
 
 /// One `latch_files` entry: `from` is the file's path in latch under this
@@ -230,7 +235,7 @@ fn default_gw() -> u16 {
 /// field and the real line — and the message ends in a remedy, per standing
 /// rule 11.
 fn parse_stack_file(raw: &str, path: &Path) -> Result<StackFile, String> {
-    serde_yaml::from_str::<StackFile>(raw).map_err(|whole| {
+    let file = serde_yaml::from_str::<StackFile>(raw).map_err(|whole| {
         let detail = match serde_yaml::from_str::<StackManifest>(raw) {
             Err(e) => e.to_string(),
             Ok(_) => whole.to_string(),
@@ -240,7 +245,14 @@ fn parse_stack_file(raw: &str, path: &Path) -> Result<StackFile, String> {
             detail,
             path.display()
         )
-    })
+    })?;
+    crate::external::validate(&file.external).map_err(|e| {
+        format!(
+            "manifest parse: {e} :: fix that value in {} and run `homelab plan` again",
+            path.display()
+        )
+    })?;
+    Ok(file)
 }
 
 /// Just the intent — no files, no secrets, no latch (F291, see REGISTER.md).
@@ -1842,6 +1854,15 @@ fn runbook_stack_section(
                 .as_deref()
                 .map(|n| format!(" ({})", n.trim().trim_end_matches('.')))
                 .unwrap_or_default()
+        ));
+    }
+    if let Ok(raw) = std::fs::read_to_string(stack_dir.join("lxc-compose.yml"))
+        && let Ok(file) = parse_stack_file(&raw, &stack_dir.join("lxc-compose.yml"))
+    {
+        s.push_str(&crate::external::runbook_lines(
+            &file.external,
+            &m.network.ip,
+            &m.hostname,
         ));
     }
     s.push('\n');

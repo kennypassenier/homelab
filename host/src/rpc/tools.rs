@@ -108,3 +108,39 @@ pub(crate) async fn tool_rollback(state: &AppState, req_id: u64, name: String) -
         Err(e) => fail(req_id, e.to_string()),
     }
 }
+
+/// What the doctor shows about each managed tool; `None` when the host
+/// manages none, so an older report stays as it was.
+pub(crate) async fn tool_probes(
+    state: &AppState,
+) -> Option<Vec<homelab_core::doctor_tools::ToolProbe>> {
+    use homelab_core::doctor_tools::ToolProbe;
+    if state.config.tools.is_empty() {
+        return None;
+    }
+    let exec = RealExecutor;
+    let mut out = Vec::new();
+    for spec in &state.config.tools {
+        let probe = match check::status(&exec, spec).await {
+            Ok(s) => ToolProbe {
+                name: s.name,
+                installed: s.installed.map(|v| v.to_string()),
+                newest: Some(s.newest.to_string()),
+                held: match s.verdict {
+                    Verdict::Hold { version, major } => Some((version.to_string(), major)),
+                    _ => None,
+                },
+                error: None,
+            },
+            Err(e) => ToolProbe {
+                name: spec.name.clone(),
+                installed: None,
+                newest: None,
+                held: None,
+                error: Some(e.to_string()),
+            },
+        };
+        out.push(probe);
+    }
+    Some(out)
+}

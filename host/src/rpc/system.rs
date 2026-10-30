@@ -186,6 +186,7 @@ pub(crate) async fn doctor(state: &AppState, req_id: u64, json: bool) -> RpcResp
     )
     .await;
     probes.failed_auth = Some(state.auth_failures.snapshot());
+    probes.tools = super::tools::tool_probes(state).await;
     gather_security_probes(&exec, &ProbeContext::of(&state.config), now, &mut probes).await;
     let checks = homelab_core::doctor::diagnose(&probes);
     let overall = homelab_core::doctor::overall(&checks);

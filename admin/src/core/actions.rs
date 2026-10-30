@@ -154,6 +154,11 @@ pub enum ActionKind {
     /// the host to the release, then install it on the dashboard (its
     /// restart ends the job). No other stack is touched.
     RollOutRelease,
+    /// Host-wide: install the newest signed release of a managed tool
+    /// (latch), a held major included; the press that releases a major.
+    ToolUpdate,
+    /// Host-wide: put a managed tool's previous program back.
+    ToolRollback,
 }
 
 /// What the shell has to read before the command can be built.
@@ -201,6 +206,8 @@ pub enum Arg {
     Command,
     /// A release tag, e.g. v3.63.0; empty: the latest.
     Tag,
+    /// A managed tool's name (a `[tools.<name>]` table in host.toml), e.g. latch.
+    Tool,
     /// The template's version number.
     Version,
     /// Build the privileged template.
@@ -304,6 +311,8 @@ impl ActionKind {
         ActionKind::ChangeSecret,
         ActionKind::SealEnv,
         ActionKind::RollOutRelease,
+        ActionKind::ToolUpdate,
+        ActionKind::ToolRollback,
     ];
 
     /// The name in a URL: `deploy`, `backup-native`, ...
@@ -343,6 +352,8 @@ impl ActionKind {
             Apply => "apply",
             RestartHost => "restart-host",
             RollOutRelease => "roll-out-release",
+            ToolUpdate => "tool-update",
+            ToolRollback => "tool-rollback",
             ChangeSecret => "change-secret",
             SealEnv => "seal-env",
             UpdateApps => "update-apps",
@@ -379,6 +390,8 @@ impl ActionKind {
                 | Apply
                 | RestartHost
                 | RollOutRelease
+                | ToolUpdate
+                | ToolRollback
                 | UpdateApps
                 | UpdateHomeAddress
         )
@@ -418,6 +431,7 @@ impl ActionKind {
             ChangeSecret => &[Arg::SecretRef, Arg::StageToken, Arg::ThenDeploy],
             RestartHost => &[Arg::ThenApply],
             RollOutRelease => &[Arg::Tag],
+            ToolUpdate | ToolRollback => &[Arg::Tool],
             Update => &[Arg::App],
             RollbackNative => &[Arg::Unit],
             PruneOrphans | Forget => &[Arg::Confirm],
@@ -536,6 +550,8 @@ impl ActionKind {
             Apply => "Deploy all changes",
             RestartHost => "Restart the host",
             RollOutRelease => "Roll out a release",
+            ToolUpdate => "Update a program",
+            ToolRollback => "Roll a program back",
             ChangeSecret => "Change a secret",
             SealEnv => "Push the env",
             UpdateApps => "Update apps",
@@ -623,6 +639,12 @@ impl ActionKind {
             RestartHost => {
                 "restarts the host daemon; running jobs are refused while a job runs; with Deploy what changed ticked, deploys every stack whose files changed once the host is back"
             }
+            ToolUpdate => {
+                "install the newest signed release of a managed program on the host (latch): the host checks its signature, checksum and glibc, keeps the previous program and puts it back when the new one does not run; this is also how a held major release is let in"
+            }
+            ToolRollback => {
+                "put a managed program's previous version back, the one kept beside it when it was last updated"
+            }
             RollOutRelease => {
                 "one job: update the host to the release, then install it on the dashboard, which restarts last; no other stack is touched"
             }
@@ -683,6 +705,9 @@ pub struct ActionArgs {
     pub app: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub unit: Option<String>,
+    /// A managed tool's name (`latch`), for the tool actions.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tool: Option<String>,
     /// restore-two-sources-1: "local" or "remote".
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub source: Option<String>,
@@ -771,6 +796,9 @@ impl ActionArgs {
         }
         if self.unit.is_some() {
             v.push(Arg::Unit);
+        }
+        if self.tool.is_some() {
+            v.push(Arg::Tool);
         }
         if self.source.is_some() {
             v.push(Arg::Source);
@@ -975,7 +1003,11 @@ pub fn validate(stack: &str, action: &str, args: ActionArgs) -> Result<ActionReq
             "choose local (the copy on the host's own disks) or remote (Google Drive)",
         ));
     }
-    for (field, v) in [("app", &args.app), ("unit", &args.unit)] {
+    for (field, v) in [
+        ("app", &args.app),
+        ("unit", &args.unit),
+        ("tool", &args.tool),
+    ] {
         if let Some(v) = v
             && !valid_word(v)
         {
@@ -1482,6 +1514,12 @@ pub fn commands(req: &ActionRequest, material: Material) -> Result<Vec<Command>,
             }
             out
         }
+        (ToolUpdate, _) => vec![Command::ToolUpdate {
+            name: a.tool.clone().ok_or_else(|| wrong_material(req))?,
+        }],
+        (ToolRollback, _) => vec![Command::ToolRollback {
+            name: a.tool.clone().ok_or_else(|| wrong_material(req))?,
+        }],
         (Patch, _) => vec![Command::PatchFleet],
         (RestartHost, _) => vec![Command::RestartHost],
         (ZfsReplicate, _) => vec![Command::ZfsReplicate],

@@ -424,6 +424,7 @@ pub(crate) async fn gather_probes(
         password_file_ok: None,
         drive: None,
         unowned_route_files: None,
+        tools: None,
     }
 }
 

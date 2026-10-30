@@ -268,6 +268,7 @@ pub fn arg_name(a: Arg) -> &'static str {
         Arg::Vmid => "vmid",
         Arg::Command => "command",
         Arg::Tag => "tag",
+        Arg::Tool => "tool",
         Arg::Version => "version",
         Arg::Privileged => "privileged",
         Arg::Base => "base",

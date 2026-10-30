@@ -5,6 +5,8 @@
     "exec": ["vmid", "command"],
     "guards-ct": ["vmid"],
     "update-host": ["tag"],
+    "tool-update": ["tool"],
+    "tool-rollback": ["tool"],
     "apply": ["destroy", "destroy_ids", "destroy_ack"],
     "roll-out-release": ["tag"]
   },
@@ -43,6 +45,8 @@
     "apply": "Compares the whole stacks directory against the host and applies every difference in one batch: deploys what changed, and destroys only the stacks explicitly typed below to confirm — nothing is destroyed just because it is no longer in the working copy.",
     "restart-host": "Restarts the homelab-host.service daemon itself, so a host.toml change that needs a restart takes effect without a full host update.",
     "change-secret": "Writes one new value for the named secret straight through latch into the stack's sealed env file. The value itself is never logged or kept in the job's own history.",
+    "tool-update": "Installs the newest signed release of a managed program on the host (latch): the host checks its signature, checksum and glibc, keeps the previous program beside it and puts it back when the new one does not run. This is also how a held major release is let in.",
+    "tool-rollback": "Puts a managed program's previous version back, the one kept beside it when it was last updated.",
     "roll-out-release": "One job for a new homelab release, in this order: the host is updated to the chosen (or newest) signed release, then the dashboard installs the same release and restarts, which ends the job (its outcome is read back after the restart). No other stack is touched. It stops at the first part that fails."
   },
   "steps": {
@@ -95,6 +99,14 @@
       "required": false,
       "source": "apps",
       "empty": "Every app"
+    },
+    "tool": {
+      "kind": "text",
+      "label": "Program",
+      "help": "The managed program, named as its [tools.<name>] table in host.toml names it (for example latch).",
+      "required": true,
+      "pattern": "word",
+      "placeholder": "latch"
     },
     "unit": {
       "kind": "choice",
@@ -381,6 +393,8 @@
     "settings-ext",
     "template-build",
     "tiles",
+    "tool-rollback",
+    "tool-update",
     "update",
     "update-host",
     "update-native",

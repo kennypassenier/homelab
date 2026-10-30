@@ -171,6 +171,36 @@ where
         .await
 }
 
+/// tile-watch-watcher-out (found 2026-10-01): the fleet-wide tile-watch
+/// targets and the watcher stack itself, read once per op from the same
+/// snapshot `deploy`'s own prior-state read uses — a deploy in progress folds
+/// its own, fresher manifest in on top of this (`with_fresh_target`), so a load
+/// a moment old is never wrong, only momentarily incomplete for the very stack
+/// being deployed. A snapshot that fails to load leaves both empty, same as
+/// `tile_watch_source` unset: no OUT rule is derived.
+async fn tile_watch_facts(
+    state: &AppState,
+    exec: &RealExecutor,
+) -> (
+    homelab_core::firewall::FleetTileTargets,
+    Option<homelab_core::firewall::TileWatcher>,
+) {
+    match homelab_core::state::StateStore::new(exec, &state.config.state_dir)
+        .load()
+        .await
+    {
+        Ok(snapshot) => (
+            homelab_core::ops::tiles::fleet_tile_watch_targets(&snapshot),
+            state
+                .config
+                .tile_watch_source
+                .as_deref()
+                .and_then(|s| homelab_core::ops::tiles::tile_watch_watcher(&snapshot, s)),
+        ),
+        Err(_) => (Vec::new(), None),
+    }
+}
+
 pub(crate) async fn run_op_body<F>(
     state: &AppState,
     exec: &RealExecutor,
@@ -208,28 +238,7 @@ where
         timeout_s: state.config.ask_timeout_s,
         notify: true,
     };
-    // tile-watch-watcher-out (found 2026-10-01): the fleet-wide tile-watch
-    // targets and the watcher stack itself, read once per op from the same
-    // snapshot `deploy`'s own prior-state read uses — a deploy in progress
-    // folds its own, fresher manifest in on top of this (`with_fresh_target`),
-    // so a load a moment old is never wrong, only momentarily incomplete for
-    // the very stack being deployed. A snapshot that fails to load leaves
-    // both empty, same as `tile_watch_source` unset: no OUT rule is derived.
-    let (tile_watch_targets, tile_watch_watcher) =
-        match homelab_core::state::StateStore::new(exec, &state.config.state_dir)
-            .load()
-            .await
-        {
-            Ok(snapshot) => (
-                homelab_core::ops::tiles::fleet_tile_watch_targets(&snapshot),
-                state
-                    .config
-                    .tile_watch_source
-                    .as_deref()
-                    .and_then(|s| homelab_core::ops::tiles::tile_watch_watcher(&snapshot, s)),
-            ),
-            Err(_) => (Vec::new(), None),
-        };
+    let (tile_watch_targets, tile_watch_watcher) = tile_watch_facts(state, exec).await;
     let ctx = OpCtx {
         exec,
         sink: &sink,
@@ -251,47 +260,9 @@ where
         asker: &asker,
     };
     let report = op(&ctx).await;
-    // arch-history: one line for this operation, whatever its outcome.
-    record_history(
-        state,
-        &homelab_core::history::HistoryEntry::Op {
-            start: now,
-            end: unix_now(),
-            label: label.to_string(),
-            subject: broadcast.subject.lock().ok().and_then(|s| s.clone()),
-            req: (req_id != 0).then_some(req_id),
-            by: broadcast.by.clone(),
-            ok: report.ok,
-            deferred: report.deferred.clone(),
-            error: report.error.as_ref().map(|e| e.what.clone()),
-            steps: broadcast
-                .timings
-                .lock()
-                .map(|t| t.clone())
-                .unwrap_or_default(),
-        },
-    );
-    // AR14: a failure's incident bundle first, so its notice can name it.
-    let bundle = if !report.ok && report.deferred.is_none() {
-        let versions = format!("host={}\nproto={}\n", VERSION, homelab_proto::PROTO_VERSION);
-        Some(
-            homelab_core::incidents::write_bundle(
-                exec,
-                &state.config.state_dir,
-                now,
-                &report,
-                &sink.events(),
-                &versions,
-            )
-            .await,
-        )
-    } else {
-        None
-    };
-    let incident = match &bundle {
-        Some(Ok(dir)) => dir.rsplit('/').next().map(str::to_string),
-        _ => None,
-    };
+    record_op_history(state, &broadcast, now, label, req_id, &report);
+    let bundle = failure_bundle(state, exec, now, &report, &sink.events()).await;
+    let incident = bundle_name(&bundle);
     // F3, best-effort; decision notify-routing: a notice, pushed if urgent.
     notify(
         state,
@@ -310,57 +281,5 @@ where
     if report.ok {
         spawn_mirror_push(state); // D5, best-effort + detached
     }
-    if report.ok {
-        RpcResponse {
-            id: req_id,
-            ok: true,
-            // fix-371-1: a run that did nothing says why, in one line.
-            message: match &report.note {
-                Some(note) => format!("{} complete — nothing to do: {}", label, note),
-                None => format!(
-                    "{} complete — {} step(s), {} changed",
-                    label,
-                    report.steps.len(),
-                    report.steps.iter().filter(|s| s.changed).count()
-                ),
-            },
-            deferred: None,
-        }
-    } else if let Some(why) = report.deferred.clone() {
-        // Stood aside on purpose. No incident bundle, no `error!`, no
-        // failure count: nothing broke and nothing changed. `ok` stays false
-        // because nothing ran either, so no caller records work that did not
-        // happen (F280).
-        info!("{} stood aside: {}", label, why);
-        RpcResponse {
-            id: req_id,
-            ok: false,
-            message: format!("{} deferred — {}", label, why),
-            deferred: Some(why),
-        }
-    } else {
-        let err = report
-            .error
-            .clone()
-            .unwrap_or(homelab_core::error::OperatorError {
-                what: format!("{} failed", label),
-                why: "unknown".into(),
-                remedy: "see transcript".into(),
-            });
-        error!("{} failed: {} — {}", label, err.what, err.why);
-        let bundle_note = match bundle {
-            Some(Ok(dir)) => format!(" :: incident bundle {}", dir),
-            Some(Err(e)) => format!(" :: (bundle write failed: {})", e),
-            None => String::new(),
-        };
-        RpcResponse {
-            id: req_id,
-            ok: false,
-            message: format!(
-                "{} :: {} :: remedy: {}{}",
-                err.what, err.why, err.remedy, bundle_note
-            ),
-            deferred: None,
-        }
-    }
+    op_response(label, req_id, &report, bundle)
 }

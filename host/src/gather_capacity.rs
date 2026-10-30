@@ -38,6 +38,204 @@ pub(crate) fn capacity_numbers(
     (total, used, committed, cores, load1)
 }
 
+use homelab_core::ops::fleetcheck::{HostCapacityFact, HostCapacityMetric, parse_df_pcent};
+
+fn fact(
+    metric: HostCapacityMetric,
+    subject: impl Into<String>,
+    used_pct: u8,
+    detail: String,
+    cap_configured: bool,
+) -> HostCapacityFact {
+    HostCapacityFact {
+        metric,
+        subject: subject.into(),
+        used_pct,
+        detail,
+        cap_configured,
+    }
+}
+
+/// pve's root filesystem.
+async fn pve_root(exec: &dyn Executor) -> Vec<HostCapacityFact> {
+    match exec
+        .run(&Cmd::new("df", &["--output=pcent", "/"], 15))
+        .await
+    {
+        Ok(o) => parse_df_pcent(&o.stdout)
+            .map(|pct| {
+                fact(
+                    HostCapacityMetric::PveRoot,
+                    "pve",
+                    pct,
+                    format!("{pct}% full"),
+                    true,
+                )
+            })
+            .into_iter()
+            .collect(),
+        Err(_) => Vec::new(),
+    }
+}
+
+/// The default Proxmox thin pool: volume group `pve`, logical volume `data`. A
+/// host configured with a different pool name is not measured here — that is
+/// a fact to add, not a guess to make.
+async fn thin_pool(exec: &dyn Executor) -> Vec<HostCapacityFact> {
+    let args = [
+        "--noheadings",
+        "-o",
+        "data_percent,metadata_percent",
+        "pve/data",
+    ];
+    let Ok(o) = exec.run(&Cmd::new("lvs", &args, 15)).await else {
+        return Vec::new();
+    };
+    let Some((data, meta)) = homelab_core::ops::fleetcheck::parse_thin_pool_percents(&o.stdout)
+    else {
+        return Vec::new();
+    };
+    vec![
+        fact(
+            HostCapacityMetric::ThinPoolData,
+            "local-lvm",
+            data,
+            format!("{data}% full (data)"),
+            true,
+        ),
+        fact(
+            HostCapacityMetric::ThinPoolMeta,
+            "local-lvm",
+            meta,
+            format!("{meta}% full (metadata)"),
+            true,
+        ),
+    ]
+}
+
+/// Every ZFS pool's fill.
+async fn zfs_pools(exec: &dyn Executor) -> Vec<HostCapacityFact> {
+    let Ok(o) = exec
+        .run(&Cmd::new(
+            "zpool",
+            &["list", "-H", "-o", "name,capacity"],
+            15,
+        ))
+        .await
+    else {
+        return Vec::new();
+    };
+    homelab_core::ops::fleetcheck::parse_zpool_capacities(&o.stdout)
+        .into_iter()
+        .map(|(pool, pct)| {
+            fact(
+                HostCapacityMetric::ZfsPool,
+                pool,
+                pct,
+                format!("{pct}% full"),
+                true,
+            )
+        })
+        .collect()
+}
+
+/// The journal against its 2 GiB cap (hostunits::JOURNALD_CAP:
+/// SystemMaxUse=2G). fix-181: whether that drop-in is actually present is
+/// itself a fact to check, not an assumption — `homelab doctor` already treats
+/// its absence as drift (hostunits::drift), and a rebuilt or hand-edited host
+/// can be without it between a doctor run and the next self-update.
+async fn journald(exec: &dyn Executor) -> Vec<HostCapacityFact> {
+    let Ok(o) = exec
+        .run(&Cmd::new("journalctl", &["--disk-usage"], 15))
+        .await
+    else {
+        return Vec::new();
+    };
+    let Some(used_mib) = homelab_core::ops::fleetcheck::parse_journal_disk_usage_mib(&o.stdout)
+    else {
+        return Vec::new();
+    };
+    let cap_configured = exec
+        .run(&Cmd::new(
+            "test",
+            &["-f", homelab_core::hostunits::JOURNALD_CAP],
+            10,
+        ))
+        .await
+        .is_ok_and(|o| o.success());
+    let cap_mib: u64 = 2048;
+    let pct = ((used_mib * 100) / cap_mib).min(255) as u8;
+    vec![fact(
+        HostCapacityMetric::Journald,
+        "pve",
+        pct,
+        format!("{used_mib} MiB of its {cap_mib} MiB cap ({pct}%)"),
+        cap_configured,
+    )]
+}
+
+/// Prometheus' own TSDB against its configured retention size.
+async fn prometheus_tsdb(
+    exec: &dyn Executor,
+    prometheus_url: Option<&str>,
+    cap_mib: Option<u64>,
+) -> Vec<HostCapacityFact> {
+    let (Some(base), Some(cap_mib)) = (prometheus_url, cap_mib) else {
+        return Vec::new();
+    };
+    let q = format!(
+        "{}/api/v1/query?query=sum(prometheus_tsdb_storage_blocks_bytes)",
+        base.trim_end_matches('/')
+    );
+    let Ok(o) = exec
+        .run(&Cmd::new("curl", &["-s", "-m", "10", &q], 20))
+        .await
+    else {
+        return Vec::new();
+    };
+    let Some(bytes) = homelab_core::ops::fleetcheck::parse_prometheus_scalar(&o.stdout) else {
+        return Vec::new();
+    };
+    let used_mib = (bytes / 1024.0 / 1024.0).round() as u64;
+    let pct = ((used_mib * 100) / cap_mib.max(1)).min(255) as u8;
+    vec![fact(
+        HostCapacityMetric::PrometheusTsdb,
+        "Prometheus",
+        pct,
+        format!("{used_mib} MiB of its {cap_mib} MiB retention.size ({pct}%)"),
+        true,
+    )]
+}
+
+/// rule-20 (coordinator, 2026-10-01): the native-backup staging directory is
+/// emptied after every run (backup.rs, DEFAULT_STAGING_DIR) — so anything
+/// found here at all is worth a look well before it could ever fill its own
+/// cap, which is why its thresholds are far lower than every other reading.
+async fn native_staging(
+    exec: &dyn Executor,
+    dir: Option<&str>,
+    cap_mib: u64,
+) -> Vec<HostCapacityFact> {
+    let Some(dir) = dir else {
+        return Vec::new();
+    };
+    let Ok(o) = exec.run(&Cmd::new("du", &["-sm", dir], 30)).await else {
+        return Vec::new();
+    };
+    let Some(used_mib) = homelab_core::ops::fleetcheck::parse_du_sm(&o.stdout) else {
+        return Vec::new();
+    };
+    let cap = cap_mib.max(1);
+    let pct = ((used_mib * 100) / cap).min(255) as u8;
+    vec![fact(
+        HostCapacityMetric::NativeBackupStaging,
+        dir,
+        pct,
+        format!("{used_mib} MiB of its {cap} MiB cap ({pct}%) — it should be empty between runs"),
+        true,
+    )]
+}
+
 /// rule-20 (disk-audit, 2026-10-01): pve's root filesystem, the local-lvm
 /// thin pool (data and metadata), every ZFS pool, pve's own journald
 /// against its own cap (`hostunits::JOURNALD_CAP`, 2G), and — only when
@@ -51,155 +249,20 @@ pub(crate) async fn gather_host_capacity(
     tsdb_retention_size_mib: Option<u64>,
     native_backup_staging_dir: Option<&str>,
     native_backup_staging_cap_mib: u64,
-) -> Vec<homelab_core::ops::fleetcheck::HostCapacityFact> {
-    use homelab_core::ops::fleetcheck::{HostCapacityFact, HostCapacityMetric, parse_df_pcent};
-    let mut out = Vec::new();
-
-    if let Ok(o) = exec
-        .run(&Cmd::new("df", &["--output=pcent", "/"], 15))
-        .await
-        && let Some(pct) = parse_df_pcent(&o.stdout)
-    {
-        out.push(HostCapacityFact {
-            metric: HostCapacityMetric::PveRoot,
-            subject: "pve".into(),
-            used_pct: pct,
-            detail: format!("{}% full", pct),
-            cap_configured: true,
-        });
-    }
-
-    // The default Proxmox thin pool: volume group `pve`, logical volume
-    // `data`. A host configured with a different pool name is not measured
-    // here — that is a fact to add, not a guess to make.
-    if let Ok(o) = exec
-        .run(&Cmd::new(
-            "lvs",
-            &[
-                "--noheadings",
-                "-o",
-                "data_percent,metadata_percent",
-                "pve/data",
-            ],
-            15,
-        ))
-        .await
-        && let Some((data, meta)) =
-            homelab_core::ops::fleetcheck::parse_thin_pool_percents(&o.stdout)
-    {
-        out.push(HostCapacityFact {
-            metric: HostCapacityMetric::ThinPoolData,
-            subject: "local-lvm".into(),
-            used_pct: data,
-            detail: format!("{}% full (data)", data),
-            cap_configured: true,
-        });
-        out.push(HostCapacityFact {
-            metric: HostCapacityMetric::ThinPoolMeta,
-            subject: "local-lvm".into(),
-            used_pct: meta,
-            detail: format!("{}% full (metadata)", meta),
-            cap_configured: true,
-        });
-    }
-
-    if let Ok(o) = exec
-        .run(&Cmd::new(
-            "zpool",
-            &["list", "-H", "-o", "name,capacity"],
-            15,
-        ))
-        .await
-    {
-        for (pool, pct) in homelab_core::ops::fleetcheck::parse_zpool_capacities(&o.stdout) {
-            out.push(HostCapacityFact {
-                metric: HostCapacityMetric::ZfsPool,
-                subject: pool.clone(),
-                used_pct: pct,
-                detail: format!("{}% full", pct),
-                cap_configured: true,
-            });
-        }
-    }
-
-    if let Ok(o) = exec
-        .run(&Cmd::new("journalctl", &["--disk-usage"], 15))
-        .await
-        && let Some(used_mib) =
-            homelab_core::ops::fleetcheck::parse_journal_disk_usage_mib(&o.stdout)
-    {
-        // hostunits::JOURNALD_CAP: SystemMaxUse=2G. fix-181: whether that
-        // drop-in is actually present is itself a fact to check, not an
-        // assumption — `homelab doctor` already treats its absence as drift
-        // (hostunits::drift), and a rebuilt or hand-edited host can be
-        // without it between a doctor run and the next self-update.
-        let cap_configured = exec
-            .run(&Cmd::new(
-                "test",
-                &["-f", homelab_core::hostunits::JOURNALD_CAP],
-                10,
-            ))
-            .await
-            .is_ok_and(|o| o.success());
-        let cap_mib: u64 = 2048;
-        let pct = ((used_mib * 100) / cap_mib).min(255) as u8;
-        out.push(HostCapacityFact {
-            metric: HostCapacityMetric::Journald,
-            subject: "pve".into(),
-            used_pct: pct,
-            detail: format!("{} MiB of its {} MiB cap ({}%)", used_mib, cap_mib, pct),
-            cap_configured,
-        });
-    }
-
-    if let (Some(base), Some(cap_mib)) = (prometheus_url, tsdb_retention_size_mib) {
-        let q = format!(
-            "{}/api/v1/query?query=sum(prometheus_tsdb_storage_blocks_bytes)",
-            base.trim_end_matches('/')
-        );
-        if let Ok(o) = exec
-            .run(&Cmd::new("curl", &["-s", "-m", "10", &q], 20))
-            .await
-            && let Some(bytes) = homelab_core::ops::fleetcheck::parse_prometheus_scalar(&o.stdout)
-        {
-            let used_mib = (bytes / 1024.0 / 1024.0).round() as u64;
-            let pct = ((used_mib * 100) / cap_mib.max(1)).min(255) as u8;
-            out.push(HostCapacityFact {
-                metric: HostCapacityMetric::PrometheusTsdb,
-                subject: "Prometheus".into(),
-                used_pct: pct,
-                detail: format!(
-                    "{} MiB of its {} MiB retention.size ({}%)",
-                    used_mib, cap_mib, pct
-                ),
-                cap_configured: true,
-            });
-        }
-    }
-
-    // rule-20 (coordinator, 2026-10-01): the native-backup staging directory
-    // is emptied after every run (backup.rs, DEFAULT_STAGING_DIR) — so
-    // anything found here at all is worth a look well before it could ever
-    // fill its own cap, which is why its thresholds are far lower than
-    // every other reading above.
-    if let Some(dir) = native_backup_staging_dir
-        && let Ok(o) = exec.run(&Cmd::new("du", &["-sm", dir], 30)).await
-        && let Some(used_mib) = homelab_core::ops::fleetcheck::parse_du_sm(&o.stdout)
-    {
-        let cap = native_backup_staging_cap_mib.max(1);
-        let pct = ((used_mib * 100) / cap).min(255) as u8;
-        out.push(HostCapacityFact {
-            metric: HostCapacityMetric::NativeBackupStaging,
-            subject: dir.to_string(),
-            used_pct: pct,
-            detail: format!(
-                "{} MiB of its {} MiB cap ({}%) — it should be empty between runs",
-                used_mib, cap, pct
-            ),
-            cap_configured: true,
-        });
-    }
-
+) -> Vec<HostCapacityFact> {
+    let mut out = pve_root(exec).await;
+    out.extend(thin_pool(exec).await);
+    out.extend(zfs_pools(exec).await);
+    out.extend(journald(exec).await);
+    out.extend(prometheus_tsdb(exec, prometheus_url, tsdb_retention_size_mib).await);
+    out.extend(
+        native_staging(
+            exec,
+            native_backup_staging_dir,
+            native_backup_staging_cap_mib,
+        )
+        .await,
+    );
     out
 }
 

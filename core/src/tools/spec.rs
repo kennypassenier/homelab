@@ -16,7 +16,7 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 pub struct ToolSpec {
     /// The key under `[tools]`; filled in by the loader, not written in the file.
-    #[serde(default)]
+    #[serde(default, skip_serializing)]
     pub name: String,
     /// `owner/repo` on GitHub whose signed releases carry the tool.
     pub release_repo: String,
@@ -28,7 +28,7 @@ pub struct ToolSpec {
     #[serde(default = "default_follow")]
     pub follow: Follow,
     /// The version a `pinned` tool is held at.
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub version: Option<String>,
 }
 

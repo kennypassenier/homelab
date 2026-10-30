@@ -11,6 +11,7 @@ mod snapshots;
 mod stacks;
 mod system;
 mod tokens;
+mod tools;
 mod views;
 
 use crate::*;
@@ -24,6 +25,9 @@ pub(crate) async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse
             limit,
         } => system::history(state, req.id, since, until, limit).await,
         Rpc::Notices { after, limit } => system::notices(state, req.id, after, limit).await,
+        Rpc::ToolStatus => tools::tool_status(state, req.id).await,
+        Rpc::ToolUpdate { name } => tools::tool_update(state, req.id, name).await,
+        Rpc::ToolRollback { name } => tools::tool_rollback(state, req.id, name).await,
         Rpc::CurrentOp => system::current_op(state, req.id).await,
         Rpc::SessionOptions { .. } => RpcResponse {
             id: req.id,

@@ -288,6 +288,20 @@ fn cli_line_bare(command: &Command, force: bool) -> Option<String> {
             push(&vmid.to_string())?;
             push(command)?;
         }
+        ToolStatus => {
+            push("tool")?;
+            push("status")?;
+        }
+        ToolUpdate { name } => {
+            push("tool")?;
+            push("update")?;
+            push(name)?;
+        }
+        ToolRollback { name } => {
+            push("tool")?;
+            push("rollback")?;
+            push(name)?;
+        }
         RestartHost => {
             push("host")?;
             push("restart")?;

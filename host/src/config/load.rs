@@ -73,6 +73,8 @@ pub(crate) struct Config {
     /// D5: git remote URL for the offsite intent mirror; None = off.
     /// The latch environment the Secrets page writes to; None until set.
     pub(crate) latch_env: Option<String>,
+    /// The managed tools, each with its table name filled in.
+    pub(crate) tools: Vec<homelab_core::tools::spec::ToolSpec>,
     pub(crate) mirror_remote: Option<String>,
     /// H1 (hardening): safety values configurable via host.toml so M5 can
     /// migrate the gateway / adjust the no-touch list without a release.
@@ -346,6 +348,15 @@ pub(crate) fn load_config_from(path: String) -> Config {
             .clone()
             .or_else(|| std::env::var("HOMELAB_LATCH_ENV").ok())
             .filter(|e| !e.trim().is_empty()),
+        tools: file
+            .tools
+            .iter()
+            .flatten()
+            .map(|(name, spec)| homelab_core::tools::spec::ToolSpec {
+                name: name.clone(),
+                ..spec.clone()
+            })
+            .collect(),
         mirror_remote: file.mirror_remote,
         safety: {
             let mut sc = SafetyConfig::default();
@@ -618,6 +629,15 @@ pub(crate) fn startup_problems(file: &FileConfig) -> Vec<String> {
     }
     if let Err(e) = validate_tokens(file.tokens.as_deref().unwrap_or_default()) {
         out.push(e);
+    }
+    for (name, spec) in file.tools.iter().flatten() {
+        let named = homelab_core::tools::spec::ToolSpec {
+            name: name.clone(),
+            ..spec.clone()
+        };
+        if let Err(e) = named.validate() {
+            out.push(e);
+        }
     }
     if let Some(l) = &file.listen
         && l.parse::<SocketAddr>().is_err()

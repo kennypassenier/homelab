@@ -381,6 +381,16 @@ pub const KEYS: &[KeyInfo] = &[
         Apply::Restart,
     ),
     k(
+        "tools",
+        "Access to the host",
+        "Managed tools",
+        "Programs homelab installs and keeps current on the host, one [tools.<name>] table each: release_repo, asset, path, follow.",
+        "none",
+        Kind::Table,
+        Access::Browser,
+        Apply::Restart,
+    ),
+    k(
         "mirror_remote",
         "Nightly round and backups",
         "Intent mirror remote",

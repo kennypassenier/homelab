@@ -151,6 +151,9 @@ pub(crate) struct FileConfig {
     pub(crate) exec_enabled: Option<bool>,
     /// The latch environment the Secrets page writes to (`prod`).
     pub(crate) latch_env: Option<String>,
+    /// `[tools.<name>]` tables: managed programs (latch first).
+    pub(crate) tools:
+        Option<std::collections::BTreeMap<String, homelab_core::tools::spec::ToolSpec>>,
     pub(crate) mirror_remote: Option<String>,
     pub(crate) no_touch: Option<Vec<u16>>,
     /// fix-120 (api-token-is-root, 2026-09-27): vmids a deploy may make a

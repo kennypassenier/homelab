@@ -12,7 +12,7 @@ useDefault = true
 [[allowlists]]
 description = "Test fixtures: the fixed dummy bearer token and named test secrets"
 condition = "AND"
-paths = ['''(^|/)tests/.*\.rs$''', '''^host/src/main\.rs$''']
+paths = ['''(^|/)tests/.*\.rs$''', '''^host/src/main\.rs$''', '''^host/src/tests\.rs$''']
 regexTarget = "line"
 # `tok-0123456789`: the first fix-143 client test (commit 92d71d1), in the
 # history for good; the test itself now uses the dummy above.

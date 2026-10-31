@@ -18,23 +18,7 @@ pub(crate) async fn record_restore_checks(
     }
     let now = ctx.now_unix;
     let recorded = crate::state::StateStore::new(ctx.exec, &ctx.state_dir)
-        .update(|s| {
-            for what in ok {
-                s.restore_check_failures
-                    .remove(&format!("{}:{}", stack, what));
-            }
-            for (what, why) in failed {
-                s.restore_check_failures.insert(
-                    format!("{}:{}", stack, what),
-                    crate::state::RestoreCheckFailure {
-                        stack: stack.to_string(),
-                        what: what.clone(),
-                        at: now,
-                        why: why.clone(),
-                    },
-                );
-            }
-        })
+        .update(|s| apply_checks(s, stack, failed, ok, now))
         .await;
     if let Err(e) = recorded {
         ctx.sink.emit(PipelineEvent::Line {
@@ -45,5 +29,29 @@ pub(crate) async fn record_restore_checks(
                 stack, e
             ),
         });
+    }
+}
+
+fn apply_checks(
+    s: &mut crate::state::HostState,
+    stack: &str,
+    failed: &[(String, String)],
+    ok: &[String],
+    now: u64,
+) {
+    for what in ok {
+        s.restore_check_failures
+            .remove(&format!("{}:{}", stack, what));
+    }
+    for (what, why) in failed {
+        s.restore_check_failures.insert(
+            format!("{}:{}", stack, what),
+            crate::state::RestoreCheckFailure {
+                stack: stack.to_string(),
+                what: what.clone(),
+                at: now,
+                why: why.clone(),
+            },
+        );
     }
 }

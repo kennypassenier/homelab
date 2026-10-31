@@ -46,26 +46,9 @@ pub(super) async fn mark_incomplete(
         // backups key off this entry, and 12 GB of configuration with no
         // backup was how this defect announced itself.
         None => {
-            state.stacks.insert(
-                m.stack_name.clone(),
-                StackState {
-                    applied_source: None,
-                    vmid: m.vmid,
-                    hostname: m.hostname.clone(),
-                    apps: m.apps.clone(),
-                    applied_at: ctx.now_unix,
-                    last_backup: 0,
-                    applied_hash: String::new(),
-                    manifest: Some(m.clone()),
-                    enabled: true,
-                    route_file: None,
-                    extra_route_files: Vec::new(),
-                    natives: Vec::new(),
-                    incomplete_step: Some(step.to_string()),
-                    pushed_file_hashes: std::collections::BTreeMap::new(),
-                    component_digests: Default::default(),
-                },
-            );
+            state
+                .stacks
+                .insert(m.stack_name.clone(), minimal_record(ctx, m, step));
         }
     }
     let _ = store.save(state).await;
@@ -78,4 +61,25 @@ pub(super) async fn mark_incomplete(
             m.stack_name, step
         ),
     });
+}
+
+/// The least record that makes a half-deployed stack exist.
+fn minimal_record(ctx: &OpCtx<'_>, m: &StackManifest, step: &str) -> StackState {
+    StackState {
+        applied_source: None,
+        vmid: m.vmid,
+        hostname: m.hostname.clone(),
+        apps: m.apps.clone(),
+        applied_at: ctx.now_unix,
+        last_backup: 0,
+        applied_hash: String::new(),
+        manifest: Some(m.clone()),
+        enabled: true,
+        route_file: None,
+        extra_route_files: Vec::new(),
+        natives: Vec::new(),
+        incomplete_step: Some(step.to_string()),
+        pushed_file_hashes: std::collections::BTreeMap::new(),
+        component_digests: Default::default(),
+    }
 }

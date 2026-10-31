@@ -3,7 +3,9 @@
 use crate::*;
 use homelab_proto::*;
 
-/// `RestoreStack`.
+/// `RestoreStack`. One parameter per field of the wire request, so the
+/// dispatcher hands the variant over as it is.
+#[allow(clippy::too_many_arguments)]
 pub(crate) async fn restore_stack(
     state: &AppState,
     req_id: u64,

@@ -53,7 +53,7 @@ pub(super) async fn restore_drill(n: &Night<'_>) {
             "{}/restore-drill",
             state.config.restore_drill_scratch_dir.trim_end_matches('/')
         );
-        let pg = homelab_core::ops::restoredrill::postgres_check(&pg_stacks, &repo);
+        let pg = homelab_core::ops::restoredrill::postgres_check(pg_stacks, &repo);
         let outcome = run_restore_drill(exec, &cfg, &repo, &target, pg.as_ref()).await;
         match &outcome {
             homelab_core::ops::restoredrill::Outcome::Passed {
@@ -68,7 +68,7 @@ pub(super) async fn restore_drill(n: &Night<'_>) {
             }
         }
         record_state(store, "restore drill", |sn| {
-            homelab_core::ops::restoredrill::record(sn, &drill_repos, &repo, &outcome, now)
+            homelab_core::ops::restoredrill::record(sn, drill_repos, &repo, &outcome, now)
         })
         .await;
     }

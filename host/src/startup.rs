@@ -186,21 +186,20 @@ pub(crate) async fn tls_config(config: &Config) -> axum_server::tls_rustls::Rust
         VERSION, BUILD, config.listen
     );
     info!("TLS fingerprint SHA256:{}", fingerprint);
-    let tls_config =
-        match axum_server::tls_rustls::RustlsConfig::from_pem_file(&certs.cert_pem, &certs.key_pem)
-            .await
-        {
-            Ok(c) => c,
-            Err(e) => {
-                error!(
-                    "FATAL: {} and {} do not load as a TLS pair :: {} — move both aside and \
+
+    match axum_server::tls_rustls::RustlsConfig::from_pem_file(&certs.cert_pem, &certs.key_pem)
+        .await
+    {
+        Ok(c) => c,
+        Err(e) => {
+            error!(
+                "FATAL: {} and {} do not load as a TLS pair :: {} — move both aside and \
                  restart; the daemon makes a new pair (clients must then re-pin)",
-                    certs.cert_pem, certs.key_pem, e
-                );
-                std::process::exit(1);
-            }
-        };
-    tls_config
+                certs.cert_pem, certs.key_pem, e
+            );
+            std::process::exit(1);
+        }
+    }
 }
 
 /// H5 / fix-121: a pending self-update is accepted by the first authenticated

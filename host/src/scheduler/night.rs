@@ -40,7 +40,7 @@ impl<'a> Night<'a> {
         let store = homelab_core::state::StateStore::new(exec, &state.config.state_dir);
         // H10: one plan per tick — stacks that are due, then the host's own
         // crown jewels. Decided by a pure function so it is unit-tested.
-        let stack_inputs = nightly_stack_inputs(&snapshot);
+        let stack_inputs = nightly_stack_inputs(snapshot);
         // G14: taken before the loop below consumes `snapshot.stacks`.
         let drill_repos: Vec<String> = homelab_core::ops::restoredrill::all_drill_repos(
             &snapshot
@@ -67,7 +67,7 @@ impl<'a> Night<'a> {
         );
         // fix-62: whose turn it is, read before the loop below consumes the
         // snapshot's stacks.
-        let drill_pick = homelab_core::ops::restoredrill::pick(&snapshot, &drill_repos);
+        let drill_pick = homelab_core::ops::restoredrill::pick(snapshot, &drill_repos);
         // fix-62: every stack's vmid and mounts, for `postgres_check` to
         // find whether tonight's repository is a Postgres data directory —
         // also read before the loop below consumes `snapshot.stacks`.
@@ -88,7 +88,7 @@ impl<'a> Night<'a> {
         // fix-96: every repository with the retention its source keeps, for
         // the second copy and the rotating restic check.
         let copy_policies = homelab_core::ops::secondcopy::repo_policies(
-            &snapshot,
+            snapshot,
             &state
                 .config
                 .device_backups

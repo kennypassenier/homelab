@@ -339,7 +339,7 @@ fn cli_line_bare(command: &Command, force: bool) -> Option<String> {
         | UiReply { .. }
         | UiHold { .. }
         // fix-120: the dashboard's token dialogs send these directly
-        // (`admin/src/shell/edit.rs::issue_token`/`revoke_token`); the CLI
+        // (`admin/src/shell/edit/tokens.rs::issue_token`/`revoke_token`); the CLI
         // equivalent (`homelab token issue|list|revoke`) is documented on
         // its own, not built from a `Command` that carries a plaintext
         // token in the reply this function has no way to show.

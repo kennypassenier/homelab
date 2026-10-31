@@ -10,7 +10,7 @@
 //! are kept by editing the text with `yamledit`, not by round-tripping
 //! through serde. Pure: current texts in, new texts out; the shell
 //! validates with `homelab_core::native::validate_native` the same way it
-//! validates every other `service.yml` (`admin/src/shell/edit.rs`'s
+//! validates every other `service.yml` (`admin/src/shell/edit/check.rs`'s
 //! `check_dir`), so this module does not repeat that check.
 
 use homelab_core::native::{BackupPause, UpdatePolicy};

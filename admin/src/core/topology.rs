@@ -118,7 +118,7 @@ pub struct Topology {
 /// (`kind: "named"`) or inside it (`kind: "route"`, the file sitting under
 /// `stacks/<any>/routes/`) — gathered once per stack by the caller, which
 /// already has every text file in hand reading the manifests
-/// (`admin::shell::edit::fleet_firewall`).
+/// (`admin/src/shell/edit/fleet_read.rs::fleet_firewall`).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NamedFlow {
     /// The stack whose own files named this address (never used for a

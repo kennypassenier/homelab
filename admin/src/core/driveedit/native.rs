@@ -70,7 +70,7 @@ pub fn add_native_body(fields: &[Field], values: &Values) -> Value {
 }
 
 /// The manifest field of a native unit's own JSON (`NativeView`'s shape,
-/// `admin/src/shell/edit.rs`'s `read_stack_edit`), as the form field of
+/// `admin/src/shell/edit/stack_read.rs`'s `read_stack_edit`), as the form field of
 /// that name would hold it — `native-unit`'s `after_set` and `open`'s
 /// prefill share this.
 pub fn native_current(name: &str, m: &Value) -> Value {

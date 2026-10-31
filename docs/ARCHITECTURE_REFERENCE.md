@@ -53,7 +53,7 @@ flowchart LR
     daemon -.->|"fallback webhook"| ha
     github -.->|"nightly native update"| daemon
 ```
-<sub>Source: `client/src/main.rs`, `client/src/spec.rs`, `client/src/release.rs`, `host/src/main.rs`, `core/src/ops/backup.rs`, `core/src/ops/native.rs`.</sub>
+<sub>Source: `client/src/main.rs`, `client/src/spec.rs`, `client/src/release.rs`, `host/src/main.rs`, `core/src/ops/backup.rs`, `core/src/ops/native/`.</sub>
 
 - Four workspace members (`Cargo.toml:3`); the release builds only
   `homelab-host`, `homelab` and `homelab-admin` (`Makefile`, `release-binaries`).
@@ -378,7 +378,7 @@ host only runs the candidate with `--selfcheck`
 (`host/src/tests/commands.rs::fix_53_a_timeout_kills_everything_the_command_started`). Whoever holds the token can install a root
 binary on the host. The host's own check is the nightly native update: it
 skips an unsigned release and verifies a signed one
-(`core/src/ops/native.rs:982-1030`).
+(`core/src/ops/native/release_verify.rs::verify_phase`).
 
 **Stack secrets.** The client fills each app's env from a local `.env` or
 from `latch cat <stack>/<app>/.env --env $HOMELAB_LATCH_ENV --expand`, in
@@ -542,7 +542,7 @@ described by `service.yml` (`core/src/native.rs:1-6,24-60`). Install steps:
 install refuses when the copy fails), `stage binary` beside the target, a
 glibc check, the unit file, `activate`. A service not active after five
 checks is rolled back to the preserved binary, or left stopped on a first
-install (`core/src/ops/native.rs:265-450`). A deploy installs a binary where
+install (`core/src/ops/native/install.rs::install_native_impl`). A deploy installs a binary where
 there is none and never replaces one (fix-28,
 `core/src/ops/deploy/start.rs::registry_login`). `update_policy` defaults to `manual`;
 `auto` lets the nightly round install new releases (`core/src/native.rs:10-23`).

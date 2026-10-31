@@ -286,7 +286,7 @@ pct exec <vmid> -- sh -c 'cd /opt/<stack>/<app> && docker compose up -d'  # ever
 
 The snapshots store the absolute host paths (`/appdata/<stack>/<app>-config`), so `--target /` puts the files back in place with the owners they had. The code starts the apps again even when the restore failed, and so should you. A rebuild does not need this step: `homelab deploy` restores each data directory it finds empty from that path's latest snapshot before the apps start, and when that fails it continues with the directory EMPTY and prints `AUTO-RESTORE FAILED` for it.
 
-**A native stack.** The nightly backup of a native unit is not a directory snapshot: it streams `tar` out of the container into restic, stored as one file `/<unit>-data.tar` (`backup_native` in core/src/ops/native.rs). Unpack it back inside the container, so file owners stay the container's own:
+**A native stack.** The nightly backup of a native unit is not a directory snapshot: it streams `tar` out of the container into restic, stored as one file `/<unit>-data.tar` (`backup_native` in core/src/ops/native/backup.rs). Unpack it back inside the container, so file owners stay the container's own:
 
 ```sh
 export RESTIC_REPOSITORY=rclone:gdrive:homelab-backups/<unit>-config

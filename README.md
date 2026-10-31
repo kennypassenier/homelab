@@ -69,7 +69,7 @@ flowchart TB
     daemon -.->|"intent repo push"| mirror
 ```
 
-<sub>Source: `client/src/main.rs` (connect), `client/src/release.rs`, `core/src/ops/backup.rs` (`restic_base`), `core/src/ops/native.rs` (release check), `notify_raw` and `spawn_mirror_push` in `host/src/main.rs`.</sub>
+<sub>Source: `client/src/main.rs` (connect), `client/src/release.rs`, `core/src/ops/backup.rs` (`restic_base`), `core/src/ops/native/release_install.rs` (release check), `notify_raw` and `spawn_mirror_push` in `host/src/main.rs`.</sub>
 
 - **Domain logic lives in `core/`.** Every side effect goes through one
   `Executor` trait (`core/src/executor.rs`), so an operation can be tested

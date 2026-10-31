@@ -858,14 +858,14 @@ Two things the update's transcript will not tell you directly:
 
 | Symptom (verbatim) | Cause | First action | Source |
 |---|---|---|---|
-| `unit <u> is not active ('<state>')` | adopt refuses a unit that is not running; adoption never starts anything | start it yourself, then re-run adopt | `core/src/ops/native.rs:59-64` |
-| `stack '<s>' already exists on vmid <n>` | adopt would re-point an existing record | check which vmid is right | `core/src/ops/native.rs:190-193` |
-| `cannot preserve the running <binary>` | install refuses to replace a binary it cannot back up | the transcript shows why the copy failed | `core/src/ops/native.rs:328-331` |
-| `the installed <u> did not come up healthy` | a new binary failed to start and the previous one was put back | read the service's own log in the container | `core/src/ops/native.rs:440-448` |
-| `<u> did not come up and there is no previous binary to return to` | a first install failed; there is nothing to roll back to | the why includes the last log lines | `core/src/ops/native.rs:424-431` |
+| `unit <u> is not active ('<state>')` | adopt refuses a unit that is not running; adoption never starts anything | start it yourself, then re-run adopt | `core/src/ops/native/adopt_verify.rs::ensure_active` |
+| `stack '<s>' already exists on vmid <n>` | adopt would re-point an existing record | check which vmid is right | `core/src/ops/native/adopt_record.rs::record_state` |
+| `cannot preserve the running <binary>` | install refuses to replace a binary it cannot back up | the transcript shows why the copy failed | `core/src/ops/native/install_stage.rs::preserve_previous` |
+| `the installed <u> did not come up healthy` | a new binary failed to start and the previous one was put back | read the service's own log in the container | `core/src/ops/native/install_activate.rs::roll_back_install` |
+| `<u> did not come up and there is no previous binary to return to` | a first install failed; there is nothing to roll back to | the why includes the last log lines | `core/src/ops/native/install_activate.rs::first_install_failed` |
 | `SHA256SUMS does not carry the ecosystem signature (<e>)` | the release's checksum file is unsigned or changed after signing; nothing installed | wait for the signed release | `core/src/release_sig.rs:33-39` |
 | `SHA256SUMS.minisig is not a minisign signature (<e>)` | the signature asset is malformed or missing | same | `core/src/release_sig.rs:27-32` |
-| `CHECKSUM MISMATCH for <asset> in <repo> <tag>` | the downloaded binary does not match its checksum; nothing installed | retry; if it repeats, do not install | `core/src/ops/native.rs:1078-1083` |
+| `CHECKSUM MISMATCH for <asset> in <repo> <tag>` | the downloaded binary does not match its checksum; nothing installed | retry; if it repeats, do not install | `core/src/ops/native/release_steps.rs::download_asset` |
 | `no release found (gh authenticated? release exists?)` | on the workstation, `gh` could not name the newest release for `homelab release-update` | check `gh auth status` | `client/src/commands/restore.rs::cmd_restore_native` |
 | `staged binary failed selfcheck (exit <n>): <e>` | a host binary for self-update could not run `--selfcheck`; nothing was replaced | wrong architecture or a truncated upload | `core/src/ops/selfupdate.rs:60-73`, `host/src/tests/commands.rs::fix_53_a_timeout_kills_everything_the_command_started` |
 

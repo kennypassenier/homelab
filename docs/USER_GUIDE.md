@@ -1654,19 +1654,19 @@ a container runs several (`stacks/kyu/kyu-runner/service.yml`)
 | `update_cmd` | its own self-update command; absent means never updated by the host | `core/src/native.rs:48` |
 | `release_repo`, `release_asset` | `owner/name` on GitHub and the asset (default: the unit name) | `core/src/native.rs:64-68,88-90` |
 | `backup_from_newest` | archive the newest file matching this glob instead of `data_dirs` | `core/src/native.rs:79` |
-| `backup_pause` | how the service is quiesced for the nightly tar (fix-113; default `false`, no quiescing). `true`: the homelab stops the unit itself before the tar and starts it again afterwards, whatever the snapshot did. `chassis`: the chassis-rs kit's own `backup-pause`/`backup-resume` subcommand does it, which can hold writes without a full stop; the homelab falls back to the `true` mechanism when the binary predates the subcommand or cannot quiesce it (owner decision, Kenny 2026-10-01: `stacks/almanac`, `stacks/inbox`) — see "Chassis pause: heartbeat and staging" below | `core/src/native.rs`, `core/src/ops/native.rs::decide_chassis_pause` |
+| `backup_pause` | how the service is quiesced for the nightly tar (fix-113; default `false`, no quiescing). `true`: the homelab stops the unit itself before the tar and starts it again afterwards, whatever the snapshot did. `chassis`: the chassis-rs kit's own `backup-pause`/`backup-resume` subcommand does it, which can hold writes without a full stop; the homelab falls back to the `true` mechanism when the binary predates the subcommand or cannot quiesce it (owner decision, Kenny 2026-10-01: `stacks/almanac`, `stacks/inbox`) — see "Chassis pause: heartbeat and staging" below | `core/src/native.rs`, `core/src/ops/native/chassis.rs::decide_chassis_pause` |
 | `update_policy` | `auto`, `self` or `manual` (default) | `core/src/native.rs` |
 
 The verbs:
 
 | Verb | What it does | Source |
 |---|---|---|
-| `homelab adopt stacks/<name>` | verifies a running, hand-built service matches its `service.yml` and records it; never starts or restarts anything | `client/src/main.rs:174-191`, `core/src/ops/native.rs:31-229` |
-| `homelab install-native stacks/<name>[/<unit>] [<tag> \| --file <path>]` | installs a binary from a release (latest by default) or from a file, with the previous binary kept and a rollback armed | `client/src/commands/mod.rs::run`, `core/src/ops/native.rs:265-512` |
-| `homelab backup-native <stack>` | archives the service's state from inside the container into restic | `core/src/ops/native.rs:515-665` |
-| `homelab update-native <stack>` | runs the service's own `update_cmd` under supervision | `core/src/ops/native.rs:1174-1333` |
-| `homelab release-update-native <stack>` | installs the latest release when its checksum differs from the installed binary | `core/src/ops/native.rs:931-1131` |
-| `homelab rollback-native <stack>[/<unit>]` | goes back to the one previous binary every healthy install or update keeps beside the program (`<binary>.homelab-prev`, fix-114), under the same health check, and parks the stack's automatic updates until `homelab enable <stack>`; running it again returns to the version rolled back from | `core/src/ops/native.rs` (`rollback_native`) |
+| `homelab adopt stacks/<name>` | verifies a running, hand-built service matches its `service.yml` and records it; never starts or restarts anything | `client/src/main.rs:174-191`, `core/src/ops/native/adopt.rs::adopt_impl` |
+| `homelab install-native stacks/<name>[/<unit>] [<tag> \| --file <path>]` | installs a binary from a release (latest by default) or from a file, with the previous binary kept and a rollback armed | `client/src/commands/mod.rs::run`, `core/src/ops/native/install.rs::install_native_impl` |
+| `homelab backup-native <stack>` | archives the service's state from inside the container into restic | `core/src/ops/native/backup.rs::backup_impl` |
+| `homelab update-native <stack>` | runs the service's own `update_cmd` under supervision | `core/src/ops/native/update.rs::update_impl` |
+| `homelab release-update-native <stack>` | installs the latest release when its checksum differs from the installed binary | `core/src/ops/native/release_install.rs::release_install_impl` |
+| `homelab rollback-native <stack>[/<unit>]` | goes back to the one previous binary every healthy install or update keeps beside the program (`<binary>.homelab-prev`, fix-114), under the same health check, and parks the stack's automatic updates until `homelab enable <stack>`; running it again returns to the version rolled back from | `core/src/ops/native/rollback.rs::rollback_native` |
 
 `backup-native`, `update-native` and `release-update-native` act on the copy
 of the service files the host recorded at adoption, and on every service of
@@ -1696,14 +1696,14 @@ leftover from a run that died mid-copy is cleared at the start of the next
 one — nothing from this accumulates on disk (rule 20). `homelab doctor`
 reports the staging directory's free space as its own finding ("backup
 staging disk") once a staging directory is configured; unconfigured raises
-no finding. Source: `core/src/ops/native.rs` (`fits_staging`,
-`chassis_pause_heartbeat`, `run_under_chassis_heartbeat`), `core/src/doctor.rs`.
+no finding. Source: `core/src/ops/native/staging.rs::fits_staging`,
+`core/src/ops/native/chassis.rs::chassis_pause_heartbeat`, `run_under_chassis_heartbeat`, `core/src/doctor.rs`.
 
 Adoption refuses an inactive unit (`adoption never starts services; start it yourself and re-run`),
 a unit that runs a different binary or reads a different env file
 (`fix the stack file to match reality`), and missing paths
-(`core/src/ops/native.rs:51-110`). It tags the container `homelab` and sets its
-description (`core/src/ops/native.rs:119-183`). Tests:
+(`core/src/ops/native/adopt_verify.rs::verify_service`, `verify_paths`). It tags the container `homelab` and sets its
+description (`core/src/ops/native/adopt_record.rs::tag_as_managed`, `describe`). Tests:
 `core/tests/native_tests.rs:87,111,125,139`.
 
 **Supervised self-update** (`update-native`, and nightly for every native
@@ -1711,16 +1711,16 @@ service): the binary is copied to `<binary>.homelab-prev`, `update_cmd` runs,
 and when the binary's checksum changed the unit is checked; a unit that does
 not come up healthy gets the previous binary back from outside, and the
 operation fails with `rolled back to the previous binary`. An unchanged
-binary means no restart (`core/src/ops/native.rs:1211-1283`). Tests:
+binary means no restart (`core/src/ops/native/update_steps.rs::restart_if_changed`). Tests:
 `core/tests/native_tests.rs:212,246`.
 
 **Release updates and signatures.** A native release is installed only when
 its `SHA256SUMS` carries a valid minisign signature (`SHA256SUMS.minisig`) and
 the binary matches that list (`core/src/release_sig.rs`,
-`core/src/ops/native.rs:982-1030`, `client/src/release.rs:75-76,127-168`). An
+`core/src/ops/native/release_steps.rs::read_checksums`, `client/src/release.rs:75-76,127-168`). An
 unsigned release is skipped, not failed:
 `is not signed yet — skipped, tried again next night`
-(`core/src/ops/native.rs:984-993`). The host's own releases (H7) are checked
+(`core/src/ops/native/release_verify.rs::stop_unsigned`). The host's own releases (H7) are checked
 against `SHA256SUMS` only, without a signature (`client/src/release.rs:57-61`).
 Tests: `core/tests/native_tests.rs:1473,1508`.
 
@@ -1734,7 +1734,7 @@ services are left alone at night, neither release-updated nor self-updated
 `release_repo` fails validation (`core/src/native.rs:163-167`). The host reads
 the policy from its own copy, so after changing it run
 `homelab adopt stacks/<name>` to refresh that copy
-(`core/src/ops/native.rs:1195-1206` says the same for `update_cmd`).
+(`core/src/ops/native/update.rs::skip_without_update_cmd` says the same for `update_cmd`).
 
 **A deploy never replaces an installed native binary.** `homelab deploy` of a
 native stack ships each binary only when none is installed yet; otherwise it

@@ -176,7 +176,7 @@ at least 20 hours old (`host/src/tests/config.rs::fix_120_host_policy_defaults_t
      (`core/src/ops/backup.rs:296-708`).
    - Native service: a `tar` stream of its data straight into
      `restic --stdin`, repository `<unit>-config`
-     (`core/src/ops/native.rs:591-627`).
+     (`core/src/ops/native/backup_snapshot.rs::snapshot`).
    - An app in use makes the whole stack stand aside: nothing stopped, no
      snapshot, no timestamp, not a failure (`core/src/ops/backup.rs:397-415`,
      `:34-74`).
@@ -709,7 +709,7 @@ docker. Worked example throughout: `stacks/almanac`.
 5. `homelab adopt stacks/<stack>` (or `stacks/<stack>/<unit>` per service).
    Refuses unless the unit is active; records the service so the nightly
    round backs it up and updates it from tonight
-   (`core/src/ops/native.rs:31-240`). A deploy keeps registered services
+   (`core/src/ops/native/adopt.rs::adopt_impl`). A deploy keeps registered services
    but never registers new ones (`core/src/ops/deploy/start_restart.rs::runs_older_files`).
 6. `homelab deploy stacks/<stack>` a third time. Only a deploy that finds
    the unit **active** copies its env and credential files into the vault,
@@ -723,7 +723,7 @@ Instead of steps 2 to 5 for the binary, `homelab install-native
 stacks/<stack>[/<unit>] [<tag>]` installs binary and unit into an existing
 container, keeps the previous binary, rolls back when the new one does not
 come up, and adopts at the end (`client/src/commands/mod.rs::run`,
-`core/src/ops/native.rs:265-507`).
+`core/src/ops/native/install.rs::install_native_impl`).
 
 **Remove one native service from a stack that stays** (workstation,
 repository root):
@@ -753,8 +753,8 @@ named is left running (`core/src/ops/deploy/restore_checks.rs::record_restore_ch
 
 | Route | What runs | Which services |
 |---|---|---|
-| Nightly release install | Host asks the GitHub API for the latest release, requires `SHA256SUMS.minisig` signed with key 1C88AB06D43C0B16, compares the checksum with the installed binary, installs under an armed rollback (`core/src/ops/native.rs:919-1131`, `core/src/release_sig.rs:10-40`) | only `update_policy: auto` (`host/src/tests/config_save.rs::feat_settings_1_the_view_hides_secrets_and_hashes`) |
-| Nightly self-update | the service's own `update_cmd`; binary preserved, restart only when it changed, 20 s to come up then a settle window that also watches `NRestarts`, rollback from outside (`core/src/ops/native.rs:701-720`, `:1174-1333`) | services with an `update_cmd` and `update_policy: self` only; never `auto` (fix-148) or `manual` (fix-58, `NativeServiceManifest::nightly_updates`) |
+| Nightly release install | Host asks the GitHub API for the latest release, requires `SHA256SUMS.minisig` signed with key 1C88AB06D43C0B16, compares the checksum with the installed binary, installs under an armed rollback (`core/src/ops/native/release_install.rs::release_install_impl`, `core/src/release_sig.rs:10-40`) | only `update_policy: auto` (`host/src/tests/config_save.rs::feat_settings_1_the_view_hides_secrets_and_hashes`) |
+| Nightly self-update | the service's own `update_cmd`; binary preserved, restart only when it changed, 20 s to come up then a settle window that also watches `NRestarts`, rollback from outside (`core/src/ops/native/scripts.rs::health_script`, `core/src/ops/native/update.rs::update_impl`) | services with an `update_cmd` and `update_policy: self` only; never `auto` (fix-148) or `manual` (fix-58, `NativeServiceManifest::nightly_updates`) |
 | `homelab release-update-native <stack>` | the release install, now | every service on the stack, policy not consulted (`host/src/tests/reads.rs::fix_217_a_never_backed_up_stack_still_resolves_to_a_read_empty_answer`) |
 | `homelab install-native stacks/<stack>/<unit> [<tag>]` | one service, latest or a named tag, downloaded and verified on the workstation with `gh` (`client/src/release.rs:75-173`) | the one named |
 | `homelab update-native <stack>` | every `update_cmd`, now | every service on the stack |
@@ -766,7 +766,7 @@ are `manual` (`stacks/kyu/service.yml:52`,
 
 **Signatures.** An unsigned release is skipped by the nightly round with
 `"is not signed yet"` and tried again the next night
-(`core/src/ops/native.rs:982-993`); the workstation refuses one with
+(`core/src/ops/native/release_verify.rs::stop_unsigned`); the workstation refuses one with
 `"is not signed (no <asset>)"` (`client/src/release.rs:145-156`), where
 the asset is `SHA256SUMS.minisig` (`core/src/release_sig.rs:15`).
 
@@ -808,7 +808,7 @@ sequenceDiagram
     H-->>W: report
 ```
 
-<sub>Source: `core/src/ops/native.rs:935-1135` (`release_update`), `:265-507` (`install_native`), `core/src/release_sig.rs:19-40` (`verify_sums`), `host/src/tests/reads.rs::fix_217_a_never_backed_up_stack_still_resolves_to_a_read_empty_answer`, `:2395-2408`.</sub>
+<sub>Source: `core/src/ops/native/release_install.rs::release_install_impl` (`release_update`), `core/src/ops/native/install.rs::install_native_impl` (`install_native`), `core/src/release_sig.rs:19-40` (`verify_sums`), `host/src/tests/reads.rs::fix_217_a_never_backed_up_stack_still_resolves_to_a_read_empty_answer`, `:2395-2408`.</sub>
 
 **A deploy never upgrades.** An installed binary is left in place and the
 log says `"already installed, not shipped"`
@@ -816,7 +816,7 @@ log says `"already installed, not shipped"`
 
 **Outcomes to recognise:** `"rolled back to the previous binary"` with
 either `"service restored and active"` or `"ROLLBACK ALSO FAILED"`
-(`core/src/ops/native.rs:432-448`, `:1270-1282`).
+(`core/src/ops/native/install_activate.rs::roll_back_install`, `core/src/ops/native/update_steps.rs::roll_back_update`).
 
 **Worked example: hold one service on an older release.**
 
@@ -826,7 +826,7 @@ either `"service restored and active"` or `"ROLLBACK ALSO FAILED"`
    `stacks/kyu/http-switchboard/service.yml`, then refresh the host's copy
    with `homelab adopt stacks/kyu/http-switchboard`. The nightly log then
    says `"the manifest the host has"` and that it carries no `update_cmd`
-   (`core/src/ops/native.rs:1186-1209`).
+   (`core/src/ops/native/update.rs::skip_without_update_cmd`).
 3. Do not use `homelab release-update-native kyu` meanwhile: it installs
    the latest release of every service on the stack, this one included.
 
@@ -998,7 +998,7 @@ The procedure is DR_RUNBOOK.md Layer 4, "A native stack"
 
 - `homelab restore` refuses a native stack (gap-28, since v3.58.4). The
   nightly snapshot of a native service is one tar stream stored as
-  `/<unit>-data.tar` (`core/src/ops/native.rs:611-615`); the compose route's
+  `/<unit>-data.tar` (`core/src/ops/native/backup_snapshot.rs::snapshot`); the compose route's
   `restic restore <snapshot> --target /` would write that tar file to the
   host's `/` and unpack nothing, which is what it did before the refusal. Where
   restic stores a stdin snapshot was checked with restic 0.19.1 on the
@@ -1006,7 +1006,7 @@ The procedure is DR_RUNBOOK.md Layer 4, "A native stack"
   restic version may differ.
 - The archive holds paths without the leading `/`
   (`appdata/almanac/almanac-config/...`): GNU tar strips it from the
-  absolute paths the backup passes (`core/src/ops/native.rs:611-613`).
+  absolute paths the backup passes (`core/src/ops/native/backup_snapshot.rs::snapshot`).
   Unpack it inside the container so owners stay the container's own.
 - Since fix-63 (2026-09-27) the nightly backup refuses a native service whose
   data directories hold no files while its repository has snapshots, and the
@@ -1041,8 +1041,7 @@ pct exec 112 -- systemctl start almanac
   `after_restore` runs `mv` of the newest `kyu.backup-*.db` onto
   `/appdata/kyu/kyu-config/kyu.db` and deletes any stale `kyu.db-wal` /
   `kyu.db-shm` beside it, inside the container, before the unit starts —
-  both on the automatic empty-rebuild path (`core/src/ops/native.rs`'s
-  `restore_empty_unit`) and on a hand-triggered dashboard restore
+  both on the automatic empty-rebuild path (`core/src/ops/native/restore_empty.rs::restore_empty_unit`) and on a hand-triggered dashboard restore
   (`restore_native`). `kyu.env` is still not in that snapshot (op-17,
   lost-5) and is unaffected by this.
 
@@ -1312,7 +1311,7 @@ flowchart LR
 | | an escrow file in `/var/lib/homelab/secrets/`: recorded in `docs/deployment/REGISTER.md` D105 (2026-09-02), not created by any code here; carried by `host-meta-config` because the whole directory is (`core/src/ops/backup.rs:971`) | host loss | loss of the restic password; useless without the escrow passphrase, which Kenny holds |
 | Native service secrets (e.g. `latch.env`, `kyu.env`, `token.env`) | the live file under `/appdata/<stack>/<unit>-config/` on the host (bind mount) | container loss | host root disk loss |
 | | vault `/var/lib/homelab/secrets/<stack>/<unit>-config/<file>` (`core/src/ops/deploy/orphans.rs::generated_dirs`, `:2297-2318`); a flat `<stack>/<file>` from before fix-37 is still read when no two units share the name (`core/src/ops/deploy/start_pull.rs::pull_from_origin`) | container loss | host root disk loss |
-| | the service's own restic repository, when the file lies in `data_dirs` and the service has no `backup_from_newest` (`core/src/ops/native.rs:591-600`): yes for almanac, kyu-runner, http-switchboard; **no for kyu** (`stacks/kyu/service.yml:48`) | host loss | loss of the restic password |
+| | the service's own restic repository, when the file lies in `data_dirs` and the service has no `backup_from_newest` (`core/src/ops/native/backup_snapshot.rs::snapshot`): yes for almanac, kyu-runner, http-switchboard; **no for kyu** (`stacks/kyu/service.yml:48`) | host loss | loss of the restic password |
 | | `host-meta-config`, through the vault | host loss | loss of the restic password |
 | Google Drive credentials (rclone) | rclone's configuration on the host, `/root/.config/rclone/rclone.conf` | container loss | `host-meta-config` (fix-111, gap-31: `HOST_META_EXTRAS` in `core/src/ops/backup.rs`) — host root disk loss is covered the same way as every other host-meta path |
 | Secrets of a retired stack, app or native unit | the vault paths in its retired record: the whole `/var/lib/homelab/secrets/<stack>` for a stack, the app's `.env` or the unit's files for an app or unit (`core/src/ops/retired.rs:59-172`); for a stack also its `/appdata` directories, where a native service's live env file sits, and its repositories | destroy, forget, and the deploy that dropped it: all keep them (`core/src/ops/retired.rs:1-15`) | `homelab wipe <key>`: every recorded vault path, `/appdata` directory and repository goes in one operation (`core/src/ops/retired.rs:408-449`); after that only older `host-meta-config` snapshots still hold the vault copy |
@@ -1693,5 +1692,5 @@ Found while writing this runbook. Each line says what to believe.
 | `Makefile:8`, `:23` | fixed in v3.58.4 (gap-21) | both say `u` now |
 | Doctor remedy for Drive | fixed in v3.58.4 (gap-27) | says no backup can be written until the token is refreshed |
 | `stacks/almanac/lxc-compose.yml` | fixed in v3.58.4 (gap-28) | points at op-11; `homelab restore` refuses a native stack |
-| Doc comment in `core/src/ops/native.rs` | fixed in v3.58.4 | says `<unit>-config` |
+| Doc comment in `core/src/ops/native/backup.rs` | fixed in v3.58.4 | says `<unit>-config` |
 | Manual checks after a deploy | "Questions that disappeared from the stack files are dropped" (`core/src/ops/manualchecks.rs:48-49`) | only while the stack still has a `manual:` line; with none left the deploy skips the registration and the old questions stay until destroy or forget (`core/src/ops/deploy/logshipper.rs::restart_alloy`) |

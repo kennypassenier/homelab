@@ -122,7 +122,7 @@ Two facts fall out of that table:
 | 113 metrics | `/appdata/metrics/` on host | v2 restic, nightly | 2026-08-30 |
 
 Note the C7 native path (CT 112, and CT 109 once repaired) is a third
-mechanism again: `core/src/ops/native.rs` runs
+mechanism again: `core/src/ops/native/backup_snapshot.rs` runs
 `pct exec <vmid> -- tar -cf - <data_dirs> | restic backup --stdin`, which
 *does* reach inside the container. So the orchestrator already has both
 techniques; only the docker path is host-only.

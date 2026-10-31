@@ -126,7 +126,7 @@ Severity is the highest rating any reviewer gave unless noted; disagreements are
 
 - **Key:** `native-update-ignores-manual-policy` · **Status:** open · **Effort:** S · **Kind:** code fix Claude can do alone
 - **Reviewers:** system, devops
-- **Evidence:** `host/src/tests/config_save.rs::feat_settings_1_the_view_hides_secrets_and_hashes` filters `release_update` to Auto, but `:2409-2418` runs `update_native` for every native, which executes the unit's own `update_cmd` (`core/src/ops/native.rs:1205+`, `:1273-1283`). `stacks/kyu/http-switchboard/service.yml:28-39` and `stacks/almanac/service.yml:64,73` have both `update_cmd` and `update_policy: manual`. REGISTER step-16 confirms the kit `update` ran for kyu, kyu-runner and http-switchboard. The `update_cmd` path bypasses `core/src/release_sig.rs`.
+- **Evidence:** `host/src/tests/config_save.rs::feat_settings_1_the_view_hides_secrets_and_hashes` filters `release_update` to Auto, but `:2409-2418` runs `update_native` for every native, which executes the unit's own `update_cmd` (`core/src/ops/native/update.rs::update_impl`, `core/src/ops/native/update_steps.rs::restart_if_changed`). `stacks/kyu/http-switchboard/service.yml:28-39` and `stacks/almanac/service.yml:64,73` have both `update_cmd` and `update_policy: manual`. REGISTER step-16 confirms the kit `update` ran for kyu, kyu-runner and http-switchboard. The `update_cmd` path bypasses `core/src/release_sig.rs`.
 - **Failure scenario:** http-switchboard, the one service that translates alarms and was set to manual so a nightly surprise cannot break the alert path, updates itself every night anyway, bypassing the orchestrator's signature check.
 - **Recommendation:** Gate `update_native` on the same policy (or add an explicit third value such as `self`), pick one update mechanism per service, and add a scheduler test: a manual native with an `update_cmd` gets no update op.
 
@@ -258,7 +258,7 @@ Severity is the highest rating any reviewer gave unless noted; disagreements are
 
 - **Key:** `error-detail-unmasked-to-phone` · **Status:** open · **Effort:** S · **Kind:** code fix Claude can do alone
 - **Reviewers:** logging, rust
-- **Evidence:** `core/src/ops/deploy/push.rs::content_for_container` (`docker compose logs --tail 20` into `CoreError::Command.detail`), `core/src/ops/native.rs:444-451` (`journalctl -n 20`), `executor::run_ok` (full stderr); `core/src/error.rs:69-74` `why = detail`; `host/src/tests/support.rs::serve_state_on_loopback` (journal), bundle `report.json`, `:2840-2843` notification `error = what :: why` to HA's `/media/homelab_events.log`, logbook and phone. Neither the fix-30 cap nor the fix-39 mask applies.
+- **Evidence:** `core/src/ops/deploy/push.rs::content_for_container` (`docker compose logs --tail 20` into `CoreError::Command.detail`), `core/src/ops/native/install_activate.rs::first_install_failed` (`journalctl -n 20`), `executor::run_ok` (full stderr); `core/src/error.rs:69-74` `why = detail`; `host/src/tests/support.rs::serve_state_on_loopback` (journal), bundle `report.json`, `:2840-2843` notification `error = what :: why` to HA's `/media/homelab_events.log`, logbook and phone. Neither the fix-30 cap nor the fix-39 mask applies.
 - **Failure scenario:** A crash-looping app prints its configuration or DSN; that text lands verbatim in HA's log file, the logbook and a phone notification, possibly kilobytes long.
 - **Recommendation:** Run diagnostics through the shared masker and `trace_line` before embedding; cap `why` in the notification (about 1 KB, 'full text in <bundle>'); keep the full masked text only in the bundle.
 
@@ -381,7 +381,7 @@ Severity is the highest rating any reviewer gave unless noted; disagreements are
 
 - **Key:** `native-rollback-copies-deleted` · **Status:** open · **Effort:** S · **Kind:** code fix Claude can do alone
 - **Reviewers:** system
-- **Evidence:** `health_script` accepts a unit active and not restarting for 5 x 2 s (`core/src/ops/native.rs:732-747`); `update_native` then removes `.homelab-prev` and the kit's `.prev` (`:1314-1345`, `:811-813`). fix-10 did this for a 2 GB disk; CT 109 now has 4 GB.
+- **Evidence:** `health_script` accepts a unit active and not restarting for 5 x 2 s (`core/src/ops/native/scripts.rs::health_script`); `update_native` then removes `.homelab-prev` and the kit's `.prev` (`core/src/ops/native/update.rs::tidy_phase`, `core/src/ops/native/update_steps.rs::drop_kit_copy`). fix-10 did this for a 2 GB disk; CT 109 now has 4 GB.
 - **Failure scenario:** A kyu release that starts fine and misbehaves an hour later has no N-1 binary on disk, on the notification path.
 - **Recommendation:** Keep exactly one previous binary after a healthy update; add `homelab rollback-native <stack>/<unit>`.
 
@@ -884,7 +884,7 @@ Severity is the highest rating any reviewer gave unless noted; disagreements are
 
 - **Key:** `native-update-copies-binary-nightly` · **Status:** open · **Effort:** S · **Kind:** code fix Claude can do alone
 - **Reviewers:** devops
-- **Evidence:** `core/src/ops/native.rs:1253-1272` copies to `.homelab-prev` before `update_cmd` every night for every service (40 MB for kyu), then deletes it.
+- **Evidence:** `core/src/ops/native/update_steps.rs::preserve_binary` copies to `.homelab-prev` before `update_cmd` every night for every service (40 MB for kyu), then deletes it.
 - **Failure scenario:** Avoidable I/O and a transient disk spike on CT 109's small rootfs.
 - **Recommendation:** Check the release first, as `release_update` does, and preserve only on change.
 

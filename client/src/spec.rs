@@ -2333,7 +2333,7 @@ pub fn generate_runbook(stacks_dir: &Path, out_path: &str) -> Result<usize, Stri
          with the directory EMPTY and prints `AUTO-RESTORE FAILED` for it.\n\n\
          **A native stack.** The nightly backup of a native unit is not a directory \
          snapshot: it streams `tar` out of the container into restic, stored as one file \
-         `/<unit>-data.tar` (`backup_native` in core/src/ops/native.rs). Unpack it back \
+         `/<unit>-data.tar` (`backup_native` in core/src/ops/native/backup.rs). Unpack it back \
          inside the container, so file owners stay the container's own:\n\n```sh\n\
          export RESTIC_REPOSITORY={base}/<unit>-config\n\
          restic snapshots --path /<unit>-data.tar\n\

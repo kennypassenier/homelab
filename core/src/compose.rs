@@ -37,7 +37,7 @@ impl ComposePsEntry {
 /// read, must never be folded into "no services are running" — that reads
 /// as a dead stack the moment the probe itself is what broke. Keeping it as
 /// its own state is the fix-132 "Unknown" shape the staleness probe already
-/// uses (`deploy.rs`'s `older_than_files`), applied here too.
+/// uses (`deploy/start_restart.rs`'s `runs_older_files`), applied here too.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ComposePs {
     /// Parsed entries, possibly empty (compose answered: nothing is up).

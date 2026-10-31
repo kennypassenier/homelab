@@ -1778,7 +1778,7 @@ fn h17_runbook_generator_structural_snapshot() {
     // A native stack has two routes, and the runbook must name both for what
     // they are. gap-32: this used to forbid `homelab deploy` for a native
     // stack, but deploy does rebuild one (its "native units" step, in
-    // core/src/ops/deploy.rs), while adopt only re-registers a service that
+    // core/src/ops/deploy/natives.rs), while adopt only re-registers a service that
     // is already running.
     assert!(
         doc.contains("`homelab adopt stacks/gamma`"),
@@ -3746,8 +3746,8 @@ fn fix_107_one_language_per_surface() {
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .parent()
         .unwrap();
-    for file in ["client/src/tui/view/focus.rs", "core/src/ops/deploy.rs"] {
-        let src = std::fs::read_to_string(root.join(file)).unwrap();
+    for file in ["client/src/tui/view/focus.rs", "core/src/ops/deploy"] {
+        let src = read_sources(&root.join(file));
         // The positive twin: a real, substantial source file — not an empty
         // one that would also pass "no Dutch word anywhere".
         assert!(src.len() > 1000, "{} read as suspiciously short", file);
@@ -3760,6 +3760,24 @@ fn fix_107_one_language_per_surface() {
             assert!(!code.contains(dutch), "{} still says {:?}", file, dutch);
         }
     }
+}
+
+/// One source file, or every `.rs` file of a module directory, as one text.
+fn read_sources(path: &std::path::Path) -> String {
+    if !path.is_dir() {
+        return std::fs::read_to_string(path).unwrap();
+    }
+    let mut files: Vec<_> = std::fs::read_dir(path)
+        .unwrap()
+        .map(|e| e.unwrap().path())
+        .filter(|p| p.extension().is_some_and(|e| e == "rs"))
+        .collect();
+    files.sort();
+    files
+        .iter()
+        .map(|f| std::fs::read_to_string(f).unwrap())
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 fn press(m: &mut Model, code: crossterm::event::KeyCode) {

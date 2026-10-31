@@ -281,7 +281,7 @@ async fn adopt_impl<'a>(
     });
 
     // The description is the tag's fault one field over. `pct set
-    // --description` runs where a container is CREATED (deploy.rs), so an
+    // --description` runs where a container is CREATED (deploy/provision_create.rs), so an
     // adopted container keeps whatever it had — and what CT 109 had was
     // "mailbox 1.0.0 — durable message hub", naming a program that no longer
     // runs and two paths that no longer exist (`/var/lib/mailbox`,

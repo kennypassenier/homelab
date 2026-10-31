@@ -28,15 +28,15 @@ fn rust_sources(dir: &Path, out: &mut Vec<PathBuf>) {
 const MEMBERS: [&str; 4] = ["core", "proto", "host", "client"];
 
 /// The operations' `step!` macro existed in eleven identical copies; one
-/// lives in `ops/mod.rs` now. deploy.rs keeps its own, which marks the
-/// stack incomplete and takes different arguments.
+/// lives in `ops/mod.rs` now. The deploy module (`ops/deploy/`) keeps its
+/// own, which marks the stack incomplete and takes different arguments.
 #[test]
 fn the_step_macro_is_defined_once_for_the_operations() {
     let mut files = Vec::new();
     rust_sources(&root().join("core/src/ops"), &mut files);
     let defining: Vec<String> = files
         .iter()
-        .filter(|p| !p.ends_with("deploy.rs"))
+        .filter(|p| !p.components().any(|c| c.as_os_str() == "deploy"))
         .filter(|p| {
             std::fs::read_to_string(p)
                 .unwrap()

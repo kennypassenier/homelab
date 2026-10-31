@@ -4,7 +4,8 @@
 ///
 /// Defined here, before the modules, so every operation sees this one
 /// (rust-code-hygiene, 2026-09-27: there were eleven identical copies).
-/// deploy.rs shadows it with its own, which also marks the stack incomplete.
+/// The deploy module (`deploy/macros.rs`) shadows it with its own, which also
+/// marks the stack incomplete.
 macro_rules! step {
     ($runner:expr_2021, $name:expr_2021, $body:expr_2021) => {
         match $runner.step($name, || async { $body }).await {

@@ -1589,7 +1589,7 @@ fn rclone_parts(restic_base: &str) -> Option<(String, String)> {
     Some((remote.to_string(), path.to_string()))
 }
 
-/// The vault file deploy.rs keeps for a file a native unit reads:
+/// The vault file deploy/vault.rs keeps for a file a native unit reads:
 /// `<state_dir>/secrets/<stack>/<parent dir>/<name>` since fix-37. Calls the
 /// deploy's own `vault_key`, so the runbook cannot name another file than the
 /// one the deploy restores from.

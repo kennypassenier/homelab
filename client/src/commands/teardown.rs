@@ -144,7 +144,7 @@ pub(crate) async fn cmd_prune_orphans(c: &Ctx) {
         die("internal: prune-orphans parsed as another verb")
     };
     let dir = &stack_dir(&stack);
-    // gap-34: `orphan_files_keeping` (core/src/ops/deploy.rs) reads
+    // gap-34: `orphan_files_keeping` (core/src/ops/deploy/orphans.rs) reads
     // only `spec.files` — never `.env` or `.secret_files` — so
     // latch never needed to run here. `build_spec` ran it anyway
     // for any stack with `latch_secrets`/`latch_files`.

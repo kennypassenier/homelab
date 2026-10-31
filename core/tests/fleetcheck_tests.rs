@@ -1498,8 +1498,13 @@ fn fix_103_the_check_leads_with_a_summary_and_the_broken_items() {
 #[test]
 fn fix_103_remedies_say_what_to_do_not_what_happened() {
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
-    for file in ["src/ops/fleetcheck.rs", "src/ops/manualchecks.rs"] {
-        let src = std::fs::read_to_string(root.join(file)).unwrap();
+    let mut files: Vec<std::path::PathBuf> = vec![root.join("src/ops/manualchecks.rs")];
+    for entry in std::fs::read_dir(root.join("src/ops/fleetcheck")).unwrap() {
+        files.push(entry.unwrap().path());
+    }
+    for path in files {
+        let file = path.display().to_string();
+        let src = std::fs::read_to_string(&path).unwrap();
         for (at, _) in src.match_indices("remedy: ") {
             let rest = &src[at..];
             // Only a field being set, not the word inside a format string.

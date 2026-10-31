@@ -540,6 +540,7 @@ export function install() {
     KeyboardEvent: Event_,
     Node: Node_,
     Element: Element_,
+    Document: Document_,
     HTMLElement: Element_,
     HTMLAnchorElement: Element_,
     HTMLButtonElement: Element_,

@@ -22,7 +22,7 @@ const { shownValue } = await import("../js/settingsrows.js");
 
 const SECRET = "hunter2-NEVER-STORE-ME";
 const unsavedSource = readFileSync(
-  fileURLToPath(import.meta.resolve("/static/kp/dist/kp-themes.min.js")),
+  fileURLToPath(import.meta.resolve("/static/kp/js/unsaved/config.js")),
   "utf8",
 );
 const settingsSource = readFileSync(
@@ -89,53 +89,46 @@ function controls() {
  * @param {any[]} list
  * @param {Record<string, string>} typed
  */
-function runKeep(list, typed) {
+async function runKeep(list, typed) {
   const exclude = /el\.dataset\.kpKeepExclude \?\? '([^']+)'/.exec(
     unsavedSource,
   )?.[1];
   assert.ok(exclude, "kp's default exclusion selector was not found");
-  const from = unsavedSource.indexOf("const keep = () => {");
-  const to = unsavedSource.indexOf("const restore = () => {");
-  assert.ok(from > 0 && to > from, "kp's keep() was not found");
-  const body = unsavedSource
-    .slice(from, to)
-    .replace(/^const keep = /, "return ");
   /** @type {Map<string, string>} */
   const store = new Map();
-  const win = {
-    sessionStorage: {
-      setItem: (/** @type {string} */ k, /** @type {unknown} */ v) =>
-        store.set(k, String(v)),
-      removeItem: (/** @type {string} */ k) => store.delete(k),
-      getItem: (/** @type {string} */ k) => store.get(k) ?? null,
-    },
+  const storage = {
+    setItem: (/** @type {string} */ k, /** @type {unknown} */ v) =>
+      store.set(k, String(v)),
+    removeItem: (/** @type {string} */ k) => store.delete(k),
+    getItem: (/** @type {string} */ k) => store.get(k) ?? null,
   };
   const baseline = new Map(list.map((c) => [c, c.value]));
   for (const c of list)
     if (c.getAttribute("name") in typed)
       c.value = typed[c.getAttribute("name")];
-  const keep = new Function(
-    "keepOn",
-    "baseline",
-    "exclude",
-    "readValue",
-    "win",
-    "storeKey",
-    body,
-  )(
-    true,
-    baseline,
-    exclude,
-    (/** @type {any} */ c) => c.value,
-    win,
-    "kp-unsaved:/settings:settings",
+  // kp's own ChangeKeeper (kp-themes 12 moved keep() out of unsaved.js into
+  // this class), on the bar Settings declares.
+  // @ts-ignore -- a kp source path only node resolves (kp-register.mjs)
+  const { ChangeKeeper } = await import("/static/kp/js/unsaved/keeper.js");
+  const keeper = new ChangeKeeper(
+    /** @type {any} */ ({
+      options: { storage },
+      settings: {
+        keepAttribute: "session",
+        exclude,
+        storeKey: "kp-unsaved:/settings:settings",
+      },
+      tracker: { baseline },
+      win: {},
+    }),
   );
-  keep();
+  keeper.keepOn = true;
+  keeper.keep();
   return store;
 }
 
-test("121: a secret typed into Settings is never kept for the tab, so never synced", () => {
-  const store = runKeep(controls(), {
+test("121: a secret typed into Settings is never kept for the tab, so never synced", async () => {
+  const store = await runKeep(controls(), {
     host_name: "pve-2",
     dashboard_password: SECRET,
     alerts_token: `${SECRET}-2`,
@@ -154,8 +147,8 @@ test("121: a secret typed into Settings is never kept for the tab, so never sync
     );
 });
 
-test("121: with only a secret staged nothing is kept at all", () => {
-  const store = runKeep(controls(), { dashboard_password: SECRET });
+test("121: with only a secret staged nothing is kept at all", async () => {
+  const store = await runKeep(controls(), { dashboard_password: SECRET });
   assert.equal(store.size, 0, "a staged secret alone leaves no draft behind");
 });
 

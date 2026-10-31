@@ -84,35 +84,92 @@ function exportedNames(file, seen = new Set()) {
   return names;
 }
 
-/**
- * A file that re-exports every kp-themes module, standing in for the bundle
- * (same names, no browser needed). The module list is the type barrel's, so
- * the two cannot disagree. A name two modules both export (the bundle picks
- * one) is taken from the first module, so no star export is ambiguous.
- */
-function bundleBarrel() {
-  if (barrel) return barrel;
+/** Name -> the module file that exports it; the first module wins a name two share (as the bundle picks one). */
+function nameIndex() {
   const types = fileURLToPath(new URL("../../types/kp", import.meta.url));
-  const taken = new Set();
-  const lines = [];
+  const index = new Map();
+  // `auto.js` re-exports what the others define and starts the page on
+  // load, so it is read last: a name goes to the module that defines it.
+  const byName = (a, b) =>
+    (a === "auto.d.ts") - (b === "auto.d.ts") || (a < b ? -1 : 1);
   for (const f of readdirSync(types)
     .filter((f) => f.endsWith(".d.ts"))
-    .sort()) {
-    const name = f.slice(0, -".d.ts".length);
-    const file = join(root, "js", `${name}.js`);
-    if (!existsSync(file)) continue;
-    const fresh = [...exportedNames(file)].filter((n) => !taken.has(n));
-    for (const n of fresh) taken.add(n);
-    if (fresh.length)
-      lines.push(
-        `export { ${fresh.join(", ")} } from ${JSON.stringify(pathToFileURL(file).href)};`,
-      );
+    .sort(byName)) {
+    const file = join(root, "js", `${f.slice(0, -".d.ts".length)}.js`);
+    // `auto.js` starts the page on load and needs a real DOM (kp-themes 12
+    // reads `MutationObserver` off the window); a test gets a no-op
+    // `attachAll` below instead, and never attaches a page.
+    if (!existsSync(file) || file.endsWith("/auto.js")) continue;
+    for (const n of exportedNames(file)) if (!index.has(n)) index.set(n, file);
   }
+  return index;
+}
+
+let index;
+const barrels = new Map();
+
+/** The names `parent` imports from the bundle, or null when it imports it whole (`* as`, dynamic). */
+function wantedNames(parent) {
+  let text;
+  try {
+    text = readFileSync(fileURLToPath(parent), "utf8");
+  } catch {
+    return null;
+  }
+  const names = new Set();
+  const from = BUNDLE.replace(/[.*+?^${}()|[\]\\/]/g, "\\$&");
+  const named = new RegExp(
+    `import\\s*\\{([^}]*)\\}\\s*from\\s*["']${from}["']`,
+    "g",
+  );
+  for (const m of text.matchAll(named))
+    for (const part of m[1].split(","))
+      if (part.trim())
+        names.add(
+          part
+            .trim()
+            .split(/\s+as\s+/)[0]
+            .trim(),
+        );
+  const whole = new RegExp(`import\\s*\\*\\s*as|import\\(\\s*["']${from}`);
+  return whole.test(text) ? null : names;
+}
+
+/**
+ * A stand-in for the bundle: re-exports, from the module that has each one,
+ * only the names `parent` imports, so a test loads just the modules the
+ * browser's bundle would hand that page (the whole tree would also start
+ * `auto.js`, which needs a page). A parent that imports it whole gets every
+ * name.
+ */
+function bundleBarrel(parent) {
+  index ??= nameIndex();
+  const wanted = parent ? wantedNames(parent) : null;
+  const names = [...(wanted ?? index.keys())]
+    .filter((n) => index.has(n))
+    .sort();
+  const key = names.join(",");
+  if (barrels.has(key)) return barrels.get(key);
+  const byFile = new Map();
+  for (const n of names) {
+    const f = index.get(n);
+    byFile.set(f, [...(byFile.get(f) ?? []), n]);
+  }
+  const lines = [];
+  if (wanted?.has("attachAll") || (!wanted && names.length))
+    lines.push("export const attachAll = () => [];");
+  lines.push(
+    ...[...byFile].map(
+      ([f, ns]) =>
+        `export { ${ns.join(", ")} } from ${JSON.stringify(pathToFileURL(f).href)};`,
+    ),
+  );
   const dir = join(tmpdir(), "homelab-kp-barrel");
   mkdirSync(dir, { recursive: true });
-  barrel = join(dir, `kp-bundle-${process.pid}.mjs`);
-  writeFileSync(barrel, `${lines.join("\n")}\n`);
-  return barrel;
+  const file = join(dir, `kp-bundle-${process.pid}-${barrels.size}.mjs`);
+  writeFileSync(file, `${lines.join("\n")}\n`);
+  barrels.set(key, file);
+  return file;
 }
 
 function resolve(specifier, context, next) {
@@ -126,7 +183,10 @@ function resolve(specifier, context, next) {
     };
   if (specifier === BUNDLE) {
     root ??= kpRoot();
-    return { url: pathToFileURL(bundleBarrel()).href, shortCircuit: true };
+    return {
+      url: pathToFileURL(bundleBarrel(context.parentURL)).href,
+      shortCircuit: true,
+    };
   }
   if (specifier.startsWith(PREFIX)) {
     root ??= kpRoot();

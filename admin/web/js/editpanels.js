@@ -166,7 +166,7 @@ const card = (node, form) => {
 
 /**
  * Each app's checks.yml as the edit read carries it: under `manifest`
- * (shell/edit.rs), where the stack's own parts are.
+ * (shell/edit/stack_read.rs::manifest_json), where the stack's own parts are.
  * @param {EditRead} e
  * @returns {Record<string, import("./editforms.js").ChecksView>}
  */

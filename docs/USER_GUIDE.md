@@ -1027,7 +1027,7 @@ needs the host to restart. Editable keys open a row form; Save stages
 every change, Review shows the diff, and Confirm writes `host.toml` in one
 shot — a key marked `Apply::Restart` queues "Save and restart the host"
 automatically. The whole page needs a token of scope `all`
-(`admin/web/js/pages/settings.js`, `admin/src/shell/edit.rs::save_host_settings`).
+(`admin/web/js/pages/settings.js`, `admin/src/shell/edit/host_save.rs::save_host_settings`).
 
 **Per-machine tokens (fix-120, owner decision 2026-10-01).** Below the
 host.toml table, a second panel lists every machine's token by name and
@@ -3623,7 +3623,7 @@ way: a save is committed to `config/host.toml` in the dashboard's working
 copy first — through the same commit/push transaction a stack's edit uses
 (`WorkingCopy::transact_file`, `admin/src/shell/workcopy.rs:644-772`) — and
 only then applied to the host from that committed text
-(`admin/src/shell/edit.rs`, `save_host_settings`). If the commit lands but
+(`admin/src/shell/edit/host_save.rs`, `save_host_settings`). If the commit lands but
 the host refuses it or does not answer, the change still exists in the
 repository and the error says to run `homelab host apply` once the host
 accepts it — nothing already written is lost. The TUI's own settings screen

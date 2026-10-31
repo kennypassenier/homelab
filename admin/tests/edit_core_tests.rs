@@ -861,7 +861,7 @@ fn fix_guards_8_the_advice_for_an_old_host_names_a_route_it_supports() {
     );
     assert!(OLD_HOST_SETTINGS_ADVICE.contains("homelab release-update"));
     let src = std::fs::read_to_string(
-        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/shell/edit.rs"),
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/shell/edit/host_settings.rs"),
     )
     .unwrap();
     let gate = &src[src.find("async fn host_new_enough").unwrap()..];

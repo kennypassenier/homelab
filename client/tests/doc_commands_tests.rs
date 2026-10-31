@@ -25,10 +25,30 @@ fn is_verb(s: &str) -> bool {
             .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
 }
 
+/// The verb dispatch of every `client/src/commands/*.rs` module: the text
+/// from `match cmd {` to the end of that match.
+fn dispatch_sources() -> String {
+    let dir = root().join("client/src/commands");
+    let mut files: Vec<_> = std::fs::read_dir(dir)
+        .unwrap()
+        .map(|e| e.unwrap().path())
+        .collect();
+    files.sort();
+    let mut out = String::new();
+    for path in files {
+        let src = std::fs::read_to_string(path).unwrap();
+        if let Some(i) = src.find("    match cmd {") {
+            let body = &src[i..];
+            out.push_str(&body[..body.find("\n    }\n").unwrap_or(body.len())]);
+            out.push('\n');
+        }
+    }
+    out
+}
+
 /// The verbs `main` dispatches: the arms of `match cmd {`, eight spaces in.
 fn dispatched_verbs() -> BTreeSet<String> {
-    let src = std::fs::read_to_string(root().join("client/src/main.rs")).unwrap();
-    let body = &src[src.find("    match cmd {").expect("match cmd in main.rs")..];
+    let body = dispatch_sources();
     let mut verbs = BTreeSet::from(["help".to_string()]);
     for line in body.lines() {
         let Some(arm) = line.strip_prefix("        ") else {
@@ -112,7 +132,7 @@ fn every_homelab_command_in_the_documents_names_a_verb_the_client_dispatches() {
     let verbs = dispatched_verbs();
     assert!(
         verbs.len() > 30,
-        "reading main.rs found only {} verbs — the parser here is broken, not the docs",
+        "reading the dispatch found only {} verbs — the parser here is broken, not the docs",
         verbs.len()
     );
     let mut seen = 0;

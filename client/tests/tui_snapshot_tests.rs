@@ -2893,6 +2893,42 @@ fn a_waiting_step_is_answerable_from_the_window_the_operator_is_reading() {
     );
 }
 
+/// The verb dispatch of every `client/src/commands/*.rs` module: the text
+/// from `match cmd {` to the end of that match.
+fn dispatch_sources() -> String {
+    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/commands");
+    let mut files: Vec<_> = std::fs::read_dir(dir)
+        .unwrap()
+        .map(|e| e.unwrap().path())
+        .collect();
+    files.sort();
+    let mut out = String::new();
+    for path in files {
+        let src = std::fs::read_to_string(path).unwrap();
+        if let Some(i) = src.find("    match cmd {") {
+            let body = &src[i..];
+            out.push_str(&body[..body.find("\n    }\n").unwrap_or(body.len())]);
+            out.push('\n');
+        }
+    }
+    out
+}
+
+/// Every `client/src/commands/*.rs` module, joined.
+fn commands_source() -> String {
+    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/commands");
+    let mut files: Vec<_> = std::fs::read_dir(dir)
+        .unwrap()
+        .map(|e| e.unwrap().path())
+        .collect();
+    files.sort();
+    files
+        .iter()
+        .map(|p| std::fs::read_to_string(p).unwrap())
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
 /// covers: F212
 ///
 /// G20 of the Phase-7 gate. The CLI is a hand-rolled string match, and its
@@ -2903,7 +2939,7 @@ fn a_waiting_step_is_answerable_from_the_window_the_operator_is_reading() {
 /// host. A verb nobody can discover is a verb that does not exist.
 #[test]
 fn every_cli_verb_appears_in_the_usage_text() {
-    let src = include_str!("../src/main.rs");
+    let src = dispatch_sources();
 
     // The verbs the matcher answers to.
     let mut verbs: Vec<String> = Vec::new();
@@ -3143,7 +3179,7 @@ fn the_committed_test_plan_matches_a_fresh_generation() {
 /// is believed.
 #[test]
 fn the_help_text_and_the_usage_message_agree_about_install_native() {
-    let src = std::fs::read_to_string("src/main.rs").expect("client source");
+    let src = commands_source();
     let usage = src
         .lines()
         .find(|l| l.contains("usage: homelab install-native"))

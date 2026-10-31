@@ -13,11 +13,31 @@ fn root() -> std::path::PathBuf {
         .to_path_buf()
 }
 
+/// The verb dispatch of every `client/src/commands/*.rs` module: the text
+/// from `match cmd {` to the end of that match.
+fn dispatch_sources() -> String {
+    let dir = root().join("client/src/commands");
+    let mut files: Vec<_> = std::fs::read_dir(dir)
+        .unwrap()
+        .map(|e| e.unwrap().path())
+        .collect();
+    files.sort();
+    let mut out = String::new();
+    for path in files {
+        let src = std::fs::read_to_string(path).unwrap();
+        if let Some(i) = src.find("    match cmd {") {
+            let body = &src[i..];
+            out.push_str(&body[..body.find("\n    }\n").unwrap_or(body.len())]);
+            out.push('\n');
+        }
+    }
+    out
+}
+
 /// The verbs `main` dispatches: the arms of `match cmd {`, eight spaces in
 /// (the same reading `doc_commands_tests` does).
 fn dispatched() -> Vec<String> {
-    let src = std::fs::read_to_string(root().join("client/src/main.rs")).unwrap();
-    let body = &src[src.find("    match cmd {").unwrap()..];
+    let body = dispatch_sources();
     let mut out = Vec::new();
     for line in body.lines() {
         let Some(arm) = line.strip_prefix("        \"") else {

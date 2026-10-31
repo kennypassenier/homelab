@@ -118,6 +118,11 @@ async fn doctor(State(c): State<Ctx>, Query(q): Query<RunQuery>) -> Response {
         .await
 }
 
+/// The managed programs (latch): installed against the newest signed release.
+async fn tools(State(c): State<Ctx>) -> Response {
+    report(&c, "managed programs", Command::ToolStatus).await
+}
+
 async fn incidents(State(c): State<Ctx>) -> Response {
     report(&c, "incidents", Command::Incidents { json: true }).await
 }
@@ -195,6 +200,7 @@ pub fn router(
         .route("/data/fleet-trend", get(fleet_trend))
         .route("/data/doctor", get(doctor))
         .route("/data/incidents", get(incidents))
+        .route("/data/tools", get(tools))
         .route("/data/manual-checks", get(manual_checks))
         .route("/data/tiles", get(tiles))
         .route("/data/current-op", get(current_op))

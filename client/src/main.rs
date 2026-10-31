@@ -860,6 +860,11 @@ async fn run(explicit_host: Option<String>) {
         "backup-devices" => rpc(&host, &token, Command::BackupDevices).await,
         // H10: on-demand snapshot of vault/state/TLS/intent repo.
         "backup-host-meta" => rpc(&host, &token, Command::BackupHostMeta).await,
+        // Managed tools on the host (latch): `homelab tool status|update|rollback`.
+        "tool" => match homelab_client::tools_cli::command(&args) {
+            Ok(command) => rpc(&host, &token, command).await,
+            Err(e) => die(&e),
+        },
         // Owner decision 2026-09-30 (item 2): CLI parity for the
         // dashboard's "Save and restart the host" — `homelab host
         // restart` schedules the same systemd restart of

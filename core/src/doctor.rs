@@ -91,6 +91,9 @@ pub struct Probes {
     /// round. `None` when the gateway could not be listed; `Some(vec![])`
     /// when it could and every file is owned.
     pub unowned_route_files: Option<Vec<String>>,
+    /// Managed programs (latch): what the host read about each. `None` when
+    /// the host manages none or did not ask.
+    pub tools: Option<Vec<crate::doctor_tools::ToolProbe>>,
 }
 
 /// fix-130: how the daemon faces the network.
@@ -613,6 +616,10 @@ fn security_and_recovery(p: &Probes) -> Vec<Check> {
                  into the configured restic_password_file, 0600",
             )
         });
+    }
+
+    if let Some(tools) = &p.tools {
+        checks.extend(crate::doctor_tools::tool_checks(tools));
     }
 
     if let Some(unowned) = &p.unowned_route_files {

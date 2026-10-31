@@ -8,6 +8,7 @@ pub mod cli_args;
 pub mod cli_help;
 
 pub mod edge;
+pub mod external;
 pub mod link;
 pub mod netredact;
 pub mod output;
@@ -21,6 +22,7 @@ pub mod spec;
 pub mod status;
 pub mod testplan;
 pub mod tls;
+pub mod tools_cli;
 #[cfg(feature = "tui")]
 pub mod tui;
 pub mod ui_catalog;

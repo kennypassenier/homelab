@@ -43,6 +43,9 @@ exec_enabled = false
 # ── Nightly round and backups ───────────────────────────────────────────────
 backup_hour = 4
 second_copy_dataset = "HDD4TB/restic"
+
+# The latch environment the dashboard's Secrets page writes to (latch put).
+latch_env = "prod"
 backup_concurrency = 3
 restic_base = "rclone:gdrive:homelab-backups"
 restic_password_file = "/var/lib/homelab/secrets/restic.pw"
@@ -174,3 +177,12 @@ port = 5002
 [[registry_cache.upstreams]]
 registry = "lscr.io"
 port = 5003
+
+# Programs homelab installs and keeps current on the host. latch follows its
+# newest signed release: minor and patch by themselves, a major waits for a
+# press on "Update a program" (Kenny, 2026-10-30).
+[tools.latch]
+release_repo = "kennypassenier/latch-rs"
+asset = "latch-x86_64-unknown-linux-gnu"
+path = "/usr/local/bin/latch"
+follow = "latest"

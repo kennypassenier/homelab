@@ -132,6 +132,18 @@ pub enum Command {
     /// (`systemctl restart --no-block`) so this reply reaches the client
     /// first. Refused while an operation runs.
     RestartHost,
+    /// Managed tools (`[tools.*]` in host.toml): what is installed against the
+    /// newest signed release, one JSON object per tool.
+    ToolStatus,
+    /// Install the newest signed release of one managed tool, a major included
+    /// (this is the press that releases a held major).
+    ToolUpdate {
+        name: String,
+    },
+    /// Put a managed tool's previous program back.
+    ToolRollback {
+        name: String,
+    },
     /// H6: apt dist-upgrade every managed stack (from host state),
     /// sequentially.
     PatchFleet,
@@ -978,7 +990,8 @@ impl Command {
             | GetBackups { .. }
             | GetRetired
             | BrowseSnapshot { .. }
-            | ReadSnapshotFile { .. } => Scope::Read,
+            | ReadSnapshotFile { .. }
+            | ToolStatus => Scope::Read,
             Ui { step, .. } => step.scope(),
             DeployStack(_)
             | StageNativeBinary { .. }
@@ -1009,6 +1022,8 @@ impl Command {
             | UiReply { .. }
             | UiHold { .. }
             | RestoreNative { .. }
+            | ToolUpdate { .. }
+            | ToolRollback { .. }
             | RevealSecret { .. } => Scope::Operate,
             DestroyStack { .. }
             | SelfUpdateHost { .. }
@@ -1047,6 +1062,9 @@ impl Command {
             UpdateStack { .. } => "update_stack",
             SelfUpdateHost { .. } => "self_update_host",
             RestartHost => "restart_host",
+            ToolStatus => "tool_status",
+            ToolUpdate { .. } => "tool_update",
+            ToolRollback { .. } => "tool_rollback",
             PatchFleet => "patch_fleet",
             ExecIn { .. } => "exec_in",
             CancelExec { .. } => "cancel_exec",

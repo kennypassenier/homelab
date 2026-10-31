@@ -346,6 +346,13 @@ pub const VERBS: &[Verb] = &[
     ),
     v(
         Host,
+        "tool",
+        "status | update <name> | rollback <name>",
+        "managed programs on the host (latch): what is installed against the newest signed release, install it, or put the previous one back",
+        "homelab tool status",
+    ),
+    v(
+        Host,
         "self-update",
         "<path-to-homelab-host>",
         "ship a locally built host daemon to the host; it rolls back on a failed selfcheck",

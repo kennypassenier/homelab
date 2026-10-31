@@ -2413,7 +2413,7 @@ catches up a night a restart interrupted, fix-129) it plans the night (`host/src
    subjects, at which severity) differs from the one last sent, or a week has
    passed since; otherwise the host logs that it held the report back
    (`report_fingerprint`, `nightly_report_due` in
-   `core/src/ops/fleetcheck.rs`).
+   `core/src/ops/fleetcheck/report.rs`).
 
 With no nightly hour set, nothing runs (`host/src/tests/config_save.rs::a_settings_save_writes_back_the_file_it_read`). A stack
 whose nightly update fails has its automatic updates parked (H8, fix-59); its
@@ -2966,7 +2966,7 @@ lxc:
 
 Drift is covered automatically: the fleet check compares the whole declared
 `lxc:` block against the host's last-applied manifest
-(`core/src/ops/fleetcheck.rs`), the same way it already does for `features`
+(`core/src/ops/fleetcheck/repo_drift.rs::evaluate_repo_drift`), the same way it already does for `features`
 and `protection` — no per-field code needed for a new field here.
 
 **Dashboard:** same "Network & hardware" card as `unprivileged`/`gpu`/`vpn`
@@ -3143,7 +3143,7 @@ The client sends the vmid every stack file claims; the host adds what it can
 see and compares (`client/src/commands/host_admin.rs::cmd_answer`, `host/src/tests/reads.rs::feat_platform_3_current_op_answers_the_holder_and_the_newest_lines`).
 From outside the repository with no path, it says the stack-file half is
 `SKIPPED` and checks only the host's half (`client/src/commands/ui.rs::cmd_ui`). The
-answer (`render`, `core/src/ops/fleetcheck.rs`, fix-103) leads with a count
+answer (`render`, `core/src/ops/fleetcheck/report.rs::render`, fix-103) leads with a count
 per severity and then groups the findings, broken first, each group printed
 in its own colour (red, yellow, dim):
 
@@ -3164,9 +3164,9 @@ A group with nothing in it is left out, of the summary too.
 
 or `fleet check: repo and reality agree`. The command exits 0 when no finding
 is `broken` or `drift`; `noted` findings are printed and do not fail it
-(`check_passes`, `core/src/ops/fleetcheck.rs:515-517`). Among the findings
-(`core/src/ops/fleetcheck.rs:520-758` and the `evaluate_*` functions after
-it): a template a stack clones that does not exist, a record whose vmid does
+(`core/src/ops/fleetcheck/report.rs::check_passes`). Among the findings
+(`core/src/ops/fleetcheck/evaluate.rs::evaluate` and the `evaluate_*` functions in its sibling files):
+a template a stack clones that does not exist, a record whose vmid does
 not exist, parked stacks, backups that never ran or are old, a stack file that
 claims a vmid somebody else owns, a route to nothing, boot policy and resource
 drift (W3), deploys recorded as incomplete, and a notification path whose last
@@ -3176,7 +3176,7 @@ delivery failed. Two came with the declarative cleanup (2026-09-27):
   neither `lxc-compose.yml` nor `service.yml`:
   `is in host state (vmid <n>) but has no stack file in the repository — stacks/<stack>/ is gone`,
   remedy `` `homelab apply` lists it and destroys it after you type its name ``
-  (`core/src/ops/fleetcheck.rs:678-716`). Only when the client sent stack
+  (`core/src/ops/fleetcheck/stack_record.rs::deleted_stack_findings`). Only when the client sent stack
   files at all, so the nightly check, which has none, never raises it.
 - `noted`, one per retired stack, app or unit: what it left and the wipe
   command (`core/src/ops/retired.rs:190-219`); section 3, `homelab wipe`.
@@ -3186,7 +3186,7 @@ says: the parsed `lxc-compose.yml` and a sha256 of every file a deploy would
 push into the container (no `.env`, no latch). The host compares them with
 the stack's recorded manifest and its intent-history copy under
 `/var/lib/homelab/repo/stacks/<stack>/` (`evaluate_repo_drift` in
-`core/src/ops/fleetcheck.rs`):
+`core/src/ops/fleetcheck/repo_drift.rs`):
 
 - `drift`, `the files differ from what the host applied on <date> — lxc-compose.yml differs; changed: <files>; new: <files>; gone from the files: <files>`,
   remedy `` `homelab deploy stacks/<stack>` (or `homelab apply`) to apply them ``;
@@ -3204,7 +3204,7 @@ repository (which a cache rewrite would call drifted on every cached app).
 Each night, the host hashes `/opt/<stack>/` from inside every recorded
 stack's own container (`pct exec … sha256sum`) and compares it against what
 it recorded pushing (`evaluate_container_drift` in
-`core/src/ops/fleetcheck.rs`):
+`core/src/ops/fleetcheck/container_drift.rs`):
 
 - `drift`, `` /opt/<stack> no longer matches what the last deploy pushed — changed inside the container: <files>; gone from the container: <files> ``,
   remedy `` redeploy <stack> to put back what was pushed, or adopt the change if it was intentional ``.
@@ -3605,7 +3605,7 @@ moved, not every key the file happens to declare:
 `homelab check` and `homelab today` compare `config/host.toml` against the
 host's own running settings, key by key, and report one `Drift` finding per
 key that differs (`evaluate_host_config_drift`,
-`core/src/ops/fleetcheck.rs:498-528`):
+`core/src/ops/fleetcheck/host_config_drift.rs::evaluate_host_config_drift`):
 
 ```text
   [drift] host.toml — gateway_vmid: config/host.toml declares 105, the host's host.toml has 104
@@ -3649,7 +3649,7 @@ place to look.
 | every ZFS pool | 80/90% (notify) | `host.toml` `capacity_thresholds`, `HostCapacityMetric::ZfsPool` |
 | Prometheus TSDB vs its `--storage.tsdb.retention.size` | 70/90% of the configured cap (notify) | cap itself: `stacks/metrics/prometheus/docker-compose.yml`; the cap value core asks against: `host.toml` `tsdb_retention_size_mib` (Kenny's own number, matching the compose file — core has no business knowing an app's configured value); threshold: `capacity_thresholds`, `HostCapacityMetric::PrometheusTsdb` |
 | native-backup staging directory (`/appdata/.backup-staging`) | emptied every run, capped by `native_backup_staging_cap_mib`; 10/50% of that cap (notify, deliberately low — anything here between runs is already a finding) | cap: `host.toml` `native_backup_staging_cap_mib`; threshold: `capacity_thresholds`, `HostCapacityMetric::NativeBackupStaging` |
-| every managed container's own rootfs | 70/85% (notify) | `host.toml`-free, a compiled default (`GrowthLimits`, `core/src/ops/fleetcheck.rs`) — unchanged by this round |
+| every managed container's own rootfs | 70/85% (notify) | `host.toml`-free, a compiled default (`GrowthLimits`, `core/src/ops/fleetcheck/growth.rs`) — unchanged by this round |
 | a stack's own declared data pool (`data_mounts`) | 80/90% (notify) | `GrowthLimits::pool_drift_pct` / `pool_broken_pct`, same module |
 | per-stack log rotation on a data mount | the stack's own `rotate:`, or — new — the fleet default (`*.log`, 50M, keep 5) for a mount that declares neither `rotate:` nor `no_default_rotate: true` | stack's own: `data_mounts[].rotate` in its `lxc-compose.yml`; fleet default: `host.toml` `default_log_rotation` |
 | registry pull-through cache (CT 117) | 168h proxy ttl (age) + nightly `registry garbage-collect` (frees what ttl expired) | ttl: `stacks/registry/registry/*.yml` (`proxy.ttl`, already declared); GC: `stacks/registry/rootfs/` (a stack-declared systemd timer, `registry-gc.timer`/`.service`) |

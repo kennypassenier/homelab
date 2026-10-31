@@ -103,7 +103,7 @@ flowchart LR
 | daemon log | stderr of `homelab-host` (`host/src/tests/commands.rs::fix_53_a_timeout_kills_everything_the_command_started`) | `tracing` calls throughout `host/src/main.rs` | always | startup faults, scheduler decisions, notification delivery, and every transcript line (below) |
 | live transcript | streamed to every connected client | `host/src/tests/commands.rs::fix_51_concurrent_writes_of_one_path_all_succeed_and_stay_whole` | while an operation runs | the exact commands and the first lines of their output |
 | state record | `/var/lib/homelab/state.json` | `core/src/state.rs:198-231` | after operations, the scheduler, notifications | what the orchestrator believes about each stack |
-| fleet check | `homelab check` output; daemon log each night | `core/src/ops/fleetcheck.rs:510-715`, `host/src/tests/config_save.rs::feat_settings_1_a_change_is_checked_like_a_start` | on demand, and after every nightly tick in the night window | where the record and reality disagree |
+| fleet check | `homelab check` output; daemon log each night | `core/src/ops/fleetcheck/evaluate.rs::evaluate`, `host/src/tests/config_save.rs::feat_settings_1_a_change_is_checked_like_a_start` | on demand, and after every nightly tick in the night window | where the record and reality disagree |
 | doctor | `homelab doctor` output | `core/src/doctor.rs:45-188`, probes at `host/src/tests/ui_relay.rs::act_the_token_name_reaches_the_operation_queued_or_beside` | on demand | host disk, state file, backups, offsite, mirror, interrupted operations; refused connections, exposure, file modes, privileged containers, host-meta, restore drill, password file, Drive space (fix-120, fix-130) |
 | exec audit | `/var/lib/homelab/audit.log` | `host/src/tests/history.rs::redesign_371_a_reveal_is_audited_in_history_without_the_value` | every `homelab exec` that passed its guard | who ran what inside which container; 0600, the command masked (fix-124, fix-125) |
 | intent history | `/var/lib/homelab/repo` (git) | deploy step `commit intent` (`core/src/ops/deploy/firewall.rs::write_rules`) | every deploy | which files each deploy applied |
@@ -581,12 +581,12 @@ see and evaluates (`host/src/tests/reads.rs::feat_platform_3_lines_carry_request
 - The command exits 1 when there is a `broken` or `drift` finding; `noted`
   ones are printed but do not fail it since v3.58.5 (gap-32,
   `fleetcheck::check_passes`). The nightly run uses the same rule: only
-  non-`noted` findings raise a warning and a notification (`host/src/tests/config_save.rs::feat_settings_1_a_change_is_checked_like_a_start`, `core/src/ops/fleetcheck.rs:501-507`).
+  non-`noted` findings raise a warning and a notification (`host/src/tests/config_save.rs::feat_settings_1_a_change_is_checked_like_a_start`, `core/src/ops/fleetcheck/report.rs::check_passes`).
 - Run it from the repository root, or pass the stacks path. From anywhere
   else the client finds no stack files, says so, and checks only the host's
   half (`client/src/commands/host_admin.rs::cmd_answer`). That half cannot see a deleted stack
   directory: the `drift` finding for a stack in state without a stack file
-  needs the stack files (`core/src/ops/fleetcheck.rs:678-716`), and the
+  needs the stack files (`core/src/ops/fleetcheck/stack_record.rs::deleted_stack_findings`), and the
   nightly check never has them (`host/src/tests/config_save.rs::feat_settings_1_a_change_is_checked_like_a_start`).
 - Every retired stack, app or unit is one `noted` line that names what it
   keeps and the `homelab wipe` command (`core/src/ops/retired.rs:190-219`).
@@ -766,7 +766,7 @@ remedy starts `This gate exists to protect unmanaged guests.`
 | `hostname '<h>' does not match canonical '<c>'` | the manifest's hostname is not `<vmid>-app-<stack>` | fix the manifest | `core/src/safety.rs:53-58` |
 | `vmid <n> is a QEMU VM` | a VM, not a container, has that id | pick another vmid | `core/src/safety.rs:63-69` |
 | `vmid <n> exists with hostname '<h>', expected '<e>'` | deploy: a container with that id belongs to something else | the stack file points at someone else's container | `core/src/safety.rs:82-86` |
-| `vmid <n> is '<h>', expected '<e>'` | backup, restore, update and other operations on an existing stack: the live hostname differs from the record | re-adopt or redeploy so the record matches; `homelab check` reports the same | `core/src/ops/mod.rs:70-75`, `core/src/ops/fleetcheck.rs:575-583` |
+| `vmid <n> is '<h>', expected '<e>'` | backup, restore, update and other operations on an existing stack: the live hostname differs from the record | re-adopt or redeploy so the record matches; `homelab check` reports the same | `core/src/ops/mod.rs:70-75`, `core/src/ops/fleetcheck/stack_record.rs::record_finding` |
 | `vmid <n> does not exist` | the container is gone | redeploy, or `homelab forget <stack>` if it is gone on purpose | `core/src/ops/mod.rs:61-63` |
 | `template <t> is <p>, but stack '<s>' asks for <q>` | privileged vs unprivileged mismatch between template and stack; a clone always inherits the template's | use the matching template | `core/src/ops/deploy/gate.rs::load_prior` |
 | `remote exec is disabled (set exec_enabled = true in host.toml to allow it)` | `homelab exec` is off by default | enable it in host.toml if you need it | `core/src/safety.rs:118-123`, `host/src/config/tokens.rs::validate_tokens` |
@@ -792,7 +792,7 @@ cache and hardware readiness (the four that run before anything changes) is
 recorded in state.json with `incomplete_step` set
 (`core/src/ops/deploy/incomplete.rs::mark_incomplete`), and
 `homelab check` reports it as `its last deploy stopped at "<step>" and never finished`
-(`core/src/ops/fleetcheck.rs:1012-1030`).
+(`core/src/ops/fleetcheck/recorded.rs::evaluate_incomplete`).
 
 | Symptom (verbatim) | Step | Cause | First action | Source |
 |---|---|---|---|---|
@@ -879,7 +879,7 @@ old (`host/src/tests/config.rs::a_typo_is_reported`, `1941-1943`). Parked stacks
 
 | Symptom | Cause | First action | Source |
 |---|---|---|---|
-| a stack is `disabled` in `homelab check` and was not backed up | a nightly run failed and the stack was parked (H8); the daemon log has the `FAILED` line and a notification went out once | fix the cause, then `homelab enable <stack>` | `host/src/tests/notices.rs::fix_184_down_notice_waits_for_the_full_threshold`, `core/src/ops/fleetcheck.rs:587-597` |
+| a stack is `disabled` in `homelab check` and was not backed up | a nightly run failed and the stack was parked (H8); the daemon log has the `FAILED` line and a notification went out once | fix the cause, then `homelab enable <stack>` | `host/src/tests/notices.rs::fix_184_down_notice_waits_for_the_full_threshold`, `core/src/ops/fleetcheck/stack_record.rs::disabled_finding` |
 | a backup that stood aside did not park the stack | by design: a deferred backup is not a failed night | none | `core/src/ops/backup/night.rs::NightBackup::of` |
 | a rolled-back update parked the stack's updates | a rolled-back update is a failure (section 8.5), and a failed update parks the automatic updates (backups continue, fix-59) | fix or pin the image, then `homelab enable` | `park_after_night` in `host/src/main.rs` |
 | a CLI command started while the nightly backups run prints the round's lines and does not start | the backup phase holds the operation lock for the whole batch; your operation waits for it | wait, or use `homelab status` which does not take the lock | `host/src/tests/config.rs::fix_120_host_policy_defaults_to_the_fleet_and_follows_host_toml`, `2969` |
@@ -895,7 +895,7 @@ first, the fallback only when it fails (`core/src/notify.rs:174-185`,
 
 | Symptom | Cause | First action | Source |
 |---|---|---|---|
-| `homelab check` reports `no route accepted the last notification` | every route failed on the last attempt; the reason is kept in state | the finding quotes the reason; check the webhook targets in host.toml | `core/src/ops/fleetcheck.rs:899-933`, `host/src/tests/doctor.rs::fix_131_incident_show_reads_one_bundle_and_nothing_else` |
+| `homelab check` reports `no route accepted the last notification` | every route failed on the last attempt; the reason is kept in state | the finding quotes the reason; check the webhook targets in host.toml | `core/src/ops/fleetcheck/recorded.rs::evaluate_notify`, `host/src/tests/doctor.rs::fix_131_incident_show_reads_one_bundle_and_nothing_else` |
 | the same failure did not notify a second time | identical failures of the same operation are suppressed for 20 hours; a changed error text passes; successes always pass | expected. The counter lives in memory, so a daemon restart resets it | `host/src/tests/refusals.rs::fix_141_the_hello_names_the_build`, `core/src/notify.rs:27-58` |
 | `cannot write the header file <path>: <e>` as the recorded reason | a route that needs a bearer token was skipped because its header file could not be written under `secrets/` | check that the state directory's `secrets/` is writable by the daemon | `host/src/tests/doctor.rs::fix_130_the_new_doctor_probes_read_the_machine` |
 | no notifications at all, and no failure recorded | no webhook is configured: with neither route set nothing is sent and nothing is recorded | `homelab config` shows the webhook setting | `host/src/tests/doctor.rs::fix_130_the_new_doctor_probes_read_the_machine` |
@@ -909,22 +909,22 @@ A selection. Every finding carries its own remedy line.
 
 | Finding (verbatim) | Meaning | Source |
 |---|---|---|
-| `recorded on vmid <n>, which does not exist` | the container was removed outside the orchestrator | `core/src/ops/fleetcheck.rs:569-574` |
-| `recorded as '<h>' but vmid <n> is really '<l>'` | every operation on this stack will fail the hostname guard | `core/src/ops/fleetcheck.rs:575-583` |
-| `disabled` … `the nightly run skips it entirely` | parked by H8 or by hand | `core/src/ops/fleetcheck.rs:587-597` |
-| `has never been backed up` | no backup was ever recorded | `core/src/ops/fleetcheck.rs:633-639` |
-| `last backup was <n> hours ago` | older than 48 hours | `core/src/ops/fleetcheck.rs:640-647`, `489` |
-| `clones template <n>, which does not exist on the hypervisor` | a rebuild of this stack would fail | `core/src/ops/fleetcheck.rs:550-564` |
-| `claims vmid <n>, which is a live container this orchestrator does not manage` | a stack file points at someone else's container | `core/src/ops/fleetcheck.rs:652-666` |
-| `routes to <target>, where nothing answers` | a gateway route leads nowhere | `core/src/ops/fleetcheck.rs:695-700` |
-| `rootfs is <n>% full` | disk pressure inside a container | `core/src/ops/fleetcheck.rs:727-741` |
-| `has no runaway guards: no journald cap, no docker log cap, or both` | run `homelab guards <vmid>` | `core/src/ops/fleetcheck.rs:794-800` |
-| `its last deploy stopped at "<step>" and never finished` | see section 8.4 | `core/src/ops/fleetcheck.rs:1018-1026` |
+| `recorded on vmid <n>, which does not exist` | the container was removed outside the orchestrator | `core/src/ops/fleetcheck/stack_record.rs::record_finding` |
+| `recorded as '<h>' but vmid <n> is really '<l>'` | every operation on this stack will fail the hostname guard | `core/src/ops/fleetcheck/stack_record.rs::record_finding` |
+| `disabled` … `the nightly run skips it entirely` | parked by H8 or by hand | `core/src/ops/fleetcheck/stack_record.rs::disabled_finding` |
+| `has never been backed up` | no backup was ever recorded | `core/src/ops/fleetcheck/backup_age.rs::evaluate_backup_age` |
+| `last backup was <n> hours ago` | older than 48 hours | `core/src/ops/fleetcheck/backup_age.rs::evaluate_backup_age`, `core/src/ops/fleetcheck/backup_age.rs::DEFAULT_BACKUP_MAX_AGE_S` |
+| `clones template <n>, which does not exist on the hypervisor` | a rebuild of this stack would fail | `core/src/ops/fleetcheck/stack_record.rs::missing_template_findings` |
+| `claims vmid <n>, which is a live container this orchestrator does not manage` | a stack file points at someone else's container | `core/src/ops/fleetcheck/stack_record.rs::stack_file_claims` |
+| `routes to <target>, where nothing answers` | a gateway route leads nowhere | `core/src/ops/fleetcheck/routes.rs::dead_route_findings` |
+| `rootfs is <n>% full` | disk pressure inside a container | `core/src/ops/fleetcheck/growth.rs::disk_finding` |
+| `has no runaway guards: no journald cap, no docker log cap, or both` | run `homelab guards <vmid>` | `core/src/ops/fleetcheck/growth.rs::guards_finding` |
+| `its last deploy stopped at "<step>" and never finished` | see section 8.4 | `core/src/ops/fleetcheck/recorded.rs::evaluate_incomplete` |
 | `the last drill did not prove a restore: <e>` | the last restore drill failed | `core/src/ops/restoredrill.rs:136` |
 | `somebody looked and said no: "<question>"` | a person answered a manual check "not ok"; fix it, then answer again (`homelab checks`). Open, reopened or unanswered manual checks raise no finding since manual-checks-as-info-1: they are information on the stack's page ("When something goes wrong, check this") | `core/src/ops/manualchecks.rs` |
-| `but has no stack file in the repository` | `drift`: the stack runs and is in state, but `stacks/<stack>/` is gone. `homelab apply` destroys it after its name is typed; put the directory back to keep it | `core/src/ops/fleetcheck.rs:700-714` |
+| `but has no stack file in the repository` | `drift`: the stack runs and is in state, but `stacks/<stack>/` is gone. `homelab apply` destroys it after its name is typed; put the directory back to keep it | `core/src/ops/fleetcheck/stack_record.rs::deleted_stack_findings` |
 | `retired <date> (<kind>, vmid <n>) — kept: restic <repos>; /appdata <dirs>; vault <paths>` | `noted`: data a retired stack, app or unit keeps on purpose; `homelab wipe <key>` deletes it | `core/src/ops/retired.rs:199-216` |
-| `monitor(s) watch a stack the fleet no longer has` | `drift`: the Uptime Kuma seeder left undeclared monitors in place because removing them all would have taken more than a quarter of the monitors at once; `refused` in `last-seed.json` says why | `core/src/ops/fleetcheck.rs:1045-1059` |
+| `monitor(s) watch a stack the fleet no longer has` | `drift`: the Uptime Kuma seeder left undeclared monitors in place because removing them all would have taken more than a quarter of the monitors at once; `refused` in `last-seed.json` says why | no fleetcheck code produces this finding (not found in `core/src/ops/fleetcheck/`) |
 
 ### 8.10 Removal, apply and wipe
 

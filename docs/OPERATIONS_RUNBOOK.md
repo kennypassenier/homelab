@@ -211,7 +211,7 @@ at least 20 hours old (`host/src/tests/config.rs::fix_120_host_policy_defaults_t
 8. **Fleet check**: the stored record held against the machine. It runs on
    every tick inside the night window, also when nothing was due, and sends
    a `fleet-check` notification when anything is more than "noted"
-   (`host/src/tests/config_save.rs::feat_settings_1_a_change_is_checked_like_a_start`, `core/src/ops/fleetcheck.rs:501-507`).
+   (`host/src/tests/config_save.rs::feat_settings_1_a_change_is_checked_like_a_start`, `core/src/ops/fleetcheck/report.rs::check_passes`).
    The hour has up to three ticks and this path does not go through the
    repeat damper (`host/src/tests/config_save.rs::fix_122_a_valid_log_level_saves_as_a_live_key`), so the same findings can arrive
    more than once in one night.
@@ -345,7 +345,7 @@ names `homelab release-update`. The steps below are the parts it merges.
    2026-09-27: a `drift` line
    `"is in host state (vmid <n>) but has no stack file in the repository"`
    for a stack whose directory you deleted (op-6 route A;
-   `core/src/ops/fleetcheck.rs:678-716`), and one `noted` line per retired
+   `core/src/ops/fleetcheck/stack_record.rs::deleted_stack_findings`), and one `noted` line per retired
    stack, app or unit, naming the repositories, `/appdata` and vault paths
    still kept and the `homelab wipe` command for them
    (`core/src/ops/retired.rs:190-219`). `noted` needs nothing today; it is
@@ -354,7 +354,7 @@ names `homelab release-update`. The steps below are the parts it merges.
    `config/host.toml` and the host's own running settings disagree —
    `"host.toml — <key>: config/host.toml declares <a>, the host's host.toml
    has <b>"` (`evaluate_host_config_drift`,
-   `core/src/ops/fleetcheck.rs:498-528`). The remedy names both routes:
+   `core/src/ops/fleetcheck/host_config_drift.rs::evaluate_host_config_drift`). The remedy names both routes:
    `homelab host apply` to make the host match the repository
    (USER_GUIDE.md, "`homelab host apply`"), or edit `config/host.toml` to
    match the host and commit that when the

@@ -93,7 +93,7 @@ The same, with only one host monitor declared, so twelve would go:
 
 The stale list then reaches `homelab check` as a `drift` finding on
 `uptime kuma` whose remedy points at `refused` in `last-seed.json`
-(`core/src/ops/fleetcheck.rs:1045-1059`).
+(no fleetcheck code produces this finding; not found in `core/src/ops/fleetcheck/`).
 
 ## What `homelab apply` does
 
@@ -148,7 +148,7 @@ deploy, not `apply` (`core/src/ops/retired.rs:1-15`). What makes that safe:
   (stack, app, native unit), vmid, date, repositories, `/appdata` paths and
   vault paths.
 - `homelab check` names every entry as `noted`, which does not fail the check
-  (`core/src/ops/retired.rs:190-219`, `core/src/ops/fleetcheck.rs:515-517`).
+  (`core/src/ops/retired.rs:190-219`, `core/src/ops/fleetcheck/report.rs::check_passes`).
   The nightly check writes it to the daemon log, and sends it in a
   notification only together with some other finding that is not `noted`
   (`host/src/tests/config_save.rs::feat_settings_1_a_change_is_checked_like_a_start`).

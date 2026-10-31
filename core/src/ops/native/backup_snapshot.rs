@@ -18,7 +18,7 @@ use crate::runner::StepOutcome;
 /// the SERVICE, not the stack. T5 puts several services on one container,
 /// and a per-stack repository would fold them into one — so moving any of
 /// them elsewhere would leave its history behind, which is what D25 exists
-/// to prevent. F171: the same restic cache constant `backup.rs` uses for
+/// to prevent. F171: the same restic cache constant `backup/restic.rs` uses for
 /// every compose stack, so this hand-built environment does not drift from
 /// it. Story: docs/deployment/REGISTER.md.
 fn restic_stdin_sink(cfg: &BackupCfg, m: &NativeServiceManifest) -> String {

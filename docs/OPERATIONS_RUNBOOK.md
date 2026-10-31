@@ -173,15 +173,15 @@ at least 20 hours old (`host/src/tests/config.rs::fix_120_host_policy_defaults_t
      are stopped, each owning app's paths go into its own repository
      `<restic_base>/<app>-config`, the stopped containers are started again
      whether or not the snapshot worked, then retention
-     (`core/src/ops/backup.rs:296-708`).
+     (`core/src/ops/backup/job.rs::backup_impl`, steps in `quiesce.rs`, `snapshot.rs` and `retention.rs` beside it).
    - Native service: a `tar` stream of its data straight into
      `restic --stdin`, repository `<unit>-config`
      (`core/src/ops/native/backup_snapshot.rs::snapshot`).
    - An app in use makes the whole stack stand aside: nothing stopped, no
-     snapshot, no timestamp, not a failure (`core/src/ops/backup.rs:397-415`,
-     `:34-74`).
+     snapshot, no timestamp, not a failure (`core/src/ops/backup/gates.rs::refuse_when_in_use`,
+     `core/src/ops/backup/night.rs::NightBackup`).
    - The phase ends with `"scheduler: backup phase took <time> for <n>
-     stack(s), <k> at a time"` (`core/src/ops/backup.rs:250-267`).
+     stack(s), <k> at a time"` (`core/src/ops/backup/night.rs::phase_duration_line`).
 2. **Updates**, one stack at a time (`host/src/tests/config_save.rs::fix_134_a_settings_save_keeps_the_file_s_own_comments`).
    - Compose: apps labelled `com.homelab.update.policy=auto` are pulled and
      recreated, with rollback (`host/src/tests/notices.rs::fix_184_down_notice_waits_for_the_full_threshold`,
@@ -193,7 +193,7 @@ at least 20 hours old (`host/src/tests/config.rs::fix_120_host_policy_defaults_t
      mechanism per policy). See op-8.
 3. **Parking.** A stack whose backup failed, or whose update failed, is set
    to disabled and one notification goes out (`host/src/tests/notices.rs::fix_184_outage_expected_is_declared_not_hardcoded`,
-   `core/src/ops/backup.rs:66-69`). See op-5.
+   `core/src/ops/backup/night.rs::NightBackup`). See op-5.
 4. **Host-meta**, the host's own backup, when due
    (`host/src/tests/notices.rs::fix_184_outage_expected_is_declared_not_hardcoded`). See op-12.
 5. **Restore drill**: one repository per night (`restore_drill_interval_s`
@@ -239,7 +239,7 @@ flowchart TD
     notify --> wait
 ```
 
-<sub>Source: `host/src/tests/tokens.rs::fix_120_issue_token_adds_one_entry_hashed_not_plain` (`nightly_plan`), `:2257-2695` (`scheduler_loop`), `core/src/ops/backup.rs:66-69` (`parks_the_stack`).</sub>
+<sub>Source: `host/src/tests/tokens.rs::fix_120_issue_token_adds_one_entry_hashed_not_plain` (`nightly_plan`), `:2257-2695` (`scheduler_loop`), `core/src/ops/backup/night.rs::NightBackup`.</sub>
 
 **Where results go.** Each operation posts to `notify_webhook` and falls
 back to `notify_fallback_webhook` (`host/src/tests/doctor.rs::fix_130_the_new_doctor_probes_read_the_machine`). An
@@ -451,10 +451,10 @@ Workstation, repository root, unless stated.
 6. **First backup.** `homelab backup stacks/<name>`. Creates the
    repositories (`restic init` answers "config file already exists" for an
    existing one, which the backup treats as normal; any other failure stops
-   it, `init_repository` in `core/src/ops/backup.rs`) and records the time
+   it, `init_repository` in `core/src/ops/backup/repo_init.rs`) and records the time
    (`host/src/tests/support.rs::cache_answering_handler`). An app name that another stack already
    uses owns the same repository; the stack recorded later is refused
-   (`core/src/ops/backup.rs:315-373`).
+   (`core/src/ops/backup/gates.rs::owner_conflict`).
 7. **Manual checks.** `homelab checks` lists what the deploy registered for
    a person to confirm (`core/src/state.rs:121-134`). They are information, not
    notifications: each stack page lists them under "When something goes
@@ -956,7 +956,7 @@ only; no secrets and no latch key needed (`client/src/commands/checks.rs::cmd_to
 **Restore to latest.** `homelab restore stacks/<name>`, or TUI `R`; both ask
 for the stack name first, `--yes` answers it for scripts, and the host
 refuses a request without it (fix-64, `restore_confirmed` in
-`core/src/ops/backup.rs`). The host checks every owning app's repository
+`core/src/ops/backup/restore_into.rs`). The host checks every owning app's repository
 holds a snapshot and that there is room for a copy of the current data,
 stops every app (`docker compose down`), copies the current data to
 `/var/lib/homelab/pre-restore/<stack>-<unix time>/` (kept; delete it by hand
@@ -964,7 +964,7 @@ once the restore is proven; `--no-safety-copy` skips it), then
 (**point of no return**) runs
 `restic restore latest --target /` per repository, starts every app again
 even when the restore failed, and verifies they run
-(`core/src/ops/backup.rs:803-962`).
+(`core/src/ops/backup/restore_app.rs::restore_app`, `core/src/ops/backup/restore_data.rs::restore_repository`).
 
 **Restore to a named snapshot.** `homelab restore stacks/<name> <id>`.
 `homelab snapshots stacks/<name>` (fix-64) lists the ids there is to pick
@@ -972,7 +972,7 @@ from, one repository at a time, newest first, reusing `GetBackups`
 unchanged — also palette-only in the TUI, Ctrl+K then "snapshots". The
 id must exist in **every** owning app's repository, otherwise the restore
 stops before anything is stopped with `"is not in the repository for"`
-(`core/src/ops/backup.rs:836-880`). A restic snapshot id belongs to one
+(`core/src/ops/backup/restore_select.rs::check_in_repository`). A restic snapshot id belongs to one
 repository, so on a stack with more than one owning app only `latest`
 passes. One app to an older snapshot, by hand, on the host:
 
@@ -987,7 +987,7 @@ pct exec <vmid> -- sh -c 'cd /opt/<stack>/<app> && docker compose up -d'
 ```
 
 The repository layout, password file and cache directory are the ones the
-backup uses (`core/src/ops/backup.rs:32`, `:88-105`, `:124-134`).
+backup uses (`core/src/ops/backup/restic.rs::RESTIC_CACHE_DIR`, `core/src/ops/backup/restic.rs::restic`, `core/src/ops/backup/config.rs::BackupCfg::default`).
 
 ---
 
@@ -1057,7 +1057,7 @@ the automated `after_restore` step on both restore paths.
 
 ## op-12 · The host's own backup (host-meta)
 
-**What it holds** (`core/src/ops/backup.rs:964-1087`):
+**What it holds** (`core/src/ops/backup/host_meta.rs::backup_host_meta`):
 
 | Path | What it is |
 |---|---|
@@ -1067,10 +1067,10 @@ the automated `after_restore` step on both restore paths.
 | `/var/lib/homelab/repo` | the intent repo with its history |
 | `/etc/homelab/host.toml` | token and every setting |
 | three SMART collector files | only those present |
-| `/etc/network/interfaces`, `/etc/pve/storage.cfg`, `/etc/pve/jobs.cfg`, `/etc/pve/qemu-server`, `/etc/sysctl.d/99-homelab-swappiness.conf`, `/root/.config/rclone/rclone.conf` | fix-111: the VLAN bridges, Proxmox's storage and job definitions, the VM configurations, the swappiness drop-in, and rclone's own remote — `HOST_META_EXTRAS` in `core/src/ops/backup.rs`, each skipped when absent |
+| `/etc/network/interfaces`, `/etc/pve/storage.cfg`, `/etc/pve/jobs.cfg`, `/etc/pve/qemu-server`, `/etc/sysctl.d/99-homelab-swappiness.conf`, `/root/.config/rclone/rclone.conf` | fix-111: the VLAN bridges, Proxmox's storage and job definitions, the VM configurations, the swappiness drop-in, and rclone's own remote — `HOST_META_EXTRAS` in `core/src/ops/backup/host_meta.rs`, each skipped when absent |
 
 **Repository:** `rclone:gdrive:homelab-backups/host-meta-config`
-(`core/src/ops/backup.rs:94`, `:1010-1021`). It is encrypted with the
+(`core/src/ops/backup/restic.rs::restic`, `core/src/ops/backup/host_meta.rs::snapshot`). It is encrypted with the
 `restic.pw` it contains; see op-17.
 
 **Not in it:** the `homelab-host` binary itself. The daemon's systemd units
@@ -1240,8 +1240,8 @@ Layer 1.
 | API bearer token | host: `token` in `host.toml`, or `HOMELAB_TOKEN` in the daemon's environment, which wins (`host/src/config/tokens.rs::validate_tokens`); every workstation: `HOMELAB_TOKEN`, `~/.config/homelab/env` or `./.env` (`client/src/commands/ctx.rs::repo_root`) | op-17 lost-3d |
 | TLS key and certificate | host: `/var/lib/homelab/tls-key.pem`, `tls-cert.pem`, made once, never renewed by the code (`host/src/tls.rs:14-54`) | op-17 lost-2 |
 | TLS pin (public) | `pin` in `config/client.toml` (committed) and `~/.config/homelab/pin` per machine (`client/src/repo_config.rs:27-40`, `client/src/lib.rs:15-34`) | op-17 lost-2b |
-| restic password | host: `/var/lib/homelab/secrets/restic.pw`, or `restic_password_file` in `host.toml` (`core/src/ops/backup.rs:124-134`, `host/src/config/tokens.rs::validate_tokens`); one password for every repository (`core/src/ops/backup.rs:88-105`) | none in code; see op-17 lost-1 |
-| Google Drive (rclone remote `gdrive`) | rclone's own configuration on the host; the backup target is `rclone:gdrive:homelab-backups` (`core/src/ops/backup.rs:127`) | `rclone config reconnect gdrive:`; `homelab doctor` shows `offsite (Drive)` as `token invalid/expired` when the listing fails (`core/src/doctor.rs:141-157`) |
+| restic password | host: `/var/lib/homelab/secrets/restic.pw`, or `restic_password_file` in `host.toml` (`core/src/ops/backup/config.rs::BackupCfg::default`, `host/src/config/tokens.rs::validate_tokens`); one password for every repository (`core/src/ops/backup/restic.rs::restic`) | none in code; see op-17 lost-1 |
+| Google Drive (rclone remote `gdrive`) | rclone's own configuration on the host; the backup target is `rclone:gdrive:homelab-backups` (`core/src/ops/backup/config.rs::BackupCfg::default`) | `rclone config reconnect gdrive:`; `homelab doctor` shows `offsite (Drive)` as `token invalid/expired` when the listing fails (`core/src/doctor.rs:141-157`) |
 | Notification bearers | `notify_auth_bearer`, `notify_fallback_auth_bearer` in `host.toml`, not editable from the TUI (`host/src/config/tokens.rs::issue_token_in`, `:178-183`); written for each send to `/var/lib/homelab/secrets/notify-route-<n>.header` (`core/src/notify.rs:188-190`) | edit `host.toml`, restart (lost-3d step 2 shows the edit-then-restart pattern) |
 | Device backup credential and pin | `cred_file` (curl `-K` format) and `pin` (`sha256//<base64>`) per `[[device_backups]]` (`core/src/ops/devicebackup.rs:37-73`) | see below |
 | Stack app secrets | latch, or a local `stacks/<stack>/<app>/.env`; copy on the host in the vault (`client/src/spec.rs:303-412`, `core/src/ops/deploy/bootstrap.rs::wait_for_systemd`), kept after the app or stack is removed until `homelab wipe` (op-6 step 6) | change in latch, then `homelab deploy stacks/<stack>` |
@@ -1297,23 +1297,23 @@ flowchart LR
 
 | Secret | Copy | Survives | Does not survive |
 |---|---|---|---|
-| restic password | `/var/lib/homelab/secrets/restic.pw` (`core/src/ops/backup.rs:128`) | container loss | host root disk loss |
-| | inside every `host-meta-config` snapshot (`core/src/ops/backup.rs:971`, `:1056-1064`) | host loss | cannot be opened without the password itself |
+| restic password | `/var/lib/homelab/secrets/restic.pw` (`core/src/ops/backup/config.rs::BackupCfg::default`) | container loss | host root disk loss |
+| | inside every `host-meta-config` snapshot (`core/src/ops/backup/host_meta.rs::snapshot_sources`) | host loss | cannot be opened without the password itself |
 | | offline copy "in Kenny's Bitwarden": stated in the generated DR runbook, Layer 3 (`client/src/spec.rs:1071-1075`); no code reads or checks it | everything the house loses | nothing proves it matches until op-18 is run |
 | TLS key and certificate | `/var/lib/homelab/tls-key.pem`, `tls-cert.pem` (`host/src/tls.rs:18-19`) | daemon reinstall | host root disk loss |
-| | `host-meta-config` (`core/src/ops/backup.rs:973-974`) | host loss | loss of the restic password |
+| | `host-meta-config` (`core/src/ops/backup/host_meta.rs::snapshot_sources`) | host loss | loss of the restic password |
 | TLS pin (public) | `config/client.toml` in git; `~/.config/homelab/pin` per machine; the daemon logs it at every start as `"TLS fingerprint SHA256:"` (`host/src/tests/support.rs::config_from_text`) | anything, via git | nothing to protect |
 | API token | `host.toml` (`host/src/config/tokens.rs::validate_tokens`) | daemon restart | host root disk loss |
 | | the running daemon's memory, written back by a TUI settings save (`host/src/config/tokens.rs::validate_tokens`, `:702-723`; test `settings_render_keeps_every_config_field`, `host/src/config/persist.rs::render_settings_toml`) | loss of the file while the daemon runs | a daemon restart |
-| | `host-meta-config` (`core/src/ops/backup.rs:989`) | host loss | loss of the restic password |
+| | `host-meta-config` (`core/src/ops/backup/host_meta.rs::snapshot_sources`) | host loss | loss of the restic password |
 | | every workstation's `~/.config/homelab/env` or `./.env` | host loss | reinstall of that machine |
 | Workstation latch key | latch's credential store on the workstation; not handled by this repository | see latch's runbook | see latch's runbook |
-| | an escrow file in `/var/lib/homelab/secrets/`: recorded in `docs/deployment/REGISTER.md` D105 (2026-09-02), not created by any code here; carried by `host-meta-config` because the whole directory is (`core/src/ops/backup.rs:971`) | host loss | loss of the restic password; useless without the escrow passphrase, which Kenny holds |
+| | an escrow file in `/var/lib/homelab/secrets/`: recorded in `docs/deployment/REGISTER.md` D105 (2026-09-02), not created by any code here; carried by `host-meta-config` because the whole directory is (`core/src/ops/backup/host_meta.rs::snapshot_sources`) | host loss | loss of the restic password; useless without the escrow passphrase, which Kenny holds |
 | Native service secrets (e.g. `latch.env`, `kyu.env`, `token.env`) | the live file under `/appdata/<stack>/<unit>-config/` on the host (bind mount) | container loss | host root disk loss |
 | | vault `/var/lib/homelab/secrets/<stack>/<unit>-config/<file>` (`core/src/ops/deploy/orphans.rs::generated_dirs`, `:2297-2318`); a flat `<stack>/<file>` from before fix-37 is still read when no two units share the name (`core/src/ops/deploy/start_pull.rs::pull_from_origin`) | container loss | host root disk loss |
 | | the service's own restic repository, when the file lies in `data_dirs` and the service has no `backup_from_newest` (`core/src/ops/native/backup_snapshot.rs::snapshot`): yes for almanac, kyu-runner, http-switchboard; **no for kyu** (`stacks/kyu/service.yml:48`) | host loss | loss of the restic password |
 | | `host-meta-config`, through the vault | host loss | loss of the restic password |
-| Google Drive credentials (rclone) | rclone's configuration on the host, `/root/.config/rclone/rclone.conf` | container loss | `host-meta-config` (fix-111, gap-31: `HOST_META_EXTRAS` in `core/src/ops/backup.rs`) — host root disk loss is covered the same way as every other host-meta path |
+| Google Drive credentials (rclone) | rclone's configuration on the host, `/root/.config/rclone/rclone.conf` | container loss | `host-meta-config` (fix-111, gap-31: `HOST_META_EXTRAS` in `core/src/ops/backup/host_meta.rs`) — host root disk loss is covered the same way as every other host-meta path |
 | Secrets of a retired stack, app or native unit | the vault paths in its retired record: the whole `/var/lib/homelab/secrets/<stack>` for a stack, the app's `.env` or the unit's files for an app or unit (`core/src/ops/retired.rs:59-172`); for a stack also its `/appdata` directories, where a native service's live env file sits, and its repositories | destroy, forget, and the deploy that dropped it: all keep them (`core/src/ops/retired.rs:1-15`) | `homelab wipe <key>`: every recorded vault path, `/appdata` directory and repository goes in one operation (`core/src/ops/retired.rs:408-449`); after that only older `host-meta-config` snapshots still hold the vault copy |
 
 A wipe is the one command that removes several copies of a secret at once
@@ -1354,12 +1354,12 @@ flowchart LR
     rclone -. reaches .-> gd
 ```
 
-<sub>Source: `core/src/ops/backup.rs` (`backup_host_meta`, from line 1058; `BackupCfg` defaults at `:193-194`), `client/src/spec.rs:1094-1100`, `docs/deployment/REGISTER.md` D105 (escrow).</sub>
+<sub>Source: `core/src/ops/backup/host_meta.rs::backup_host_meta`, `core/src/ops/backup/config.rs::BackupCfg::default`, `client/src/spec.rs:1094-1100`, `docs/deployment/REGISTER.md` D105 (escrow).</sub>
 
 ### lost-1 · The restic password is gone
 
 **What breaks.** Every backup stops its paused containers, fails at the
-snapshot, starts them again (`core/src/ops/backup.rs:545-645`), and the
+snapshot, starts them again (`core/src/ops/backup/quiesce.rs::quiesce` and `::resume`), and the
 night parks each due stack (op-5). Host-meta and the restore drill fail. The
 dangerous one: a deploy onto an empty `/appdata` directory treats "no
 readable snapshot" as a new app and starts it empty, logging
@@ -1371,7 +1371,7 @@ exist yet would be created under the new password while all existing ones
 stay locked under the old. Since v3.58.4 (gap-24) the backup reads what
 `restic init` answers, and a repository created under a password that does
 not open `host-meta-config` stops the run with a message naming it
-(`same_password_as_host_meta` in `core/src/ops/backup.rs`); before that it
+(`same_password_as_host_meta` in `core/src/ops/backup/repo_init.rs`); before that it
 happened silently.
 
 **lost-1a · Host alive, offline copy available.** Host, root, bash:
@@ -1647,7 +1647,7 @@ as in R12b, copy the file back to the same place under
 ### lost-6 · The Google Drive credentials are gone
 
 Host. The remote must be called `gdrive`: the backup target is
-`rclone:gdrive:homelab-backups` (`core/src/ops/backup.rs:127`) and
+`rclone:gdrive:homelab-backups` (`core/src/ops/backup/config.rs::BackupCfg::default`) and
 `homelab doctor` looks for exactly that name (`host/src/tests/ui_relay.rs::follow_ui_steps_are_relayed_to_the_attached_dashboard_by_scope`).
 
 ```sh

@@ -79,7 +79,7 @@ Two facts fall out of that table:
 **What changed — three things.**
 
 1. **Where restic runs.** On the Proxmox host, not inside the container
-   (`core/src/ops/backup.rs`). It snapshots `manifest.storage[].host_path`.
+   (`core/src/ops/backup/`). It snapshots `manifest.storage[].host_path`.
 2. **Where the config lives.** On the host, under `/appdata/<stack>/…`,
    bind-mounted into the container. Example from the live metrics stack:
    ```yaml

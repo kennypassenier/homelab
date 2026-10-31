@@ -38,7 +38,7 @@ destroy or a forget. A destroy itself always needs the stack name typed.
 | Mount points `mpN` | deploy, step `provision container` (`core/src/ops/deploy/autorestore.rs::restore_latest`) | the same step detaches an `mpN` the file no longer asks for, when its host directory is one this stack declares now or declared before; a mount no version of the file named is left alone and logged (`core/src/ops/deploy/autorestore.rs::restore_latest`) | Yes | The host directory is kept |
 | Vault copies under `/var/lib/homelab/secrets/<stack>/` | deploy: each app's `.env` (`core/src/ops/deploy/bootstrap.rs::wait_for_systemd`), native env and credential files (`:2475-2484`, `:2549-2552`) | only `homelab wipe` (`core/src/ops/retired.rs:432-449`) | **No, never** | Yes: secrets |
 | `/appdata/<stack>/<owner>-config` directories | deploy, step `host storage` (`core/src/ops/deploy/gate.rs::validate`) | only `homelab wipe` | **No, never** | Yes |
-| restic repositories `<owner>-config` | the first backup (`init_repository` in `core/src/ops/backup.rs`) | only `homelab wipe`, with `rclone purge` (`core/src/ops/retired.rs:408-430`) | **No, never** | Yes |
+| restic repositories `<owner>-config` | the first backup (`init_repository` in `core/src/ops/backup/repo_init.rs`) | only `homelab wipe`, with `rclone purge` (`core/src/ops/retired.rs:408-430`) | **No, never** | Yes |
 | Retired record (`state.json`, `retired.<key>`) | destroy and forget (`<stack>`, `core/src/ops/destroy.rs:299-316`); a deploy that dropped an app or unit (`<stack>/<name>`) | `homelab wipe <key>` (`core/src/ops/retired.rs:451-462`); a deploy that brings the stack, app or unit back (`core/src/ops/retired.rs:175-180`, called at `core/src/ops/deploy/mod.rs::deploy`) | Yes for a comeback, else never | No; it names data |
 | Log shipper (Alloy) inside the container | deploy, step `log shipper` (`core/src/ops/deploy/start_pull.rs::all_images_present`) | goes with the container | Yes | No |
 | Container metrics (cAdvisor) | the runaway guards, every managed docker host (`core/src/ops/guards.rs:36-51`) | goes with the container | Yes | No |
@@ -200,7 +200,7 @@ homelab wipe media/bazarr    # one app or native unit that left a stack
 
 What a wipe does not reach: older `host-meta-config` snapshots, which carry
 the vault directory as it was on each night (`backup_host_meta` in
-`core/src/ops/backup.rs`), until their retention forgets them.
+`core/src/ops/backup/host_meta.rs`), until their retention forgets them.
 
 ## Where this is enforced
 

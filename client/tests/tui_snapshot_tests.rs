@@ -2144,7 +2144,7 @@ fn the_runbook_names_the_repositories_restic_actually_uses() {
     assert_eq!(
         repos,
         vec!["jellyfin".to_string(), "sonarr".to_string()],
-        "one repository per owning app — this is what backup.rs writes to"
+        "one repository per owning app — this is what backup/owners.rs names"
     );
     assert!(
         !repos.contains(&"media".to_string()),

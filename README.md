@@ -69,7 +69,7 @@ flowchart TB
     daemon -.->|"intent repo push"| mirror
 ```
 
-<sub>Source: `client/src/main.rs` (connect), `client/src/release.rs`, `core/src/ops/backup.rs` (`restic_base`), `core/src/ops/native/release_install.rs` (release check), `notify_raw` and `spawn_mirror_push` in `host/src/main.rs`.</sub>
+<sub>Source: `client/src/main.rs` (connect), `client/src/release.rs`, `core/src/ops/backup/config.rs` (`restic_base`), `core/src/ops/native/release_install.rs` (release check), `notify_raw` and `spawn_mirror_push` in `host/src/main.rs`.</sub>
 
 - **Domain logic lives in `core/`.** Every side effect goes through one
   `Executor` trait (`core/src/executor.rs`), so an operation can be tested
@@ -436,7 +436,7 @@ sequenceDiagram
 | TLS certificate and key | `/var/lib/homelab/tls-cert.pem`, `tls-key.pem` | the daemon makes a new pair at start without a warning, so the fingerprint changes and every pinned client refuses it | in every host-meta snapshot |
 | restic password | `/var/lib/homelab/secrets/restic.pw` | no backup or restore can run | inside the host-meta snapshot, which is encrypted with this same password, so a copy kept off the host is the only way back |
 
-The host-meta snapshot (`backup_host_meta` in `core/src/ops/backup.rs`) holds
+The host-meta snapshot (`backup_host_meta` in `core/src/ops/backup/host_meta.rs`) holds
 `/var/lib/homelab/secrets`, `state.json`, both TLS files, the intent repository
 `/var/lib/homelab/repo`, `/etc/homelab/host.toml`, and the SMART collector
 files when they exist. It goes to the restic

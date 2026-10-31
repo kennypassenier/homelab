@@ -53,7 +53,7 @@ flowchart LR
     daemon -.->|"fallback webhook"| ha
     github -.->|"nightly native update"| daemon
 ```
-<sub>Source: `client/src/main.rs`, `client/src/spec.rs`, `client/src/release.rs`, `host/src/main.rs`, `core/src/ops/backup.rs`, `core/src/ops/native/`.</sub>
+<sub>Source: `client/src/main.rs`, `client/src/spec.rs`, `client/src/release.rs`, `host/src/main.rs`, `core/src/ops/backup/`, `core/src/ops/native/`.</sub>
 
 - Four workspace members (`Cargo.toml:3`); the release builds only
   `homelab-host`, `homelab` and `homelab-admin` (`Makefile`, `release-binaries`).
@@ -407,9 +407,9 @@ read with `curl -H @<file>` since v3.58.3 (fix-35,
 
 | Credential | Read from | Copies the code makes | When it is gone |
 |---|---|---|---|
-| API token | `token` in `/etc/homelab/host.toml` or `HOMELAB_TOKEN` (`host/src/config/tokens.rs::validate_tokens,404-407`); client: environment, `~/.config/homelab/env`, `./.env` (`client/src/commands/ctx.rs::repo_root`) | `host.toml` is in the host-meta snapshot (`core/src/ops/backup.rs:989,1056-1063`) | the daemon exits with "FATAL: token must be set (>=16 chars) via ... or HOMELAB_TOKEN" (`host/src/config/tokens.rs::validate_tokens`); any string of 16 or more characters, set on both sides, works |
-| TLS cert and key | `<state_dir>/tls-*.pem` | host-meta snapshot (`backup.rs:973-974`) | a new pair is generated at start without a warning (`host/src/tls.rs:21`); pinned clients refuse with "certificate fingerprint mismatch" (`client/src/tls.rs:58-61`) |
-| restic password | `restic_password_file`, default `/var/lib/homelab/secrets/restic.pw` (`backup.rs:128`) | only inside the host-meta snapshot, encrypted with this same password (`backup.rs:971,1056-1066`) | no backup or restore runs, and no copy the code makes can open itself. The out-of-band copy is an operations matter: OPERATIONS_RUNBOOK.md asks for an offline copy of `restic.pw` |
+| API token | `token` in `/etc/homelab/host.toml` or `HOMELAB_TOKEN` (`host/src/config/tokens.rs::validate_tokens,404-407`); client: environment, `~/.config/homelab/env`, `./.env` (`client/src/commands/ctx.rs::repo_root`) | `host.toml` is in the host-meta snapshot (`core/src/ops/backup/host_meta.rs::snapshot_sources`) | the daemon exits with "FATAL: token must be set (>=16 chars) via ... or HOMELAB_TOKEN" (`host/src/config/tokens.rs::validate_tokens`); any string of 16 or more characters, set on both sides, works |
+| TLS cert and key | `<state_dir>/tls-*.pem` | host-meta snapshot (`core/src/ops/backup/host_meta.rs::snapshot_sources`) | a new pair is generated at start without a warning (`host/src/tls.rs:21`); pinned clients refuse with "certificate fingerprint mismatch" (`client/src/tls.rs:58-61`) |
+| restic password | `restic_password_file`, default `/var/lib/homelab/secrets/restic.pw` (`core/src/ops/backup/config.rs::BackupCfg::default`) | only inside the host-meta snapshot, encrypted with this same password (`core/src/ops/backup/host_meta.rs::snapshot_sources`) | no backup or restore runs, and no copy the code makes can open itself. The out-of-band copy is an operations matter: OPERATIONS_RUNBOOK.md asks for an offline copy of `restic.pw` |
 | stack `.env` | latch or a local file on the workstation | container `.env`, host vault (kept after the app or stack is gone, until `homelab wipe`), host-meta snapshot | a redeploy re-seals from the client or restores from the vault (`deploy.rs:1443-1480`) |
 
 **Precondition for any future key-escrow step (gap-15).** The latch project

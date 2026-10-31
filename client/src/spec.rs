@@ -2068,7 +2068,7 @@ pub fn generate_runbook(stacks_dir: &Path, out_path: &str) -> Result<usize, Stri
          `<owner>-config`: one per owning app for a compose stack, one per unit for a native \
          stack, `host-meta-config` for the daemon's own state, and `<name>-config` for each \
          `[[device_backups]]` entry in `{toml}`. Every repository opens with the same \
-         password file `{pw}`. (`BackupCfg::default()` in core/src/ops/backup.rs; \
+         password file `{pw}`. (`BackupCfg::default()` in core/src/ops/backup/config.rs; \
          `restic_base` and `restic_password_file` in `{toml}` override both.)\n\
          - **A second copy** of every repository, when `second_copy_dataset` is set in \
          `{toml}`: each night after the backups, `restic copy` writes \
@@ -2243,7 +2243,7 @@ pub fn generate_runbook(stacks_dir: &Path, out_path: &str) -> Result<usize, Stri
     doc.push_str(&format!(
         "Do this first when the host itself was lost: every later step needs the vault it \
          brings back. The repository is `{base}/host-meta-config`, written nightly and by \
-         `homelab backup-host-meta` (`backup_host_meta` in core/src/ops/backup.rs). A \
+         `homelab backup-host-meta` (`backup_host_meta` in core/src/ops/backup/host_meta.rs). A \
          snapshot holds:\n\n```sh\n\
          {state}/secrets        # the vault, including restic.pw\n\
          {state}/state.json     # what is deployed where\n\
@@ -2253,7 +2253,7 @@ pub fn generate_runbook(stacks_dir: &Path, out_path: &str) -> Result<usize, Stri
          {toml}     # token, webhooks, zfs_jobs and every other setting\n\
          ```\n\n\
          and, each only when it was present on the host (`HOST_META_EXTRAS` in \
-         core/src/ops/backup.rs): the SMART collector, the network bridges, Proxmox's \
+         core/src/ops/backup/host_meta.rs): the SMART collector, the network bridges, Proxmox's \
          storage and job definitions, the VM configurations (Home Assistant's USB \
          passthrough), the swappiness drop-in and rclone's own configuration:\n\n```sh\n\
          {extras}\
@@ -2309,8 +2309,8 @@ pub fn generate_runbook(stacks_dir: &Path, out_path: &str) -> Result<usize, Stri
          export RESTIC_CACHE_DIR={cache}\n\
          ```\n\n\
          **A compose stack.** When the daemon is up, `homelab restore stacks/<stack> \
-         [snapshot]` does the following, and by hand it is the same (`restore` in \
-         core/src/ops/backup.rs). It asks for the stack name first (`--yes` for scripts) \
+         [snapshot]` does the following, and by hand it is the same (`restore_app` in \
+         core/src/ops/backup/restore_app.rs). It asks for the stack name first (`--yes` for scripts) \
          and, with the stack down, copies the current data to \
          `/var/lib/homelab/pre-restore/<stack>-<unix time>/` before restic writes over it \
          (`--no-safety-copy` skips that copy). With that copy taken it empties each \

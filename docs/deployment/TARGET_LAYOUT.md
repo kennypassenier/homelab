@@ -91,7 +91,7 @@ Named here so the gate form can price them, each verified in the source:
    `hostname == "<vmid>-app-<stack_name>"` and `guard_target` re-checks it live.
    Two stacks on vmid 109 would need two different hostnames on one container.
    The Phase 3 form presents B as a trade-off; it is ruled out by code.
-4. **The restore timeout is hardcoded at 1800 s** (`backup.rs:329`) while the
+4. **The restore timeout is hardcoded at 1800 s** (`core/src/ops/backup/config.rs::BackupCfg::default`) while the
    backup timeout was already raised to four hours for exactly this reason.
    A media or observability restore over Google Drive dies at thirty minutes —
    on the operation you least want to find broken. B3's drills would hit it.

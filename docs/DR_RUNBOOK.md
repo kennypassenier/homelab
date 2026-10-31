@@ -32,7 +32,7 @@ flowchart TD
 - **Clients** reach the daemon at `pve:8443`. The address and the certificate pin are in `config/client.toml` in the repository; each machine's token is `HOMELAB_TOKEN` in `~/.config/homelab/env`.
 - **The state directory** holds `state.json` (what is deployed where), `repo/` (a git history of every file each deploy sent), `secrets/` (the vault, below), `tls-cert.pem` and `tls-key.pem` (the daemon's certificate), `journal.jsonl` and `incidents/` (operation records) and `restic-cache/`.
 - **The vault** `/var/lib/homelab/secrets`: `restic.pw` (the one password for every repository), `<stack>/<app>.env` for each compose app that has an `.env`, and `<stack>/<dir>/<file>` for each env or credential file a native unit reads, where `<dir>` is the directory that file sits in (two units may both read a `token.env`).
-- **Backups** are restic repositories behind `rclone:gdrive:homelab-backups`. The name is `<owner>-config`: one per owning app for a compose stack, one per unit for a native stack, `host-meta-config` for the daemon's own state, and `<name>-config` for each `[[device_backups]]` entry in `/etc/homelab/host.toml`. Every repository opens with the same password file `/var/lib/homelab/secrets/restic.pw`. (`BackupCfg::default()` in core/src/ops/backup.rs; `restic_base` and `restic_password_file` in `/etc/homelab/host.toml` override both.)
+- **Backups** are restic repositories behind `rclone:gdrive:homelab-backups`. The name is `<owner>-config`: one per owning app for a compose stack, one per unit for a native stack, `host-meta-config` for the daemon's own state, and `<name>-config` for each `[[device_backups]]` entry in `/etc/homelab/host.toml`. Every repository opens with the same password file `/var/lib/homelab/secrets/restic.pw`. (`BackupCfg::default()` in core/src/ops/backup/config.rs; `restic_base` and `restic_password_file` in `/etc/homelab/host.toml` override both.)
 - **A second copy** of every repository, when `second_copy_dataset` is set in `/etc/homelab/host.toml`: each night after the backups, `restic copy` writes `<owner>-config` into a local repository of the same name on that ZFS dataset (`HDD4TB/restic` mounts at `/HDD4TB/restic`), with the same password file and the same retention, and the ZFS replication carries it to its replica pool. When Google Drive is unreachable or damaged, use it in place of `rclone:gdrive:homelab-backups` in every command below: `RESTIC_REPOSITORY=/HDD4TB/restic/<owner>-config`. One repository per night is checked with `restic check` on both copies (core/src/ops/secondcopy.rs).
 - **App data** lives on the host under `/appdata/<stack>/<app>-config` and is bind-mounted into the container at the same path, so a container can be rebuilt without touching it.
 - **ZFS pools** referenced by the stack files: `HDD12TB` (mounted by downloader, media), `HDD18TB` (mounted by downloader, media), `HDD2TB` (mounted by gateway), `HDD4TB` (mounted by media). Replication jobs are the `[[zfs_jobs]]` entries in `/etc/homelab/host.toml` (Layer 5).
@@ -217,7 +217,7 @@ When the daemon is up, `homelab deploy stacks/<stack>` rebuilds a native stack t
 
 ## Layer 3: Restore the daemon's own state (host-meta)
 
-Do this first when the host itself was lost: every later step needs the vault it brings back. The repository is `rclone:gdrive:homelab-backups/host-meta-config`, written nightly and by `homelab backup-host-meta` (`backup_host_meta` in core/src/ops/backup.rs). A snapshot holds:
+Do this first when the host itself was lost: every later step needs the vault it brings back. The repository is `rclone:gdrive:homelab-backups/host-meta-config`, written nightly and by `homelab backup-host-meta` (`backup_host_meta` in core/src/ops/backup/host_meta.rs). A snapshot holds:
 
 ```sh
 /var/lib/homelab/secrets        # the vault, including restic.pw
@@ -228,7 +228,7 @@ Do this first when the host itself was lost: every later step needs the vault it
 /etc/homelab/host.toml     # token, webhooks, zfs_jobs and every other setting
 ```
 
-and, each only when it was present on the host (`HOST_META_EXTRAS` in core/src/ops/backup.rs): the SMART collector, the network bridges, Proxmox's storage and job definitions, the VM configurations (Home Assistant's USB passthrough), the swappiness drop-in and rclone's own configuration:
+and, each only when it was present on the host (`HOST_META_EXTRAS` in core/src/ops/backup/host_meta.rs): the SMART collector, the network bridges, Proxmox's storage and job definitions, the VM configurations (Home Assistant's USB passthrough), the swappiness drop-in and rclone's own configuration:
 
 ```sh
 /usr/local/bin/smart-textfile-collector.py
@@ -273,7 +273,7 @@ export RESTIC_PASSWORD_FILE=/var/lib/homelab/secrets/restic.pw
 export RESTIC_CACHE_DIR=/var/lib/homelab/restic-cache
 ```
 
-**A compose stack.** When the daemon is up, `homelab restore stacks/<stack> [snapshot]` does the following, and by hand it is the same (`restore` in core/src/ops/backup.rs). It asks for the stack name first (`--yes` for scripts) and, with the stack down, copies the current data to `/var/lib/homelab/pre-restore/<stack>-<unix time>/` before restic writes over it (`--no-safety-copy` skips that copy). With that copy taken it empties each data directory first, so no file the snapshot lacks stays behind. `--app <app>` restores one app and leaves the others running. A stack with several repositories is restored to one night: the newest `run-<unix time>` tag every one of its repositories has, or the night of the snapshot ID given:
+**A compose stack.** When the daemon is up, `homelab restore stacks/<stack> [snapshot]` does the following, and by hand it is the same (`restore_app` in core/src/ops/backup/restore_app.rs). It asks for the stack name first (`--yes` for scripts) and, with the stack down, copies the current data to `/var/lib/homelab/pre-restore/<stack>-<unix time>/` before restic writes over it (`--no-safety-copy` skips that copy). With that copy taken it empties each data directory first, so no file the snapshot lacks stays behind. `--app <app>` restores one app and leaves the others running. A stack with several repositories is restored to one night: the newest `run-<unix time>` tag every one of its repositories has, or the night of the snapshot ID given:
 
 ```sh
 pct exec <vmid> -- sh -c 'cd /opt/<stack>/<app> && docker compose down'   # every app

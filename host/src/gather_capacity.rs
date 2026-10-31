@@ -109,7 +109,7 @@ async fn prometheus_tsdb(
 }
 
 /// rule-20 (coordinator, 2026-10-01): the native-backup staging directory is
-/// emptied after every run (backup.rs, DEFAULT_STAGING_DIR) — so anything
+/// emptied after every run (backup/config.rs, DEFAULT_STAGING_DIR) — so anything
 /// found here at all is worth a look well before it could ever fill its own
 /// cap, which is why its thresholds are far lower than every other reading.
 async fn native_staging(

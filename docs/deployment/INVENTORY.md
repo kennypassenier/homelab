@@ -219,7 +219,7 @@ Numbered into `REGISTER.md`; the sharp ones:
   homelab could adopt it — the adoption never happened.** It has been
   unprotected and unmanaged at the same time since.
 - **F16 · restic backs up HOST paths, never paths inside a container.**
-  `core/src/ops/backup.rs` collects `manifest.storage[].host_path` and runs
+  `core/src/ops/backup/job.rs` collects `manifest.storage[].host_path` and runs
   restic on the Proxmox host against those. Configuration living at
   `/opt/<app>-config/` inside a container is therefore invisible to it. This
   settles §3: the four ansible-era stacks are in **no backup of any kind** —

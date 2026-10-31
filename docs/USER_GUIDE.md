@@ -951,7 +951,7 @@ than restarted over a half-written directory.
 descend into a directory with `?path=`, nothing here restores a single
 file — that stays a whole-repository restore, named above.
 
-Tests: `core/ops/backup.rs`'s own unit tests (`parse_snapshot_ls`),
+Tests: `core/src/ops/backup/tests_browse.rs`'s own unit tests (`parse_snapshot_ls`),
 `core/tests/native_restore_tests.rs` (`restore_native`'s gate, order of
 steps, and the failed-unpack case).
 
@@ -2201,13 +2201,13 @@ or `SHIFT+B` in the TUI. Only the stack file is sent; the backup runs on the
 host against `/appdata` (`client/src/commands/checks.rs::cmd_today`). Repositories are
 `<restic_base>/<owner>-config`, one per owning app (deployment decision D25),
 with `restic_base` defaulting to `rclone:gdrive:homelab-backups` and the
-password in `/var/lib/homelab/secrets/restic.pw` (`core/src/ops/backup.rs:89-133`).
+password in `/var/lib/homelab/secrets/restic.pw` (`core/src/ops/backup/config.rs::BackupCfg::default`, `core/src/ops/backup/restic.rs::restic`).
 
 **Worked example: which repositories a stack writes.** For the syncthing stack
 file in C1, the one storage entry has `app: syncthing`, so its data goes to
 `rclone:gdrive:homelab-backups/syncthing-config`. A storage entry without
 `app:` belongs to the stack itself (`core/src/manifest.rs:337-342`). The steps
-(`core/src/ops/backup.rs:297-708`):
+(`core/src/ops/backup/job.rs::backup_impl`):
 
 | Step | Effect |
 |---|---|
@@ -2251,7 +2251,7 @@ sequenceDiagram
     end
 ```
 
-Drawn from `core/src/ops/backup.rs` (`backup`).
+Drawn from `core/src/ops/backup/job.rs` (`backup`).
 
 Two storage flags change this (`core/src/manifest.rs:228-262`):
 `no_data: true` means the app keeps nothing (no repository, and the path must
@@ -2304,7 +2304,7 @@ The client prints `▶ restore <stack> from '<snapshot>'`
 nothing is stopped when it is not), `quiesce stack` (`docker compose down` per
 app), `restore data` (`restic restore <snapshot> --target /` per owner),
 `resume stack` (always, even when the restore failed) and `verify health`
-(`core/src/ops/backup.rs:803-962`). Tests: `core/tests/m4_ops_tests.rs:598,634`.
+(`core/src/ops/backup/restore_app.rs::restore_app`). Tests: `core/tests/m4_ops_tests.rs:598,634`.
 In the TUI, `SHIFT+R` restores the latest snapshot after you type the stack
 name; it is refused for native-only stacks (section 1.2). Read section 1.3
 before restoring from the TUI.
@@ -2341,7 +2341,7 @@ sequenceDiagram
     end
 ```
 
-Drawn from `core/src/ops/backup.rs` (`restore`).
+Drawn from `core/src/ops/backup/restore_into.rs` (`restore`).
 
 A native service with `backup_from_newest` is archived from its own newest
 copy; such a copy is a complete database, to be put back as the live file with
@@ -2385,7 +2385,7 @@ catches up a night a restart interrupted, fix-129) it plans the night (`host/src
    `auto` and `self` services (C7, fix-58).
 3. The host's own backup (`host-meta-config` repository: vault, state,
    TLS files, intent repository, `/etc/homelab/host.toml`,
-   `core/src/ops/backup.rs:967-1010`).
+   `core/src/ops/backup/host_meta.rs::backup_host_meta`).
 4. A restore drill of one repository, when the last passed drill is older
    than `restore_drill_interval_s` (default 20 hours, so every night; it was
    90 days until fix-62): the repository drilled longest ago goes first, over
@@ -2419,7 +2419,7 @@ With no nightly hour set, nothing runs (`host/src/tests/config_save.rs::a_settin
 whose nightly update fails has its automatic updates parked (H8, fix-59); its
 backups go on, and a failed backup parks nothing. A
 deferred backup is neither a failure nor a backup
-(`core/src/ops/backup.rs:34-86`).
+(`core/src/ops/backup/night.rs::NightBackup`).
 
 The quiesce label is set in a compose file:
 
@@ -2434,7 +2434,7 @@ as in `stacks/gateway/crowdsec/docker-compose.yml:23`.
 
 **Status:** Built, narrower than FEATURES.md. The backup target is one base,
 `restic_base`, which defaults to Google Drive through rclone
-(`core/src/ops/backup.rs:127`) and can be changed in `host.toml`
+(`core/src/ops/backup/config.rs::BackupCfg::default`) and can be changed in `host.toml`
 (`host/src/config/tokens.rs::validate_tokens`). The code keeps no second, local copy. The doctor's
 `offsite (Drive)` check reports an expired token (`core/src/doctor.rs:141-158`).
 
@@ -3104,7 +3104,7 @@ retention:
 in `lxc-compose.yml` replaces the fleet-wide tiers for this stack, for manual
 and nightly backups alike; the backup logs
 `[w2] <stack> keeps snapshots by its own policy (<n> tier(s)), not the fleet-wide one`
-(`core/src/manifest.rs:72-82`, `core/src/ops/backup.rs:647-667`). The tiers
+(`core/src/manifest.rs:72-82`, `core/src/ops/backup/retention.rs::retention`). The tiers
 above are an example. Test: `core/tests/m4_ops_tests.rs:266`.
 
 **Dashboard:** the stack page's Settings tab, "Network & hardware" card,
@@ -3796,7 +3796,7 @@ shows it.
 | 3 | B6 keeps no digest history; the rollback uses images captured during the same update | `core/src/ops/update.rs:145-151` |
 | 4 | D9 has no registry polling, update badges or `auto-after-N-days` | `docs/deployment/UPDATE_POLICY.md:26-28` |
 | 5 | D10 has no `docker compose config` gate | `core/src/manifest.rs:445-458,607` |
-| 6 | E5 writes one backup target; no separate local copy | `core/src/ops/backup.rs:107-133` |
+| 6 | E5 writes one backup target; no separate local copy | `core/src/ops/backup/config.rs::BackupCfg` |
 | 7 | E7 runs on demand, not after every change | `client/src/commands/host_cmd.rs::read_host_toml` |
 | 8 | G6 reports only file-push bytes | `core/src/ops/deploy/provision_create.rs::create_args` |
 | 9 | H6 has no reboot indicator and no TUI action | `core/src/ops/patch.rs`, `client/src/tui/model.rs:1104-1184` |

@@ -134,7 +134,7 @@ Severity is the highest rating any reviewer gave unless noted; disagreements are
 
 - **Key:** `failed-update-parks-backups` · **Status:** open · **Effort:** S · **Kind:** code fix Claude can do alone
 - **Reviewers:** system, devops, backup
-- **Evidence:** `core/src/ops/backup.rs:67-69`: `parks_the_stack(update_ok) = Failed || !update_ok`; the scheduler sets `enabled=false` (`host/src/tests/config.rs::fix_false_alarm_watch_url_to_check`, `:2507-2531`); `nightly_plan` skips disabled stacks for backup and update (`:2008-2012`). Even a successful rollback returns `Err` (`update.rs:278-283`).
+- **Evidence:** `core/src/ops/backup/night.rs::NightBackup` (at the time `parks_the_stack(update_ok) = Failed || !update_ok`); the scheduler sets `enabled=false` (`host/src/tests/config.rs::fix_false_alarm_watch_url_to_check`, `:2507-2531`); `nightly_plan` skips disabled stacks for backup and update (`:2008-2012`). Even a successful rollback returns `Err` (`update.rs:278-283`).
 - **Failure scenario:** One bad upstream `bazarr:latest` image, or a Drive 5xx at the backup hour, and the media stack (Jellyfin config included) gets no backups until someone types `homelab enable media`. During a week's holiday that is a week without backups.
 - **Recommendation:** Split the flag: park updates per app (with reason and digest), never backups. A failed backup should be retried every night and escalated, not parked.
 
@@ -290,7 +290,7 @@ Severity is the highest rating any reviewer gave unless noted; disagreements are
 
 - **Key:** `backup-pause-stops-monitoring` · **Status:** open · **Effort:** M · **Kind:** needs a decision from Kenny (CT 113 (metrics), CT 104 (gateway), CT 107 (Kuma))
 - **Reviewers:** grafana, logging
-- **Evidence:** Measured (grafana): Prometheus and Alertmanager started 2026-09-27 02:11:11 UTC; `todo.notifications` holds 'prometheus is down' and 'alertmanager is down' (ECONNREFUSED) on the first night after Kuma started notifying HA. Loki carries `com.homelab.backup.pause=true` and is stopped for the whole gateway snapshot loop (`backup.rs:596-631`); Alloy's `loki.write` has no WAL and drops a batch after about 8-9 min; UDP syslog is lost meanwhile (code, not measured). `loki-config` and the TSDB fall under the default tiers including 'every 2 months forever' (`core/src/retention.rs`).
+- **Evidence:** Measured (grafana): Prometheus and Alertmanager started 2026-09-27 02:11:11 UTC; `todo.notifications` holds 'prometheus is down' and 'alertmanager is down' (ECONNREFUSED) on the first night after Kuma started notifying HA. Loki carries `com.homelab.backup.pause=true` and is stopped for the whole gateway snapshot loop (`core/src/ops/backup/quiesce.rs::quiesce`); Alloy's `loki.write` has no WAL and drops a batch after about 8-9 min; UDP syslog is lost meanwhile (code, not measured). `loki-config` and the TSDB fall under the default tiers including 'every 2 months forever' (`core/src/retention.rs`).
 - **Failure scenario:** Every morning the notification list shows cry-wolf 'down' items for the monitoring stack; no alert rule is evaluated during the pause; the log gap falls exactly in the window when the nightly round runs; and anything an app should not have logged lives on Drive for good.
 - **Recommendation:** Stop pausing Prometheus (TSDB snapshot via admin API, internal only, or exclude the TSDB from backup); back up only Loki's configuration or give it a short tier; declare a Kuma maintenance window for the backup round; add a WAL or larger retry budget to `loki.write`; measure the gap once around the backup hour.
 
@@ -314,7 +314,7 @@ Severity is the highest rating any reviewer gave unless noted; disagreements are
 
 - **Key:** `restore-no-confirm-no-safety-snapshot` · **Status:** open · **Effort:** M · **Kind:** code fix Claude can do alone
 - **Reviewers:** usability
-- **Evidence:** `client/src/commands/host_cmd.rs::host_restart`: `homelab restore` goes straight to `RestoreStack`; the TUI asks for a typed name (`model.rs:801-825`). Host restore steps take no snapshot of current data (`core/src/ops/backup.rs:870-1010`). Picking an older snapshot needs a root shell and three `export RESTIC_*` lines (op-10). Code-derived.
+- **Evidence:** `client/src/commands/host_cmd.rs::host_restart`: `homelab restore` goes straight to `RestoreStack`; the TUI asks for a typed name (`model.rs:801-825`). Host restore steps take no snapshot of current data (`core/src/ops/backup/restore_app.rs::restore_app`). Picking an older snapshot needs a root shell and three `export RESTIC_*` lines (op-10). Code-derived.
 - **Failure scenario:** Corruption happened before last night's backup, so `latest` is the corruption; a CLI restore overwrites the current state without asking, and that state is gone too.
 - **Recommendation:** Typed name on the CLI (`--yes` for scripts); automatic pre-restore snapshot with its id printed; `homelab snapshots stacks/<name>`; let the TUI show that list before restoring.
 
@@ -463,7 +463,7 @@ Severity is the highest rating any reviewer gave unless noted; disagreements are
 
 - **Key:** `orchestrator-logs-only-on-pve` · **Status:** open · **Effort:** M · **Kind:** live change on a machine (pve)
 - **Reviewers:** logging, system, rust
-- **Evidence:** REGISTER fix-39 measured alloy and promtail inactive on pve; no journald cap in the repo; `backup_host_meta` (`core/src/ops/backup.rs:1058-1100`) excludes `incidents/`, `journal.jsonl`, `audit.log`. 'Nothing prunes bundles' (DEBUGGING_GUIDE §3.4, 90 bundles today). `journal.jsonl` read whole at every boot and failure (`host/src/tests/refusals.rs::fix_55_an_unparseable_frame_is_logged_without_its_body`, `:4418`; `core/src/incidents.rs:89-103`) with blocking `std::fs` on the runtime. `homelab incidents` lists names only.
+- **Evidence:** REGISTER fix-39 measured alloy and promtail inactive on pve; no journald cap in the repo; `backup_host_meta` (`core/src/ops/backup/host_meta.rs::snapshot_sources`) excludes `incidents/`, `journal.jsonl`, `audit.log`. 'Nothing prunes bundles' (DEBUGGING_GUIDE §3.4, 90 bundles today). `journal.jsonl` read whole at every boot and failure (`host/src/tests/refusals.rs::fix_55_an_unparseable_frame_is_logged_without_its_body`, `:4418`; `core/src/incidents.rs:89-103`) with blocking `std::fs` on the runtime. `homelab incidents` lists names only.
 - **Failure scenario:** At night the only remote trace is one notification line; everything else needs a root shell on the hypervisor, and on pve disk loss the exec audit trail and every bundle go with it.
 - **Recommendation:** After fixing Loki's exposure and the mask: ship pve's journal (homelab-host, kernel, zfs-zed, smartd, pve*) via Alloy with redaction; add `homelab incidents show <name>`; prune bundles by age/count; bound `journal.jsonl`; add `incidents/` and `audit.log` to host-meta; capture a journald drop-in and let doctor report sizes.
 
@@ -745,7 +745,7 @@ Severity is the highest rating any reviewer gave unless noted; disagreements are
 
 - **Key:** `shell-strings-quoting` · **Status:** open · **Effort:** M · **Kind:** code fix Claude can do alone
 - **Reviewers:** rust
-- **Evidence:** 117 `pct_sh` and 144 `Cmd::new` calls; three quoting helpers; about 20 sites insert values between bare `'{}'` (e.g. `deploy.rs:447`, `backup.rs:496`, `facts.rs:357`). `storage.host_path` checked only with `starts_with("/appdata/")` (`manifest.rs:749`), `data_mounts.host_path` with `starts_with('/')` (`:685`). Output parsed through magic tokens (`contains("reated")`, `deploy.rs:1696`); 14 probes `.unwrap_or(false)`; `let _ = pct_sh("rm -rf ...")` logs 'removed' anyway (`deploy.rs:2197`).
+- **Evidence:** 117 `pct_sh` and 144 `Cmd::new` calls; three quoting helpers; about 20 sites insert values between bare `'{}'` (e.g. `deploy.rs:447`, `backup/gates.rs`, `facts.rs:357`). `storage.host_path` checked only with `starts_with("/appdata/")` (`manifest.rs:749`), `data_mounts.host_path` with `starts_with('/')` (`:685`). Output parsed through magic tokens (`contains("reated")`, `deploy.rs:1696`); 14 probes `.unwrap_or(false)`; `let _ = pct_sh("rm -rf ...")` logs 'removed' anyway (`deploy.rs:2197`).
 - **Failure scenario:** A typo such as `/appdata/x'` or `/appdata/../etc` validates and ends up in a root shell command on the Proxmox host.
 - **Recommendation:** Validated newtypes (`AppdataPath`, `AppName`, `StackName`) refusing `'`, `..` and empty segments; one `shq` and a `Script` builder whose only interpolation quotes; JSON output parsed with serde; probe failure as a named `Unknown` state.
 

@@ -44,8 +44,8 @@ Paths on the Proxmox host in this guide assume the defaults:
 A few paths are fixed to `/var/lib/homelab` whatever `state_dir` says: the
 self-update staging file and marker (`core/src/ops/selfupdate.rs:42-45`), the
 push staging files (`core/src/ops/util.rs:48`), the restic cache
-(`core/src/ops/backup.rs:32`) and the default restic password file
-(`core/src/ops/backup.rs:128`). On a host with a non-default `state_dir`,
+(`core/src/ops/backup/restic.rs::RESTIC_CACHE_DIR`) and the default restic password file
+(`core/src/ops/backup/config.rs::BackupCfg::default`). On a host with a non-default `state_dir`,
 look for those under `/var/lib/homelab` anyway.
 
 The daemon's systemd unit, its `OnFailure=` rollback unit and script ship
@@ -836,8 +836,8 @@ upgrade a binary that is already installed. The transcript says
 
 | Symptom (verbatim) | Cause | First action | Source |
 |---|---|---|---|
-| `<label> deferred` followed by `is in use, so nothing was stopped and no snapshot was taken: <reason>` | an app was in use, so the backup stood aside. The client still prints `✗` and exits 1, but no bundle is written and nothing changed | nothing; it runs next night. If it keeps standing aside, the backup-age finding in `homelab check` says so | `core/src/ops/backup.rs:397-415`, `host/src/tests/support.rs::serve_on_loopback` |
-| `stack '<s>' would back up into the repository '<o>-config', which stack '<b>'` … | two stacks name the same owning app, so they would share one restic repository | rename the app in the newer stack's file | `core/src/ops/backup.rs:327-363` |
+| `<label> deferred` followed by `is in use, so nothing was stopped and no snapshot was taken: <reason>` | an app was in use, so the backup stood aside. The client still prints `✗` and exits 1, but no bundle is written and nothing changed | nothing; it runs next night. If it keeps standing aside, the backup-age finding in `homelab check` says so | `core/src/ops/backup/gates.rs::refuse_when_in_use`, `host/src/tests/support.rs::serve_on_loopback` |
+| `stack '<s>' would back up into the repository '<o>-config', which stack '<b>'` … | two stacks name the same owning app, so they would share one restic repository | rename the app in the newer stack's file | `core/src/ops/backup/gates.rs::owner_conflict` |
 | `<app> unhealthy after update` … `ROLLED BACK to previous image, now healthy.` | the new image failed its health check and the previous one was restored. This is still reported as a failure | the app runs on the old image; check the new image's release notes | `core/src/ops/update.rs:229-260` |
 | `<app> unhealthy after update AND after rollback` | the rollback did not bring it back either | hands on the container now | `core/src/ops/update.rs:262-265` |
 | `<app> unhealthy after update and no captured image to roll back to` | there was nothing to roll back to | hands on the container now | `core/src/ops/update.rs:235-240` |
@@ -880,7 +880,7 @@ old (`host/src/tests/config.rs::a_typo_is_reported`, `1941-1943`). Parked stacks
 | Symptom | Cause | First action | Source |
 |---|---|---|---|
 | a stack is `disabled` in `homelab check` and was not backed up | a nightly run failed and the stack was parked (H8); the daemon log has the `FAILED` line and a notification went out once | fix the cause, then `homelab enable <stack>` | `host/src/tests/notices.rs::fix_184_down_notice_waits_for_the_full_threshold`, `core/src/ops/fleetcheck.rs:587-597` |
-| a backup that stood aside did not park the stack | by design: a deferred backup is not a failed night | none | `core/src/ops/backup.rs:67-74` |
+| a backup that stood aside did not park the stack | by design: a deferred backup is not a failed night | none | `core/src/ops/backup/night.rs::NightBackup::of` |
 | a rolled-back update parked the stack's updates | a rolled-back update is a failure (section 8.5), and a failed update parks the automatic updates (backups continue, fix-59) | fix or pin the image, then `homelab enable` | `park_after_night` in `host/src/main.rs` |
 | a CLI command started while the nightly backups run prints the round's lines and does not start | the backup phase holds the operation lock for the whole batch; your operation waits for it | wait, or use `homelab status` which does not take the lock | `host/src/tests/config.rs::fix_120_host_policy_defaults_to_the_fleet_and_follows_host_toml`, `2969` |
 | nothing ran at all | `backup_hour` is not set, or `date` failed, or state.json did not load | check the daemon log for the lines in section 5 | `host/src/tests/config.rs::a_key_the_struct_does_not_read_is_reported_even_where_a_list_named_it`, `2267-2280` |
@@ -981,7 +981,7 @@ where each is read, where its other copies are, and how to put one back.
   `~/.config/homelab/env` or the repository's `.env` on any working
   workstation holds the same value (`client/src/commands/ctx.rs::repo_root`).
 - **Copy in the host-meta backup**: the host-meta snapshot includes
-  `/etc/homelab/host.toml` (`core/src/ops/backup.rs:989`, `1056-1064`). It
+  `/etc/homelab/host.toml` (`core/src/ops/backup/host_meta.rs::snapshot_sources`). It
   survives the loss of the host disk, but only holds the token if the token
   was in host.toml rather than in the unit's environment. It is encrypted
   with the restic password (9.3).
@@ -1025,7 +1025,7 @@ until the new one is in place.
 Recipe 2, host.toml is gone and no workstation has the token: restore
 host.toml from the host-meta snapshot. The repository is
 `<restic_base>/host-meta-config`, and `restic_base` defaults to
-`rclone:gdrive:homelab-backups` (`core/src/ops/backup.rs:89-105`, `127`). It
+`rclone:gdrive:homelab-backups` (`core/src/ops/backup/restic.rs::restic`, `core/src/ops/backup/config.rs::BackupCfg::default`). It
 needs the restic password file (9.3) and a working rclone remote on the host.
 
 ```bash
@@ -1064,7 +1064,7 @@ the same value in `~/.config/homelab/env` on every workstation.
   key is present, generation fails on the existing key file and the daemon
   panics with `tls cert` (8.2).
 - **Copy in the host-meta backup**: both files are in the snapshot
-  (`core/src/ops/backup.rs:973-974`, `1056-1062`).
+  (`core/src/ops/backup/host_meta.rs::snapshot_sources`).
 - **Clients hold only the fingerprint**, in `config/client.toml` and
   `~/.config/homelab/pin`, never the key (`client/src/lib.rs:15-34`).
 
@@ -1100,10 +1100,10 @@ Recipe 2, no copy: let the daemon make a new pair and re-pin every client.
 
 The daemon starts without it; backups, restores and the host-meta snapshot
 fail. It lives at `/var/lib/homelab/secrets/restic.pw` unless host.toml says
-otherwise (`core/src/ops/backup.rs:128`, `host/src/config/tokens.rs::validate_tokens`). The
+otherwise (`core/src/ops/backup/config.rs::BackupCfg::default`, `host/src/config/tokens.rs::validate_tokens`). The
 host-meta snapshot contains the `secrets/` directory
-(`core/src/ops/backup.rs:971`, `1058`), but that snapshot is encrypted with
-the same password (`core/src/ops/backup.rs:1010-1021`), so it cannot give the
+(`core/src/ops/backup/host_meta.rs::snapshot_sources`), but that snapshot is encrypted with
+the same password (`core/src/ops/backup/host_meta.rs::snapshot`), so it cannot give the
 password back. This repository's code knows of no other copy. An offline
 copy is an operator matter; [OPERATIONS_RUNBOOK.md](OPERATIONS_RUNBOOK.md)
 covers keeping one.

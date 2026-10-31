@@ -45,7 +45,7 @@ Facts (measured 2026-09-28): deploys push content inline as `DeploySpec`
 (proto/src/lib.rs:32, core/src/manifest.rs:562), secrets in its `env`,
 `source` recorded but never compared (manifest.rs:602-611); the host serves
 one session's requests serially, only `Answer`/`Today` beside the queue
-(host/src/main.rs:4436-4460, 4540-4548); queued requests still run after a
+(host/src/tests/ui_relay.rs::act_the_sink_stamps_the_token_name_on_every_line, 4540-4548); queued requests still run after a
 disconnect (main.rs:4507-4512); Ask ids restart at 1 per host process
 (main.rs:2763); no history beyond last-run scalars and a 4 MiB
 `journal.jsonl` (main.rs:2695); no current-op or log ring (main.rs:3150);

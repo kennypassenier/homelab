@@ -20,27 +20,27 @@ destroy or a forget. A destroy itself always needs the stack name typed.
 
 | Surface | Added by | Removed by, and when | Automatic? | Data? |
 |---|---|---|---|---|
-| The container (LXC) | deploy, step `provision container` (`core/src/ops/deploy.rs:546`) | destroy, step `destroy container`, `pct destroy --purge` (`core/src/ops/destroy.rs:176-181`); also `homelab apply` for a stack whose directory is gone (`client/src/main.rs:792-827`) | No: the stack name is typed first, and a backup is taken first unless `--no-backup` (`core/src/ops/destroy.rs:58-67`, `:116-159`) | Yes: the container disk goes. Backed up first |
-| Host state record (`state.json`, `stacks.<name>`) | deploy, step `record state` (`core/src/ops/deploy.rs:2596-2689`) | destroy and forget, step `update state` (`core/src/ops/destroy.rs:293-321`) | Yes, inside destroy or forget | No. A retired record replaces it (row below) |
-| Traefik route `<vmid>-app-<stack>.yml` on the gateway | deploy, step `gateway route` (`core/src/ops/deploy.rs:1914-1935`) | destroy and forget, step `remove gateway route` (`core/src/ops/destroy.rs:264-287`); a deploy, step `retire gateway route`, when the stack dropped `gateway_route:` or moved to another vmid (`core/src/ops/deploy.rs:1937-1986`) | Yes | No |
+| The container (LXC) | deploy, step `provision container` (`core/src/ops/deploy/checks.rs::log_baseline`) | destroy, step `destroy container`, `pct destroy --purge` (`core/src/ops/destroy.rs:176-181`); also `homelab apply` for a stack whose directory is gone (`client/src/commands/native_install.rs::cmd_release_update_native`) | No: the stack name is typed first, and a backup is taken first unless `--no-backup` (`core/src/ops/destroy.rs:58-67`, `:116-159`) | Yes: the container disk goes. Backed up first |
+| Host state record (`state.json`, `stacks.<name>`) | deploy, step `record state` (`core/src/ops/deploy/health.rs::verify_health`) | destroy and forget, step `update state` (`core/src/ops/destroy.rs:293-321`) | Yes, inside destroy or forget | No. A retired record replaces it (row below) |
+| Traefik route `<vmid>-app-<stack>.yml` on the gateway | deploy, step `gateway route` (`core/src/ops/deploy/push.rs::content_for_container`) | destroy and forget, step `remove gateway route` (`core/src/ops/destroy.rs:264-287`); a deploy, step `retire gateway route`, when the stack dropped `gateway_route:` or moved to another vmid (`core/src/ops/deploy/push.rs::push_one`) | Yes | No |
 | Traefik routes under a name of their own (`extra_routes`, fix-91) on the gateway | deploy, step `gateway route`, which records them in host state (`StackState.extra_route_files`) | destroy and forget, step `remove gateway route`, for the recorded files; a deploy, step `retire gateway route`, for a recorded file the stack no longer declares. A file no deploy recorded is never removed | Yes | No |
-| Prometheus target file for the stack | deploy, step `metrics discovery` (`core/src/ops/deploy.rs:521-544`) | destroy and forget, step `remove metrics discovery` (`core/src/ops/destroy.rs:218-228`) | Yes | No |
-| Grafana dashboard for the stack | deploy, step `grafana dashboard` (`core/src/ops/deploy.rs:1994-2046`) | destroy and forget, step `remove grafana dashboard`, run inside the gateway (`core/src/ops/destroy.rs:233-262`) | Yes | No |
-| Homepage tile (`services.yaml`, rendered from all route files) | deploy, step `homepage services` (`core/src/ops/deploy.rs:2056-2060`, `core/src/ops/fleetfiles.rs:32-175`) | rewritten without the stack after destroy and forget, step `fleet files` (`core/src/ops/destroy.rs:325-330`, `core/src/ops/fleetfiles.rs:236-251`), and by every deploy once the route file is gone | Yes; a failure to write only warns (`core/src/ops/fleetfiles.rs:241-249`) | No |
-| Uptime Kuma host monitor `host · <stack>` | deploy, step `uptime monitors`, writes `host-monitors.json` (`core/src/ops/deploy.rs:2076-2086`, `core/src/ops/fleetfiles.rs:183-229`); the seeder adds the monitor (`stacks/uptime/kuma-seeder/seed.py:295-302`) | destroy and forget rewrite the file (`core/src/ops/fleetfiles.rs:252-265`); the seeder removes the monitor on its next run, every `SEED_INTERVAL_SECONDS=3600` (`stacks/uptime/kuma-seeder/docker-compose.yml`, `seed.py:313-331`) | Yes, unless more than a quarter of all monitors would go at once (next section) | No |
-| Uptime Kuma application monitor (`APPLICATION_MONITORS`, the `kyu` hub monitor included) | the seeder, from the list in `stacks/uptime/kuma-seeder/seed.py:57-95` | the seeder, once the entry is gone from that list; a changed address is corrected in place (`seed.py:250-256`, `:321-326`). The list is a module constant, read when the seeder process starts (`seed.py:377-399`); a deploy that changes `seed.py` restarts the seeder app (`core/src/ops/deploy.rs:1688-1714`) | Yes, same cap | No |
-| Manual checks (`manual:` lines of `checks.yml`) | deploy, at its end (`core/src/ops/deploy.rs:2939-2952`, `core/src/ops/manualchecks.rs:51-74`) | a deploy drops the stack's questions that left its files (`core/src/ops/manualchecks.rs:69-74`), but only when at least one question remains, because `register` is called only then (`core/src/ops/deploy.rs:2944`); destroy and forget drop all of the stack's (`core/src/ops/destroy.rs:298`) | Yes | No |
-| Intent-repo copy `/var/lib/homelab/repo/stacks/<stack>/` | deploy, step `commit intent` (`core/src/ops/deploy.rs:1192-1260`) | a file the stack dropped is removed from the copy and committed, so `git log` shows it (`core/src/ops/deploy.rs:1195-1220`). Destroy leaves the copy and its history | Yes | No |
-| Files under `/opt/<stack>/` in the container | deploy, step `push files` (`core/src/ops/deploy.rs:1319`) | deploy, step `orphan files`: every file the stack no longer declares, one `rm -f` each, never a directory; `.env` files, the gateway's generated dashboard and route directories, and the files of an app that is leaving are not touched (`core/src/ops/deploy.rs:133-199`, `:2104-2143`). `homelab prune-orphans` still exists and does the same after a typed name (`client/src/main.rs:1031-1063`) | Yes (reverses D84's report-only rule) | No |
-| A compose app (its containers and `/opt/<stack>/<app>/`) | deploy, step `start apps` (`core/src/ops/deploy.rs:1520`) | deploy, step `garbage collect`: `docker compose down --remove-orphans`, then `rm -rf /opt/<stack>/<app>` (`core/src/ops/deploy.rs:2145-2182`) | Yes | Its `/appdata`, repository and vault copy are kept and recorded as retired `<stack>/<app>` (`core/src/ops/deploy.rs:2630-2644`, `core/src/ops/retired.rs:106-143`) |
-| `rootfs/` files: units, timers, scripts on PATH | deploy, step `push files` | deploy, step `retire dropped`: a `.service`, `.timer`, `.socket` or `.path` unit is `systemctl disable --now` first, then every dropped file is removed and systemd reloads (`core/src/ops/deploy.rs:1044-1106`, `:1181-1183`) | Yes | No |
-| A native unit named in `natives:` | deploy, step `native units` (`core/src/ops/deploy.rs:2333`), or `homelab adopt` | deploy, step `retire dropped`, when the previous stack file listed it and this one does not: `systemctl disable --now`, unit file and program removed, registration dropped from state (`core/src/ops/deploy.rs:285-297`, `:1107-1180`, `:2611-2629`). A unit only `homelab adopt` registered is never retired this way (test `an_adopted_unit_the_stack_never_declared_is_not_retired`) | Yes | Its data directories in the container, its `<unit>-config` repository and its vault copies are kept, recorded as retired `<stack>/<unit>` (`core/src/ops/deploy.rs:2645-2654`, `core/src/ops/retired.rs:147-172`) |
-| Mount points `mpN` | deploy, step `provision container` (`core/src/ops/deploy.rs:782-866`) | the same step detaches an `mpN` the file no longer asks for, when its host directory is one this stack declares now or declared before; a mount no version of the file named is left alone and logged (`core/src/ops/deploy.rs:782-848`) | Yes | The host directory is kept |
-| Vault copies under `/var/lib/homelab/secrets/<stack>/` | deploy: each app's `.env` (`core/src/ops/deploy.rs:1443-1449`), native env and credential files (`:2475-2484`, `:2549-2552`) | only `homelab wipe` (`core/src/ops/retired.rs:432-449`) | **No, never** | Yes: secrets |
-| `/appdata/<stack>/<owner>-config` directories | deploy, step `host storage` (`core/src/ops/deploy.rs:402-416`) | only `homelab wipe` | **No, never** | Yes |
+| Prometheus target file for the stack | deploy, step `metrics discovery` (`core/src/ops/deploy/mod.rs::deploy`) | destroy and forget, step `remove metrics discovery` (`core/src/ops/destroy.rs:218-228`) | Yes | No |
+| Grafana dashboard for the stack | deploy, step `grafana dashboard` (`core/src/ops/deploy/push_verify.rs::activate_rootfs`) | destroy and forget, step `remove grafana dashboard`, run inside the gateway (`core/src/ops/destroy.rs:233-262`) | Yes | No |
+| Homepage tile (`services.yaml`, rendered from all route files) | deploy, step `homepage services` (`core/src/ops/deploy/push_secrets.rs::restore_missing_env`, `core/src/ops/fleetfiles.rs:32-175`) | rewritten without the stack after destroy and forget, step `fleet files` (`core/src/ops/destroy.rs:325-330`, `core/src/ops/fleetfiles.rs:236-251`), and by every deploy once the route file is gone | Yes; a failure to write only warns (`core/src/ops/fleetfiles.rs:241-249`) | No |
+| Uptime Kuma host monitor `host · <stack>` | deploy, step `uptime monitors`, writes `host-monitors.json` (`core/src/ops/deploy/mod.rs::deploy`, `core/src/ops/fleetfiles.rs:183-229`); the seeder adds the monitor (`stacks/uptime/kuma-seeder/seed.py:295-302`) | destroy and forget rewrite the file (`core/src/ops/fleetfiles.rs:252-265`); the seeder removes the monitor on its next run, every `SEED_INTERVAL_SECONDS=3600` (`stacks/uptime/kuma-seeder/docker-compose.yml`, `seed.py:313-331`) | Yes, unless more than a quarter of all monitors would go at once (next section) | No |
+| Uptime Kuma application monitor (`APPLICATION_MONITORS`, the `kyu` hub monitor included) | the seeder, from the list in `stacks/uptime/kuma-seeder/seed.py:57-95` | the seeder, once the entry is gone from that list; a changed address is corrected in place (`seed.py:250-256`, `:321-326`). The list is a module constant, read when the seeder process starts (`seed.py:377-399`); a deploy that changes `seed.py` restarts the seeder app (`core/src/ops/deploy/retire_native.rs::retire_native`) | Yes, same cap | No |
+| Manual checks (`manual:` lines of `checks.yml`) | deploy, at its end (`core/src/ops/deploy/logshipper.rs::restart_alloy`, `core/src/ops/manualchecks.rs:51-74`) | a deploy drops the stack's questions that left its files (`core/src/ops/manualchecks.rs:69-74`), but only when at least one question remains, because `register` is called only then (`core/src/ops/deploy/logshipper.rs::restart_alloy`); destroy and forget drop all of the stack's (`core/src/ops/destroy.rs:298`) | Yes | No |
+| Intent-repo copy `/var/lib/homelab/repo/stacks/<stack>/` | deploy, step `commit intent` (`core/src/ops/deploy/provision_mounts.rs::stale_mounts`) | a file the stack dropped is removed from the copy and committed, so `git log` shows it (`core/src/ops/deploy/provision_mounts.rs::stale_mounts`). Destroy leaves the copy and its history | Yes | No |
+| Files under `/opt/<stack>/` in the container | deploy, step `push files` (`core/src/ops/deploy/provision.rs::provision_container`) | deploy, step `orphan files`: every file the stack no longer declares, one `rm -f` each, never a directory; `.env` files, the gateway's generated dashboard and route directories, and the files of an app that is leaving are not touched (`core/src/ops/deploy/compose.rs::compose_reports_created`, `:2104-2143`). `homelab prune-orphans` still exists and does the same after a typed name (`client/src/commands/mod.rs::run`) | Yes (reverses D84's report-only rule) | No |
+| A compose app (its containers and `/opt/<stack>/<app>/`) | deploy, step `start apps` (`core/src/ops/deploy/bootstrap.rs::log_rotation`) | deploy, step `garbage collect`: `docker compose down --remove-orphans`, then `rm -rf /opt/<stack>/<app>` (`core/src/ops/deploy/start.rs::registry_login`) | Yes | Its `/appdata`, repository and vault copy are kept and recorded as retired `<stack>/<app>` (`core/src/ops/deploy/route.rs::gateway_route`, `core/src/ops/retired.rs:106-143`) |
+| `rootfs/` files: units, timers, scripts on PATH | deploy, step `push files` | deploy, step `retire dropped`: a `.service`, `.timer`, `.socket` or `.path` unit is `systemctl disable --now` first, then every dropped file is removed and systemd reloads (`core/src/ops/deploy/provision_clone.rs::provision_clone`, `:1181-1183`) | Yes | No |
+| A native unit named in `natives:` | deploy, step `native units` (`core/src/ops/deploy/start_restart.rs::restart_if_stale`), or `homelab adopt` | deploy, step `retire dropped`, when the previous stack file listed it and this one does not: `systemctl disable --now`, unit file and program removed, registration dropped from state (`core/src/ops/deploy/restore_checks.rs::record_restore_checks`, `:1107-1180`, `:2611-2629`). A unit only `homelab adopt` registered is never retired this way (test `an_adopted_unit_the_stack_never_declared_is_not_retired`) | Yes | Its data directories in the container, its `<unit>-config` repository and its vault copies are kept, recorded as retired `<stack>/<unit>` (`core/src/ops/deploy/phases.rs::phase_routes`, `core/src/ops/retired.rs:147-172`) |
+| Mount points `mpN` | deploy, step `provision container` (`core/src/ops/deploy/autorestore.rs::restore_latest`) | the same step detaches an `mpN` the file no longer asks for, when its host directory is one this stack declares now or declared before; a mount no version of the file named is left alone and logged (`core/src/ops/deploy/autorestore.rs::restore_latest`) | Yes | The host directory is kept |
+| Vault copies under `/var/lib/homelab/secrets/<stack>/` | deploy: each app's `.env` (`core/src/ops/deploy/bootstrap.rs::wait_for_systemd`), native env and credential files (`:2475-2484`, `:2549-2552`) | only `homelab wipe` (`core/src/ops/retired.rs:432-449`) | **No, never** | Yes: secrets |
+| `/appdata/<stack>/<owner>-config` directories | deploy, step `host storage` (`core/src/ops/deploy/gate.rs::validate`) | only `homelab wipe` | **No, never** | Yes |
 | restic repositories `<owner>-config` | the first backup (`init_repository` in `core/src/ops/backup.rs`) | only `homelab wipe`, with `rclone purge` (`core/src/ops/retired.rs:408-430`) | **No, never** | Yes |
-| Retired record (`state.json`, `retired.<key>`) | destroy and forget (`<stack>`, `core/src/ops/destroy.rs:299-316`); a deploy that dropped an app or unit (`<stack>/<name>`) | `homelab wipe <key>` (`core/src/ops/retired.rs:451-462`); a deploy that brings the stack, app or unit back (`core/src/ops/retired.rs:175-180`, called at `core/src/ops/deploy.rs:2634`) | Yes for a comeback, else never | No; it names data |
-| Log shipper (Alloy) inside the container | deploy, step `log shipper` (`core/src/ops/deploy.rs:2202`) | goes with the container | Yes | No |
+| Retired record (`state.json`, `retired.<key>`) | destroy and forget (`<stack>`, `core/src/ops/destroy.rs:299-316`); a deploy that dropped an app or unit (`<stack>/<name>`) | `homelab wipe <key>` (`core/src/ops/retired.rs:451-462`); a deploy that brings the stack, app or unit back (`core/src/ops/retired.rs:175-180`, called at `core/src/ops/deploy/mod.rs::deploy`) | Yes for a comeback, else never | No; it names data |
+| Log shipper (Alloy) inside the container | deploy, step `log shipper` (`core/src/ops/deploy/start_pull.rs::all_images_present`) | goes with the container | Yes | No |
 | Container metrics (cAdvisor) | the runaway guards, every managed docker host (`core/src/ops/guards.rs:36-51`) | goes with the container | Yes | No |
 
 Outside this table, because no deploy writes them: the Prometheus jobs
@@ -98,7 +98,7 @@ The stale list then reaches `homelab check` as a `drift` finding on
 ## What `homelab apply` does
 
 `homelab apply [stacks/] [--no-backup]` holds the whole stacks directory
-against the host (`client/src/main.rs:704-827`, plan in
+against the host (`client/src/commands/checks.rs::check_pins`, plan in
 `client/src/apply.rs:30-54`). It never runs by itself: the nightly round
 does not destroy anything.
 
@@ -119,9 +119,9 @@ flowchart TD
     ask -- anything else --> keep[Kept, nothing destroyed]
 ```
 
-<sub>Source: `client/src/main.rs:704-827`, `client/src/apply.rs:30-54`, `core/src/ops/destroy.rs:414-446`.</sub>
+<sub>Source: `client/src/commands/checks.rs::check_pins`, `client/src/apply.rs:30-54`, `core/src/ops/destroy.rs:414-446`.</sub>
 
-The printed plan (`client/src/main.rs:760-779`) is one line
+The printed plan (`client/src/commands/checks.rs::cmd_today`) is one line
 `▶ apply :: <n> to deploy · <m> unchanged · <k> gone from the files`, then
 `  = <stack>` per unchanged stack, `  ↑ <stack>` per stack to deploy, and
 `  ✗ <stack> — in host state, no <dir>/<stack>/` per stack to destroy, where
@@ -151,11 +151,11 @@ deploy, not `apply` (`core/src/ops/retired.rs:1-15`). What makes that safe:
   (`core/src/ops/retired.rs:190-219`, `core/src/ops/fleetcheck.rs:515-517`).
   The nightly check writes it to the daemon log, and sends it in a
   notification only together with some other finding that is not `noted`
-  (`host/src/main.rs:2657-2688`).
+  (`host/src/tests/config_save.rs::feat_settings_1_a_change_is_checked_like_a_start`).
 
 Real output of `evaluate_retired` for the record a destroy of
 `stacks/syncthing` would leave (one `storage` entry owned by `syncthing`),
-printed in the format `homelab check` uses (`host/src/main.rs:3198`):
+printed in the format `homelab check` uses (`host/src/tests/questions.rs::fix_240_another_session_answers_a_running_operations_question`):
 
 ```text
   [noted] syncthing — retired 2026-09-27 (stack, vmid 108) — kept: restic syncthing-config; /appdata /appdata/syncthing/syncthing-config; vault /var/lib/homelab/secrets/syncthing
@@ -171,7 +171,7 @@ homelab wipe media/bazarr    # one app or native unit that left a stack
 ```
 
 1. The client asks the host for the list; nothing is deleted yet
-   (`client/src/main.rs:831-848`). Real output of the list for the record
+   (`client/src/commands/mod.rs::run`). Real output of the list for the record
    above (`WipePlan::render`, `core/src/ops/retired.rs:237-255`):
 
    ```text
@@ -189,13 +189,13 @@ homelab wipe media/bazarr    # one app or native unit that left a stack
    (`core/src/ops/retired.rs:260-292`).
 2. It asks `Type '<name>' to delete all of the above, permanently: `;
    anything else stops with `name mismatch — nothing deleted`
-   (`client/src/main.rs:849-855`).
+   (`client/src/commands/mod.rs::run`).
 3. **Point of no return.** The host runs the operation `wipe` under the
    operation lock: steps `confirm`, `plan`, `restic repositories`
    (`rclone purge <remote>/<repo>`; refused when `restic_base` is not an
    `rclone:` remote), `appdata and vault` (`rm -rf --`), `update state`
    (the record goes last) (`core/src/ops/retired.rs:363-468`,
-   `host/src/main.rs:3698-3706`). A failure stops the wipe and keeps the
+   `host/src/tests/reads.rs::feat_platform_3_lines_carry_request_time_and_step_and_the_ring_is_capped`). A failure stops the wipe and keeps the
    record, so it can be run again.
 
 What a wipe does not reach: older `host-meta-config` snapshots, which carry

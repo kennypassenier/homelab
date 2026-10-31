@@ -59,7 +59,7 @@ themselves, and whether an animation feels right. Those stay Kenny's.
    scaffold writes `promtail/docker-compose.yml` (`grafana/promtail:3.0.0`)
    because `StackDefaults::core_apps` is `["promtail"]`
    (`client/src/scaffold.rs:73`). Since 2026-09-02 the deploy installs
-   Grafana Alloy on every container itself (`core/src/ops/deploy.rs`, the
+   Grafana Alloy on every container itself (`core/src/ops/deploy/`, the
    "log shipper" step), and no stack in `stacks/` carries a promtail
    directory any more — so a new stack would run two log shippers, one of
    them end of life. (The scaffold's `template: "clone:998"` looked stale at

@@ -65,12 +65,12 @@ flowchart LR
 - Containers are reached only through `pct exec` (`core/src/executor.rs:161-174`)
   and `pct push` of a staged file (`core/src/ops/util.rs:99-107`).
 - Frames are bare JSON: the host opens with `ServerMsg::Hello`
-  (`host/src/main.rs:2707-2716`), the client answers with an `RpcRequest`
+  (`host/src/tests/doctor.rs::doctor_probes_surface_stale_backup_and_dead_offsite`), the client answers with an `RpcRequest`
   (`client/src/main.rs`). There is no envelope; AR5 was amended to this on
   2026-09-27 (`docs/ARCHITECTURE_DECISIONS.md`).
 - Version skew: the client refuses a mutating command to a host older than
   itself and tells you to run `homelab release-update` first
-  (`client/src/main.rs:1203-1212`).
+  (`client/src/commands/new_stack.rs::cmd_template_build`).
 
 ## 2. Crates: what each may and may not do
 
@@ -78,7 +78,7 @@ flowchart LR
 |---|---|---|
 | `core` | decide everything: manifests, safety gates, runner, state, operations (`core/src/lib.rs:1-7`) | touch the world itself. Dependencies: serde, thiserror, async-trait, sha2, minisign-verify (`core/Cargo.toml:8-15`); no `std::fs`, `std::process`, `std::env`, `SystemTime` or `tokio::` in `core/src`. Time arrives as `OpCtx.now_unix` (`core/src/ops/mod.rs:98-99`) |
 | `proto` | wire types, re-exporting core's domain types (`proto/src/lib.rs:11-16`) | depend on more than core and serde (`proto/Cargo.toml:8-11`) |
-| `host` | the real `Executor` (`host/src/main.rs:1518-1585`), config, TLS and websocket server, journal, scheduler, notifications | run `gh` (it does not occur in `host/src`) or `latch` beyond the one `latch put` in `host/src/secrets.rs:53`, which stores a secret the dashboard edited |
+| `host` | the real `Executor` (`host/src/tests/commands.rs::a_restore_source_picks_the_repository_set`), config, TLS and websocket server, journal, scheduler, notifications | run `gh` (it does not occur in `host/src`) or `latch` beyond the one `latch put` in `host/src/secrets.rs:53`, which stores a secret the dashboard edited |
 | `client` | CLI verbs, TUI, local validation, scaffolding; the crate that runs `latch` for deploys and reads (`client/src/spec.rs:375`; the host only writes, see above) and the only one that runs `gh` (`client/src/release.rs:15`) | change the host except through an RPC |
 
 The dependency arrows point one way, towards `core`; `+` is what a crate
@@ -127,7 +127,7 @@ classDiagram
 <sub>Source: `core/Cargo.toml`, `proto/Cargo.toml`, `host/Cargo.toml`, `client/Cargo.toml`, `tui-preview/Cargo.toml`.</sub>
 
 Not every decision sits in core: the nightly plan is a pure function in the
-host (`nightly_plan`, `host/src/main.rs:1967`), tested there (`:1237`).
+host (`nightly_plan`, `host/src/tests/tokens.rs::fix_120_the_bearer_check_refuses_every_near_miss`), tested there (`:1237`).
 
 ## 3. Load-bearing patterns
 
@@ -155,10 +155,10 @@ body and `done` or `failed` after (`core/src/runner.rs:76-106`).
 step reported success but the change is not there" (`:123-157`). Each op
 file has its own `step!` that returns `finish_err` on the first failure (e.g.
 `core/src/ops/selfupdate.rs:16-23`); deploy's also marks the stack
-half-deployed (`core/src/ops/deploy.rs:20-31`). `CoreError::Deferred` is
+half-deployed (`core/src/ops/deploy/mod.rs`). `CoreError::Deferred` is
 reported as deferred, not failed (`core/src/runner.rs:170-189`).
 
-**Serial mutations (AR12).** One `op_lock` (`host/src/main.rs:1667`), taken
+**Serial mutations (AR12).** One `op_lock` (`host/src/tests/supervision.rs::fix_52_sigterm_waits_for_the_running_operation_then_exits_zero`), taken
 in `run_mutating_op` (`:2944`); the nightly round takes it once and runs its
 backups side by side inside it (`:2155`).
 
@@ -202,28 +202,28 @@ sequenceDiagram
     end
     H-->>C: RpcDone ok, message
 ```
-<sub>Source: `client/src/main.rs` (verb `deploy`), `client/src/spec.rs`, `host/src/main.rs` (`run_mutating_op`, `run_op_locked`), `core/src/ops/deploy.rs`, `core/src/runner.rs`.</sub>
+<sub>Source: `client/src/main.rs` (verb `deploy`), `client/src/spec.rs`, `host/src/main.rs` (`run_mutating_op`, `run_op_locked`), `core/src/ops/deploy/`, `core/src/runner.rs`.</sub>
 
 **Failure capture (AR13, AR14, AR16).** A failed op writes
 `<state_dir>/incidents/<ts>-<op>/`: `report.json`, `events.jsonl`,
 `commands.sh`, `state-at-failure.json`, the last 200 journal lines,
 `versions.txt` (`core/src/incidents.rs:56-110`, called at
-`host/src/main.rs:3041`). At boot every op whose last journal record is
+`host/src/tests/support.rs::test_state`). At boot every op whose last journal record is
 `running` is logged as interrupted (`core/src/incidents.rs:117-137`,
-`host/src/main.rs:1780-1790`).
+`host/src/tests/commands.rs::fix_53_a_timeout_kills_everything_the_command_started`).
 
 **Safety gates (A1, A2, A6).**
 - No-touch: compiled `DEFAULT_NO_TOUCH = [100, 101, 102, 103]`
   (`core/src/safety.rs:21`); `host.toml` can add vmids, never remove them
-  (`host/src/main.rs:444-456`, test at `:838`).
+  (`host/src/config/tokens.rs::validate_tokens`, test at `:838`).
 - Hostname: a target must be `<vmid>-app-<stack>` live. Deploy checks before
   creating and refuses any QEMU VM on the id (`core/src/safety.rs:42-89`);
   backup, update, enable and the native ops call `guard_target`
   (`core/src/ops/mod.rs:42-77`); destroy and resize repeat both checks
   (`core/src/ops/destroy.rs:70-98`, `core/src/ops/resize.rs:53-74`).
-- Remote exec is off unless `exec_enabled = true` (`host/src/main.rs:430`,
+- Remote exec is off unless `exec_enabled = true` (`host/src/config/tokens.rs::validate_tokens`,
   `core/src/safety.rs:114-131`); each call is appended to
-  `<state_dir>/audit.log` first, best effort (`host/src/main.rs:3933-3947`).
+  `<state_dir>/audit.log` first, best effort (`host/src/tests/history.rs::redesign_371_a_reveal_is_audited_in_history_without_the_value`).
   The exec path checks the daemon's configured list (`exec_allowed`,
   fix-36), so vmids `host.toml` added are refused too; it has no hostname
   guard, because it names a vmid rather than a stack. `homelab patch` and
@@ -248,7 +248,7 @@ mode. The TLS pair is written through a temp file created with its final mode (0
 
 **Fail direction.** Operations fail closed: the first failed step ends them.
 Notification and the intent-mirror push run after the op and cannot fail it
-(`host/src/main.rs:3002-3004`, `:2754-2765`). A `host.toml` that does not
+(`host/src/tests/config.rs::fix_false_alarm_watch_url_refusal`, `:2754-2765`). A `host.toml` that does not
 parse stops the daemon; unknown keys are warned about by name (`:369-396`).
 
 **Declarative registration (step-21, step-22, ask-8, ask-9).** What the
@@ -257,7 +257,7 @@ person wipes it. Three mechanisms carry that, and a new registration has to
 join all three:
 
 - *A deploy knows what left.* It reads the stack's previous record
-  (`prior`, `core/src/ops/deploy.rs:276-297`) and the intent repo's copy of
+  (`prior`, `core/src/ops/deploy/restore_checks.rs::apply_checks`) and the intent repo's copy of
   the files before overwriting it, and removes the difference: `rootfs/`
   files and dropped native units (step `retire dropped`, `:1044-1189`),
   repo files (`:1195-1220`), an old route file (`:1937-1986`), orphan files
@@ -268,7 +268,7 @@ join all three:
   metrics target, route, state record and manual checks.
   `destroy_recorded` (`:414-446`)
   runs the ordinary destroy from the manifest in state, so `homelab apply`
-  (`client/src/apply.rs`, `client/src/main.rs:704-827`) can remove a stack
+  (`client/src/apply.rs`, `client/src/commands/checks.rs::check_pins`) can remove a stack
   whose directory is gone with every gate intact.
 - *Data is recorded, not deleted.* `HostState.retired`
   (`core/src/state.rs:158-204`) names each retired stack, app or unit's
@@ -296,7 +296,7 @@ in one place (`client/src/scaffold.rs:473-500`). Default swap is
 
 **The line.** The daemon generates a self-signed certificate once into
 `<state_dir>/tls-cert.pem` and `tls-key.pem` and prints its fingerprint at
-every boot (`host/src/tls.rs:16-54`, `host/src/main.rs:1837-1843`). The
+every boot (`host/src/tls.rs:16-54`, `host/src/tests/refusals.rs::fix_55_an_unparseable_frame_is_logged_without_its_body`). The
 client is built with the fleet's pin (fix-149, `client/build.rs` reads
 `config/client.toml`) and trusts that certificate only, first connection
 included; a machine or repository pin that disagrees stops with an error.
@@ -304,10 +304,10 @@ A client built without one pins as before: `~/.config/homelab/pin` wins, the
 `pin` in the repository's `config/client.toml` fills an empty machine, a
 disagreement stops with an error, and with neither the first certificate
 seen is trusted and saved
-(`client/src/repo_config.rs:139-167`, `client/src/main.rs:1100-1120`). The
+(`client/src/repo_config.rs:139-167`, `client/src/commands/manual_checks.rs::cmd_checks`). The
 TUI uses the machine pin only (`client/src/tui/backend.rs:66`). Every
 websocket upgrade needs `Authorization: Bearer <token>`
-(`host/src/main.rs:2684-2690`).
+(`host/src/tests/config_save.rs::fix_122_a_valid_log_level_saves_as_a_live_key`).
 
 The pin compares the certificate the server presents, and since v3.58.3
 (fix-34) `verify_tls12_signature` and `verify_tls13_signature` check the
@@ -372,10 +372,10 @@ and says so (`client/src/release.rs:57-62`; `release.yml` publishes no
 signature); `install-native` from a release also requires
 `SHA256SUMS.minisig` signed with the ecosystem key
 (`client/src/release.rs:79-169`, `core/src/release_sig.rs:10-40`);
-`install-native --file` checks nothing (`client/src/main.rs:243-250`). The
+`install-native --file` checks nothing (`client/src/commands/startup.rs::resolve_host`). The
 host only runs the candidate with `--selfcheck`
 (`core/src/ops/selfupdate.rs:60-73`), which prints the version and exits
-(`host/src/main.rs:1753-1756`). Whoever holds the token can install a root
+(`host/src/tests/commands.rs::fix_53_a_timeout_kills_everything_the_command_started`). Whoever holds the token can install a root
 binary on the host. The host's own check is the nightly native update: it
 skips an unsigned release and verifies a signed one
 (`core/src/ops/native.rs:982-1030`).
@@ -387,7 +387,7 @@ deploy pushes it to `/opt/<stack>/<app>/.env` (mode 600) and keeps a vault
 copy at `<state_dir>/secrets/<stack>/<app>.env` (0600; a native unit's file
 at `<stack>/<parent dir>/<name>` since fix-37); an app the client
 sent nothing for gets the vault copy back
-(`core/src/ops/deploy.rs:1443-1480`). The intent repo gets files, not env
+(`core/src/ops/deploy/bootstrap.rs::wait_for_systemd`). The intent repo gets files, not env
 (`:1192-1224`). Vault copies outlive the app, unit or stack they belong to
 until `homelab wipe` (`core/src/ops/retired.rs:1-15`). The `pct push` staging file is 0600 and removed after the push
 (`core/src/ops/util.rs:99-122`).
@@ -395,7 +395,7 @@ until `homelab wipe` (`core/src/ops/retired.rs:1-15`). The `pct push` staging fi
 **Credentials in argv.** `/proc/<pid>/cmdline` is world-readable. The device
 backup gives curl its credential file with `-K`
 (`core/src/ops/devicebackup.rs:44-56,148-153`); a registry token goes to
-`--password-stdin` (`core/src/ops/deploy.rs:1196-1200`). The guard,
+`--password-stdin` (`core/src/ops/deploy/provision_mounts.rs::stale_mounts`). The guard,
 `core/tests/argv_secret_tests.rs` (fix-32), scans `core/src`, `host/src`,
 `client/src`, `stacks` and `presets` for one shape: `curl -u "$..."` or
 `--user "$..."`. The notification bearer goes through a 0600 header file
@@ -407,7 +407,7 @@ read with `curl -H @<file>` since v3.58.3 (fix-35,
 
 | Credential | Read from | Copies the code makes | When it is gone |
 |---|---|---|---|
-| API token | `token` in `/etc/homelab/host.toml` or `HOMELAB_TOKEN` (`host/src/main.rs:371,404-407`); client: environment, `~/.config/homelab/env`, `./.env` (`client/src/main.rs:49-88`) | `host.toml` is in the host-meta snapshot (`core/src/ops/backup.rs:989,1056-1063`) | the daemon exits with "FATAL: token must be set (>=16 chars) via ... or HOMELAB_TOKEN" (`host/src/main.rs:408-414`); any string of 16 or more characters, set on both sides, works |
+| API token | `token` in `/etc/homelab/host.toml` or `HOMELAB_TOKEN` (`host/src/config/tokens.rs::validate_tokens,404-407`); client: environment, `~/.config/homelab/env`, `./.env` (`client/src/commands/ctx.rs::repo_root`) | `host.toml` is in the host-meta snapshot (`core/src/ops/backup.rs:989,1056-1063`) | the daemon exits with "FATAL: token must be set (>=16 chars) via ... or HOMELAB_TOKEN" (`host/src/config/tokens.rs::validate_tokens`); any string of 16 or more characters, set on both sides, works |
 | TLS cert and key | `<state_dir>/tls-*.pem` | host-meta snapshot (`backup.rs:973-974`) | a new pair is generated at start without a warning (`host/src/tls.rs:21`); pinned clients refuse with "certificate fingerprint mismatch" (`client/src/tls.rs:58-61`) |
 | restic password | `restic_password_file`, default `/var/lib/homelab/secrets/restic.pw` (`backup.rs:128`) | only inside the host-meta snapshot, encrypted with this same password (`backup.rs:971,1056-1066`) | no backup or restore runs, and no copy the code makes can open itself. The out-of-band copy is an operations matter: OPERATIONS_RUNBOOK.md asks for an offline copy of `restic.pw` |
 | stack `.env` | latch or a local file on the workstation | container `.env`, host vault (kept after the app or stack is gone, until `homelab wipe`), host-meta snapshot | a redeploy re-seals from the client or restores from the vault (`deploy.rs:1443-1480`) |
@@ -441,7 +441,7 @@ held to a fingerprint.
 
 **Per-machine tokens (fix-120, owner decision 2026-10-01).** `host.toml`'s
 `[[tokens]]` is a list of `{name, scope, sha256}`; the legacy single
-`token` key is compared alongside it (`identify`, `host/src/main.rs:5564`).
+`token` key is compared alongside it (`identify`, `host/src/tests/tokens.rs::h12_bearer_check`).
 Minting and revoking are their own scope-All RPCs
 (`TokenIssue`/`TokenRevoke`, `proto/src/lib.rs`) rather than going through
 `SetHostConfig`, because `tokens` is `Access::Locked` there on purpose
@@ -528,11 +528,11 @@ stateDiagram-v2
 ```
 <sub>Source: `core/src/ops/selfupdate.rs`, `host/src/main.rs` (`Rpc::SelfUpdateHost`, marker cleared by the first answered request, fix-121).</sub>
 - **Watchdog (B7).** `READY=1`, then `WATCHDOG=1` every 10 seconds
-  (`host/src/main.rs:1862-1868`); nothing is sent when `NOTIFY_SOCKET` is
+  (`host/src/tests/refusals.rs::fix_211_a_command_with_only_known_fields_is_never_refused`); nothing is sent when `NOTIFY_SOCKET` is
   unset (`:1734-1747`). Whether systemd enforces it depends on the unit on
   the host.
 - **Boot.** Three seconds after start a `host-online` notification carries
-  the version and any interrupted operations (`host/src/main.rs:1792-1812`).
+  the version and any interrupted operations (`host/src/tests/refusals.rs::fix_141_the_hello_names_the_build`).
 
 ## 6. Native services and signed releases
 
@@ -544,7 +544,7 @@ glibc check, the unit file, `activate`. A service not active after five
 checks is rolled back to the preserved binary, or left stopped on a first
 install (`core/src/ops/native.rs:265-450`). A deploy installs a binary where
 there is none and never replaces one (fix-28,
-`core/src/ops/deploy.rs:2138-2150`). `update_policy` defaults to `manual`;
+`core/src/ops/deploy/start.rs::registry_login`). `update_policy` defaults to `manual`;
 `auto` lets the nightly round install new releases (`core/src/native.rs:10-23`).
 Verification: `SHA256SUMS.minisig` over `SHA256SUMS` with the compiled
 `RELEASE_PUBKEY`, then the binary against `SHA256SUMS`
@@ -557,15 +557,15 @@ Verification: `SHA256SUMS.minisig` over `SHA256SUMS` with the compiled
 | AR1 | crates proto, core, host, client | section 2 |
 | AR2 | Executor trait | `core/src/executor.rs:58-73` |
 | AR3 | step pipelines, one runner | `core/src/runner.rs` |
-| AR4 | typed JSON, schema version, atomic writes | `core/src/state.rs`, `host/src/main.rs:1549-1570` |
+| AR4 | typed JSON, schema version, atomic writes | `core/src/state.rs`, `host/src/tests/commands.rs::a_stalled_streaming_command_is_stopped_and_a_moving_one_is_not` |
 | AR5 | bare JSON frames (amended 2026-09-27; the envelope was removed) | `proto/src/lib.rs`, section 1 |
 | AR6 | Elm-style TUI over `Backend` | `client/src/tui/backend.rs:33,40,173`; `update` at `client/src/tui/model.rs:389` |
 | AR7 | `OperatorError` what, why, remedy | `core/src/error.rs:41-45` |
 | AR8 | no template engine (amended 2026-09-27) | string substitution in `client/src/scaffold.rs` |
 | AR9 | hard gates | `.githooks/pre-commit` and `make release` (fmt, clippy `-D warnings`, tests, scanners); no GitHub Actions since 2026-09-29 |
 | AR10 | tagged releases with sha256 | `release.yml`: a read-only `build` job, a `publish` job that alone can write; no signature |
-| AR11 | TOML config, YAML manifests | `host/src/main.rs:369-396`; `client/src/spec.rs:54-56` |
-| AR12 | serial mutations | `host/src/main.rs:1667,2944` |
+| AR11 | TOML config, YAML manifests | `host/src/config/tokens.rs::validate_tokens`; `client/src/spec.rs:54-56` |
+| AR12 | serial mutations | `host/src/tests/supervision.rs::fix_52_sigterm_waits_for_the_running_operation_then_exits_zero,2944` |
 | AR13 | journal names interrupted ops | `core/src/incidents.rs:117-137` |
 | AR14 | incident bundle per failure | `core/src/incidents.rs:56-110` |
 | AR15 | journald + JSONL ring + runtime debug toggle (built 2026-10-01, superseding the "journald only" amendment) | stderr to the journal, no colour codes; every line of an operation inside `rpc{id,stack}` or `stack{stack}` and `op{op}` spans, step starts and finishes logged (fix-122, `journal_subscriber`, `run_op_locked`); `<state_dir>/logs/host.jsonl`, size-capped and cut back like `journal.jsonl` (`core/src/logring.rs`, `host::RingWriter`); `log_level` in host.toml, dashboard-editable, applied live via `tracing_subscriber::reload` (`AppState::log_filter`, `init_production_logging`) |
@@ -583,7 +583,7 @@ Looks wrong, is deliberate:
 - **The shell tab is not a PTY.** It is a REPL over the audited exec
   (`client/src/tui/model.rs:267`).
 - **Devices apply at create only.** GPU and TUN are set in the create path
-  (`core/src/ops/deploy.rs:662-677`); an existing container gets its mounts
+  (`core/src/ops/deploy/mod.rs::deploy`); an existing container gets its mounts
   reconciled, not its devices (`:681-700`).
 - **`exec_enabled` is not remote.** The client can change backup hour,
   webhook and retention (`proto/src/lib.rs:239-246`); `exec_enabled`,

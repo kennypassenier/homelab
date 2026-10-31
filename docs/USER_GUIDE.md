@@ -44,12 +44,12 @@ things, and each has its own home:
 
 | What | Where it comes from, first match wins | Source |
 |---|---|---|
-| Host address | `HOMELAB_HOST` typed before the command; else `host` in `config/client.toml`, searched upward from the current directory the way git finds its root; else `HOMELAB_HOST` from `~/.config/homelab/env` or `./.env`; else the built-in `pve:8443` | `client/src/main.rs:127-137`, `client/src/repo_config.rs:25,63,103` |
-| Token | `HOMELAB_TOKEN` in the environment; else `~/.config/homelab/env`; else `./.env` | `client/src/main.rs:49-88,140` |
-| Certificate pin | the pin built into the client from `config/client.toml` at compile time (fix-149), the only certificate trusted; a machine pin or repository pin that disagrees is refused. A client built without one: `~/.config/homelab/pin`; if that is empty, the `pin` in `config/client.toml` is adopted and saved; if both are empty, the first certificate seen is trusted and saved | `client/src/lib.rs:16-18`, `client/src/repo_config.rs:143`, `client/src/main.rs:1101-1155` |
+| Host address | `HOMELAB_HOST` typed before the command; else `host` in `config/client.toml`, searched upward from the current directory the way git finds its root; else `HOMELAB_HOST` from `~/.config/homelab/env` or `./.env`; else the built-in `pve:8443` | `client/src/commands/ctx.rs::load_config_env`, `client/src/repo_config.rs:25,63,103` |
+| Token | `HOMELAB_TOKEN` in the environment; else `~/.config/homelab/env`; else `./.env` | `client/src/commands/ctx.rs::repo_root,140` |
+| Certificate pin | the pin built into the client from `config/client.toml` at compile time (fix-149), the only certificate trusted; a machine pin or repository pin that disagrees is refused. A client built without one: `~/.config/homelab/pin`; if that is empty, the `pin` in `config/client.toml` is adopted and saved; if both are empty, the first certificate seen is trusted and saved | `client/src/lib.rs:16-18`, `client/src/repo_config.rs:143`, `client/src/commands/manual_checks.rs::cmd_checks` |
 
 Only keys that start with `HOMELAB_` are read from the two env files, and a
-key already in the environment is never overwritten (`client/src/main.rs:76-81`).
+key already in the environment is never overwritten (`client/src/commands/ctx.rs::stacks_base`).
 `config/client.toml` accepts exactly two keys, `host` and `pin`; a file that
 does not parse stops every command rather than falling back to a default
 (`client/src/repo_config.rs:75-90`).
@@ -76,7 +76,7 @@ flowchart TD
 Drawn from `client/src/main.rs` (`main`) and `client/src/repo_config.rs` (`load`, `resolve_host`).
 
 **Worked example: which door did I knock on?** `homelab ping` is the one verb
-that prints where its address came from (`client/src/main.rs:1190-1194`):
+that prints where its address came from (`client/src/commands/new_stack.rs::cmd_template_build`):
 
 ```text
 ● HOST v<version> (<host build>) · proto <n> — link up
@@ -106,7 +106,7 @@ a message that starts `the host certificate pinned on this machine`
 that differs from the pin, the connection is refused with
 `certificate fingerprint mismatch` (`client/src/tls.rs:63`). Both messages
 say what to delete; do that only after checking the fingerprint the host
-logs at start (`host/src/main.rs:1876`).
+logs at start (`host/src/tests/support.rs::config_from_text`).
 
 The certificate pin is decided per connection like this, for a client built
 without a pin; the released client carries the fleet's pin (fix-149), trusts
@@ -139,7 +139,7 @@ Drawn from `client/src/repo_config.rs` (`reconcile_pin`), `client/src/main.rs` a
 
 Every verb needs `HOMELAB_TOKEN` except `help`, `plan`, `runbook`,
 `dashboard`, `presets`, `export`, `import`, `new`, `testplan`, `self-install`
-and `tui --offline` (`client/src/main.rs:144-150`; `new` and `testplan` since
+and `tui --offline` (`client/src/commands/ctx.rs::apply_env_line`; `new` and `testplan` since
 fix-110). Without it the refusal names the file: `HOMELAB_TOKEN is not set —
 put HOMELAB_TOKEN=<token> in ~/.config/homelab/env (or export it)`.
 `template-build` refuses an argument it cannot read instead of falling back
@@ -153,14 +153,14 @@ directory (fix-101):
 
 | Verb | Reads / writes in the repository | Source |
 |---|---|---|
-| `homelab presets` | reads `presets/` | `client/src/main.rs:650` |
-| `homelab new` | reads `presets/`, writes `stacks/<name>/` | `client/src/main.rs:585,624-628` |
-| `homelab import` | writes `stacks/<name>/` | `client/src/main.rs:466` |
-| `homelab runbook` | reads `stacks/`, writes `docs/DR_RUNBOOK.md` unless an output path is given | `client/src/main.rs:902-906` |
-| `homelab testplan` | reads `core/tests`, `client/tests`, `docs/deployment/REALIZATION_PLAN.md`; writes `docs/deployment/TEST_PLAN.md` unless an output path is given | `client/src/main.rs:883-891` |
-| `homelab check` | reads `stacks/` unless a path is given | `client/src/main.rs:311` |
-| `homelab apply` | reads `stacks/` unless a path is given | `client/src/main.rs:709-713` |
-| `homelab export` | writes `<name>-bundle.yml` here unless an output path is given | `client/src/main.rs:446-449` |
+| `homelab presets` | reads `presets/` | `client/src/commands/checks.rs::check_edge` |
+| `homelab new` | reads `presets/`, writes `stacks/<name>/` | `client/src/commands/stacks.rs::cmd_guards,624-628` |
+| `homelab import` | writes `stacks/<name>/` | `client/src/commands/stacks.rs::cmd_adopt` |
+| `homelab runbook` | reads `stacks/`, writes `docs/DR_RUNBOOK.md` unless an output path is given | `client/src/commands/host_cmd.rs::read_host_toml` |
+| `homelab testplan` | reads `core/tests`, `client/tests`, `docs/deployment/REALIZATION_PLAN.md`; writes `docs/deployment/TEST_PLAN.md` unless an output path is given | `client/src/commands/host_cmd.rs::host_settings` |
+| `homelab check` | reads `stacks/` unless a path is given | `client/src/commands/host_admin.rs::cmd_answer` |
+| `homelab apply` | reads `stacks/` unless a path is given | `client/src/commands/checks.rs::check_pins` |
+| `homelab export` | writes `<name>-bundle.yml` here unless an output path is given | `client/src/commands/ui.rs::ui_drive_step` |
 | `homelab tui` | reads `stacks/` and `presets/` at start | `client/src/tui/mod.rs:47-48` |
 
 A stack can be named the same way for every verb: `almanac`, `almanac/`,
@@ -173,7 +173,7 @@ in the repository.
 
 When the host is older than the client, the command line refuses to send any
 command except `ping`, `status`, `doctor`, `incidents`, a state request and a
-host update (`client/src/version.rs:15-30`, `client/src/main.rs:1203-1213`).
+host update (`client/src/version.rs:15-30`, `client/src/commands/new_stack.rs::cmd_template_build`).
 Read-only verbs such as `homelab check` and `homelab config` are refused too.
 The message ends with `run 'homelab release-update' first`. The reason is in
 the message: a host that predates a field ignores it, and the operation
@@ -197,12 +197,12 @@ or empty; piped into a file, `grep` or a log it is plain text (fix-109).
 
 Every host operation streams its log lines and ends with one line:
 `✓ <message>` and exit code 0, or `✗ <message>` and exit code 1
-(`client/src/main.rs:1056-1059,1267-1277`). A successful operation says
+(`client/src/commands/manual_checks.rs::parse_accept,1267-1277`). A successful operation says
 `<label> complete — <n> step(s), <m> changed`. A failed one says
 `<what> :: <why> :: remedy: <remedy> :: incident bundle <dir>`
-(`host/src/main.rs:3043-3098`). An operation that deliberately did not run
+(`host/src/tests/support.rs::serve_on_loopback`). An operation that deliberately did not run
 says `<label> deferred — <reason>` and leaves no incident
-(`host/src/main.rs:3054-3065`).
+(`host/src/tests/support.rs::serve_state_on_loopback`).
 
 Arguments are positional. `--help` or `-h` anywhere on the line prints help
 instead of running anything (`client/src/version.rs:98-100`): after a verb,
@@ -221,7 +221,7 @@ homelab tui             # against the host
 homelab tui --offline   # against a built-in fake host, no token needed
 ```
 
-`--demo` is accepted as a synonym of `--offline` (`client/src/main.rs:141`).
+`--demo` is accepted as a synonym of `--offline` (`client/src/commands/ctx.rs::apply_env_line`).
 Start the TUI from the repository root: it looks for `stacks/` and `presets/`
 in the current directory when it starts (`client/src/tui/mod.rs:47-48`), and
 see the warning in 1.3 for what happens when it finds none.
@@ -367,8 +367,8 @@ before starting the TUI anywhere else:
   until it is answered (`client/src/tui/model.rs:620-633`). The window
   shows `[a] allow` and `[s] stop` (`client/src/tui/view/focus.rs:138-142`).
   Unanswered, it times out after `ask_timeout_s` seconds, 600 by default, and
-  fails the step (`host/src/main.rs:146-152,669-671`,
-  `core/src/ops/deploy.rs:2617-2659`). The question is also pushed as an
+  fails the step (`host/src/config/tokens.rs::validate_tokens,669-671`,
+  `core/src/ops/deploy/route.rs::declared_routes`). The question is also pushed as an
   urgent notice. A headless command line prints it and how to answer it;
   any other terminal answers it with `homelab answer <operation> allow|stop`,
   Live view with `homelab ui answer <operation> allow|stop`, the dashboard
@@ -390,16 +390,16 @@ before starting the TUI anywhere else:
 The host only acts on stacks you send it, and four guests can never be acted
 on at all: vmids 100, 101, 102 and 103 (`core/src/safety.rs:21`). The list is
 compiled in. `no_touch = [...]` in `/etc/homelab/host.toml` adds vmids to it
-and can never remove one (`host/src/main.rs:446-460`, test
-`host/src/main.rs:843`). A vmid that belongs to a QEMU VM is refused too,
+and can never remove one (`host/src/config/tokens.rs::validate_tokens`, test
+`host/src/config/load.rs::load_config_from`). A vmid that belongs to a QEMU VM is refused too,
 whether or not it is on the list (`core/src/safety.rs:61-70`).
 
 Every operation that changes a container checks the list before its first
 command: deploy (`core/src/safety.rs:40-52`), backup, restore, update,
 enable/disable and adoption (`core/src/ops/mod.rs:42-53`), destroy
 (`core/src/ops/destroy.rs`, step `no-touch check`), resize, patch, template
-build and guards (`host/src/main.rs:3687-3700`), and remote exec
-(`host/src/main.rs:2861-2866`, test `host/src/main.rs:864`).
+build and guards (`host/src/tests/reads.rs::redesign_stackhub_2_app_health_comes_from_the_reading`), and remote exec
+(`host/src/tests/doctor.rs::fix_130_the_new_doctor_probes_read_the_machine`, test `host/src/config/load.rs::load_config_from`).
 
 **Worked example.** A stack file that names `vmid: 101` validates (the
 allowed range is 100 to 354, `core/src/manifest.rs:623-625`), so
@@ -407,7 +407,7 @@ allowed range is 100 to 354, `core/src/manifest.rs:623-625`), so
 `safety gates` step with `vmid <vmid> is on the no-touch list`, here with
 101 filled in (`core/src/safety.rs:47-52`), and no command reaches the machine: the test
 `core/tests/deploy_tests.rs:327` asserts zero commands ran. No incomplete
-state is recorded either (`core/src/ops/deploy.rs:67-75`).
+state is recorded either (`core/src/ops/deploy/incomplete.rs::mark_incomplete`).
 
 #### A2 · Hostname guard
 
@@ -420,7 +420,7 @@ the host reads its live hostname and refuses a mismatch with
 `vmid <n> exists with hostname '<live>', expected '<expected>' — refusing`
 (`core/src/safety.rs:72-87`). The same live check guards backup, restore,
 update, enable/disable, adoption, native updates and orphan pruning
-(`core/src/ops/mod.rs:42-80`, `host/src/main.rs:3575-3585`), and destroy
+(`core/src/ops/mod.rs:42-80`, `host/src/tests/reads.rs::fix_217_a_never_backed_up_stack_still_resolves_to_a_read_empty_answer`), and destroy
 (`core/src/ops/destroy.rs`, step `hostname guard`). Tests:
 `core/tests/deploy_tests.rs:354`, `core/tests/m4_ops_tests.rs:1322`.
 
@@ -462,20 +462,20 @@ Drawn from `core/src/safety.rs` (`check_deploy_target`) and `core/src/ops/mod.rs
 **Status:** Built, narrower than FEATURES.md.
 
 What is built: the first failing step ends the operation
-(`core/src/runner.rs:100-104`, `core/src/ops/deploy.rs:20-30`), and every
+(`core/src/runner.rs:100-104`, `core/src/ops/deploy/mod.rs`), and every
 failed operation leaves an **incident bundle** under
 `/var/lib/homelab/incidents/<unix-time>-<op>/` holding `report.json`,
 `events.jsonl`, `commands.sh` (the commands it ran, as a script),
 `state-at-failure.json`, `journal-tail.jsonl` and `versions.txt`
-(`core/src/incidents.rs:55-110`, `host/src/main.rs:3077-3089`). A deploy that
+(`core/src/incidents.rs:55-110`, `host/src/tests/support.rs::serve_state_on_loopback`). A deploy that
 fails after the machine was touched records the stack with the step where it
-stopped, and logs `recorded as incomplete at step` (`core/src/ops/deploy.rs:55-117`).
+stopped, and logs `recorded as incomplete at step` (`core/src/ops/deploy/incomplete.rs::mark_incomplete`).
 
 What is not built: FEATURES.md says a failed provision leaves the stack
 disabled and a missing `.env` aborts before compose. The code records a
-failed first deploy as enabled (`core/src/ops/deploy.rs:99`), and an app
+failed first deploy as enabled (`core/src/ops/deploy/incomplete.rs::minimal_record`), and an app
 without a `.env` in the payload gets the host's vault copy if there is one
-and otherwise none (`core/src/ops/deploy.rs:1140-1151`). Only a failed
+and otherwise none (`core/src/ops/deploy/provision_attach.rs::attach_devices`). Only a failed
 *nightly* run disables a stack (H8).
 
 List the bundles with `homelab incidents` or `i` in the TUI, and read one
@@ -486,14 +486,14 @@ and all but the newest 200, are removed by the daemon.
 
 **Status:** Built.
 
-The daemon serves TLS only (`host/src/main.rs:1903`) with a self-signed
+The daemon serves TLS only (`host/src/tests/config.rs::the_config_can_widen_the_no_touch_list_but_never_shrink_it`) with a self-signed
 certificate it creates once in `/var/lib/homelab/tls-cert.pem` and
 `tls-key.pem` (`host/src/tls.rs:16-19`), and logs its fingerprint at start
-(`host/src/main.rs:1876`). The WebSocket at `/api/ws` needs
+(`host/src/tests/support.rs::config_from_text`). The WebSocket at `/api/ws` needs
 `Authorization: Bearer <token>`; without it the answer is 401
-`missing or invalid bearer token` (`host/src/main.rs:2717-2723`). The daemon
+`missing or invalid bearer token` (`host/src/tests/doctor.rs::doctor_probes_surface_stale_backup_and_dead_offsite`). The daemon
 refuses to start with a token shorter than 16 characters
-(`host/src/main.rs:409-419`). `/api/health` answers without a token;
+(`host/src/config/tokens.rs::validate_tokens`). `/api/health` answers without a token;
 `/api/version` needs it since fix-126 (`app_router`). Every refusal is a
 journal line `401 on <path> from <address>` and counts toward the `refused
 connections` line of `homelab doctor` (fix-120). Pinning is described in 0.1; test
@@ -1066,10 +1066,10 @@ An app's secrets are its `.env`. The client reads `stacks/<stack>/<app>/.env`
 (`client/src/spec.rs:285-291`). The host writes it into the container as
 `/opt/<stack>/<app>/.env` with mode 600 and keeps a copy at
 `/var/lib/homelab/secrets/<stack>/<app>.env` with mode 0600; the log says
-`sealed (values not logged)` (`core/src/ops/deploy.rs:1132-1138`). The intent
-repository only receives the stack's files (`core/src/ops/deploy.rs:907-913`).
+`sealed (values not logged)` (`core/src/ops/deploy/provision_attach.rs::attach_mounts`). The intent
+repository only receives the stack's files (`core/src/ops/deploy/firewall.rs::firewall`).
 When a later deploy sends no `.env` for an app, the vault copy is pushed
-again (`core/src/ops/deploy.rs:1140-1151`). `*.env` is in `.gitignore`
+again (`core/src/ops/deploy/provision_attach.rs::attach_devices`). `*.env` is in `.gitignore`
 (`.gitignore:1`). Tests: `core/tests/deploy_tests.rs:1637`,
 `core/tests/m4_ops_tests.rs:2176`.
 
@@ -1078,9 +1078,9 @@ again (`core/src/ops/deploy.rs:1140-1151`). `*.env` is in `.gitignore`
 **Status:** Built.
 
 Off until `exec_enabled = true` is set in `/etc/homelab/host.toml` on the host
-(`host/src/main.rs:435`); it is deliberately not one of the keys the admin
+(`host/src/config/tokens.rs::validate_tokens`); it is deliberately not one of the keys the admin
 dashboard's host settings page or `config/host.toml` can set
-(`host/src/main.rs:175-177`). While off, every call answers
+(`host/src/config/tokens.rs::validate_tokens`). While off, every call answers
 `remote exec is disabled (set exec_enabled = true in host.toml to allow it)`
 (`core/src/safety.rs:121`). Every call is appended to
 `/var/lib/homelab/audit.log` as `<unix-time> exec vmid=<n> cmd="<command>"`
@@ -1092,10 +1092,10 @@ Anything else is recorded as typed and kept on pve, so do not put a bare
 password on an exec command line; read it from a file inside the container
 instead (`cat /run/secret | tool --password-stdin`). The command runs through
 `sh -c` inside the container with a 120-second limit
-(`host/src/main.rs:3981`). A vmid on the no-touch list, compiled or added in
+(`host/src/tests/history.rs::redesign_371_a_reveal_is_audited_in_history_without_the_value`). A vmid on the no-touch list, compiled or added in
 `host.toml`, is refused even with exec on (`core/src/safety.rs:124-129`,
-`host/src/main.rs:2861-2866`). Tests: `core/tests/m4_ops_tests.rs:998`,
-`host/src/main.rs:864`.
+`host/src/tests/doctor.rs::fix_130_the_new_doctor_probes_read_the_machine`). Tests: `core/tests/m4_ops_tests.rs:998`,
+`host/src/config/load.rs::load_config_from`.
 
 **Worked example.**
 
@@ -1104,9 +1104,9 @@ homelab exec 108 df -h /
 ```
 
 Everything after the vmid is joined with spaces into one command
-(`client/src/main.rs:544-555`). The answer is `exit <code>`, then stdout,
+(`client/src/commands/native_install.rs::stage_binary`). The answer is `exit <code>`, then stdout,
 then a `--- stderr ---` section when there was any
-(`host/src/main.rs:3982-3995`). The SHELL tab (G4) sends the same request.
+(`host/src/tests/history.rs::redesign_371_a_reveal_is_audited_in_history_without_the_value`). The SHELL tab (G4) sends the same request.
 
 #### A7 · Unattended security updates in every container
 
@@ -1115,7 +1115,7 @@ then a `--- stderr ---` section when there was any
 Every deploy and every `homelab guards <vmid>` writes
 `/etc/apt/apt.conf.d/50unattended-upgrades` with Debian-Security origins
 only, `Automatic-Reboot "false"` and `Remove-Unused-Dependencies "true"`
-(`core/src/ops/guards.rs:125-131,309`, `core/src/ops/deploy.rs:884-895`).
+(`core/src/ops/guards.rs:125-131,309`, `core/src/ops/deploy/firewall.rs::write_rules`).
 
 #### A8 · CrowdSec and bouncer on the gateway
 
@@ -1150,7 +1150,7 @@ nothing, and shows in `homelab check` as a `noted` finding with subject
 
 Every step reports whether it changed anything (`core/src/runner.rs:40-46`),
 files are pushed only when their hash differs, and the intent commit passes
-when there is nothing to commit (`core/src/ops/deploy.rs:950-970`). Test
+when there is nothing to commit (`core/src/ops/deploy/provision.rs::net0_config`). Test
 `core/tests/deploy_tests.rs:1550` deploys a stack whose files and guards are
 already in place and asserts that no `pct create`, `pct start`, `pct push`,
 docker restart, journald restart or timer enable ran. Re-running a deploy
@@ -1161,7 +1161,7 @@ operations (`core/src/doctor.rs:178-185`).
 
 **Status:** Built.
 
-On every deploy (`core/src/ops/deploy.rs:884-895`) and on demand with
+On every deploy (`core/src/ops/deploy/firewall.rs::write_rules`) and on demand with
 `homelab guards <vmid>` or `g` in the TUI, the host writes:
 
 | File in the container | Content | Source |
@@ -1193,7 +1193,7 @@ data_mounts:
 
 Fields: `core/src/manifest.rs:289-335`; the rule is written to
 `/etc/logrotate.d/homelab-<stack>` (`core/src/ops/guards.rs:329`) in the
-`log rotation` step (`core/src/ops/deploy.rs:897-905`). The `mount_point`
+`log rotation` step (`core/src/ops/deploy/firewall.rs::write_rules`). The `mount_point`
 above is an example; use the stack's own.
 
 #### B3 · Verify gates after every deploy
@@ -1205,17 +1205,17 @@ A deploy is only green after three checks:
 1. **`verify health`**: after 5 seconds, every app must have a running
    service according to `docker compose ps --status running --services`. A
    failing app's error carries `docker compose ps -a` and its last 20 log
-   lines (`core/src/ops/deploy.rs:1547-1582`).
+   lines (`core/src/ops/deploy/mod.rs::deploy`).
 2. **`reconcile`**: the container is asked whether the whole stack file is
    true: hostname, every storage and data mount attached, boot policy, every
    app running, every native unit active. Anything else fails with
    `the deploy reported success but the container does not match the stack file`
-   (`core/src/ops/deploy.rs:2423-2528`).
+   (`core/src/ops/deploy/mod.rs::deploy`).
 3. **`service checks`**: each app may carry a `checks.yml` beside its compose
    file. Every check runs before the work and after it, and the pair is
-   judged (`core/src/ops/deploy.rs:239-269,2531-2660`).
+   judged (`core/src/ops/deploy/vault.rs::vault_key,2531-2660`).
 
-Only then does the log say `Sync complete` (`core/src/ops/deploy.rs:2699-2707`).
+Only then does the log say `Sync complete` (`core/src/ops/deploy/route.rs::retire_gateway_route`).
 
 **Worked example: a `checks.yml`.** From
 `stacks/registry/registry/checks.yml`, shortened:
@@ -1254,9 +1254,9 @@ container yet, takes its first reading as the baseline and asks nothing, fix-151
 asks you (see 1.5); in the TUI, `a` accepts the new value as normal and `s`
 fails the deploy with an incident. An app the deploy restarted gets up to
 twelve more readings, 5 seconds apart, before a drop counts
-(`core/src/ops/deploy.rs:2561-2594`). Each `blind_spot` is printed as
+(`core/src/ops/deploy/storage_ownership.rs::storage_ownership`). Each `blind_spot` is printed as
 `[check] does not prove: <text>` even when everything passed
-(`core/src/ops/deploy.rs:2608-2612`). The `manual` lines become manual checks
+(`core/src/ops/deploy/route.rs::declared_routes`). The `manual` lines become manual checks
 you can confirm with `homelab checks answer` (see section 3). They are listed on the stack's page under "When something goes wrong, check this" for debugging, with when someone last confirmed each; they are never a notification, an Inbox row or a fleet-check finding (manual-checks-as-info-1).
 
 #### B4 · Drift detection
@@ -1264,7 +1264,7 @@ you can confirm with `homelab checks answer` (see section 3). They are listed on
 **Status:** Built.
 
 The host stores a hash of what it last applied per stack
-(`core/src/ops/deploy.rs:2402`). The TUI hashes the local `stacks/<name>/`
+(`core/src/ops/deploy/start_restart.rs::restart_if_stale`). The TUI hashes the local `stacks/<name>/`
 the same way (`core/src/manifest.rs:951`) and marks a stack `[CHANGED]` when
 the two differ (`client/src/tui/model.rs:490-509`,
 `client/src/tui/view/stacks.rs:59-61`); the alert line lists them as
@@ -1284,10 +1284,10 @@ would act on.
 Every step of every operation writes `running` before it starts and `done`
 or `failed` after it, and the operation ends with `complete`, `failed` or
 `deferred` (`core/src/runner.rs:81-104,159-189`), in
-`/var/lib/homelab/journal.jsonl` (`host/src/main.rs:3008-3010`). At start the
+`/var/lib/homelab/journal.jsonl` (`host/src/tests/config.rs::gap_26_journal_max_bytes_defaults_and_follows_host_toml`). At start the
 daemon logs every operation the journal shows as unfinished, as
 `interrupted operation '<op>' at step '<step>' — re-running it is safe (idempotent)`
-(`host/src/main.rs:1812-1823`), and the doctor lists them
+(`host/src/tests/refusals.rs::fix_55_an_unparseable_frame_is_logged_without_its_body`), and the doctor lists them
 (`core/src/doctor.rs:178-185`).
 
 #### B6 · Rollback guard for image updates
@@ -1330,10 +1330,10 @@ ships from this repository (`core/assets/host-units/homelab-host.service`,
 A golden template is a Proxmox template container with docker, the guards and
 unattended-upgrades baked in; a stack whose `lxc.template` is
 `"clone:<vmid>"` is cloned from it instead of bootstrapped
-(`core/src/ops/deploy.rs:493-532`). The clone inherits the template's
+(`core/src/ops/deploy/gate.rs::load_prior`). The clone inherits the template's
 privilege level, so a mismatch is refused:
 `pct clone cannot change this, it always inherits the template`
-(`core/src/ops/deploy.rs:512-520`). New stacks get `clone:996` from the
+(`core/src/ops/deploy/gate.rs::compute_dropped_natives`). New stacks get `clone:996` from the
 scaffold (`client/src/scaffold.rs:71`).
 
 ```text
@@ -1341,7 +1341,7 @@ homelab template-build [vmid] [ver] [--privileged] [--base <vztmpl>]
 ```
 
 The build vmid defaults to 999 and the version to 1
-(`client/src/main.rs:507-508`); the base defaults to
+(`client/src/commands/native_install.rs::release_repo_of`); the base defaults to
 `local:vztmpl/debian-12-standard_12.12-1_amd64.tar.zst`
 (`core/src/ops/template.rs:48-60`). The build refuses a vmid that exists or is
 on the no-touch list (`core/src/ops/template.rs:113-126`), and **the build
@@ -1358,14 +1358,14 @@ homelab template-build 994 5 --base <vztmpl from the list>
 
 1. `homelab templates` prints `clonable golden templates (fast):` with one
    `clone:<vmid>  <hostname>` line each, then `OS templates (full bootstrap):`
-   (`host/src/main.rs:3899-3934`). Pick a base from the second list and a
+   (`host/src/tests/history.rs::arch_history_the_history_command_reads_since_a_moment`). Pick a base from the second list and a
    vmid that does not exist yet; 994 above is an example.
 2. When the build finishes the log says
    `[template] <name> ready — set template: "clone:<vmid>" in StackDefaults/manifests for fast provisioning`
    (`core/src/ops/template.rs:314-320`), with the vmid you chose.
 3. Put `template: "clone:994"` under `lxc:` in the stacks that should use it.
    The deploy's bootstrap still runs over a clone and skips what is already
-   there (`core/src/ops/deploy.rs:849-859`).
+   there (`core/src/ops/deploy/provision.rs::net0_config`).
 
 ### C · Provisioning and lifecycle
 
@@ -1402,7 +1402,7 @@ stateDiagram-v2
     end note
 ```
 
-Drawn from `core/src/ops/deploy.rs`, `core/src/ops/enable.rs`, `core/src/ops/destroy.rs`, `core/src/ops/retired.rs`, `client/src/apply.rs` and `host/src/main.rs` (nightly park).
+Drawn from `core/src/ops/deploy/`, `core/src/ops/enable.rs`, `core/src/ops/destroy.rs`, `core/src/ops/retired.rs`, `client/src/apply.rs` and `host/src/main.rs` (nightly park).
 
 #### C1 · Declarative containers from `lxc-compose.yml`
 
@@ -1458,7 +1458,7 @@ All fields: `core/src/manifest.rs:11-342`. The rules the validator enforces
   `docs/deployment/REGISTER.md`: one restic repository per owning app).
 - `data_mounts` are directories the stack borrows (media libraries): never
   created, never backed up, and the deploy refuses when one is missing
-  (`core/src/manifest.rs:53-71`, `core/src/ops/deploy.rs:328-329`).
+  (`core/src/manifest.rs:53-71`, `core/src/ops/deploy/restore_checks.rs::record_restore_checks`).
 - Unknown keys are refused, so a typo such as `latch_secret:` cannot pass
   (`client/src/spec.rs:10-21`).
 
@@ -1476,10 +1476,10 @@ A **`rootfs/` directory** maps onto the container's `/` for two places only:
 a changed timer is enabled and started. A changed drop-in of a native unit
 (`rootfs/etc/systemd/system/<unit>.service.d/…`) restarts that unit when it
 runs, in the step `native units` (fix-159, below); no other service is
-restarted by this (`core/src/ops/deploy.rs`, step `push files`). A file you delete from `rootfs/` is
+restarted by this (`core/src/ops/deploy/`, step `push files`). A file you delete from `rootfs/` is
 removed from the container by the next deploy; a `.service`, `.timer`,
 `.socket` or `.path` unit is `systemctl disable --now` first, and systemd
-reloads afterwards (step `retire dropped`, `core/src/ops/deploy.rs:1044-1106`,
+reloads afterwards (step `retire dropped`, `core/src/ops/deploy/provision_clone.rs::provision_clone`,
 `:1181-1183`). `stacks/kyu/rootfs/` is the example in the repository.
 
 A **`firewall:` block** declares the container's Proxmox firewall (fix-88).
@@ -1533,7 +1533,7 @@ homelab plan stacks/syncthing
 ```
 
 `plan` builds the payload and runs the same validator the host runs, with no
-network (`client/src/main.rs:673-691`). It prints
+network (`client/src/commands/checks.rs::check_pins`). It prints
 `✓ valid — <stack> would deploy vmid <vmid>: <n> file(s), <m> env(s)` or
 `error: validation failed: <every problem, joined with "; ">`. A stack with
 `latch_secrets` still calls latch (D12).
@@ -1549,7 +1549,7 @@ homelab destroy stacks/drill
 ```
 
 The client asks `Type the stack name '<stack>' to confirm destroy: ` and stops
-with `name mismatch — aborted` on anything else (`client/src/main.rs:1111-1123`).
+with `name mismatch — aborted` on anything else (`client/src/commands/stacks.rs::cmd_export`).
 The host then runs, in order: `confirm`, `no-touch check`, `hostname guard`,
 `backup before destroy`, `stop container`, `lift protection`,
 `destroy container` (`pct destroy --purge`), and then the same unregister
@@ -1567,7 +1567,7 @@ automatic ever does (`core/src/ops/retired.rs:1-15`). Until then
 
 The backup before a destroy is taken on every destroy. If it fails, the
 destroy is refused with `pass --no-backup to destroy anyway, which is a decision, not a retry`.
-`--no-backup` skips it and says so (`client/src/main.rs:1069`, `:1104-1109`,
+`--no-backup` skips it and says so (`client/src/commands/manual_checks.rs::parse_verdict`, `:1104-1109`,
 `core/src/ops/destroy.rs:116-159`). A stack without storage is destroyed
 with a warning that anything inside the container goes with it. Tests:
 `core/tests/m4_ops_tests.rs:94,114,133`.
@@ -1576,7 +1576,7 @@ with a warning that anything inside the container goes with it. Tests:
 `stacks/<name>/lxc-compose.yml` the client prints
 `! no <dir>/lxc-compose.yml — destroying '<stack>' from the manifest the host recorded`,
 asks for the name the same way, and sends the destroy with the manifest the
-host stored at its last deploy (`client/src/main.rs:1070-1099`,
+host stored at its last deploy (`client/src/commands/manual_checks.rs::parse_verdict`,
 `destroy_recorded` in `core/src/ops/destroy.rs:414-446`). Every gate above
 still runs. A stack the host holds no manifest for (adopted, never
 deployed) is refused with `has no manifest recorded in host state`; remove
@@ -1586,7 +1586,7 @@ that container by hand, then `homelab forget <stack>`. Tests:
 (`core/tests/declarative_cleanup_tests.rs:483,503`).
 
 With the directory present, `homelab destroy` reads the whole stack, secrets
-included (`client/src/main.rs:1100`), so a stack with `latch_secrets` needs
+included (`client/src/commands/manual_checks.rs::cmd_checks`), so a stack with `latch_secrets` needs
 latch and `HOMELAB_LATCH_ENV` even though a destroy uses no secret. The path
 from the recorded manifest reads no stack files and needs neither.
 
@@ -1595,7 +1595,7 @@ from the recorded manifest reads no stack files and needs neither.
 **Status:** Built.
 
 `boot.onboot` (default true) and `boot.order` are set when the container is
-created (`core/src/manifest.rs:216-222`, `core/src/ops/deploy.rs:556-567,642-655`)
+created (`core/src/manifest.rs:216-222`, `core/src/ops/deploy/registry_cache.rs::registry_cache,642-655`)
 and put back on every later deploy when they drifted (W3). The scaffold
 writes `order: 99` (`client/src/scaffold.rs:75`); lower numbers start first.
 
@@ -1610,13 +1610,13 @@ homelab resize stacks/syncthing
 ```
 
 The client prints `▶ resize <stack> :: <MiB> MiB / <cores> cores / <disk>G`
-(`client/src/main.rs:482-503`). The host re-checks the no-touch list and the
+(`client/src/commands/native_install.rs::cmd_install_native`). The host re-checks the no-touch list and the
 live hostname, then applies RAM, cores and swap with `pct set` and grows the
 disk with `pct resize`, without a restart (`core/src/ops/resize.rs`). Lowering
 RAM or cores is refused while the container runs
 (`shrink refused while running`); lowering the disk is always refused
 (`disk shrink refused`). Like destroy, `resize` reads the whole stack,
-secrets included (`client/src/main.rs:487`). Test:
+secrets included (`client/src/commands/native_install.rs::cmd_install_native`). Test:
 `core/tests/m4_ops_tests.rs:1227`.
 
 #### C5 · Template list from the live host
@@ -1631,7 +1631,7 @@ the host has (see B8); the wizard does not use it.
 The DASHBOARD's CAPACITY panel shows RAM used, total and free from `free -m`,
 the RAM all stored stack files ask for together with its ratio to the total
 (`alloc <MB> MB <ratio>× ok`), and the one-minute load against the core count
-(`host/src/main.rs:4167-4180,1911-1943`, `client/src/tui/view/dashboard.rs:22-110`).
+(`host/src/tests/questions.rs::arch_host_link_a_stale_answer_does_not_answer_a_new_question,1911-1943`, `client/src/tui/view/dashboard.rs:22-110`).
 Not built: a warning in the wizard when a new stack would overcommit.
 
 #### C7 · Native Rust services under systemd
@@ -1662,7 +1662,7 @@ The verbs:
 | Verb | What it does | Source |
 |---|---|---|
 | `homelab adopt stacks/<name>` | verifies a running, hand-built service matches its `service.yml` and records it; never starts or restarts anything | `client/src/main.rs:174-191`, `core/src/ops/native.rs:31-229` |
-| `homelab install-native stacks/<name>[/<unit>] [<tag> \| --file <path>]` | installs a binary from a release (latest by default) or from a file, with the previous binary kept and a rollback armed | `client/src/main.rs:195-287`, `core/src/ops/native.rs:265-512` |
+| `homelab install-native stacks/<name>[/<unit>] [<tag> \| --file <path>]` | installs a binary from a release (latest by default) or from a file, with the previous binary kept and a rollback armed | `client/src/commands/mod.rs::run`, `core/src/ops/native.rs:265-512` |
 | `homelab backup-native <stack>` | archives the service's state from inside the container into restic | `core/src/ops/native.rs:515-665` |
 | `homelab update-native <stack>` | runs the service's own `update_cmd` under supervision | `core/src/ops/native.rs:1174-1333` |
 | `homelab release-update-native <stack>` | installs the latest release when its checksum differs from the installed binary | `core/src/ops/native.rs:931-1131` |
@@ -1670,9 +1670,9 @@ The verbs:
 
 `backup-native`, `update-native` and `release-update-native` act on the copy
 of the service files the host recorded at adoption, and on every service of
-the stack in turn (`host/src/main.rs:3441-3555`). A stack the host does not
+the stack in turn (`host/src/tests/reads.rs::fix_180_a_cache_miss_backup_calendar_does_not_block_the_queue_behind_it`). A stack the host does not
 know answers `adopt it first`, followed by the adopt command
-(`host/src/main.rs:3121-3124`).
+(`host/src/tests/support.rs::asking_handler_with`).
 
 **Chassis pause: heartbeat and staging** (fix-113 ADDENDUM, owner + chassis-rs
 agreement, 2026-10-01). `backup_pause: chassis` never asks the binary to hold
@@ -1739,7 +1739,7 @@ the policy from its own copy, so after changing it run
 **A deploy never replaces an installed native binary.** `homelab deploy` of a
 native stack ships each binary only when none is installed yet; otherwise it
 logs `already installed, not shipped — upgrades go through the nightly updater or`
-followed by the release-update command (`core/src/ops/deploy.rs:2175-2197`,
+followed by the release-update command (`core/src/ops/deploy/mod.rs::deploy`,
 tests `core/tests/deploy_tests.rs:2649,2677`).
 
 **A deploy restarts a running native unit whose files changed** (fix-159,
@@ -1756,7 +1756,7 @@ fails with the unit, the reason, what the check read (`NEVER_ACTIVE`,
 `DIED_IN_WINDOW`, `RESTART_LOOP`) and the unit's last 20 log lines; the new
 files stay in place. A unit whose files are unchanged is left running, as
 adoption leaves it (`core/src/native.rs` `restart_reason`,
-`core/src/ops/deploy.rs` step `native units`; tests
+`core/src/ops/deploy/` step `native units`; tests
 `fix_159_a_changed_unit_restarts_the_running_service_with_a_health_check`,
 `fix_159_a_changed_env_file_restarts_the_running_service`,
 `fix_159_a_restart_that_does_not_come_up_fails_the_deploy`,
@@ -1775,12 +1775,12 @@ dashboard, which its Deploy dialog already says (`restarts_dashboard`).
 and the program, reloads systemd, and takes the unit out of the stack's
 record; the transcript says `[native] <unit> left the stack file — stopped and disabled`
 and `[native] <unit>'s data directories and its restic repository are kept`
-(`core/src/ops/deploy.rs:1107-1180`, `:2611-2629`). Its data directories
+(`core/src/ops/deploy/provision_create.rs::create_args`, `:2611-2629`). Its data directories
 inside the container, its `<unit>-config` repository and its vault copies
 stay, recorded as retired `<stack>/<unit>` until `homelab wipe <stack>/<unit>`
 (`core/src/ops/retired.rs:147-172`). Only a unit an earlier version of the
 stack file listed is retired; one that `homelab adopt` registered and no stack
-file ever named is left alone (`core/src/ops/deploy.rs:285-297`, test
+file ever named is left alone (`core/src/ops/deploy/restore_checks.rs::record_restore_checks`, test
 `an_adopted_unit_the_stack_never_declared_is_not_retired`,
 `core/tests/declarative_cleanup_tests.rs:762`).
 
@@ -1831,10 +1831,10 @@ homelab deploy stacks/syncthing
 **Worked example: what a deploy does.** The client validates first and
 prints `▶ deploy <stack> :: vmid <vmid> :: <n> file(s), <m> env(s)`, plus one
 `[env] <app> <- <source>` line per app with secrets
-(`client/src/main.rs:692-702`, `:1466-1476`, `client/src/spec.rs:316-332`).
+(`client/src/commands/checks.rs::check_pins`, `:1466-1476`, `client/src/spec.rs:316-332`).
 Each native binary is sent in a message of its own first
-(`deploy_spec`, `client/src/main.rs:1477-1513`). The host then runs these
-steps in this order (`core/src/ops/deploy.rs`, the `step!` calls from line
+(`deploy_spec`, `client/src/commands/backups.rs::cmd_snapshot_file`). The host then runs these
+steps in this order (`core/src/ops/deploy/`, the `step!` calls from line
 265 to 2808):
 
 | Step | What it does |
@@ -1870,13 +1870,13 @@ steps in this order (`core/src/ops/deploy.rs`, the `step!` calls from line
 
 A message larger than 256 MiB is refused by the client before it is sent,
 with a message that says it is a size limit and not a network fault
-(`client/src/version.rs:59-73`, `client/src/main.rs:1237-1242`).
+(`client/src/version.rs:59-73`, `client/src/commands/mod.rs::run`).
 
 #### D2 · Activation gating
 
 **Status:** Not built. A stack's first deploy records it as enabled
-(`core/src/ops/deploy.rs:2378`), and a deploy starts a stopped container
-(`core/src/ops/deploy.rs:812-816`). The per-stack flag that exists is H8.
+(`core/src/ops/deploy/start_restart.rs::runs_older_files`), and a deploy starts a stopped container
+(`core/src/ops/deploy/metrics.rs::metrics_discovery`). The per-stack flag that exists is H8.
 
 #### D3 · App add/remove and garbage collection
 
@@ -1886,11 +1886,11 @@ Add an app: create `stacks/<stack>/<app>/docker-compose.yml`, add the name to
 `apps:`, deploy. Remove an app: delete it from `apps:` and deploy; the host
 runs `docker compose down --remove-orphans` for it and deletes
 `/opt/<stack>/<app>`, logging `app '<app>' removed (config dirs kept)`
-(`core/src/ops/deploy.rs:2145-2182`, test `core/tests/m4_ops_tests.rs:2244`).
+(`core/src/ops/deploy/start.rs::registry_login`, test `core/tests/m4_ops_tests.rs:2244`).
 Its `/appdata` directory, its restic repository and its vault copy
 `/var/lib/homelab/secrets/<stack>/<app>.env` stay; the deploy records them as
 retired `<stack>/<app>`, which `homelab check` shows as `noted` until
-`homelab wipe <stack>/<app>` deletes them (`core/src/ops/deploy.rs:2630-2644`,
+`homelab wipe <stack>/<app>` deletes them (`core/src/ops/deploy/route.rs::gateway_route`,
 `core/src/ops/retired.rs:106-143`). Putting the app back in `apps:` and
 deploying clears the record (`core/src/ops/retired.rs:175-180`).
 
@@ -1899,11 +1899,11 @@ next deploy** (since ask-8, 2026-09-27; before that the deploy only reported
 it). Step `orphan files` deletes every file under `/opt/<stack>/` that the
 stack no longer sends, one `rm -f` each, never a directory, and logs
 `[orphans] removed <path> — no longer in the stack's files` per file
-(`core/src/ops/deploy.rs:2104-2143`). It leaves alone: `.env` files, which
+(`core/src/ops/deploy/push_verify.rs::run`). It leaves alone: `.env` files, which
 come from the vault; on the gateway, the directories where other stacks'
 dashboards and route files are generated; and the files of an app that is
 leaving, which the garbage collection above needs for its
-`docker compose down` (`core/src/ops/deploy.rs:133-199`). Tests:
+`docker compose down` (`core/src/ops/deploy/compose.rs::compose_reports_created`). Tests:
 `the_deploy_removes_files_the_stack_no_longer_declares`,
 `generated_dashboards_on_the_gateway_are_never_orphans`,
 `a_removed_apps_files_are_left_for_the_garbage_collector`
@@ -1914,11 +1914,11 @@ homelab prune-orphans stacks/syncthing
 ```
 
 still exists and removes the same set after you type the stack name
-(`client/src/main.rs:1031-1063`, `host/src/main.rs:3557-3633`). After a
+(`client/src/commands/mod.rs::run`, `host/src/tests/reads.rs::fix_217_a_never_backed_up_stack_still_resolves_to_a_read_empty_answer`). After a
 deploy it finds nothing and answers
 `nothing to remove — everything under /opt/<stack> is in the repository`;
 it is kept for a container that has not been deployed since. Like destroy,
-it reads the whole stack, secrets included (`client/src/main.rs:1039`).
+it reads the whole stack, secrets included (`client/src/commands/manual_checks.rs::checks_answer`).
 
 **A mount the stack no longer declares is detached.** When `lxc-compose.yml`
 drops a `storage` or `data_mounts` entry, the next deploy runs
@@ -1926,10 +1926,10 @@ drops a `storage` or `data_mounts` entry, the next deploy runs
 `[mounts] <mpN> (<dir>) is no longer declared — detached; the directory on the host is kept`.
 Only a mount whose host directory this stack declares now or declared in the
 record before is detached; one no version of the stack file named is logged
-as attached by hand and left (`core/src/ops/deploy.rs:782-848`, test
+as attached by hand and left (`core/src/ops/deploy/autorestore.rs::restore_latest`, test
 `a_mount_the_stack_no_longer_declares_is_detached_and_its_directory_kept`,
 `core/tests/declarative_cleanup_tests.rs:784`). A running container sees the
-change after a reboot (`core/src/ops/deploy.rs:865`).
+change after a reboot (`core/src/ops/deploy/firewall.rs::firewall`).
 
 #### D4 · Intent history on the host
 
@@ -1944,7 +1944,7 @@ reported`. The client warns before it deploys uncommitted files but does not
 refuse. Secrets are not among the files (A5). A
 commit that fails for any reason other than "nothing to commit" fails the
 deploy, because history, mirror and plan all depend on it
-(`core/src/ops/deploy.rs:907-970`). There is no revert verb: the deploy always
+(`core/src/ops/deploy/firewall.rs::firewall`). There is no revert verb: the deploy always
 sends the files from your checkout, so rolling a configuration back means
 putting the old files back in the repository and deploying. The TUI's plan
 (D6) compares against this history.
@@ -1956,7 +1956,7 @@ putting the old files back in the repository and deploying. The TUI's plan
 
 After every successful operation, and on every 20-minute scheduler tick, the
 host pushes all branches of the intent repository to the git remote named
-`mirror`, adding it on first use (`host/src/main.rs:2787-2798,3040,2261`,
+`mirror`, adding it on first use (`host/src/tests/doctor.rs::doctor_probes_surface_stale_backup_and_dead_offsite,3040,2261`,
 `core/src/ops/mirror.rs`). A failed push is logged as
 `mirror push failed (will retry)` and never fails the operation. Tests:
 `core/tests/m4_ops_tests.rs:1015,1043`.
@@ -1998,7 +1998,7 @@ homelab presets
 
 prints one line per preset: name, RAM in MiB, description and its apps, with
 `(built-in fallback)` when it came from the fallback list
-(`client/src/main.rs:648-669`). Run it from the repository root. How to add a
+(`client/src/commands/checks.rs::check_edge`). Run it from the repository root. How to add a
 preset: [PRESET_GUIDE.md](PRESET_GUIDE.md); converting a vendor compose file:
 [LLM_COMPOSE_CONVERSION.md](LLM_COMPOSE_CONVERSION.md).
 
@@ -2061,7 +2061,7 @@ or `SHIFT+U` in the TUI. Per app (`core/src/ops/update.rs:121-270`):
    minutes). The rollback is held to the same check.
 
 The command sends only the stack file, so no secrets are needed
-(`client/src/main.rs:779-807`). Tests: `core/tests/m4_ops_tests.rs:662,694,737`.
+(`client/src/commands/native_install.rs::cmd_update_native`). Tests: `core/tests/m4_ops_tests.rs:662,694,737`.
 Which apps are `auto` is recorded in `docs/deployment/UPDATE_POLICY.md`; for
 example `stacks/syncthing/syncthing/docker-compose.yml:22` carries
 `com.homelab.update.policy=auto`.
@@ -2074,7 +2074,7 @@ Not built: registry polling and update badges, and the
 **Status:** Built, narrower than FEATURES.md.
 
 One validator, `core/src/manifest.rs`, runs in the client before `plan`,
-`deploy` and `import` finish (`client/src/main.rs:469-471,679,698`) and on the
+`deploy` and `import` finish (`client/src/commands/stacks.rs::cmd_adopt,679,698`) and on the
 host as the first deploy step. Backup, restore, update and resize run the
 manifest part of it (`core/src/manifest.rs:445-458`). It reports every
 problem at once, joined with `; `. Not built: `docker compose config` as a gate
@@ -2091,7 +2091,7 @@ homelab import /tmp/syncthing-bundle.yml notes 150
 
 `export` writes one YAML with the manifest and every file, never a `.env`,
 and prints `✓ exported — <out> (<n> file(s), no secrets)`
-(`client/src/main.rs:437-457`, `client/src/spec.rs:1315-1338`). It builds the
+(`client/src/commands/ui.rs::ui_drive_step`, `client/src/spec.rs:1315-1338`). It builds the
 full payload first, so a stack with `latch_secrets` calls latch even though
 the secrets are then left out. `import` writes `stacks/<new-name>/` relative to
 the current directory, refuses an existing one, and replaces the old identity
@@ -2099,7 +2099,7 @@ everywhere: name, vmid, hostname, IP (`10.10.10.<vmid - 100>`, keeping the
 prefix length), `/appdata/<old>/` paths and `<old>_net` network names
 (`client/src/spec.rs:1344-1407`). It then validates the result and prints
 `✓ imported — <dir> (vmid <vmid>) :: add .env files if the apps need secrets, then deploy`
-(`client/src/main.rs:458-481`). Test: `client/tests/tui_snapshot_tests.rs:715`.
+(`client/src/commands/stacks.rs::cmd_adopt`). Test: `client/tests/tui_snapshot_tests.rs:715`.
 The paths and the vmid above are examples.
 
 #### D12 · Secrets from latch
@@ -2117,7 +2117,7 @@ HOMELAB_LATCH_ENV=prod homelab deploy stacks/gateway
 ```
 
 `HOMELAB_LATCH_ENV` can also live in `~/.config/homelab/env` or `./.env`
-(`client/src/main.rs:68-86`). For each named app without a local `.env`, the
+(`client/src/commands/ctx.rs::stack_dir`). For each named app without a local `.env`, the
 client runs `latch cat <stack>/<app>/.env --env <env> --expand` from the
 parent of the stack directory, which makes `stacks/` the latch project root,
 and keeps the result in memory (`client/src/spec.rs:334-412`). A local
@@ -2142,7 +2142,7 @@ every stack it finds), `export`, `destroy` (when the stack directory exists),
 `resize`, `prune-orphans`, and every per-stack action in the TUI
 (`client/src/tui/model.rs:1296-1299`). On the command line, `backup`,
 `restore` and `update` send only the stack file and need no secrets
-(`client/src/spec.rs:68-84`, `client/src/main.rs:749-807`). Test:
+(`client/src/spec.rs:68-84`, `client/src/commands/checks.rs::cmd_today`). Test:
 `client/tests/latch_secrets_tests.rs:62`. Stacks that use it today include
 `stacks/home/lxc-compose.yml:68` and `stacks/gateway/lxc-compose.yml:130`.
 
@@ -2198,7 +2198,7 @@ homelab backup stacks/syncthing
 ```
 
 or `SHIFT+B` in the TUI. Only the stack file is sent; the backup runs on the
-host against `/appdata` (`client/src/main.rs:749-757`). Repositories are
+host against `/appdata` (`client/src/commands/checks.rs::cmd_today`). Repositories are
 `<restic_base>/<owner>-config`, one per owning app (deployment decision D25),
 with `restic_base` defaulting to `rclone:gdrive:homelab-backups` and the
 password in `/var/lib/homelab/secrets/restic.pw` (`core/src/ops/backup.rs:89-133`).
@@ -2299,7 +2299,7 @@ free) the restore stops before anything is stopped; `--no-safety-copy`
 restores without the copy, deliberately.
 
 The client prints `▶ restore <stack> from '<snapshot>'`
-(`client/src/main.rs:758-778`). The host runs `safety gates`, then
+(`client/src/commands/checks.rs::cmd_today`). The host runs `safety gates`, then
 `validate snapshot` (the id must be in every repository of the stack, and
 nothing is stopped when it is not), `quiesce stack` (`docker compose down` per
 app), `restore data` (`restic restore <snapshot> --target /` per owner),
@@ -2356,7 +2356,7 @@ restored from its latest one; each path is judged on its own, and
 `no_data: true` paths are skipped. A restore that fails does not stop the
 deploy: it logs
 `[e3] AUTO-RESTORE FAILED for <path> — deploy continues with that dir EMPTY; restore it by hand if it held data`
-(`core/src/ops/deploy.rs:355-453`). Tests:
+(`core/src/ops/deploy/plan.rs::plan_names`). Tests:
 `core/tests/m4_ops_tests.rs:1397,1432,1504,1534`.
 
 **Worked example: rebuild a container with its data.** After
@@ -2372,13 +2372,13 @@ finds a snapshot, and restores it before the app starts.
 
 The host looks a minute after it starts, then every 20 minutes. In the
 configured hour or the hour after it (host local time; the second hour
-catches up a night a restart interrupted, fix-129) it plans the night (`host/src/main.rs:2257-2333,2000-2035`):
+catches up a night a restart interrupted, fix-129) it plans the night (`host/src/tests/config.rs::a_key_the_struct_does_not_read_is_reported_even_where_a_list_named_it,2000-2035`):
 
 1. Backups of every **enabled** stack whose last backup is more than 20 hours
-   old (`host/src/main.rs:1952-1954,2008-2013`), three at a time by default
-   (`backup_concurrency`, `host/src/main.rs:164-165,675-677`), all under the
+   old (`host/src/tests/config.rs::fix_120_host_policy_defaults_to_the_fleet_and_follows_host_toml,2008-2013`), three at a time by default
+   (`backup_concurrency`, `host/src/config/tokens.rs::validate_tokens,675-677`), all under the
    one operation lock, so they never overlap a deploy
-   (`host/src/main.rs:2172-2188`).
+   (`host/src/tests/tokens.rs::fix_120_a_refused_connection_is_counted_with_its_peer`).
 2. Then, one stack at a time and only when that stack's backup ran tonight
    (fix-60): image updates for `auto` apps (D9); for native stacks the
    release update of `auto` services and the supervised self-update of
@@ -2415,7 +2415,7 @@ catches up a night a restart interrupted, fix-129) it plans the night (`host/src
    (`report_fingerprint`, `nightly_report_due` in
    `core/src/ops/fleetcheck.rs`).
 
-With no nightly hour set, nothing runs (`host/src/main.rs:2264-2267`). A stack
+With no nightly hour set, nothing runs (`host/src/tests/config_save.rs::a_settings_save_writes_back_the_file_it_read`). A stack
 whose nightly update fails has its automatic updates parked (H8, fix-59); its
 backups go on, and a failed backup parks nothing. A
 deferred backup is neither a failure nor a backup
@@ -2435,7 +2435,7 @@ as in `stacks/gateway/crowdsec/docker-compose.yml:23`.
 **Status:** Built, narrower than FEATURES.md. The backup target is one base,
 `restic_base`, which defaults to Google Drive through rclone
 (`core/src/ops/backup.rs:127`) and can be changed in `host.toml`
-(`host/src/main.rs:478`). The code keeps no second, local copy. The doctor's
+(`host/src/config/tokens.rs::validate_tokens`). The code keeps no second, local copy. The doctor's
 `offsite (Drive)` check reports an expired token (`core/src/doctor.rs:141-158`).
 
 #### E6 · PBS / vzdump safety net
@@ -2454,7 +2454,7 @@ homelab runbook /tmp/dr.md         # or anywhere else
 ```
 
 Run it from the repository root: it reads `stacks/` from the current
-directory (`client/src/main.rs:899-913`). It writes plain markdown: recovery
+directory (`client/src/commands/host_cmd.rs::read_host_toml`). It writes plain markdown: recovery
 Layers 0 to 5 (what runs where, the daemon, a stack without the daemon, the
 daemon's own state, a stack's data, ZFS replicas), one section per stack
 (container, apps or native units, how to rebuild it, which repositories hold
@@ -2481,7 +2481,7 @@ source = "HDD2TB"
 target = "HDD18TB/replica/HDD2TB"
 ```
 
-(the shape of the test fixture at `host/src/main.rs:888-890`). Then:
+(the shape of the test fixture at `host/src/config/warnings.rs::warn_at_load`). Then:
 
 ```bash
 homelab zfs-replicate
@@ -2523,10 +2523,10 @@ container at that stack's next deploy, which renders its Alloy config again.
 That port takes pushes only since fix-93, so the coverage check in
 `homelab check` asks Loki from inside its container instead: set
 `loki_vmid = 113` beside `loki_url`, and the host runs the query there on
-`127.0.0.1:3101`; unset, it asks `loki_url` from the host as before (`core/src/ops/deploy.rs:1958-1967`,
+`127.0.0.1:3101`; unset, it asks `loki_url` from the host as before (`core/src/ops/deploy/push.rs::note_changed`,
 `core/src/ops/logshipper.rs`). An install that fails does not fail the
 deploy; it logs a warning that the container is shipping no logs
-(`core/src/ops/deploy.rs:1968-1978`). A stack may open syslog receivers for
+(`core/src/ops/deploy/push.rs::push_one`). A stack may open syslog receivers for
 devices that cannot run a shipper, with `syslog_receivers:` entries of `host`,
 `listen` (port 1024 or higher), `protocol` (`udp`/`tcp`) and `format`
 (`rfc5424`/`rfc3164`), and optionally `allow_from`, a list of sender IP
@@ -2631,7 +2631,7 @@ alertmanager, pve-exporter and loki (`stacks/metrics/lxc-compose.yml`; loki
 since fix-90, 2026-09-27, before that on the gateway). With
 `metrics_targets_dir` set on the host, every deploy writes the stack's
 Prometheus target file and destroy and forget remove it
-(`core/src/ops/deploy.rs:521-544`, `core/src/ops/destroy.rs:218-228`).
+(`core/src/ops/deploy/mod.rs::deploy`, `core/src/ops/destroy.rs:218-228`).
 
 Grafana ran in this stack until owner decision "Alle vier meteen"
 (2026-10-01): the admin dashboard's own Metrics page (below, "The
@@ -2746,10 +2746,10 @@ homelab new notes --preset syncthing --vmid 150 --ram 1024 --cores 2 --disk 8 --
 ```
 
 Defaults: RAM from the preset, cores from the preset or 2, disk from the
-preset or 8, swap by the formula (`client/src/main.rs:598-623`). It prints
+preset or 8, swap by the formula (`client/src/commands/mod.rs::run`). It prints
 `✓ scaffolded <dir> — <n> file(s)`, the file list, and
 `next: read the compose files, then` followed by the plan command
-(`client/src/main.rs:629-644`). The stack file gets the address
+(`client/src/commands/mod.rs::run`). The stack file gets the address
 `10.10.10.<vmid - 100>`, `template: "clone:996"`, `protection: true`,
 `order: 99`, and one storage entry per `/appdata` bind in the copied compose
 files (`client/src/scaffold.rs:368-369,57-86,470-500`). Run it from the
@@ -2791,16 +2791,16 @@ remote exec is off in `host.toml`, every line gets the A6 refusal
 #### G6 · Visual data transfers
 
 **Status:** Built, narrower than FEATURES.md. The host reports the bytes of
-each file it pushes into a container (`core/src/ops/deploy.rs:1091-1096`); the
+each file it pushes into a container (`core/src/ops/deploy/provision_create.rs::create_args`); the
 TUI draws them in DATA_TRANSFERS and lets each fade after a while
 (`client/src/tui/model.rs:399-402,474-489`), and the command line prints
-`⇅ <label> <done>/<total> bytes` (`client/src/main.rs:1230-1238`). Backup,
+`⇅ <label> <done>/<total> bytes` (`client/src/commands/stacks.rs::cmd_exec`). Backup,
 restore and image-pull bytes are not reported.
 
 #### G7 · Demo mode
 
 **Status:** Won't as a feature. `homelab tui --offline` (also `--demo`) runs
-the TUI against a built-in fake host (`client/src/main.rs:141,155-157`).
+the TUI against a built-in fake host (`client/src/commands/ctx.rs::apply_env_line,155-157`).
 
 #### G8 · Settings and tiered retention
 
@@ -2825,7 +2825,7 @@ To read the current settings from the command line:
 homelab config
 ```
 
-which prints (`client/src/main.rs:1239-1258`):
+which prints (`client/src/commands/mod.rs::run`):
 
 ```text
 nightly run : <HH:00 | off>
@@ -2863,9 +2863,9 @@ The client refuses any other filename, because destroy removes exactly
 `<vmid>-app-<stack>.yml` (`client/src/spec.rs:122-153`). The host writes the
 fragment only to the gateway vmid and only into the routes directory
 (defaults 104 and `/opt/traefik-config/routes`, both settable in `host.toml`)
-(`core/src/safety.rs:24-37,90-110`, `host/src/main.rs:461-466`). When that
+(`core/src/safety.rs:24-37,90-110`, `host/src/config/tokens.rs::validate_tokens`). When that
 directory is under `/appdata/`, it is written on the host side; otherwise it
-is pushed into the gateway (`core/src/ops/deploy.rs:1914-1935`). Traefik's
+is pushed into the gateway (`core/src/ops/deploy/push.rs::content_for_container`). Traefik's
 file watch picks it up.
 
 The route file goes away again in three cases: a destroy or a forget of the
@@ -2873,7 +2873,7 @@ stack (`core/src/ops/destroy.rs:264-287`), and a deploy of a stack that
 dropped `gateway_route:` or moved to another vmid, which removes the old
 `<vmid>-app-<stack>.yml` and logs
 `[route] <path> removed — the stack file no longer declares it`
-(step `retire gateway route`, `core/src/ops/deploy.rs:1937-1986`; tests
+(step `retire gateway route`, `core/src/ops/deploy/push.rs::push_one`; tests
 `core/tests/declarative_cleanup_tests.rs:349,372`). The front page follows,
 since it is rendered from these files (section 4).
 
@@ -2939,7 +2939,7 @@ lxc:
 
 (`core/src/manifest.rs:201-206`). The deploy first checks that the host has
 the devices (W1), then passes them in when it creates the container
-(`core/src/ops/deploy.rs:589-618,673-698`). A preset can set them:
+(`core/src/ops/deploy/registry_cache.rs::log_cache,673-698`). A preset can set them:
 `presets/jellyfin/preset.yml` has `gpu: true`. Directories the stack only
 borrows (media libraries) are `data_mounts`, see C1.
 
@@ -2953,7 +2953,7 @@ reads them), same shape as the existing protection warning.
 
 **Status:** Built. `lxc.timezone` (default `"host"`, `core/src/manifest.rs`)
 is passed to `pct create --timezone` the same way `features` is
-(`core/src/ops/deploy.rs`); it is create-time only, like `unprivileged`,
+(`core/src/ops/deploy/`); it is create-time only, like `unprivileged`,
 `gpu` and `vpn` — a deploy of a running container never changes it. `"host"`
 inherits the Proxmox host's own timezone (CET/CEST), which is what every
 container ran on before this field existed, so a stack file leaves it out
@@ -2983,11 +2983,11 @@ homelab self-update <path-to-homelab-host-binary>
 ```
 
 The client sends the file (`▶ self-update :: shipping <path> (<n> KiB)`,
-`client/src/main.rs:835-855`). The host saves it to
+`client/src/commands/mod.rs::run`). The host saves it to
 `/var/lib/homelab/staged-host` and runs (`core/src/ops/selfupdate.rs:39-131`):
 
 1. `selfcheck candidate`: `<staged> --selfcheck` must exit 0 and print its
-   version (`host/src/main.rs:1784-1789`).
+   version (`host/src/tests/commands.rs::fix_53_a_timeout_kills_everything_the_command_started`).
 2. `backup current`: copies `/usr/local/bin/homelab-host` to `.prev`.
 3. `install candidate`.
 4. `arm rollback marker`: writes `/var/lib/homelab/selfupdate.pending`.
@@ -2995,7 +2995,7 @@ The client sends the file (`▶ self-update :: shipping <path> (<n> KiB)`,
    reaches you.
 
 The new binary removes the marker after 5 seconds of serving and logs
-`self-update accepted — now running v<version>` (`host/src/main.rs:1882-1891`).
+`self-update accepted — now running v<version>` (`host/src/tests/support.rs::config_from_text`).
 Normally you use H7 instead, which fetches and verifies a release first.
 
 #### H6 · Fleet OS patching
@@ -3009,7 +3009,7 @@ homelab patch
 Every stack in the host's state, one at a time, runs `apt-get update`,
 `apt-get dist-upgrade -y` (keeping existing config files), `autoremove` and
 `clean`, with 30 minutes per container. No-touch vmids are skipped; the first
-failure stops the run (`core/src/ops/patch.rs`, `host/src/main.rs:3371-3385`,
+failure stops the run (`core/src/ops/patch.rs`, `host/src/tests/support.rs::new`,
 test `core/tests/m4_ops_tests.rs:817`). Not built: a reboot indicator, and a
 TUI key or palette action.
 
@@ -3054,7 +3054,7 @@ homelab enable syncthing
 ```
 
 or `e` in the TUI. The argument is the stack **name**, not a path
-(`client/src/main.rs:423-436`). Disable sets `onboot` to 0 and marks the stack
+(`client/src/commands/ui.rs::ui_drive_step`). Disable sets `onboot` to 0 and marks the stack
 parked; enable restores `onboot` to what the stored stack file says. Neither
 starts or stops a container (`core/src/ops/enable.rs`). Tests:
 `core/tests/m4_ops_tests.rs:2491,2512,2533`.
@@ -3062,7 +3062,7 @@ starts or stops a container (`core/src/ops/enable.rs`). Tests:
 A parked stack shows `[OFF]` in the lists and `○ parked [e] to re-enable` in
 its detail (`client/src/tui/view/stacks.rs:62-64,117-121`), and the nightly
 run skips it and logs `scheduler: stack <name> is disabled — skipped`
-(`host/src/main.rs:2365-2371`).
+(`host/src/tests/config_save.rs::fix_134_a_settings_save_keeps_the_file_s_own_comments`).
 
 A failed nightly update parks the stack's automatic updates by itself
 (fix-59): the nightly backup goes on, `onboot` and the running containers are
@@ -3073,8 +3073,8 @@ followed by the enable command, and sends a notification
 (`park_after_night` in `host/src/main.rs`). `homelab check` lists the stack
 as `automatic updates parked since <date>` until `homelab enable <name>`
 resumes them. A redeploy keeps the flag as it was
-(`core/src/ops/deploy.rs:2362-2378`), but a deploy does start a stopped
-container (`core/src/ops/deploy.rs:812-816`).
+(`core/src/ops/deploy/start_restart.rs::runs_older_files`), but a deploy does start a stopped
+container (`core/src/ops/deploy/metrics.rs::metrics_discovery`).
 
 ### W · Added 2026-08-31
 
@@ -3086,7 +3086,7 @@ Before anything is created, a stack with `gpu: true` has the host's `/dev/dri`
 devices and their group ids read; a missing device or unreadable group stops
 the deploy with a message naming the stack and the device. `vpn: true` does
 the same for `/dev/net/tun`, and every `data_mounts` path must exist
-(`core/src/ops/hardware.rs:37-165`, `core/src/ops/deploy.rs:318-337`). The
+(`core/src/ops/hardware.rs:37-165`, `core/src/ops/deploy/restore_checks.rs::record_restore_checks`). The
 log shows `[w1] <card> gid <n> · <render> gid <m>`. A stack that asks for no
 hardware is never probed. Tests: `core/tests/deploy_tests.rs:1078,1114,1142,1160`.
 
@@ -3119,7 +3119,7 @@ policy from G8 (feat-stacks-9).
 
 On every deploy of an existing container, `onboot` and the startup order are
 compared with the stack file and put back, logged as
-`[w3] boot policy drifted — <what differs>` (`core/src/ops/deploy.rs:756-779`).
+`[w3] boot policy drifted — <what differs>` (`core/src/ops/deploy/autorestore.rs::check_mount`).
 Memory, cores and disk are not touched by a deploy; `homelab check` reports a
 difference and names the remedy: `homelab resize` to raise, a rebuild to
 lower. Tests: `core/tests/deploy_tests.rs:1003,1042`,
@@ -3140,9 +3140,9 @@ homelab check ~/Projects/homelab/stacks
 ```
 
 The client sends the vmid every stack file claims; the host adds what it can
-see and compares (`client/src/main.rs:310-338`, `host/src/main.rs:3773-3806`).
+see and compares (`client/src/commands/host_admin.rs::cmd_answer`, `host/src/tests/reads.rs::feat_platform_3_current_op_answers_the_holder_and_the_newest_lines`).
 From outside the repository with no path, it says the stack-file half is
-`SKIPPED` and checks only the host's half (`client/src/main.rs:317-327`). The
+`SKIPPED` and checks only the host's half (`client/src/commands/ui.rs::cmd_ui`). The
 answer (`render`, `core/src/ops/fleetcheck.rs`, fix-103) leads with a count
 per severity and then groups the findings, broken first, each group printed
 in its own colour (red, yellow, dim):
@@ -3226,16 +3226,16 @@ for an Access app that now lets everyone in). Without the token it prints
 `docs/deployment/CLOUDFLARE.md`.
 
 The host runs the same check after every nightly run and notifies only when a
-finding is not `noted` (`host/src/main.rs:2646-2690`).
+finding is not `noted` (`host/src/tests/config_save.rs::feat_settings_1_a_change_is_checked_like_a_start`).
 
 ### `homelab checks`: what only a person can confirm
 
 The `manual:` lines of every `checks.yml` (B3) are registered when their
-stack is deployed, each with a short id (`core/src/ops/deploy.rs:2939-2952`,
+stack is deployed, each with a short id (`core/src/ops/deploy/logshipper.rs::restart_alloy`,
 `core/src/ops/manualchecks.rs:29-43`). A question that left the files is
 dropped by the next deploy of its stack, but only while the stack still has
 at least one `manual:` line: with none left the deploy does not call the
-registration at all (`core/src/ops/deploy.rs:2944`,
+registration at all (`core/src/ops/deploy/logshipper.rs::restart_alloy`,
 `core/src/ops/manualchecks.rs:69-74`), and the old questions stay until the
 stack is destroyed or forgotten (`core/src/ops/destroy.rs:298`).
 
@@ -3302,8 +3302,8 @@ The listing is grouped per stack, one line per question with its id and
 status (`unanswered`, `ok, <n>d ago` or `NOT OK`), and ends with the count of
 answered and open questions (`core/src/ops/manualchecks.rs:221-250`). `ok`,
 `yes` and `ja` mean yes; `nok`, `no` and `nee` mean no; everything after the
-verdict is the note (`client/src/main.rs:388-421`). An unknown id answers
-`no manual check has id <id>` (`host/src/main.rs:3878-3882`). Redeploying
+verdict is the note (`client/src/commands/ui.rs::ui_refusals`). An unknown id answers
+`no manual check has id <id>` (`host/src/tests/history.rs::arch_history_the_history_command_reads_since_a_moment`). Redeploying
 never resets an answer (`core/src/ops/manualchecks.rs:45-50`).
 
 ### Probes: the questions a machine can answer
@@ -3483,7 +3483,7 @@ metrics target, state record and manual checks
 records the stack as retired, so its
 backups, `/appdata` and vault are kept and named by `homelab check`. It runs
 as the operation `forget` under the operation lock
-(`host/src/main.rs:3638-3644`). Tests:
+(`host/src/tests/reads.rs::feat_platform_2_app_status_comes_from_the_reading`). Tests:
 `forget_unregisters_everything_a_destroy_unregisters`,
 `forget_still_refuses_a_record_whose_container_is_live`,
 `a_forgotten_stack_is_recorded_as_retired_too`
@@ -3504,8 +3504,8 @@ changes pending), so a script can ask.
 Asks the host for its state, builds and validates every stack directory that
 has an `lxc-compose.yml` (latch and `gh` included), and stops before sending
 anything when one fails: `<stack>: validation failed: <e> — nothing applied`
-(`client/src/main.rs:704-756`). Then it prints the plan
-(`client/src/main.rs:760-779`):
+(`client/src/commands/checks.rs::check_pins`). Then it prints the plan
+(`client/src/commands/checks.rs::cmd_today`):
 
 ```text
 ▶ apply :: <n> to deploy · <m> unchanged · <k> gone from the files
@@ -3531,13 +3531,13 @@ as a change) (`client/src/apply.rs:30-54`, `intent_hash` in
 `core/src/manifest.rs:948-974`). The changed stacks are deployed one after
 another with the same path as `homelab deploy`; the first failure stops
 everything after it: `deploy of <stack> failed — apply stopped here; nothing after it was deployed and nothing was destroyed`
-(`client/src/main.rs:781-791`).
+(`client/src/commands/native_install.rs::cmd_update_native`).
 
 Each stack in state whose directory is gone is destroyed only after you type
 its name at `Type the stack name '<stack>' to destroy it: `; Enter keeps it
 (`kept <stack> — nothing destroyed`). The destroy runs from the manifest the
 host recorded, with every C2 gate and the backup first unless `--no-backup`
-(`client/src/main.rs:792-827`). The nightly round never does any of this.
+(`client/src/commands/native_install.rs::cmd_release_update_native`). The nightly round never does any of this.
 Tests: `client/tests/apply_tests.rs:21,47`.
 
 **Worked example: retire a stack.** Delete `stacks/drill/` in your checkout.
@@ -3581,7 +3581,7 @@ checkout already matches an unmodified host. Secrets (`token`,
 `homelab host apply` reads the file (the repository's `config/host.toml`
 unless a path is given), refuses early if it does not parse as TOML, reads
 the host's current `host.toml` sha256 (`GetHostConfig`) and sends it whole as
-`Command::ApplyHostConfig` (`client/src/main.rs:671-726`,
+`Command::ApplyHostConfig` (`client/src/commands/checks.rs::check_pins`,
 `proto/src/lib.rs:447-466`). The host lays `config/host.toml` over its own
 file with `homelab_core::hostconfig::apply_declared`
 (`core/src/hostconfig.rs:391-414`): every secret key the host already has
@@ -3590,7 +3590,7 @@ survives untouched, a secret the repository tries to set is refused outright
 the repository does not declare is dropped — the same "the file is the whole
 picture" rule `homelab apply` already keeps for a stack. The result is
 validated with the same parser `host.toml` has always used
-(`host/src/main.rs:1025-1084`, `apply_host_config_whole`) and written. The
+(`host/src/config/persist.rs::persist_settings`, `apply_host_config_whole`) and written. The
 reply names which changed keys took effect at once (`live`) and which wait
 for the host's next start (`restart`) — only the keys whose value actually
 moved, not every key the file happens to declare:
@@ -3690,7 +3690,7 @@ owned by `syncthing`, so one repository, `core/src/ops/retired.rs:36-44`,
 
 `homelab wipe syncthing` (a stack) or `homelab wipe media/bazarr` (an app or
 unit that left a stack) first shows the list and deletes nothing
-(`client/src/main.rs:831-848`):
+(`client/src/commands/mod.rs::run`):
 
 ```text
 wipe 'syncthing' deletes, permanently:
@@ -3700,7 +3700,7 @@ wipe 'syncthing' deletes, permanently:
 ```
 
 then asks `Type '<name>' to delete all of the above, permanently: `
-(`client/src/main.rs:849-855`). The host deletes the repositories with
+(`client/src/commands/mod.rs::run`). The host deletes the repositories with
 `rclone purge`, the directories and vault copies with `rm -rf --`, and the
 record last (`core/src/ops/retired.rs:363-468`). A repository or directory a
 managed stack still uses is shown as `KEPT (a managed stack still uses it)`
@@ -3744,10 +3744,10 @@ refusal rather than guessing "removable" from an empty in-use list).
 ### `homelab backup-host-meta` and `homelab backup-devices`
 
 `backup-host-meta` takes the host's own backup (see E4 step 3) now instead of
-at night (`host/src/main.rs:3392-3416`). `backup-devices` asks every device
+at night (`host/src/tests/support.rs::sleep_ms`). `backup-devices` asks every device
 listed under `[[device_backups]]` in `host.toml` for its own configuration
 and stores it with restic; without that list it answers
-`no device_backups configured in host.toml` (`host/src/main.rs:3809-3847`).
+`no device_backups configured in host.toml` (`host/src/tests/reads.rs::feat_platform_1_reports_answer_json_when_asked`).
 
 ### `homelab status`, `homelab incidents`, `homelab testplan`
 
@@ -3759,7 +3759,7 @@ A bare `homelab` (no verb) runs `homelab today`.
 `incidents` lists the incident bundle directories (A3); `incidents show
 <name>` prints one bundle's error, versions and transcript end (fix-131). `testplan` rebuilds
 `docs/deployment/TEST_PLAN.md` from the test files and the realization plan;
-run it from the repository root (`client/src/main.rs:882-898`).
+run it from the repository root (`client/src/commands/host_cmd.rs::host_settings`).
 
 ### Answering a question from the command line
 
@@ -3791,14 +3791,14 @@ shows it.
 
 | # | What | Source |
 |---|---|---|
-| 1 | D2 activation gating is not built; a first deploy records the stack enabled | `core/src/ops/deploy.rs:2378` |
-| 2 | A3 does not disable a stack after a failed deploy, and a missing `.env` does not abort | `core/src/ops/deploy.rs:99,1139-1151` |
+| 1 | D2 activation gating is not built; a first deploy records the stack enabled | `core/src/ops/deploy/start_restart.rs::runs_older_files` |
+| 2 | A3 does not disable a stack after a failed deploy, and a missing `.env` does not abort | `core/src/ops/deploy/incomplete.rs::minimal_record,1139-1151` |
 | 3 | B6 keeps no digest history; the rollback uses images captured during the same update | `core/src/ops/update.rs:145-151` |
 | 4 | D9 has no registry polling, update badges or `auto-after-N-days` | `docs/deployment/UPDATE_POLICY.md:26-28` |
 | 5 | D10 has no `docker compose config` gate | `core/src/manifest.rs:445-458,607` |
 | 6 | E5 writes one backup target; no separate local copy | `core/src/ops/backup.rs:107-133` |
-| 7 | E7 runs on demand, not after every change | `client/src/main.rs:899-913` |
-| 8 | G6 reports only file-push bytes | `core/src/ops/deploy.rs:1091` |
+| 7 | E7 runs on demand, not after every change | `client/src/commands/host_cmd.rs::read_host_toml` |
+| 8 | G6 reports only file-push bytes | `core/src/ops/deploy/provision_create.rs::create_args` |
 | 9 | H6 has no reboot indicator and no TUI action | `core/src/ops/patch.rs`, `client/src/tui/model.rs:1104-1184` |
 | 10 | C6 has no overcommit warning in the wizard | `client/src/tui/model.rs:1806-1900` |
 | 11 | Fixed in v3.58.4 (gap-19): without a local `stacks/` directory, TUI backup and restore now refuse instead of acting on a manifest with no storage (section 1.3) | `client/src/tui/model.rs`, `start_stack_op` |

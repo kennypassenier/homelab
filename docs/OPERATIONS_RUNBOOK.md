@@ -56,25 +56,25 @@ source; `<...>` marks a value the program fills in.
 - *Workstation* (bash): the machine with this repository and the `homelab`
   client. Run `homelab` from the repository root. `new`, `presets`,
   `runbook` and `check` read `stacks/` and `presets/` relative to the
-  working directory (`client/src/main.rs:311`, `:585`, `:650`, `:906`), and
+  working directory (`client/src/commands/host_admin.rs::cmd_answer`, `:585`, `:650`, `:906`), and
   the host address and certificate pin come from `config/client.toml`,
   found by walking up from the working directory
   (`client/src/repo_config.rs:62-73`, `:103-120`).
 - *Host* (root shell on Proxmox): `restic`, `rclone`, `pct`, `systemctl`,
   `journalctl`. The daemon is the systemd unit `homelab-host`
   (`core/src/ops/selfupdate.rs:46`), its config `/etc/homelab/host.toml`
-  (`host/src/main.rs:372`), its state directory `/var/lib/homelab`
-  (`host/src/main.rs:426-429`). `<proxmox-host>` below is that machine; the
+  (`host/src/config/tokens.rs::validate_tokens`), its state directory `/var/lib/homelab`
+  (`host/src/config/tokens.rs::validate_tokens`). `<proxmox-host>` below is that machine; the
   client reaches it at the `host` in `config/client.toml`
   (`config/client.toml:15`).
 
 **The client's token.** Read from `HOMELAB_TOKEN` in the environment, then
 `~/.config/homelab/env`, then `./.env`; the first place that sets a key wins
-(`client/src/main.rs:45-87`). Every verb except `help`, `plan`, `runbook`,
+(`client/src/commands/ctx.rs::repo_root`). Every verb except `help`, `plan`, `runbook`,
 `dashboard`, `presets`, `export`, `import`, `new`, `testplan`, `self-install`
 and `tui --offline` stops with `"HOMELAB_TOKEN is not set"` and where to put
 it when there is none
-(`client/src/main.rs:144-150`).
+(`client/src/commands/ctx.rs::apply_env_line`).
 
 **Per-machine tokens (fix-120, owner decision 2026-10-01).** Every machine
 should get its own named bearer rather than sharing the one `token` in
@@ -108,8 +108,8 @@ without touching any other machine's access.
   host is arch-self's own guard (`Access::Locked`).
 
 **One operation at a time.** Every mutating operation takes the host's one
-lock (`host/src/main.rs:2980`); the nightly backup phase holds it for its
-whole batch (`host/src/main.rs:2188`). A command typed during the backup
+lock (`host/src/tests/doctor.rs::fix_131_old_bundles_are_removed_from_disk`); the nightly backup phase holds it for its
+whole batch (`host/src/tests/config.rs::misplaced_keys_are_reported_not_swallowed`). A command typed during the backup
 hour waits for the batch, and says so at once:
 `waiting for the nightly backup (started 23 min ago, stack 5 of 14); this command runs as soon as it is done`
 (fix-104). `check`, `doctor` and `today` print a `CHECK` line per phase while
@@ -117,7 +117,7 @@ they read, one per container they probe.
 
 **Client newer than host.** A mutating command against an older host is
 refused and the message ends in `"run 'homelab release-update' first"`
-(`client/src/main.rs:1203-1213`). `release-update` itself is exempt
+(`client/src/commands/new_stack.rs::cmd_template_build`). `release-update` itself is exempt
 (`client/src/version.rs:15-30`).
 
 **Questions.** A step that must ask (for example, an app is in use) is
@@ -125,15 +125,15 @@ raised as an urgent notice and waits `ask_timeout_s`, default 600 s, then
 answers `Unattended` and fails (fix-240). A headless CLI run cannot answer
 its own question; `homelab answer <operation> allow|stop` from another
 terminal, `homelab ui answer <operation> allow|stop` in Live view or the
-dashboard banner can (`client/src/main.rs:1173-1182`,
-`host/src/main.rs:669-671`, `:1750-1759`).
+dashboard banner can (`client/src/commands/stacks.rs::cmd_resize`,
+`host/src/config/start.rs::start_checks`, `:1750-1759`).
 In the TUI the question takes the keyboard: `a` allows, `s` stops
 (`client/src/tui/model.rs:624-633`).
 
 **Abort-safety.** Each procedure marks its point of no return. The host
 journals every step to `/var/lib/homelab/journal.jsonl` before it runs; an
 operation cut off half way is logged at the next start with
-`"re-running it is safe (idempotent)"` (`host/src/main.rs:1668-1692`,
+`"re-running it is safe (idempotent)"` (`host/src/tests/supervision.rs::fix_52_sigterm_waits_for_the_running_operation_then_exits_zero`,
 `:1812-1823`) and shown by `homelab doctor` under "interrupted operations"
 (`core/src/doctor.rs:178-185`).
 
@@ -152,23 +152,23 @@ the hour after it (fix-129, `in_night_window`). The second hour is a
 catch-up, so a daemon restarted during the first (a self-update, a crash, a
 power cut) still runs what is due instead of skipping the night. Without a
 `backup_hour` the daemon logs `"scheduler idle (backup_hour not set)"` at
-start (`host/src/main.rs:1854-1860`). `homelab config` prints the hour as
-`nightly run : HH:00`, or `off` (`client/src/main.rs:1242-1246`).
+start (`host/src/tests/refusals.rs::fix_211_a_command_with_only_known_fields_is_never_refused`). `homelab config` prints the hour as
+`nightly run : HH:00`, or `off` (`client/src/commands/new_stack.rs::cmd_new`).
 
 To change the hour: the admin dashboard's host settings page, or edit
 `backup_hour` in `config/host.toml` and run `homelab host apply` (fix-110;
 the TUI's old SETTINGS tab was removed 2026-10-01). The host writes it to
 `host.toml` and uses it from the next tick, no restart
-(`host/src/main.rs:4064-4102`).
+(`host/src/tests/notices.rs::notify_routing_every_event_is_a_notice_and_only_urgent_pushes`).
 
 **Which stacks.** A stack is due when it is enabled and its last backup is
-at least 20 hours old (`host/src/main.rs:1952-1954`, `:2008-2013`).
+at least 20 hours old (`host/src/tests/config.rs::fix_120_host_policy_defaults_to_the_fleet_and_follows_host_toml`, `:2008-2013`).
 
 **In order, inside the night window:**
 
 1. **Backups** of every due stack, `backup_concurrency` at a time (default
-   3, `host/src/main.rs:675-677`), under one hold of the lock
-   (`host/src/main.rs:2334-2363`).
+   3, `host/src/config/start.rs::start_checks`), under one hold of the lock
+   (`host/src/tests/config_save.rs::fix_134_a_settings_save_keeps_the_file_s_own_comments`).
    - Compose stack: containers labelled `com.homelab.backup.pause=true`
      are stopped, each owning app's paths go into its own repository
      `<restic_base>/<app>-config`, the stopped containers are started again
@@ -182,20 +182,20 @@ at least 20 hours old (`host/src/main.rs:1952-1954`, `:2008-2013`).
      `:34-74`).
    - The phase ends with `"scheduler: backup phase took <time> for <n>
      stack(s), <k> at a time"` (`core/src/ops/backup.rs:250-267`).
-2. **Updates**, one stack at a time (`host/src/main.rs:2365-2512`).
+2. **Updates**, one stack at a time (`host/src/tests/config_save.rs::fix_134_a_settings_save_keeps_the_file_s_own_comments`).
    - Compose: apps labelled `com.homelab.update.policy=auto` are pulled and
-     recreated, with rollback (`host/src/main.rs:2476-2482`,
+     recreated, with rollback (`host/src/tests/notices.rs::fix_184_down_notice_waits_for_the_full_threshold`,
      `core/src/ops/update.rs:84-87`, `:126`).
    - Native: the orchestrator's release install for every service
-     with `update_policy: auto` (`host/src/main.rs:2395-2408`), and the
+     with `update_policy: auto` (`host/src/tests/config_save.rs::feat_settings_1_the_view_hides_secrets_and_hashes`), and the
      service's own `update_cmd` under supervision for every service with
-     `update_policy: self` (`host/src/main.rs:2409-2418`; fix-148: one
+     `update_policy: self` (`host/src/tests/config.rs::a_key_the_struct_does_not_read_is_reported_even_where_a_list_named_it`; fix-148: one
      mechanism per policy). See op-8.
 3. **Parking.** A stack whose backup failed, or whose update failed, is set
-   to disabled and one notification goes out (`host/src/main.rs:2483-2511`,
+   to disabled and one notification goes out (`host/src/tests/notices.rs::fix_184_outage_expected_is_declared_not_hardcoded`,
    `core/src/ops/backup.rs:66-69`). See op-5.
 4. **Host-meta**, the host's own backup, when due
-   (`host/src/main.rs:2518-2539`). See op-12.
+   (`host/src/tests/notices.rs::fix_184_outage_expected_is_declared_not_hardcoded`). See op-12.
 5. **Restore drill**: one repository per night (`restore_drill_interval_s`
    defaults to 20 hours since fix-62; it was 90 days), the one drilled
    longest ago first, over the stack and native repositories, `host-meta`
@@ -205,15 +205,15 @@ at least 20 hours old (`host/src/main.rs:1952-1954`, `:2008-2013`).
    passes (`core/src/ops/restoredrill.rs`, `run_restore_drill` in
    `host/src/main.rs`).
 6. **Device configurations** from `device_backups` in `host.toml`, one GET
-   per device into restic (`host/src/main.rs:2588-2609`).
+   per device into restic (`host/src/tests/config_save.rs::feat_settings_1_a_change_is_checked_like_a_start`).
 7. **ZFS** snapshots and replication, when `zfs_jobs` is set
-   (`host/src/main.rs:2612-2626`). See op-13.
+   (`host/src/tests/config_save.rs::feat_settings_1_a_change_is_checked_like_a_start`). See op-13.
 8. **Fleet check**: the stored record held against the machine. It runs on
    every tick inside the night window, also when nothing was due, and sends
    a `fleet-check` notification when anything is more than "noted"
-   (`host/src/main.rs:2628-2693`, `core/src/ops/fleetcheck.rs:501-507`).
+   (`host/src/tests/config_save.rs::feat_settings_1_a_change_is_checked_like_a_start`, `core/src/ops/fleetcheck.rs:501-507`).
    The hour has up to three ticks and this path does not go through the
-   repeat damper (`host/src/main.rs:2679`), so the same findings can arrive
+   repeat damper (`host/src/tests/config_save.rs::fix_122_a_valid_log_level_saves_as_a_live_key`), so the same findings can arrive
    more than once in one night.
 
 The same round as one picture, from the scheduler's tick to the fleet check:
@@ -239,15 +239,15 @@ flowchart TD
     notify --> wait
 ```
 
-<sub>Source: `host/src/main.rs:2000-2035` (`nightly_plan`), `:2257-2695` (`scheduler_loop`), `core/src/ops/backup.rs:66-69` (`parks_the_stack`).</sub>
+<sub>Source: `host/src/tests/tokens.rs::fix_120_issue_token_adds_one_entry_hashed_not_plain` (`nightly_plan`), `:2257-2695` (`scheduler_loop`), `core/src/ops/backup.rs:66-69` (`parks_the_stack`).</sub>
 
 **Where results go.** Each operation posts to `notify_webhook` and falls
-back to `notify_fallback_webhook` (`host/src/main.rs:2876-2936`). An
+back to `notify_fallback_webhook` (`host/src/tests/doctor.rs::fix_130_the_new_doctor_probes_read_the_machine`). An
 identical failure repeated inside 20 hours is damped; a success always goes
-out (`host/src/main.rs:1807-1809`, `:2847-2855`, `core/src/notify.rs:45-57`). A failed operation writes an
+out (`host/src/tests/refusals.rs::fix_55_an_unparseable_frame_is_logged_without_its_body`, `:2847-2855`, `core/src/notify.rs:45-57`). A failed operation writes an
 incident bundle under `/var/lib/homelab/incidents`
-(`host/src/main.rs:3077-3085`), listed by `homelab incidents`
-(`host/src/main.rs:4255-4277`).
+(`host/src/tests/support.rs::serve_state_on_loopback`), listed by `homelab incidents`
+(`host/src/tests/support.rs::naming_handler`).
 
 **TLS to kyu (fix-126, owner decision 2026-10-01).** CT 109 (kyu) can take
 notifications over `https://` instead of plain `http://`: `kyu-tls.service`
@@ -339,9 +339,9 @@ names `homelab release-update`. The steps below are the parts it merges.
 
 1. `homelab check`. Prints `"fleet check: repo and reality agree"` or one
    block per finding with a `remedy:` line; exits 1 when there is a
-   `broken` or `drift` finding (`noted` ones do not fail it since gap-32) (`host/src/main.rs:3189-3209`, `:3755-3760`). Run from the
+   `broken` or `drift` finding (`noted` ones do not fail it since gap-32) (`host/src/tests/questions.rs::fix_240_another_session_answers_a_running_operations_question`, `:3755-3760`). Run from the
    repository root: without stack files it checks only the host's half and
-   says so (`client/src/main.rs:317-336`). Two findings to expect since
+   says so (`client/src/commands/ui.rs::cmd_ui`). Two findings to expect since
    2026-09-27: a `drift` line
    `"is in host state (vmid <n>) but has no stack file in the repository"`
    for a stack whose directory you deleted (op-6 route A;
@@ -387,7 +387,7 @@ names `homelab release-update`. The steps below are the parts it merges.
 finding whose remedy reads `"check the repository and the password file"`
 (`core/src/ops/restoredrill.rs:123-141`). The drill restores into a scratch
 directory and judges by the largest file that came back
-(`host/src/main.rs:2040-2083`), so this means a repository did not give
+(`host/src/tests/tokens.rs::fix_120_revoke_token_removes_only_that_one`), so this means a repository did not give
 back real data. First prove the password (op-18), then look at that one
 repository with `restic snapshots` on the host (op-10).
 
@@ -398,7 +398,7 @@ repository with `restic snapshots` on the host (op-10).
 Workstation, repository root, unless stated.
 
 1. **Pick a preset.** `homelab presets` lists the catalogue, local, no
-   network (`client/src/main.rs:648-669`). Three lines of the real output
+   network (`client/src/commands/checks.rs::check_edge`). Three lines of the real output
    on 2026-09-27:
 
    ```text
@@ -411,8 +411,8 @@ Workstation, repository root, unless stated.
    `homelab new <name> --preset <preset> --vmid <n>` with optional
    `--ram`, `--cores`, `--disk`, `--swap` and repeatable
    `--no-data <path>`, or TUI key `n` on the Dashboard or Stacks tab
-   (`client/src/main.rs:556-647`, `client/src/tui/model.rs:852-872`). The
-   vmid determines address and hostname (`client/src/main.rs:598-600`).
+   (`client/src/commands/native_install.rs::stage_binary`, `client/src/tui/model.rs:852-872`). The
+   vmid determines address and hostname (`client/src/commands/mod.rs::run`).
    Only `stacks/<name>/` is written.
 
    Worked example (name and vmid are illustrative; pick a vmid no stack
@@ -437,22 +437,22 @@ Workstation, repository root, unless stated.
    example `[env] mealie <- latch` or `"local .env (latch skipped)"`
    (`client/src/spec.rs:316-332`, `client/tests/latch_secrets_tests.rs:241-260`).
 4. **Validate locally.** `homelab plan stacks/<name>`: needs no token and
-   no connection to the host (`client/src/main.rs:142-147`), same validator
+   no connection to the host (`client/src/commands/ctx.rs::apply_env_line`), same validator
    as the deploy. Success prints
    `"✓ valid"` and `"would deploy vmid <n>: <k> file(s), <m> env(s)"`
-   (`client/src/main.rs:673-691`).
+   (`client/src/commands/checks.rs::check_pins`).
 5. **Deploy.** `homelab deploy stacks/<name>`, or in the TUI select the
    stack and press `p` (preview, Enter runs it) or `D` (runs now)
    (`client/src/tui/model.rs:669-689`, `:793`, `:851`).
    **Point of no return:** the container is created. Every empty `/appdata`
    directory is first refilled from its own latest snapshot if one exists
-   (`core/src/ops/deploy.rs:355-452`); for a new app there is none and the
+   (`core/src/ops/deploy/plan.rs::plan_names`); for a new app there is none and the
    log says `"is empty and has no snapshot"`.
 6. **First backup.** `homelab backup stacks/<name>`. Creates the
    repositories (`restic init` answers "config file already exists" for an
    existing one, which the backup treats as normal; any other failure stops
    it, `init_repository` in `core/src/ops/backup.rs`) and records the time
-   (`host/src/main.rs:3334-3350`). An app name that another stack already
+   (`host/src/tests/support.rs::cache_answering_handler`). An app name that another stack already
    uses owns the same repository; the stack recorded later is refused
    (`core/src/ops/backup.rs:315-373`).
 7. **Manual checks.** `homelab checks` lists what the deploy registered for
@@ -461,7 +461,7 @@ Workstation, repository root, unless stated.
    wrong, check this" (the standing password-chain check is on Host), and none
    reaches the Inbox, the fleet check or the nightly report.
 8. **Regenerate the DR runbook.** `homelab runbook` rewrites
-   `docs/DR_RUNBOOK.md` from `stacks/` (`client/src/main.rs:899-913`).
+   `docs/DR_RUNBOOK.md` from `stacks/` (`client/src/commands/host_cmd.rs::read_host_toml`).
 9. Commit `stacks/<name>/` and `docs/DR_RUNBOOK.md` on `main`.
 
 **Undo.** Before step 5, delete `stacks/<name>/`. After step 5, op-6.
@@ -474,15 +474,15 @@ Workstation, repository root.
 
 | Change | Command | What it does |
 |---|---|---|
-| Edited compose files or `lxc-compose.yml` | `homelab deploy stacks/<name>` | Re-applies, and removes what the files no longer declare: files under `/opt/<name>/` (one `rm -f` each, never a directory, never `.env`), `rootfs/` units and timers (disabled first), native units dropped from `natives:` (data kept), mounts no longer declared (host directory kept), an old route file (`core/src/ops/deploy.rs:1044-1189`, `:782-848`, `:1937-1986`, `:2104-2143`). |
-| Every changed stack at once | `homelab apply` | Deploys each stack whose files differ from what the host applied; one that fails stops the rest (`client/src/main.rs:704-791`). A stack whose directory is gone is offered for destruction (op-6 route A). |
-| Delete what the repository dropped, without a deploy | `homelab prune-orphans stacks/<name>` | Asks for the stack name; removes the same files a deploy would, `rm -f` one by one. After any deploy since `ad03664` it finds nothing (`client/src/main.rs:1031-1063`, `host/src/main.rs:3557-3633`). |
-| Remove an app | delete it from `apps:`, `homelab deploy stacks/<name>` | Its containers stop and `/opt/<name>/<app>` goes; its `/appdata`, repository and vault copy are kept and recorded as retired `<name>/<app>` (`core/src/ops/deploy.rs:2145-2182`, `:2630-2644`). Wipe them with op-6 step 6. |
+| Edited compose files or `lxc-compose.yml` | `homelab deploy stacks/<name>` | Re-applies, and removes what the files no longer declare: files under `/opt/<name>/` (one `rm -f` each, never a directory, never `.env`), `rootfs/` units and timers (disabled first), native units dropped from `natives:` (data kept), mounts no longer declared (host directory kept), an old route file (`core/src/ops/deploy/provision_clone.rs::provision_clone`, `:782-848`, `:1937-1986`, `:2104-2143`). |
+| Every changed stack at once | `homelab apply` | Deploys each stack whose files differ from what the host applied; one that fails stops the rest (`client/src/commands/checks.rs::check_pins`). A stack whose directory is gone is offered for destruction (op-6 route A). |
+| Delete what the repository dropped, without a deploy | `homelab prune-orphans stacks/<name>` | Asks for the stack name; removes the same files a deploy would, `rm -f` one by one. After any deploy since `ad03664` it finds nothing (`client/src/commands/mod.rs::run`, `host/src/tests/reads.rs::fix_217_a_never_backed_up_stack_still_resolves_to_a_read_empty_answer`). |
+| Remove an app | delete it from `apps:`, `homelab deploy stacks/<name>` | Its containers stop and `/opt/<name>/<app>` goes; its `/appdata`, repository and vault copy are kept and recorded as retired `<name>/<app>` (`core/src/ops/deploy/start.rs::registry_login`, `:2630-2644`). Wipe them with op-6 step 6. |
 | New image versions now | `homelab update stacks/<name> [app]`, TUI `U` | Every named app, whatever its policy; rollback when unhealthy; an app in use is skipped (`core/src/ops/update.rs:84-87`, `:157-170`). |
 | New image versions nightly | label `com.homelab.update.policy=auto` | Only those apps (`core/src/ops/update.rs:126`). |
-| OS packages in every managed container | `homelab patch` | `apt-get dist-upgrade` one container at a time; the first failure stops the run (`core/src/ops/patch.rs:22-73`); targets are the stacks in state (`host/src/main.rs:3371-3385`). |
+| OS packages in every managed container | `homelab patch` | `apt-get dist-upgrade` one container at a time; the first failure stops the run (`core/src/ops/patch.rs:22-73`); targets are the stacks in state (`host/src/tests/support.rs::new`). |
 | More RAM, cores or disk | edit `resources:`, then `homelab resize stacks/<name>` | Grows a running container; shrinking a running one is refused (`core/src/ops/resize.rs:1-4`). |
-| Runaway guards on a container this suite did not build | `homelab guards <vmid>` | Log caps, journald limits, logrotate, weekly prune; refused on the no-touch list (`host/src/main.rs:3687-3727`). |
+| Runaway guards on a container this suite did not build | `homelab guards <vmid>` | Log caps, journald limits, logrotate, weekly prune; refused on the no-touch list (`host/src/tests/reads.rs::redesign_stackhub_2_app_health_comes_from_the_reading`). |
 
 In the TUI, `U` updates the selected stack; the host update is palette-only
 ("host update…", Ctrl+K) since fix-102 — it had sat one Shift from `U`, with
@@ -494,7 +494,7 @@ lasting consequences, and was pulled off a bare key (`client/src/tui/model.rs`,
 ## op-5 · Park and unpark a stack
 
 The argument is the stack **name**, not a path
-(`client/src/main.rs:422-436`).
+(`client/src/commands/ui.rs::ui_drive_step`).
 
 Where parking sits in a stack's life, from scaffold to removal:
 
@@ -523,7 +523,7 @@ stateDiagram-v2
     Removed --> [*]: homelab wipe name, op-6 step 6
 ```
 
-<sub>Source: `core/src/ops/enable.rs:24-104` (`set_enabled`, `AUTO_PARK_NOTICE`), `core/src/ops/deploy.rs:2596-2689` (a new record starts enabled, a redeploy keeps the flag), `host/src/main.rs:2428-2455`, `:2487-2511` (automatic park), `core/src/ops/destroy.rs:293-321` (the record goes, a retired record comes), `:345-403` (`forget`), `client/src/apply.rs` (`apply`), `core/src/ops/retired.rs:363-468` (`wipe`).</sub>
+<sub>Source: `core/src/ops/enable.rs:24-104` (`set_enabled`, `AUTO_PARK_NOTICE`), `core/src/ops/deploy/health.rs::verify_health` (a new record starts enabled, a redeploy keeps the flag), `host/src/tests/config.rs::fix_false_alarm_watch_url_to_check`, `:2487-2511` (automatic park), `core/src/ops/destroy.rs:293-321` (the record goes, a retired record comes), `:345-403` (`forget`), `client/src/apply.rs` (`apply`), `core/src/ops/retired.rs:363-468` (`wipe`).</sub>
 
 - **Park:** `homelab disable <stack>`, or `e` on the selected stack in the
   TUI (a toggle, `client/src/tui/model.rs:837-850`). The nightly round
@@ -544,7 +544,7 @@ nightly backup, and `onboot` and the running containers are left alone. A
 failed backup parks nothing. Before fix-59 the park set `enabled = false`,
 which stopped the backups too.
 The notification is named `stack-disabled-<stack>`
-(`host/src/main.rs:2812-2828`). Its text is `AUTO_PARK_NOTICE`
+(`host/src/tests/doctor.rs::fix_130_the_new_doctor_probes_read_the_machine`). Its text is `AUTO_PARK_NOTICE`
 (`core/src/ops/enable.rs`): the nightly backup still runs, updates wait
 until `homelab enable`, onboot and the running containers left as they were.
 Before
@@ -578,22 +578,22 @@ say what runs, B when you want to remove one stack by its path.
    `"but has no stack file in the repository"` for it (op-2).
 2. `homelab apply`. It builds every remaining stack first and stops with
    `"nothing applied"` if one does not build (a missing latch key does
-   that, op-17 lost-4) (`client/src/main.rs:733-756`). It deploys what
+   that, op-17 lost-4) (`client/src/commands/checks.rs::print_today_banner`). It deploys what
    changed, then lists the stack as
    `✗ <name> — in host state, no <dir>/<name>/` (`<dir>` is `stacks`) and asks
    `Type the stack name '<name>' to destroy it:`. Enter keeps it and says
-   `"nothing destroyed"` (`client/src/main.rs:792-827`). Go to step 3.
+   `"nothing destroyed"` (`client/src/commands/native_install.rs::cmd_release_update_native`). Go to step 3.
 
 **Route B: destroy by path.**
 
 1. Workstation, repository root: `homelab destroy stacks/<name>`. It asks
    `Type the stack name '<name>' to confirm destroy:`; anything else stops
    it with `"name mismatch"` and nothing happens
-   (`client/src/main.rs:1065-1135`). With the directory present it builds
+   (`client/src/commands/manual_checks.rs::parse_verdict`). With the directory present it builds
    the full deploy spec, so a stack with `latch_secrets` needs a working
-   latch key here (`client/src/main.rs:1100`, `client/src/spec.rs:86-117`).
+   latch key here (`client/src/commands/manual_checks.rs::cmd_checks`, `client/src/spec.rs:86-117`).
    When the directory is already gone it destroys from the manifest the host
-   recorded and needs no latch (`client/src/main.rs:1070-1099`).
+   recorded and needs no latch (`client/src/commands/manual_checks.rs::parse_verdict`).
 
 **Then, either route:**
 
@@ -629,7 +629,7 @@ say what runs, B when you want to remove one stack by its path.
    ```
 
    then asks `Type '<name>' to delete all of the above, permanently:`
-   (`client/src/main.rs:831-865`, `core/src/ops/retired.rs:237-255`).
+   (`client/src/commands/mod.rs::run`, `core/src/ops/retired.rs:237-255`).
    Anything a managed stack still uses is listed as `KEPT` and left. The
    host purges each repository with `rclone purge`, removes the directories
    with `rm -rf --`, and drops the record last; a failure keeps the record,
@@ -651,7 +651,7 @@ say what runs, B when you want to remove one stack by its path.
 Refused with `"still names a live container"` while any container carries
 the recorded hostname; touches no container. Otherwise it runs step 4
 without the `pct destroy` and records the stack as retired, so step 6
-applies (`core/src/ops/destroy.rs:334-403`, `host/src/main.rs:3638-3644`).
+applies (`core/src/ops/destroy.rs:334-403`, `host/src/tests/reads.rs::feat_platform_2_app_status_comes_from_the_reading`).
 
 **Worked example: route A for the drill stack.** `git rm -r stacks/drill`,
 commit, `homelab apply`, type `drill`. The drill stack declares no storage,
@@ -681,7 +681,7 @@ docker. Worked example throughout: `stacks/almanac`.
   `release_repo` as `owner/name`, and `update_policy: auto` only with a
   `release_repo` (`core/src/native.rs:101-187`).
 - `stacks/<stack>/<unit>/<unit>.service`, the unit file. The deploy refuses
-  a native unit without it (`core/src/ops/deploy.rs:2126-2137`).
+  a native unit without it (`core/src/ops/deploy/start.rs::registry_login`).
 
 **Steps:**
 
@@ -693,10 +693,10 @@ docker. Worked example throughout: `stacks/almanac`.
    the binary only where none exists, and starts the unit only when every
    `EnvironmentFile=`/`LoadCredential=` file and the binary are present;
    otherwise the log says `"NOT started"` and names what is missing
-   (`core/src/ops/deploy.rs:2097-2291`). Binaries come from signed
+   (`core/src/ops/deploy/push_verify.rs::run`). Binaries come from signed
    releases only (`client/src/release.rs:75-77`).
 3. A first install has no env file anywhere yet; it cannot be invented
-   (`core/src/ops/deploy.rs:2284-2287`). Host, with the path from the
+   (`core/src/ops/deploy/start_pull.rs::kept_compose`). Host, with the path from the
    unit's `EnvironmentFile=` and the user from its `User=`:
 
    ```sh
@@ -705,24 +705,24 @@ docker. Worked example throughout: `stacks/almanac`.
    ```
 
 4. `homelab deploy stacks/<stack>` again: the log says the unit is not
-   running and starts it (`core/src/ops/deploy.rs:2323-2350`).
+   running and starts it (`core/src/ops/deploy/start.rs::compose_up`).
 5. `homelab adopt stacks/<stack>` (or `stacks/<stack>/<unit>` per service).
    Refuses unless the unit is active; records the service so the nightly
    round backs it up and updates it from tonight
    (`core/src/ops/native.rs:31-240`). A deploy keeps registered services
-   but never registers new ones (`core/src/ops/deploy.rs:2368-2378`).
+   but never registers new ones (`core/src/ops/deploy/start_restart.rs::runs_older_files`).
 6. `homelab deploy stacks/<stack>` a third time. Only a deploy that finds
    the unit **active** copies its env and credential files into the vault,
    under the file's parent directory and name, for example
    `/var/lib/homelab/secrets/kyu/kyu-runner-config/token.env`
-   (`core/src/ops/deploy.rs:164-180`, `:2297-2318`). Until this run the env
+   (`core/src/ops/deploy/orphans.rs::generated_dirs`, `:2297-2318`). Until this run the env
    file exists in one place.
 7. `homelab backup-native <stack>`, `homelab runbook`, commit on `main`.
 
 Instead of steps 2 to 5 for the binary, `homelab install-native
 stacks/<stack>[/<unit>] [<tag>]` installs binary and unit into an existing
 container, keeps the previous binary, rolls back when the new one does not
-come up, and adopts at the end (`client/src/main.rs:192-287`,
+come up, and adopts at the end (`client/src/commands/mod.rs::run`,
 `core/src/ops/native.rs:265-507`).
 
 **Remove one native service from a stack that stays** (workstation,
@@ -736,7 +736,7 @@ repository root):
    systemd; the log says `"left the stack file — stopped and disabled"` and
    `"data directories and its restic repository are kept"`. The unit leaves
    the stack's record, so the nightly round stops backing it up and
-   updating it (`core/src/ops/deploy.rs:1107-1189`, `:2611-2629`).
+   updating it (`core/src/ops/deploy/provision_create.rs::create_args`, `:2611-2629`).
 3. Its data inside the container, its `<unit>-config` repository and its
    vault copies are kept and recorded as retired `<stack>/<unit>`
    (`core/src/ops/retired.rs:147-172`). `homelab check` names them; delete
@@ -744,7 +744,7 @@ repository root):
 
 Only a unit an earlier version of the stack file listed in `natives:` is
 retired this way. One that `homelab adopt` registered and no stack file ever
-named is left running (`core/src/ops/deploy.rs:285-297`, test
+named is left running (`core/src/ops/deploy/restore_checks.rs::record_restore_checks`, test
 `an_adopted_unit_the_stack_never_declared_is_not_retired`).
 
 ---
@@ -753,9 +753,9 @@ named is left running (`core/src/ops/deploy.rs:285-297`, test
 
 | Route | What runs | Which services |
 |---|---|---|
-| Nightly release install | Host asks the GitHub API for the latest release, requires `SHA256SUMS.minisig` signed with key 1C88AB06D43C0B16, compares the checksum with the installed binary, installs under an armed rollback (`core/src/ops/native.rs:919-1131`, `core/src/release_sig.rs:10-40`) | only `update_policy: auto` (`host/src/main.rs:2395-2399`) |
+| Nightly release install | Host asks the GitHub API for the latest release, requires `SHA256SUMS.minisig` signed with key 1C88AB06D43C0B16, compares the checksum with the installed binary, installs under an armed rollback (`core/src/ops/native.rs:919-1131`, `core/src/release_sig.rs:10-40`) | only `update_policy: auto` (`host/src/tests/config_save.rs::feat_settings_1_the_view_hides_secrets_and_hashes`) |
 | Nightly self-update | the service's own `update_cmd`; binary preserved, restart only when it changed, 20 s to come up then a settle window that also watches `NRestarts`, rollback from outside (`core/src/ops/native.rs:701-720`, `:1174-1333`) | services with an `update_cmd` and `update_policy: self` only; never `auto` (fix-148) or `manual` (fix-58, `NativeServiceManifest::nightly_updates`) |
-| `homelab release-update-native <stack>` | the release install, now | every service on the stack, policy not consulted (`host/src/main.rs:3521-3555`) |
+| `homelab release-update-native <stack>` | the release install, now | every service on the stack, policy not consulted (`host/src/tests/reads.rs::fix_217_a_never_backed_up_stack_still_resolves_to_a_read_empty_answer`) |
 | `homelab install-native stacks/<stack>/<unit> [<tag>]` | one service, latest or a named tag, downloaded and verified on the workstation with `gh` (`client/src/release.rs:75-173`) | the one named |
 | `homelab update-native <stack>` | every `update_cmd`, now | every service on the stack |
 
@@ -808,11 +808,11 @@ sequenceDiagram
     H-->>W: report
 ```
 
-<sub>Source: `core/src/ops/native.rs:935-1135` (`release_update`), `:265-507` (`install_native`), `core/src/release_sig.rs:19-40` (`verify_sums`), `host/src/main.rs:3522-3548`, `:2395-2408`.</sub>
+<sub>Source: `core/src/ops/native.rs:935-1135` (`release_update`), `:265-507` (`install_native`), `core/src/release_sig.rs:19-40` (`verify_sums`), `host/src/tests/reads.rs::fix_217_a_never_backed_up_stack_still_resolves_to_a_read_empty_answer`, `:2395-2408`.</sub>
 
 **A deploy never upgrades.** An installed binary is left in place and the
 log says `"already installed, not shipped"`
-(`core/src/ops/deploy.rs:2175-2197`).
+(`core/src/ops/deploy/mod.rs::deploy`).
 
 **Outcomes to recognise:** `"rolled back to the previous binary"` with
 either `"service restored and active"` or `"ROLLBACK ALSO FAILED"`
@@ -853,7 +853,7 @@ Workstation, repository root, on `main`, after `make hooks` once per clone
 3. **Roll out to the host.** `homelab release-update` (newest) or
    `homelab release-update vx.y.z`; or the TUI palette's "host update" entry
    (Ctrl+K, fix-102 moved it off a bare key) when the dashboard shows
-   `"HOST UPDATE <tag> available"` (`client/src/main.rs:808-834`,
+   `"HOST UPDATE <tag> available"` (`client/src/commands/restore.rs::cmd_restore_native`,
    `client/src/tui/model.rs`, `client/src/tui/view/mod.rs:601-605`).
    The client downloads with `gh`, checks the checksum, and ships the
    binary over the line. There is no signature on the orchestrator's own
@@ -869,7 +869,7 @@ Workstation, repository root, on `main`, after `make hooks` once per clone
    that accepts it) and exits non-zero when the old version came back (a
    rollback) or nothing answered.
 5. **Verify.** `homelab ping` prints the host version and `"link up"`
-   (`client/src/main.rs:1183-1194`).
+   (`client/src/commands/new_stack.rs::cmd_template_build`).
 6. **New client** on every workstation, from the verified release asset:
    `homelab self-install vx.y.z` does it in one step (fix-105: download,
    checksum against `SHA256SUMS`, replace the running client). By hand:
@@ -921,7 +921,7 @@ sequenceDiagram
     O->>W: homelab ping
 ```
 
-<sub>Source: `Makefile:51-119` (`release`), `.github/workflows/release.yml:6-40`, `client/src/main.rs:808-834`, `client/src/release.rs:55-62`, `core/src/ops/selfupdate.rs:51-131`, `host/src/main.rs:1882-1891`.</sub>
+<sub>Source: `Makefile:51-119` (`release`), `.github/workflows/release.yml:6-40`, `client/src/commands/restore.rs::cmd_restore_native`, `client/src/release.rs:55-62`, `core/src/ops/selfupdate.rs:51-131`, `host/src/tests/support.rs::config_from_text`.</sub>
 
 **Rollback.** `core/src/ops/selfupdate.rs:1-7` describes an `OnFailure=`
 unit on the host that restores `.prev` while the marker is still there.
@@ -943,14 +943,14 @@ systemctl restart homelab-host
 **Without GitHub.** Workstation: `make host-binary` (Debian 12 build in
 docker, `Makefile:45-49`), then
 `homelab self-update target-debian/release/homelab-host`
-(`client/src/main.rs:835-855`).
+(`client/src/commands/mod.rs::run`).
 
 ---
 
 ## op-10 · Back up and restore a compose stack on demand
 
 **Backup.** `homelab backup stacks/<name>`, or TUI `B`. Sends the manifest
-only; no secrets and no latch key needed (`client/src/main.rs:749-757`,
+only; no secrets and no latch key needed (`client/src/commands/checks.rs::cmd_today`,
 `client/src/spec.rs:68-84`).
 
 **Restore to latest.** `homelab restore stacks/<name>`, or TUI `R`; both ask
@@ -1084,17 +1084,17 @@ host-meta snapshot. rclone's own configuration (the Google Drive
 credentials, gap-31) IS in the list above, since fix-111.
 
 **When:** nightly when due (op-1 step 4), and on demand with
-`homelab backup-host-meta` (`host/src/main.rs:3392-3416`).
+`homelab backup-host-meta` (`host/src/tests/support.rs::sleep_ms`).
 
 **Nobody watches it.** No fleet-check finding and no doctor line reads its
 age: `last_host_meta` is written by the scheduler and by
 `homelab backup-host-meta`, and read only by the nightly plan
-(`core/src/state.rs:113-117`, `host/src/main.rs:2014-2023`, `:2531`,
+(`core/src/state.rs:113-117`, `host/src/tests/tokens.rs::fix_120_issue_token_adds_one_entry_hashed_not_plain`, `:2531`,
 `:3408`). Since fix-62 the nightly restore drill takes `host-meta` in its
 turn like any other repository (`all_drill_repos` in
 `core/src/ops/restoredrill.rs`). A failure logs
 `"scheduler: host-meta backup FAILED"` and sends the operation's
-notification (`host/src/main.rs:2534-2538`, `:3038`).
+notification (`host/src/tests/notices.rs::fix_184_recovery_is_urgent_only_if_the_outage_was_pushed`, `:3038`).
 
 **R12a · Check its age** (host, read-only):
 
@@ -1126,7 +1126,7 @@ A difference is expected only for files changed since the snapshot's time.
 
 **Declared** in `host.toml`, one table per job; nothing is discovered
 (`core/src/ops/zfs.rs:1-16`, `:34-40`). The file that was live on
-2026-09-02, kept as a test fixture (`host/src/main.rs:878-890`):
+2026-09-02, kept as a test fixture (`host/src/config/warnings.rs::warn_at_load`):
 
 ```toml
 [[zfs_jobs]]
@@ -1137,10 +1137,10 @@ target = "HDD18TB/replica/HDD2TB"
 Put `[[zfs_jobs]]` tables after every top-level key: a key written below a
 `[table]` header belongs to that table, and the daemon warns
 `"is not a setting this daemon reads and is being ignored"`
-(`host/src/main.rs:257-273`, `:391-398`).
+(`host/src/config/tokens.rs::validate_tokens`, `:391-398`).
 
 **Runs** nightly (op-1 step 7) and on demand with `homelab zfs-replicate`
-(`host/src/main.rs:3789-3808`). Per job: `zfs snapshot -r
+(`host/src/tests/reads.rs::feat_platform_1_reports_answer_json_when_asked`). Per job: `zfs snapshot -r
 <source>@homelab-YYYYMMDD-HHMM` (`-manual` appended on demand; retention
 thins the two kinds each on its own, fix-243), then every dataset of the source is sent on
 its own (never one `-R` stream): an incremental from the replica dataset's
@@ -1191,11 +1191,11 @@ zfs-replicate` ran with no jobs (`core/src/ops/zfs.rs:432-437`).
 ## op-14 · Golden templates
 
 1. `homelab templates` lists clonable template containers and OS tarballs
-   (`host/src/main.rs:3899-3934`).
+   (`host/src/tests/history.rs::arch_history_the_history_command_reads_since_a_moment`).
 2. `homelab template-build <temp-vmid> <version> [--privileged] --base <vztmpl>`
-   (`client/src/main.rs:505-543`). Always pass both numbers: a missing or
+   (`client/src/commands/native_install.rs::release_repo_of`). Always pass both numbers: a missing or
    unreadable one falls back to vmid 999 and version 1
-   (`client/src/main.rs:507-508`). Always pass `--base`: the default base
+   (`client/src/commands/native_install.rs::release_repo_of`). Always pass `--base`: the default base
    is a Debian 12 tarball (`core/src/ops/template.rs:47-51`). The temp vmid
    must be free and off the no-touch list (`core/src/ops/template.rs:113`).
 3. The container at that vmid becomes the template, named
@@ -1225,7 +1225,7 @@ Nothing to do in the normal case.
 - The daemon logs each interrupted operation with
   `"re-running it is safe (idempotent)"` and, 3 s after start, sends a
   `host-online` notification carrying its version and anything left
-  mid-flight (`host/src/main.rs:1812-1846`).
+  mid-flight (`host/src/tests/refusals.rs::fix_55_an_unparseable_frame_is_logged_without_its_body`).
 - Re-run whatever that notification or `homelab doctor` lists under
   "interrupted operations".
 
@@ -1238,15 +1238,15 @@ Layer 1.
 
 | Credential | Lives (code) | Renew or rotate |
 |---|---|---|
-| API bearer token | host: `token` in `host.toml`, or `HOMELAB_TOKEN` in the daemon's environment, which wins (`host/src/main.rs:409-419`); every workstation: `HOMELAB_TOKEN`, `~/.config/homelab/env` or `./.env` (`client/src/main.rs:45-87`) | op-17 lost-3d |
+| API bearer token | host: `token` in `host.toml`, or `HOMELAB_TOKEN` in the daemon's environment, which wins (`host/src/config/tokens.rs::validate_tokens`); every workstation: `HOMELAB_TOKEN`, `~/.config/homelab/env` or `./.env` (`client/src/commands/ctx.rs::repo_root`) | op-17 lost-3d |
 | TLS key and certificate | host: `/var/lib/homelab/tls-key.pem`, `tls-cert.pem`, made once, never renewed by the code (`host/src/tls.rs:14-54`) | op-17 lost-2 |
 | TLS pin (public) | `pin` in `config/client.toml` (committed) and `~/.config/homelab/pin` per machine (`client/src/repo_config.rs:27-40`, `client/src/lib.rs:15-34`) | op-17 lost-2b |
-| restic password | host: `/var/lib/homelab/secrets/restic.pw`, or `restic_password_file` in `host.toml` (`core/src/ops/backup.rs:124-134`, `host/src/main.rs:479`); one password for every repository (`core/src/ops/backup.rs:88-105`) | none in code; see op-17 lost-1 |
+| restic password | host: `/var/lib/homelab/secrets/restic.pw`, or `restic_password_file` in `host.toml` (`core/src/ops/backup.rs:124-134`, `host/src/config/tokens.rs::validate_tokens`); one password for every repository (`core/src/ops/backup.rs:88-105`) | none in code; see op-17 lost-1 |
 | Google Drive (rclone remote `gdrive`) | rclone's own configuration on the host; the backup target is `rclone:gdrive:homelab-backups` (`core/src/ops/backup.rs:127`) | `rclone config reconnect gdrive:`; `homelab doctor` shows `offsite (Drive)` as `token invalid/expired` when the listing fails (`core/src/doctor.rs:141-157`) |
-| Notification bearers | `notify_auth_bearer`, `notify_fallback_auth_bearer` in `host.toml`, not editable from the TUI (`host/src/main.rs:65-85`, `:178-183`); written for each send to `/var/lib/homelab/secrets/notify-route-<n>.header` (`core/src/notify.rs:188-190`) | edit `host.toml`, restart (lost-3d step 2 shows the edit-then-restart pattern) |
+| Notification bearers | `notify_auth_bearer`, `notify_fallback_auth_bearer` in `host.toml`, not editable from the TUI (`host/src/config/tokens.rs::issue_token_in`, `:178-183`); written for each send to `/var/lib/homelab/secrets/notify-route-<n>.header` (`core/src/notify.rs:188-190`) | edit `host.toml`, restart (lost-3d step 2 shows the edit-then-restart pattern) |
 | Device backup credential and pin | `cred_file` (curl `-K` format) and `pin` (`sha256//<base64>`) per `[[device_backups]]` (`core/src/ops/devicebackup.rs:37-73`) | see below |
-| Stack app secrets | latch, or a local `stacks/<stack>/<app>/.env`; copy on the host in the vault (`client/src/spec.rs:303-412`, `core/src/ops/deploy.rs:1443-1449`), kept after the app or stack is removed until `homelab wipe` (op-6 step 6) | change in latch, then `homelab deploy stacks/<stack>` |
-| Native service env and credential files | the path in the unit's `EnvironmentFile=`/`LoadCredential=`; copy in the vault (`core/src/ops/deploy.rs:2533-2554`), kept after the unit or stack is removed until `homelab wipe` | op-17 lost-5 |
+| Stack app secrets | latch, or a local `stacks/<stack>/<app>/.env`; copy on the host in the vault (`client/src/spec.rs:303-412`, `core/src/ops/deploy/bootstrap.rs::wait_for_systemd`), kept after the app or stack is removed until `homelab wipe` (op-6 step 6) | change in latch, then `homelab deploy stacks/<stack>` |
+| Native service env and credential files | the path in the unit's `EnvironmentFile=`/`LoadCredential=`; copy in the vault (`core/src/ops/deploy/storage_ownership.rs::check_writable`), kept after the unit or stack is removed until `homelab wipe` | op-17 lost-5 |
 | Workstation latch key | latch's credential store; this repository only calls `latch cat` (`client/src/spec.rs:374-378`) | op-17 lost-4 |
 | GitHub CLI on the workstation | `gh` auth, used by `release-update`, `install-native` and native deploys (`client/src/release.rs:12-26`, `:92-117`) | `gh auth login` |
 
@@ -1303,15 +1303,15 @@ flowchart LR
 | | offline copy "in Kenny's Bitwarden": stated in the generated DR runbook, Layer 3 (`client/src/spec.rs:1071-1075`); no code reads or checks it | everything the house loses | nothing proves it matches until op-18 is run |
 | TLS key and certificate | `/var/lib/homelab/tls-key.pem`, `tls-cert.pem` (`host/src/tls.rs:18-19`) | daemon reinstall | host root disk loss |
 | | `host-meta-config` (`core/src/ops/backup.rs:973-974`) | host loss | loss of the restic password |
-| TLS pin (public) | `config/client.toml` in git; `~/.config/homelab/pin` per machine; the daemon logs it at every start as `"TLS fingerprint SHA256:"` (`host/src/main.rs:1876`) | anything, via git | nothing to protect |
-| API token | `host.toml` (`host/src/main.rs:409-412`) | daemon restart | host root disk loss |
-| | the running daemon's memory, written back by a TUI settings save (`host/src/main.rs:524-652`, `:702-723`; test `settings_render_keeps_every_config_field`, `host/src/main.rs:963-1069`) | loss of the file while the daemon runs | a daemon restart |
+| TLS pin (public) | `config/client.toml` in git; `~/.config/homelab/pin` per machine; the daemon logs it at every start as `"TLS fingerprint SHA256:"` (`host/src/tests/support.rs::config_from_text`) | anything, via git | nothing to protect |
+| API token | `host.toml` (`host/src/config/tokens.rs::validate_tokens`) | daemon restart | host root disk loss |
+| | the running daemon's memory, written back by a TUI settings save (`host/src/config/tokens.rs::validate_tokens`, `:702-723`; test `settings_render_keeps_every_config_field`, `host/src/config/persist.rs::render_settings_toml`) | loss of the file while the daemon runs | a daemon restart |
 | | `host-meta-config` (`core/src/ops/backup.rs:989`) | host loss | loss of the restic password |
 | | every workstation's `~/.config/homelab/env` or `./.env` | host loss | reinstall of that machine |
 | Workstation latch key | latch's credential store on the workstation; not handled by this repository | see latch's runbook | see latch's runbook |
 | | an escrow file in `/var/lib/homelab/secrets/`: recorded in `docs/deployment/REGISTER.md` D105 (2026-09-02), not created by any code here; carried by `host-meta-config` because the whole directory is (`core/src/ops/backup.rs:971`) | host loss | loss of the restic password; useless without the escrow passphrase, which Kenny holds |
 | Native service secrets (e.g. `latch.env`, `kyu.env`, `token.env`) | the live file under `/appdata/<stack>/<unit>-config/` on the host (bind mount) | container loss | host root disk loss |
-| | vault `/var/lib/homelab/secrets/<stack>/<unit>-config/<file>` (`core/src/ops/deploy.rs:164-180`, `:2297-2318`); a flat `<stack>/<file>` from before fix-37 is still read when no two units share the name (`core/src/ops/deploy.rs:2244-2254`) | container loss | host root disk loss |
+| | vault `/var/lib/homelab/secrets/<stack>/<unit>-config/<file>` (`core/src/ops/deploy/orphans.rs::generated_dirs`, `:2297-2318`); a flat `<stack>/<file>` from before fix-37 is still read when no two units share the name (`core/src/ops/deploy/start_pull.rs::pull_from_origin`) | container loss | host root disk loss |
 | | the service's own restic repository, when the file lies in `data_dirs` and the service has no `backup_from_newest` (`core/src/ops/native.rs:591-600`): yes for almanac, kyu-runner, http-switchboard; **no for kyu** (`stacks/kyu/service.yml:48`) | host loss | loss of the restic password |
 | | `host-meta-config`, through the vault | host loss | loss of the restic password |
 | Google Drive credentials (rclone) | rclone's configuration on the host, `/root/.config/rclone/rclone.conf` | container loss | `host-meta-config` (fix-111, gap-31: `HOST_META_EXTRAS` in `core/src/ops/backup.rs`) — host root disk loss is covered the same way as every other host-meta path |
@@ -1325,7 +1325,7 @@ restores from, and after the wipe lost-5c (host-meta) is the only way back.
 Everything offsite hangs on one password. `homelab doctor`'s `restic
 password file` line checks that the file exists and is not empty (`Fail`
 when it is missing or empty); it never reads the password itself
-(`core/src/doctor.rs`, `host/src/main.rs:4286-4396`).
+(`core/src/doctor.rs`, `host/src/tests/ui_relay.rs::act_the_token_name_reaches_the_operation_queued_or_beside`).
 
 The same dependency as a picture: the password sits inside the host-meta copy it encrypts, so the offline copy is the only way back in:
 
@@ -1364,7 +1364,7 @@ snapshot, starts them again (`core/src/ops/backup.rs:545-645`), and the
 night parks each due stack (op-5). Host-meta and the restore drill fail. The
 dangerous one: a deploy onto an empty `/appdata` directory treats "no
 readable snapshot" as a new app and starts it empty, logging
-`"is empty and has no snapshot"` (`core/src/ops/deploy.rs:393-406`).
+`"is empty and has no snapshot"` (`core/src/ops/deploy/mod.rs::deploy`).
 **Until lost-1 is done, deploy nothing whose `/appdata` is empty.**
 
 **Never generate a new password over it.** Every repository that does not
@@ -1423,7 +1423,7 @@ lost-1a step 2 (without `.new`), and an rclone remote named exactly `gdrive`
 **lost-1c · No copy anywhere.** Nothing written under that password can be
 read, by anyone. There is no way to put it back. What remains is to start a
 new chain: a new password file and a new `restic_base` in `host.toml`
-(`host/src/main.rs:119-124`, `:475-486`), so new repositories do not
+(`host/src/config/tokens.rs::validate_tokens`, `:475-486`), so new repositories do not
 collide with the locked ones, then `systemctl restart homelab-host`, a
 backup of every stack and `homelab backup-host-meta`.
 
@@ -1432,14 +1432,14 @@ backup of every stack and `homelab backup-host-meta`.
 **What happens.** The daemon makes a new pair whenever either file is
 missing (`host/src/tls.rs:21`), at start and also whenever a client asks
 for the fleet state, which the TUI does on refresh with `r`
-(`host/src/main.rs:4196`, `client/src/tui/model.rs:779`). The next start serves it; every workstation then
+(`host/src/tests/support.rs::scoped_state`, `client/src/tui/model.rs:779`). The next start serves it; every workstation then
 refuses with `"certificate fingerprint mismatch"`
 (`client/src/tls.rs:49-67`).
 
 **Restore or remove the pair together.** With the certificate missing and
 the key present, generation overwrites the certificate, then fails to
 create the key file (`host/src/tls.rs:31-43`), and the daemon stops at
-start (`host/src/main.rs:1870-1871`). From then on both files exist and do
+start (`host/src/tests/support.rs::parsed`). From then on both files exist and do
 not belong together, and nothing regenerates them.
 
 **lost-2a · Put the old identity back** (every pin stays valid). Host; needs
@@ -1513,7 +1513,7 @@ printed at boot"`.
 ### lost-3 · The API token is gone
 
 **lost-3a · Gone from one workstation.** Workstation (bash). The first line
-that sets a key wins (`client/src/main.rs:79-81`), so remove a stale one
+that sets a key wins (`client/src/commands/ctx.rs::in_repo`), so remove a stale one
 before adding:
 
 ```sh
@@ -1527,8 +1527,8 @@ If that adds nothing, the host may take its token from the environment:
 
 **lost-3b · `host.toml` gone, daemon still running.** The daemon still
 holds the whole configuration in memory, token included
-(`host/src/main.rs:524-652`, `:702-723`; guarded by the test
-`settings_render_keeps_every_config_field`, `host/src/main.rs:963-1069`),
+(`host/src/config/tokens.rs::validate_tokens`, `:702-723`; guarded by the test
+`settings_render_keeps_every_config_field`, `host/src/config/persist.rs::render_settings_toml`),
 and `Rpc::SetConfig` would still write it all back — but fix-110 /
 tui-host-settings (Kenny, 2026-10-01) removed the TUI's SETTINGS tab, the
 only client that ever sent it. `homelab host apply` writes only the
@@ -1539,7 +1539,7 @@ even though the daemon is still up.
 
 **lost-3c · `host.toml` gone and the daemon restarted.** It will not start:
 `"FATAL: token must be set (>=16 chars) via <path> or HOMELAB_TOKEN"`
-(`host/src/main.rs:409-419`). Restore it from host-meta. Host; needs the
+(`host/src/config/tokens.rs::validate_tokens`). Restore it from host-meta. Host; needs the
 restic password:
 
 ```sh
@@ -1561,13 +1561,13 @@ Settings changed after that snapshot are lost; read them back with
    `systemctl show homelab-host -p Environment | grep -c HOMELAB_TOKEN`
    prints 0.
 2. Edit and restart in one line. A TUI settings save in between would write
-   the old in-memory token back (`host/src/main.rs:609`, `:702-723`):
+   the old in-memory token back (`host/src/config/unknown.rs::walk`, `:702-723`):
 
    ```sh
    NEW=$(openssl rand -hex 32) && sed -i "s/^token *= *\".*\"/token = \"$NEW\"/" /etc/homelab/host.toml && systemctl restart homelab-host; unset NEW
    ```
 
-   The token must be at least 16 characters (`host/src/main.rs:413`).
+   The token must be at least 16 characters (`host/src/config/tokens.rs::validate_tokens`).
 3. Every workstation: lost-3a.
 4. Workstation: `homelab backup-host-meta`.
 
@@ -1582,11 +1582,11 @@ escrow with `latch key restore <file>`
 (`~/Projects/latch-rs/crates/cli/src/main.rs:243-246`).
 
 **What still works without it.** `backup`, `restore` and `update` send the
-manifest only (`client/src/main.rs:749-807`, `client/src/spec.rs:68-84`).
+manifest only (`client/src/commands/checks.rs::cmd_today`, `client/src/spec.rs:68-84`).
 `deploy`, `destroy`, `resize`, `prune-orphans` and `plan` build the full
 spec, which calls latch for every app listed under `latch_secrets` that has
 no local `.env`, and stop when latch cannot answer
-(`client/src/main.rs:487`, `:678`, `:696`, `:923`, `:953`).
+(`client/src/commands/native_install.rs::cmd_install_native`, `:678`, `:696`, `:923`, `:953`).
 
 **lost-4a · Get the escrow from the host** (REGISTER D105 records it there;
 the file name is not in code). Host: `ls -l /var/lib/homelab/secrets/`.
@@ -1604,14 +1604,14 @@ host-meta first (R12b shows the restore into a scratch directory).
 
 **lost-4b · Deploy meanwhile, without the key and without copying a secret off
 the host.** For an app whose env the client does not send, the deploy puts
-back the vault copy (`core/src/ops/deploy.rs:1140-1152`), and with no
+back the vault copy (`core/src/ops/deploy/provision_attach.rs::attach_devices`), and with no
 `latch_secrets` the client never calls latch (`client/src/spec.rs:340-342`).
 Workstation:
 
 1. Delete the `latch_secrets:` line from `stacks/<stack>/lxc-compose.yml`.
    Do not commit this.
 2. `homelab deploy stacks/<stack>`; the log shows
-   `"restored from vault"` per app (`core/src/ops/deploy.rs:1150`).
+   `"restored from vault"` per app (`core/src/ops/deploy/provision_attach.rs::attach_devices`).
 3. `git checkout -- stacks/<stack>/lxc-compose.yml`.
 
 This only works for an app that has been deployed before, so the vault has
@@ -1627,7 +1627,7 @@ its key (`stacks/almanac/service.yml:20`, `:43-47`,
 step 6). Workstation: `homelab deploy stacks/<stack>`. Before starting the
 unit, the deploy puts the vault copy back when the file is missing or
 empty and logs `"restored from the vault"`
-(`core/src/ops/deploy.rs:2223-2263`). Check on the host first:
+(`core/src/ops/deploy/start_pull.rs::first_attempt`). Check on the host first:
 `ls -lR /var/lib/homelab/secrets/<stack>/`.
 
 **lost-5b · Vault missing too, file in the service's own backup** (almanac,
@@ -1649,14 +1649,14 @@ as in R12b, copy the file back to the same place under
 
 Host. The remote must be called `gdrive`: the backup target is
 `rclone:gdrive:homelab-backups` (`core/src/ops/backup.rs:127`) and
-`homelab doctor` looks for exactly that name (`host/src/main.rs:4321-4326`).
+`homelab doctor` looks for exactly that name (`host/src/tests/ui_relay.rs::follow_ui_steps_are_relayed_to_the_attached_dashboard_by_scope`).
 
 ```sh
 rclone config                          # new remote "gdrive", type drive, OAuth in a browser
 rclone lsd gdrive:homelab-backups --max-depth 1    # the doctor's own probe
 ```
 
-The probe is `host/src/main.rs:4327-4343`.
+The probe is `host/src/tests/ui_relay.rs::follow_ui_steps_are_relayed_to_the_attached_dashboard_by_scope`.
 
 Expired rather than gone: `rclone config reconnect gdrive:`. Then
 `homelab doctor` on the workstation shows `offsite (Drive)` as ok.
@@ -1694,4 +1694,4 @@ Found while writing this runbook. Each line says what to believe.
 | Doctor remedy for Drive | fixed in v3.58.4 (gap-27) | says no backup can be written until the token is refreshed |
 | `stacks/almanac/lxc-compose.yml` | fixed in v3.58.4 (gap-28) | points at op-11; `homelab restore` refuses a native stack |
 | Doc comment in `core/src/ops/native.rs` | fixed in v3.58.4 | says `<unit>-config` |
-| Manual checks after a deploy | "Questions that disappeared from the stack files are dropped" (`core/src/ops/manualchecks.rs:48-49`) | only while the stack still has a `manual:` line; with none left the deploy skips the registration and the old questions stay until destroy or forget (`core/src/ops/deploy.rs:2944`) |
+| Manual checks after a deploy | "Questions that disappeared from the stack files are dropped" (`core/src/ops/manualchecks.rs:48-49`) | only while the stack still has a `manual:` line; with none left the deploy skips the registration and the old questions stay until destroy or forget (`core/src/ops/deploy/logshipper.rs::restart_alloy`) |

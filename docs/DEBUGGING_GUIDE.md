@@ -28,7 +28,7 @@ marks source text left out of the quote.
 Every command block below starts with a comment naming its machine. The
 client needs no shell setup: it reads `HOMELAB_*` keys from
 `~/.config/homelab/env`, then from `./.env`, and an environment variable that
-is already set wins over both (`client/src/main.rs:45-87`). The host address
+is already set wins over both (`client/src/commands/ctx.rs::repo_root`). The host address
 and the certificate pin come from `config/client.toml`, found by walking up
 from the working directory the way git finds its root
 (`client/src/repo_config.rs:63-73`). The token is the only per-machine fact;
@@ -37,9 +37,9 @@ the address and pin are per-repository (`client/src/repo_config.rs:1-16`).
 Paths on the Proxmox host in this guide assume the defaults:
 
 - configuration file `/etc/homelab/host.toml`, unless `HOMELAB_CONFIG` names
-  another (`host/src/main.rs:370-373`);
+  another (`host/src/config/tokens.rs::validate_tokens`);
 - state directory `/var/lib/homelab`, unless `HOMELAB_STATE_DIR` or
-  `state_dir` in host.toml says otherwise (`host/src/main.rs:426-429`).
+  `state_dir` in host.toml says otherwise (`host/src/config/tokens.rs::validate_tokens`).
 
 A few paths are fixed to `/var/lib/homelab` whatever `state_dir` says: the
 self-update staging file and marker (`core/src/ops/selfupdate.rs:42-45`), the
@@ -93,48 +93,48 @@ flowchart LR
     s8 --> t8
 ```
 
-<sub>Source: `write_bundle` (`core/src/incidents.rs:56`), `FileJournal` and `BroadcastSink` (`host/src/main.rs:1622-1681`), `StateStore` (`core/src/state.rs:198-231`), the exec audit (`host/src/main.rs:3994`).</sub>
+<sub>Source: `write_bundle` (`core/src/incidents.rs:56`), `FileJournal` and `BroadcastSink` (`host/src/tests/commands.rs::fix_51_concurrent_writes_of_one_path_all_succeed_and_stay_whole`), `StateStore` (`core/src/state.rs:198-231`), the exec audit (`host/src/tests/notices.rs::fix_184_recovery_is_urgent_only_if_the_outage_was_pushed`).</sub>
 
 | Trace | Where | Written by | When | Answers |
 |---|---|---|---|---|
-| failure line | your terminal | client prints the host's reply (`client/src/main.rs:1267-1270`) | every failed command | what failed, why, what to do, where the bundle is |
-| incident bundle | `/var/lib/homelab/incidents/<unix-ts>-<op>/` | `core/src/incidents.rs:56-110`, called from `host/src/main.rs:3066` | a mutating operation fails (not when it is deferred) | the full context of one failure; root only (0700 directories, 0600 files, fix-125) |
-| operation journal | `/var/lib/homelab/journal.jsonl` | `host/src/main.rs:1659-1681` | before and after every step of every mutating operation | which step an operation was in, including one that never finished |
-| daemon log | stderr of `homelab-host` (`host/src/main.rs:1780-1785`) | `tracing` calls throughout `host/src/main.rs` | always | startup faults, scheduler decisions, notification delivery, and every transcript line (below) |
-| live transcript | streamed to every connected client | `host/src/main.rs:1611-1655` | while an operation runs | the exact commands and the first lines of their output |
+| failure line | your terminal | client prints the host's reply (`client/src/commands/new_stack.rs::cmd_new`) | every failed command | what failed, why, what to do, where the bundle is |
+| incident bundle | `/var/lib/homelab/incidents/<unix-ts>-<op>/` | `core/src/incidents.rs:56-110`, called from `host/src/tests/support.rs::serve_state_on_loopback` | a mutating operation fails (not when it is deferred) | the full context of one failure; root only (0700 directories, 0600 files, fix-125) |
+| operation journal | `/var/lib/homelab/journal.jsonl` | `host/src/tests/supervision.rs::fix_52_a_dead_scheduler_ends_the_daemon_with_a_failure` | before and after every step of every mutating operation | which step an operation was in, including one that never finished |
+| daemon log | stderr of `homelab-host` (`host/src/tests/commands.rs::fix_53_a_timeout_kills_everything_the_command_started`) | `tracing` calls throughout `host/src/main.rs` | always | startup faults, scheduler decisions, notification delivery, and every transcript line (below) |
+| live transcript | streamed to every connected client | `host/src/tests/commands.rs::fix_51_concurrent_writes_of_one_path_all_succeed_and_stay_whole` | while an operation runs | the exact commands and the first lines of their output |
 | state record | `/var/lib/homelab/state.json` | `core/src/state.rs:198-231` | after operations, the scheduler, notifications | what the orchestrator believes about each stack |
-| fleet check | `homelab check` output; daemon log each night | `core/src/ops/fleetcheck.rs:510-715`, `host/src/main.rs:2629-2682` | on demand, and after every nightly tick in the night window | where the record and reality disagree |
-| doctor | `homelab doctor` output | `core/src/doctor.rs:45-188`, probes at `host/src/main.rs:4275-4385` | on demand | host disk, state file, backups, offsite, mirror, interrupted operations; refused connections, exposure, file modes, privileged containers, host-meta, restore drill, password file, Drive space (fix-120, fix-130) |
-| exec audit | `/var/lib/homelab/audit.log` | `host/src/main.rs:3955-3969` | every `homelab exec` that passed its guard | who ran what inside which container; 0600, the command masked (fix-124, fix-125) |
-| intent history | `/var/lib/homelab/repo` (git) | deploy step `commit intent` (`core/src/ops/deploy.rs:894-960`) | every deploy | which files each deploy applied |
-| notification | the configured webhook | `host/src/main.rs:2822-2925` | after every mutating operation, at boot, on auto-disable, on nightly findings | the same verdict, off the machine |
+| fleet check | `homelab check` output; daemon log each night | `core/src/ops/fleetcheck.rs:510-715`, `host/src/tests/config_save.rs::feat_settings_1_a_change_is_checked_like_a_start` | on demand, and after every nightly tick in the night window | where the record and reality disagree |
+| doctor | `homelab doctor` output | `core/src/doctor.rs:45-188`, probes at `host/src/tests/ui_relay.rs::act_the_token_name_reaches_the_operation_queued_or_beside` | on demand | host disk, state file, backups, offsite, mirror, interrupted operations; refused connections, exposure, file modes, privileged containers, host-meta, restore drill, password file, Drive space (fix-120, fix-130) |
+| exec audit | `/var/lib/homelab/audit.log` | `host/src/tests/history.rs::redesign_371_a_reveal_is_audited_in_history_without_the_value` | every `homelab exec` that passed its guard | who ran what inside which container; 0600, the command masked (fix-124, fix-125) |
+| intent history | `/var/lib/homelab/repo` (git) | deploy step `commit intent` (`core/src/ops/deploy/firewall.rs::write_rules`) | every deploy | which files each deploy applied |
+| notification | the configured webhook | `host/src/tests/doctor.rs::fix_130_the_new_doctor_probes_read_the_machine` | after every mutating operation, at boot, on auto-disable, on nightly findings | the same verdict, off the machine |
 
 Which operations leave which traces:
 
 - **Mutating operations** go through `run_mutating_op` or `run_op_locked`
-  (`host/src/main.rs:2955-3089`). They get journal records, a notification,
+  (`host/src/tests/doctor.rs::fix_131_incident_show_reads_one_bundle_and_nothing_else`). They get journal records, a notification,
   and an incident bundle when they fail. The labels are: adopt,
   apply-guards, backup, backup-native, deploy, destroy, device-backup,
   forget, host-meta-backup, install-native, patch, release-update-native,
   resize, restore, self-update, set-enabled, template-build, update,
   update-native, wipe, zfs-replicate, and the scheduler's scheduled-backup,
   scheduled-backup-native, scheduled-update, scheduled-update-native and
-  scheduled-release-update (`host/src/main.rs:2187-4120`). `forget` and
-  `wipe` joined the list on 2026-09-27 (`host/src/main.rs:3638-3706`); a
+  scheduled-release-update (`host/src/tests/config.rs::misplaced_keys_are_reported_not_swallowed`). `forget` and
+  `wipe` joined the list on 2026-09-27 (`host/src/tests/reads.rs::feat_platform_2_app_status_comes_from_the_reading`); a
   destroy from the recorded manifest (`homelab apply`, or `homelab destroy`
   without the stack directory) runs under the label destroy.
 - **Everything else** (ping, status, doctor, incidents, check, checks,
   config, exec, prune-orphans, and the list `homelab wipe` shows before it
-  asks) answers directly from `handle_rpc` (`host/src/main.rs:3207-4267`).
+  asks) answers directly from `handle_rpc` (`host/src/tests/questions.rs::fix_240_another_session_answers_a_running_operations_question`).
   No journal record, no bundle, no notification. `exec` alone leaves a line
   in `audit.log`.
 
 ## 2. Reading the failure line
 
 A failed mutating operation ends with one line, built by the host
-(`host/src/main.rs:3079-3086`) and printed by the client after a `✗`
-(`client/src/main.rs:1268-1270`). The client then exits 1
-(`client/src/main.rs:1056-1059`).
+(`host/src/tests/support.rs::serve_state_on_loopback`) and printed by the client after a `✗`
+(`client/src/commands/new_stack.rs::cmd_new`). The client then exits 1
+(`client/src/commands/manual_checks.rs::parse_accept`).
 
 The shape is `<what> :: <why> :: remedy: <remedy> :: incident bundle <dir>`.
 
@@ -157,14 +157,14 @@ Read it left to right:
    Deploy step names are listed in section 8.4.
 2. `image not found`: the why. For a command failure this is the command's
    stderr, not the command itself (`core/src/error.rs:69-70`,
-   `core/src/ops/deploy.rs:1340-1344`).
+   `core/src/ops/deploy/mod.rs::deploy`).
 3. `remedy: …`: fixed per error class, see the table below.
 4. `incident bundle …`: the directory is
    `<state_dir>/incidents/<unix-ts>-<op>` (`core/src/incidents.rs:64`). The
-   op is `deploy-<stack>`, not the bare verb (`core/src/ops/deploy.rs:176`).
+   op is `deploy-<stack>`, not the bare verb (`core/src/ops/deploy/orphans.rs::orphan_files_keeping`).
 
 If writing the bundle itself failed, the last part reads
-`(bundle write failed: <e>)` instead (`host/src/main.rs:3077`).
+`(bundle write failed: <e>)` instead (`host/src/tests/support.rs::serve_state_on_loopback`).
 
 ### Recognising the error class by its remedy
 
@@ -228,7 +228,7 @@ sequenceDiagram
     end
 ```
 
-<sub>Source: `run_op_locked` (`host/src/main.rs:2991-3101`), `notify`, `notify_raw` and `record_notify_outcome` (`host/src/main.rs:2834-2962`), `Runner::step` and `finish_err` (`core/src/runner.rs:76-190`), `write_bundle` (`core/src/incidents.rs:56-110`).</sub>
+<sub>Source: `run_op_locked` (`host/src/tests/doctor.rs::rule_20_orphaned_push_staging_files_are_removed_from_disk`), `notify`, `notify_raw` and `record_notify_outcome` (`host/src/tests/doctor.rs::fix_130_the_new_doctor_probes_read_the_machine`), `Runner::step` and `finish_err` (`core/src/runner.rs:76-190`), `write_bundle` (`core/src/incidents.rs:56-110`).</sub>
 
 ### What is in one
 
@@ -239,7 +239,7 @@ sequenceDiagram
 | `commands.sh` | the `[run ]` transcript lines as a shell script | `core/src/incidents.rs:39-52`, `80-85` |
 | `state-at-failure.json` | a copy of state.json, if it could be read | `core/src/incidents.rs:87-90` |
 | `journal-tail.jsonl` | the last 200 lines of the operation journal, if it could be read | `core/src/incidents.rs:91-105` |
-| `versions.txt` | `host=<version>` and `proto=<version>` | `core/src/incidents.rs:107`, content at `host/src/main.rs:3065` |
+| `versions.txt` | `host=<version>` and `proto=<version>` | `core/src/incidents.rs:107`, content at `host/src/tests/support.rs::serve_state_on_loopback` |
 
 Four things about these files that are easy to get wrong:
 
@@ -305,10 +305,10 @@ The last events (real output, excerpt):
 
 What this tells you: the pull ran, the `up` failed, and its only output was
 `image not found`. The line after these is a warning that the stack was
-recorded as incomplete at `start apps` (`core/src/ops/deploy.rs:108-116`),
+recorded as incomplete at `start apps` (`core/src/ops/deploy/incomplete.rs::mark_incomplete`),
 and `state-at-failure.json` indeed carries `"incomplete_step": "start apps"`
 for the stack, because that record is written before the bundle
-(`core/src/ops/deploy.rs:20-29`).
+(`core/src/ops/deploy/mod.rs`).
 
 ### Reproducing a command safely
 
@@ -345,7 +345,7 @@ second; its own header says to review it before executing
 ## 4. The operation journal
 
 Each record is one JSON line with `ts`, `op`, `step` and `status`
-(`host/src/main.rs:1669`). The statuses, and who writes them:
+(`host/src/tests/supervision.rs::fix_52_sigterm_waits_for_the_running_operation_then_exits_zero`). The statuses, and who writes them:
 
 | status | Written | Source |
 |---|---|---|
@@ -357,7 +357,7 @@ Each record is one JSON line with `ts`, `op`, `step` and `status`
 | `deferred` | with step `-`, the operation stood aside | `core/src/runner.rs:175` |
 
 Writes are best effort: a journal that cannot be opened is skipped without
-an error (`host/src/main.rs:1670-1679`).
+an error (`host/src/tests/supervision.rs::fix_52_sigterm_waits_for_the_running_operation_then_exits_zero`).
 
 ### Interrupted operations
 
@@ -382,12 +382,12 @@ This yields `deploy-media` at `compose up`. The same journal ending in a
 Three places report it, none of which needs a shell on the host:
 
 1. At daemon start, one warning per interrupted operation in the daemon log
-   (`host/src/main.rs:1802-1812`).
+   (`host/src/tests/refusals.rs::fix_55_an_unparseable_frame_is_logged_without_its_body`).
 2. The boot notification, three seconds after start: op `host-online`,
    label `boot`, `ok` false, and an error text of `interrupted: ` followed by
-   `<op> @ <step>` entries joined by `; ` (`host/src/main.rs:1817-1835`).
+   `<op> @ <step>` entries joined by `; ` (`host/src/tests/refusals.rs::fix_55_an_unparseable_frame_is_logged_without_its_body`).
 3. `homelab doctor`, as a warning named `interrupted operations`
-   (`host/src/main.rs:4356-4363`, `core/src/doctor.rs:178-185`).
+   (`host/src/tests/ui_relay.rs::follow_ui_steps_are_relayed_to_the_attached_dashboard_by_scope`, `core/src/doctor.rs:178-185`).
 
 The remedy the code gives is to re-run the operation; the operations are
 written to be idempotent (`core/src/doctor.rs:183`).
@@ -428,54 +428,54 @@ start when the unit sets it; `log_level` is what changes without one.
 
 **The transcript is in the daemon log too.** Every log line an operation
 emits is also written with `tracing::info!`, whatever its level
-(`host/src/main.rs:1618-1625`). That includes every `[run ] <command>` line
+(`host/src/tests/commands.rs::fix_51_concurrent_writes_of_one_path_all_succeed_and_stay_whole`). That includes every `[run ] <command>` line
 and the output lines under it. A successful operation leaves no bundle, so
 for "it said success but did the wrong thing" the daemon log is where the
 commands are. Step start and finish markers are sent to clients only, as
 `[sync][run ] <op> :: <step>` and `[sync][exit] <op> :: <step> :: <outcome>`
-(`host/src/main.rs:1626-1640`).
+(`host/src/tests/commands.rs::fix_51_concurrent_writes_of_one_path_all_succeed_and_stay_whole`).
 
 **Every connected client sees every operation.** Log lines go to one
-broadcast channel (`host/src/main.rs:1653`) and each client session
-subscribes to it (`host/src/main.rs:2739`). A `homelab deploy` started while
+broadcast channel (`host/src/tests/supervision.rs::fix_52_a_dead_scheduler_ends_the_daemon_with_a_failure`) and each client session
+subscribes to it (`host/src/tests/doctor.rs::doctor_probes_surface_stale_backup_and_dead_offsite`). A `homelab deploy` started while
 the nightly round runs prints the round's lines too.
 
 **Verbosity.** `RUST_LOG=homelab_host=trace` adds a line for every command
-the daemon runs, including ones outside an operation (`host/src/main.rs:1549`).
+the daemon runs, including ones outside an operation (`host/src/tests/commands.rs::a_stalled_streaming_command_is_stopped_and_a_moving_one_is_not`).
 The notification POST is one of those, and its arguments end with the
 webhook URL (`core/src/notify.rs:204-231`), so at trace level the webhook id
 is written into the journal. The notification bearer token is not: it
 reaches curl through a mode-600 header file,
 `<state_dir>/secrets/notify-route-<n>.header`, named in argv only by its path
-(`core/src/notify.rs:187-195`, `host/src/main.rs:2882-2899`).
+(`core/src/notify.rs:187-195`, `host/src/tests/doctor.rs::fix_130_the_new_doctor_probes_read_the_machine`).
 
 ### Log lines worth knowing (verbatim)
 
 | Log line | Level | Meaning | Source |
 |---|---|---|---|
-| `homelab-host v<v> listening on <addr> (TLS)` | info | started and bound | `host/src/main.rs:1861-1864` |
-| `TLS fingerprint SHA256:<fp>` | info | the fingerprint clients must pin; compare with `config/client.toml` | `host/src/main.rs:1865` |
-| `interrupted operation '<op>' at step '<step>'` | warn | see section 4 | `host/src/main.rs:1805-1809` |
-| `scheduler armed: daily backup + auto-updates at <hh>:00` | info | nightly round configured | `host/src/main.rs:1844-1847` |
-| `scheduler idle (backup_hour not set)` | info | no nightly round at all | `host/src/main.rs:1848` |
-| `self-update accepted` | info | a new binary answered its first authenticated request and cleared the rollback marker (fix-121) | `host/src/main.rs:1871-1880` |
-| `<label> failed: <what>` | error | a mutating operation failed; a bundle was written | `host/src/main.rs:3064` |
-| `<label> stood aside: <why>` | info | deferred, no bundle | `host/src/main.rs:3048` |
-| `unparseable request dropped :: <e> :: <text>` | error | the host could not parse a client frame; the client waits forever for a reply | `host/src/main.rs:2755-2765` |
-| `scheduler: cannot determine local hour ('date' failed)` | error | this 20-minute tick did nothing | `host/src/main.rs:2263-2270` |
-| `scheduler: state unreadable` | error | the nightly round skipped this tick; see section 6 | `host/src/main.rs:2274-2280` |
+| `homelab-host v<v> listening on <addr> (TLS)` | info | started and bound | `host/src/tests/refusals.rs::fix_211_a_command_with_only_known_fields_is_never_refused` |
+| `TLS fingerprint SHA256:<fp>` | info | the fingerprint clients must pin; compare with `config/client.toml` | `host/src/tests/refusals.rs::fix_211_a_read_only_command_is_never_refused_for_an_unknown_field` |
+| `interrupted operation '<op>' at step '<step>'` | warn | see section 4 | `host/src/tests/refusals.rs::fix_55_an_unparseable_frame_is_logged_without_its_body` |
+| `scheduler armed: daily backup + auto-updates at <hh>:00` | info | nightly round configured | `host/src/tests/refusals.rs::fix_211_a_field_the_host_does_not_know_is_refused_by_name` |
+| `scheduler idle (backup_hour not set)` | info | no nightly round at all | `host/src/tests/refusals.rs::fix_211_a_field_the_host_does_not_know_is_refused_by_name` |
+| `self-update accepted` | info | a new binary answered its first authenticated request and cleared the rollback marker (fix-121) | `host/src/tests/support.rs::parsed` |
+| `<label> failed: <what>` | error | a mutating operation failed; a bundle was written | `host/src/tests/support.rs::serve_state_on_loopback` |
+| `<label> stood aside: <why>` | info | deferred, no bundle | `host/src/tests/support.rs::serve_on_loopback` |
+| `unparseable request dropped :: <e> :: <text>` | error | the host could not parse a client frame; the client waits forever for a reply | `host/src/tests/doctor.rs::doctor_probes_surface_stale_backup_and_dead_offsite` |
+| `scheduler: cannot determine local hour ('date' failed)` | error | this 20-minute tick did nothing | `host/src/tests/config_save.rs::a_settings_save_writes_back_the_file_it_read` |
+| `scheduler: state unreadable` | error | the nightly round skipped this tick; see section 6 | `host/src/tests/config_save.rs::a_settings_save_writes_back_the_file_it_read` |
 | `scheduler: nightly update for <stack> FAILED` | warn | the stack's automatic updates were parked; its backups continue (H8, fix-59) | `park_after_night` in `host/src/main.rs` |
-| `scheduler: stack <name> is disabled` | info | a parked stack was skipped | `host/src/main.rs:2358` |
-| `scheduler: stack <name> has no stored manifest` | warn | nothing to back up or update from | `host/src/main.rs:2447` |
-| `scheduler: backup for <stack> stood aside` | info | a nightly backup deferred | `host/src/main.rs:2216` |
-| `fleet check: repo and reality agree` | info | the nightly check found nothing alarming | `host/src/main.rs:2648-2655` |
-| `fleet check: <b> broken · <d> drift · ...` | warn | the nightly check found something; it also went out as a notification | `host/src/main.rs:2657-2679` |
+| `scheduler: stack <name> is disabled` | info | a parked stack was skipped | `host/src/tests/config_save.rs::fix_134_a_settings_save_keeps_the_file_s_own_comments` |
+| `scheduler: stack <name> has no stored manifest` | warn | nothing to back up or update from | `host/src/tests/config.rs::fix_false_alarm_watch_url_to_check` |
+| `scheduler: backup for <stack> stood aside` | info | a nightly backup deferred | `host/src/tests/config.rs::misplaced_keys_are_reported_not_swallowed` |
+| `fleet check: repo and reality agree` | info | the nightly check found nothing alarming | `host/src/tests/config_save.rs::feat_settings_1_a_change_is_checked_like_a_start` |
+| `fleet check: <b> broken · <d> drift · ...` | warn | the nightly check found something; it also went out as a notification | `host/src/tests/config_save.rs::feat_settings_1_a_change_is_checked_like_a_start` |
 | `notification route <scheme>://<host:port>/<path withheld> failed: <why>` | warn | one webhook route did not answer 2xx; the path (a Home Assistant webhook id) is withheld since fix-123, the full URL is `notify_webhook` or `notify_fallback_webhook` in `host.toml` | `host/src/main.rs`, `notify_raw` |
 | `a client lagged: <n> message(s) to it dropped` | warn | a connected client read slower than the host wrote; it was told so and sent every open question again (fix-127) | `host/src/main.rs`, `serve_ws` |
 | `401 on <path> from <address>: missing or wrong bearer token (<n> refused since this daemon started)` | warn | a connection without the right token; `homelab doctor` counts them under `refused connections` (fix-120) | `host/src/main.rs`, `log_refused` |
-| `notification took the fallback route: the primary said <why>` | warn | primary failed, fallback delivered | `host/src/main.rs:2909-2914` |
-| `mirror push failed (will retry): <e>` | warn | the intent repo did not reach its mirror; retried every tick | `host/src/main.rs:2781-2785`, `2250` |
-| `A6 exec vmid=<n> cmd=<cmd>` | info | a `homelab exec` ran | `host/src/main.rs:3969` |
+| `notification took the fallback route: the primary said <why>` | warn | primary failed, fallback delivered | `host/src/tests/doctor.rs::fix_131_incident_show_reads_one_bundle_and_nothing_else` |
+| `mirror push failed (will retry): <e>` | warn | the intent repo did not reach its mirror; retried every tick | `host/src/tests/support.rs::config_from_text`, `2250` |
+| `A6 exec vmid=<n> cmd=<cmd>` | info | a `homelab exec` ran | `host/src/tests/history.rs::redesign_371_a_reveal_is_audited_in_history_without_the_value` |
 
 ### Logs in Loki
 
@@ -529,7 +529,7 @@ cat /etc/systemd/system/alloy.service.d/homelab-read.conf
 Sent bytes growing and dropped bytes at zero means Loki accepts what Alloy
 sends. A deploy asks the same questions and says `[logs] Alloy on <host>
 cannot read /var/lib/docker/containers` when the answer is no
-(`core/src/ops/deploy.rs`, log shipper step), and `homelab check` reports a
+(`core/src/ops/deploy/`, log shipper step), and `homelab check` reports a
 stack whose labelled lines stopped arriving (`core/src/ops/facts.rs`,
 coverage). A redeploy of the stack puts Alloy's config and its read access
 back.
@@ -537,7 +537,7 @@ back.
 ## 6. state.json
 
 The orchestrator's belief about each stack. `homelab status` prints the host's
-`pct list` followed by the raw state.json (`host/src/main.rs:3216-3228`).
+`pct list` followed by the raw state.json (`host/src/tests/questions.rs::fix_240_another_session_answers_a_running_operations_question`).
 
 Fields to look at when debugging (`core/src/state.rs:14-62`, `108-158`):
 
@@ -559,35 +559,35 @@ How it loads (`core/src/state.rs:198-223`):
 - **Missing file**: treated as a fresh install, an empty fleet.
 - **Does not parse**: the content is copied to `state.json.corrupt` and the
   load returns a state error; the original is left in place. The scheduler
-  skips its tick on that error (`host/src/main.rs:2274-2280`), but a few
+  skips its tick on that error (`host/src/tests/config_save.rs::a_settings_save_writes_back_the_file_it_read`), but a few
   read-only views fall back to an empty state instead, for example
-  `homelab checks` (`host/src/main.rs:3839`), so an empty answer there is not
+  `homelab checks` (`host/src/tests/history.rs::arch_history_the_sink_times_steps_and_names_the_subject`), so an empty answer there is not
   proof that nothing is recorded.
 - **Written by a newer binary**: refused rather than touched.
 
 Writes are atomic: a temporary file is written, synced and renamed over the
-original (`host/src/main.rs:1571-1596`).
+original (`host/src/tests/commands.rs::a_stalled_streaming_command_is_stopped_and_a_moving_one_is_not`).
 
 ## 7. Fleet check and doctor
 
 ### `homelab check`
 
 Holds the record against the machine. The client sends the vmid each stack
-directory claims (`client/src/main.rs:310-338`); the host adds what it can
-see and evaluates (`host/src/main.rs:3717-3750`). Each finding prints as
+directory claims (`client/src/commands/host_admin.rs::cmd_answer`); the host adds what it can
+see and evaluates (`host/src/tests/reads.rs::feat_platform_3_lines_carry_request_time_and_step_and_the_ring_is_capped`). Each finding prints as
 `[broken]`, `[drift]` or `[noted]`, a subject, what is wrong, and a
-`remedy:` line (`host/src/main.rs:3178-3198`).
+`remedy:` line (`host/src/tests/questions.rs::fix_66_an_answer_on_the_same_connection_reaches_the_waiting_operation`).
 
 - The command exits 1 when there is a `broken` or `drift` finding; `noted`
   ones are printed but do not fail it since v3.58.5 (gap-32,
   `fleetcheck::check_passes`). The nightly run uses the same rule: only
-  non-`noted` findings raise a warning and a notification (`host/src/main.rs:2646-2679`, `core/src/ops/fleetcheck.rs:501-507`).
+  non-`noted` findings raise a warning and a notification (`host/src/tests/config_save.rs::feat_settings_1_a_change_is_checked_like_a_start`, `core/src/ops/fleetcheck.rs:501-507`).
 - Run it from the repository root, or pass the stacks path. From anywhere
   else the client finds no stack files, says so, and checks only the host's
-  half (`client/src/main.rs:311-327`). That half cannot see a deleted stack
+  half (`client/src/commands/host_admin.rs::cmd_answer`). That half cannot see a deleted stack
   directory: the `drift` finding for a stack in state without a stack file
   needs the stack files (`core/src/ops/fleetcheck.rs:678-716`), and the
-  nightly check never has them (`host/src/main.rs:2646`).
+  nightly check never has them (`host/src/tests/config_save.rs::feat_settings_1_a_change_is_checked_like_a_start`).
 - Every retired stack, app or unit is one `noted` line that names what it
   keeps and the `homelab wipe` command (`core/src/ops/retired.rs:190-219`).
   It is the reminder that data is being kept on purpose, not a fault.
@@ -597,9 +597,9 @@ see and evaluates (`host/src/main.rs:3717-3750`). Each finding prints as
 Checks host disk, state file, each stack's container and backup age, the
 offsite remote, mirror lag and interrupted operations (`core/src/doctor.rs:45-188`).
 Each check prints its health in brackets, its name, a detail, and a remedy
-line under it when there is one (`host/src/main.rs:4139-4145`). The command
+line under it when there is one (`host/src/tests/questions.rs::arch_host_link_a_stale_answer_does_not_answer_a_new_question`). The command
 exits 1 only when a check is `Fail`; a warning still exits 0
-(`host/src/main.rs:4148`, `client/src/main.rs:1267-1275`).
+(`host/src/tests/questions.rs::arch_host_link_a_stale_answer_does_not_answer_a_new_question`, `client/src/commands/new_stack.rs::cmd_new`).
 
 One per-stack check to know, and one limit:
 
@@ -609,7 +609,7 @@ One per-stack check to know, and one limit:
   v3.58.7 the host reported every stack as sealed, so this check never fired
   (gap-27, `unsealed_secret_files` in `core/src/ops/facts.rs`).
 - The offsite check only runs when `rclone listremotes` shows a remote
-  named exactly `gdrive:` (`host/src/main.rs:4310-4332`).
+  named exactly `gdrive:` (`host/src/tests/ui_relay.rs::follow_ui_steps_are_relayed_to_the_attached_dashboard_by_scope`).
 
 ## 8. Symptom → cause tables
 
@@ -620,25 +620,25 @@ The client's own refusals print as `error: <message>` and exit 1
 
 | Symptom (verbatim) | Cause | First action | Source |
 |---|---|---|---|
-| `HOMELAB_TOKEN is not set` | no token in the environment, in `~/.config/homelab/env`, or in `./.env` | add a `HOMELAB_TOKEN=` line to `~/.config/homelab/env`; no sourcing needed | `client/src/main.rs:140-150` |
+| `HOMELAB_TOKEN is not set` | no token in the environment, in `~/.config/homelab/env`, or in `./.env` | add a `HOMELAB_TOKEN=` line to `~/.config/homelab/env`; no sourcing needed | `client/src/commands/ctx.rs::apply_env_line` |
 | `<path> does not parse: <e> :: it is TOML` | `config/client.toml` is not valid TOML or has a key other than `host` and `pin` | fix the file; a parse error is never replaced by a default | `client/src/repo_config.rs:80-95` |
 | `the host certificate pinned on this machine (~/.config/homelab/pin: <m>) is not the` … | this machine pinned a different fingerprint than `config/client.toml` names | see worked example A | `client/src/repo_config.rs:143-153` |
 | `certificate fingerprint mismatch` | the daemon presented a certificate other than the pinned one | see worked example A | `client/src/tls.rs:59-65` |
-| `connect <url>: <e>` | TLS or network failure; the host answered 401 because the token did not match; or the server could not prove it holds the key of the pinned certificate (the handshake signature is checked, `client/src/tls.rs:69-90`, test `fix_34_an_impostor_replaying_the_pinned_certificate_is_refused` at `client/tests/tls_pin_tests.rs:146`) | check the address with `homelab ping`; compare tokens on both sides | `client/src/main.rs:1127-1141`, `host/src/main.rs:2706-2712` |
-| `host is v<h> and this client is v<c> :: a host that predates a field ignores it silently` | the client refuses to send a mutating command to an older host | update the host first; read-only verbs (ping, status, doctor, incidents) and the self-update itself still work | `client/src/main.rs:1203-1213`, `client/src/version.rs:15-30` |
-| `connection closed before RPC completed` | the link closed before the host answered; the operation may or may not have finished | look in the daemon log for the operation's outcome before re-running | `client/src/main.rs:1284-1288` |
-| `payload is <n> MiB and the link carries at most <m> MiB` | the message is bigger than the 256 MiB frame limit | not a network fault; the payload has to shrink | `client/src/version.rs:59`, `73-84`, `client/src/main.rs:1076-1081` |
-| `staging the binary of <unit> failed` | a native binary could not be staged; the deploy never started | read the line above it, which is the host's reason | `client/src/main.rs:729-744` |
-| `validation failed: <e>` | `homelab plan` or `homelab deploy` found the stack file invalid before connecting | fix the stack file; `homelab plan` repeats the check offline | `client/src/main.rs:673-700` |
+| `connect <url>: <e>` | TLS or network failure; the host answered 401 because the token did not match; or the server could not prove it holds the key of the pinned certificate (the handshake signature is checked, `client/src/tls.rs:69-90`, test `fix_34_an_impostor_replaying_the_pinned_certificate_is_refused` at `client/tests/tls_pin_tests.rs:146`) | check the address with `homelab ping`; compare tokens on both sides | `client/src/commands/stacks.rs::cmd_export`, `host/src/tests/doctor.rs::doctor_probes_surface_stale_backup_and_dead_offsite` |
+| `host is v<h> and this client is v<c> :: a host that predates a field ignores it silently` | the client refuses to send a mutating command to an older host | update the host first; read-only verbs (ping, status, doctor, incidents) and the self-update itself still work | `client/src/commands/new_stack.rs::cmd_template_build`, `client/src/version.rs:15-30` |
+| `connection closed before RPC completed` | the link closed before the host answered; the operation may or may not have finished | look in the daemon log for the operation's outcome before re-running | `client/src/commands/new_stack.rs::cmd_new` |
+| `payload is <n> MiB and the link carries at most <m> MiB` | the message is bigger than the 256 MiB frame limit | not a network fault; the payload has to shrink | `client/src/version.rs:59`, `73-84`, `client/src/commands/manual_checks.rs::checks_answer` |
+| `staging the binary of <unit> failed` | a native binary could not be staged; the deploy never started | read the line above it, which is the host's reason | `client/src/commands/checks.rs::print_today_banner` |
+| `validation failed: <e>` | `homelab plan` or `homelab deploy` found the stack file invalid before connecting | fix the stack file; `homelab plan` repeats the check offline | `client/src/commands/checks.rs::check_pins` |
 | `latch_secrets is set but HOMELAB_LATCH_ENV is not` | the stack reads secrets from latch but no latch environment is named | add `HOMELAB_LATCH_ENV=` to `~/.config/homelab/env` | `client/src/spec.rs:356-360` |
 | `cannot run latch for app '<app>': <e>` | the `latch` binary is not on PATH | install latch | `client/src/spec.rs:375-385` |
 | `latch returned empty content for app '<app>' (<rel> in env '<env>')` | latch has no content for that file in that environment | commit and push the env file in latch | `client/src/spec.rs:402-407` |
-| `name mismatch` | the typed confirmation for destroy, prune-orphans or wipe did not match the name | nothing was sent to the host (for wipe: the list was fetched, nothing deleted) | `client/src/main.rs:854`, `1052`, `1087`, `1122` |
-| `no stacks directory at '<dir>'` | `homelab apply` found no stacks directory at the given or default path | run it from the repository root or pass the path | `client/src/main.rs:715-721` |
-| `could not read the host's state — nothing applied` | `homelab apply` did not get the host's state back | check the link with `homelab ping` | `client/src/main.rs:723-727` |
-| `<stack>: validation failed: <e> — nothing applied` | one stack under `stacks/` does not validate; apply builds every stack before sending anything | fix that stack file, or run `homelab plan stacks/<stack>` for the detail | `client/src/main.rs:739-749` |
-| `deploy of <stack> failed — apply stopped here` | a deploy inside `homelab apply` failed; later stacks were not deployed and nothing was destroyed | read that deploy's failure line; re-run apply after the fix | `client/src/main.rs:781-791` |
-| `is waiting for a decision` | a step asked a question the command line cannot answer | see worked example B | `client/src/main.rs:1173-1182` |
+| `name mismatch` | the typed confirmation for destroy, prune-orphans or wipe did not match the name | nothing was sent to the host (for wipe: the list was fetched, nothing deleted) | `client/src/commands/mod.rs::run`, `1052`, `1087`, `1122` |
+| `no stacks directory at '<dir>'` | `homelab apply` found no stacks directory at the given or default path | run it from the repository root or pass the path | `client/src/commands/checks.rs::cmd_check` |
+| `could not read the host's state — nothing applied` | `homelab apply` did not get the host's state back | check the link with `homelab ping` | `client/src/commands/checks.rs::print_today_banner` |
+| `<stack>: validation failed: <e> — nothing applied` | one stack under `stacks/` does not validate; apply builds every stack before sending anything | fix that stack file, or run `homelab plan stacks/<stack>` for the detail | `client/src/commands/checks.rs::print_today_banner` |
+| `deploy of <stack> failed — apply stopped here` | a deploy inside `homelab apply` failed; later stacks were not deployed and nothing was destroyed | read that deploy's failure line; re-run apply after the fix | `client/src/commands/native_install.rs::cmd_update_native` |
+| `is waiting for a decision` | a step asked a question the command line cannot answer | see worked example B | `client/src/commands/stacks.rs::cmd_resize` |
 
 When the client cannot reach the host, walk its checks in the order it makes
 them; the first one that fails is the fault.
@@ -680,14 +680,14 @@ flowchart TD
     ver -->|yes| fix_ver
 ```
 
-<sub>Source: `client/src/main.rs:149` (token), `1103-1143` (pin, connect), `1205-1213` (version); `PinnedVerifier` (`client/src/tls.rs:49-90`); `bearer_ok` (`host/src/main.rs:2717-2723`).</sub>
+<sub>Source: `client/src/commands/ctx.rs::apply_env_line` (token), `1103-1143` (pin, connect), `1205-1213` (version); `PinnedVerifier` (`client/src/tls.rs:49-90`); `bearer_ok` (`host/src/tests/doctor.rs::doctor_probes_surface_stale_backup_and_dead_offsite`).</sub>
 
 #### Worked example A: pin disagreement
 
 Real output, produced locally with a scratch `HOME` holding pin `AA:…:AA`
 and a scratch `config/client.toml` naming `BB:…:BB`. The client refused
 before opening any connection, because the pin decision comes before the
-connect (`client/src/main.rs:1101-1127`). Excerpt, fingerprints shortened:
+connect (`client/src/commands/manual_checks.rs::cmd_checks`). Excerpt, fingerprints shortened:
 
 ```text
 error: the host certificate pinned on this machine (~/.config/homelab/pin: AA:AA:…:AA) is not the one config/client.toml names (BB:BB:…:BB) :: either the daemon's certificate changed …
@@ -722,7 +722,7 @@ The decision tree:
 
 During a deploy, the `service checks` step compares readings taken before and
 after. When one went down it asks instead of deciding
-(`core/src/ops/deploy.rs:2565-2589`). A headless command line (stdin not a
+(`core/src/ops/deploy/storage_ownership.rs::storage_ownership`). A headless command line (stdin not a
 terminal, no `--answer`) prints the question and how to answer it elsewhere.
 The host raises it as an urgent notice (pushed) and waits `ask_timeout_s`,
 default 600 s (fix-240). Answer it from any other terminal with
@@ -731,19 +731,19 @@ from Live view with `homelab ui answer <operation> allow|stop`, or with the
 dashboard banner's Allow/Stop. Unanswered, the step fails with the reason
 `nobody answered within 10 min — the operation did not guess`. When no client is connected at all, as in the nightly
 round, the answer is immediately unattended
-(`host/src/main.rs:1720-1722`).
+(`host/src/tests/supervision.rs::fix_52_sigterm_waits_for_the_running_operation_then_exits_zero`).
 
 ### 8.2 On the Proxmox host: the daemon does not start or keeps restarting
 
 | Symptom (verbatim) | Cause | First action | Source |
 |---|---|---|---|
-| `FATAL: <path> does not parse as TOML: <e>` | host.toml has a syntax error; the daemon exits 1 | fix the file | `host/src/main.rs:384-390` |
-| `FATAL: <path> is not a valid host config: <e>` | a key has the wrong type | fix the value | `host/src/main.rs:399-405` |
-| `FATAL: token must be set (>=16 chars) via <path> or HOMELAB_TOKEN` | no token, or one shorter than 16 characters | section 9.1 | `host/src/main.rs:409-419` |
-| `listen must be host:port` | `listen` or `HOMELAB_LISTEN` is not an address; the daemon panics | fix the value | `host/src/main.rs:420-425` |
-| `tls cert` | the certificate could not be created. One way to get here: `tls-cert.pem` is missing while `tls-key.pem` is present, because the key file is created with create-new and refuses to overwrite. The new certificate was already written by then, so the next start finds a certificate that does not belong to the key | fix both files together, section 9.2 | `host/src/main.rs:1859-1860`, `host/src/tls.rs:21-43` |
-| `load tls` | the certificate or key file exists but could not be loaded | restore both files together, section 9.2 | `host/src/main.rs:1866-1869` |
-| `is not a setting this daemon reads and is being ignored.` | a key the daemon does not know; usually a key written below a `[table]` header, which makes it part of that table | move the key above the first header | `host/src/main.rs:391-398`, test `misplaced_keys_are_reported_not_swallowed` at `host/src/main.rs:883` |
+| `FATAL: <path> does not parse as TOML: <e>` | host.toml has a syntax error; the daemon exits 1 | fix the file | `host/src/config/tokens.rs::validate_tokens` |
+| `FATAL: <path> is not a valid host config: <e>` | a key has the wrong type | fix the value | `host/src/config/tokens.rs::validate_tokens` |
+| `FATAL: token must be set (>=16 chars) via <path> or HOMELAB_TOKEN` | no token, or one shorter than 16 characters | section 9.1 | `host/src/config/tokens.rs::validate_tokens` |
+| `listen must be host:port` | `listen` or `HOMELAB_LISTEN` is not an address; the daemon panics | fix the value | `host/src/config/tokens.rs::validate_tokens` |
+| `tls cert` | the certificate could not be created. One way to get here: `tls-cert.pem` is missing while `tls-key.pem` is present, because the key file is created with create-new and refuses to overwrite. The new certificate was already written by then, so the next start finds a certificate that does not belong to the key | fix both files together, section 9.2 | `host/src/tests/refusals.rs::fix_211_a_command_with_only_known_fields_is_never_refused`, `host/src/tls.rs:21-43` |
+| `load tls` | the certificate or key file exists but could not be loaded | restore both files together, section 9.2 | `host/src/tests/refusals.rs::fix_211_a_read_only_command_is_never_refused_for_an_unknown_field` |
+| `is not a setting this daemon reads and is being ignored.` | a key the daemon does not know; usually a key written below a `[table]` header, which makes it part of that table | move the key above the first header | `host/src/gather_capacity.rs::gather_host_capacity`, test `misplaced_keys_are_reported_not_swallowed` at `host/src/config/warnings.rs::warn_at_load` |
 
 The last one is a warning, not a fatal error: the daemon starts, without the
 setting.
@@ -762,16 +762,16 @@ remedy starts `This gate exists to protect unmanaged guests.`
 
 | Symptom (verbatim) | Cause | First action | Source |
 |---|---|---|---|
-| `vmid <n> is on the no-touch list` | the stack file names a protected guest. The compiled list is 100, 101, 102, 103; host.toml can add to it, never remove | the stack file's vmid is wrong | `core/src/safety.rs:21`, `48-51`, `host/src/main.rs:446-460` |
+| `vmid <n> is on the no-touch list` | the stack file names a protected guest. The compiled list is 100, 101, 102, 103; host.toml can add to it, never remove | the stack file's vmid is wrong | `core/src/safety.rs:21`, `48-51`, `host/src/config/tokens.rs::validate_tokens` |
 | `hostname '<h>' does not match canonical '<c>'` | the manifest's hostname is not `<vmid>-app-<stack>` | fix the manifest | `core/src/safety.rs:53-58` |
 | `vmid <n> is a QEMU VM` | a VM, not a container, has that id | pick another vmid | `core/src/safety.rs:63-69` |
 | `vmid <n> exists with hostname '<h>', expected '<e>'` | deploy: a container with that id belongs to something else | the stack file points at someone else's container | `core/src/safety.rs:82-86` |
 | `vmid <n> is '<h>', expected '<e>'` | backup, restore, update and other operations on an existing stack: the live hostname differs from the record | re-adopt or redeploy so the record matches; `homelab check` reports the same | `core/src/ops/mod.rs:70-75`, `core/src/ops/fleetcheck.rs:575-583` |
 | `vmid <n> does not exist` | the container is gone | redeploy, or `homelab forget <stack>` if it is gone on purpose | `core/src/ops/mod.rs:61-63` |
-| `template <t> is <p>, but stack '<s>' asks for <q>` | privileged vs unprivileged mismatch between template and stack; a clone always inherits the template's | use the matching template | `core/src/ops/deploy.rs:499-507` |
-| `remote exec is disabled (set exec_enabled = true in host.toml to allow it)` | `homelab exec` is off by default | enable it in host.toml if you need it | `core/src/safety.rs:118-123`, `host/src/main.rs:435` |
-| `vmid <n> is on the no-touch list` … `exec refused regardless of config` | `homelab exec` into a protected guest; the configured list counts, including host.toml additions | none | `core/src/safety.rs:124-128`, `host/src/main.rs:2853-2855` |
-| `vmid <n> is on the no-touch list :: this list is the one thing that is never worked around` | `homelab guards` on a protected guest | none | `host/src/main.rs:3679-3689` |
+| `template <t> is <p>, but stack '<s>' asks for <q>` | privileged vs unprivileged mismatch between template and stack; a clone always inherits the template's | use the matching template | `core/src/ops/deploy/gate.rs::load_prior` |
+| `remote exec is disabled (set exec_enabled = true in host.toml to allow it)` | `homelab exec` is off by default | enable it in host.toml if you need it | `core/src/safety.rs:118-123`, `host/src/config/tokens.rs::validate_tokens` |
+| `vmid <n> is on the no-touch list` … `exec refused regardless of config` | `homelab exec` into a protected guest; the configured list counts, including host.toml additions | none | `core/src/safety.rs:124-128`, `host/src/tests/doctor.rs::fix_130_the_new_doctor_probes_read_the_machine` |
+| `vmid <n> is on the no-touch list :: this list is the one thing that is never worked around` | `homelab guards` on a protected guest | none | `host/src/tests/reads.rs::redesign_stackhub_2_app_health_comes_from_the_reading` |
 | `has no manifest recorded in host state (an adopted service)` | destroy from the record (`homelab apply`, or `homelab destroy` without the stack directory) on a stack the host never deployed | remove the container by hand, then `homelab forget <stack>` | `core/src/ops/destroy.rs:432-437` |
 | `holds a manifest for '<m>' — refusing to guess which one is meant` | the state record and the manifest in it name different stacks | look at `state.json` (section 6) | `core/src/ops/destroy.rs:439-443` |
 | `still names a live container` | `homelab forget` on a record whose container still exists | destroy it instead, or rename it first | `core/src/ops/destroy.rs:383-386` |
@@ -785,26 +785,26 @@ runaway guards, log rotation, retire dropped, commit intent, push files,
 start apps, storage ownership, verify health, then the optional gateway
 route, retire gateway route, grafana dashboard, homepage services and uptime
 monitors, then orphan files, garbage collect, log shipper, native units,
-record state, reconcile and service checks (`core/src/ops/deploy.rs:265-2808`).
+record state, reconcile and service checks (`core/src/ops/deploy/restore_checks.rs::record_restore_checks`).
 
 A deploy that fails at any step except validate, safety gates, registry
 cache and hardware readiness (the four that run before anything changes) is
 recorded in state.json with `incomplete_step` set
-(`core/src/ops/deploy.rs:55-117`), and
+(`core/src/ops/deploy/incomplete.rs::mark_incomplete`), and
 `homelab check` reports it as `its last deploy stopped at "<step>" and never finished`
 (`core/src/ops/fleetcheck.rs:1012-1030`).
 
 | Symptom (verbatim) | Step | Cause | First action | Source |
 |---|---|---|---|---|
-| `container never reached running/degraded` | wait for systemd | systemd in the container did not reach running or degraded within 30 polls, 4 s apart | enter the container and look at its network and boot | `core/src/ops/deploy.rs:811-834` |
-| `no running services` | verify health | an app has no running compose service 5 s after start; the why includes `docker compose ps -a` and the last 20 log lines | read those lines in the failure line | `core/src/ops/deploy.rs:1534-1569` |
-| `intent commit failed` | commit intent | git commit in `/var/lib/homelab/repo` failed | the why carries git's output | `core/src/ops/deploy.rs:945-959` |
+| `container never reached running/degraded` | wait for systemd | systemd in the container did not reach running or degraded within 30 polls, 4 s apart | enter the container and look at its network and boot | `core/src/ops/deploy/metrics.rs::metrics_discovery` |
+| `no running services` | verify health | an app has no running compose service 5 s after start; the why includes `docker compose ps -a` and the last 20 log lines | read those lines in the failure line | `core/src/ops/deploy/mod.rs::deploy` |
+| `intent commit failed` | commit intent | git commit in `/var/lib/homelab/repo` failed | the why carries git's output | `core/src/ops/deploy/provision.rs::net0_config` |
 | `the step reported success but the change is not there: <why>` | any verified step | the command succeeded but reading back showed no change | treat as a real fault in that step | `core/src/runner.rs:123-157` |
-| `the deploy reported success but the container does not match` | reconcile | the live container differs from the stack file | the why lists the differences | `core/src/ops/deploy.rs:2466-2479` |
-| `stopped by the operator` | service checks | you answered stop | nothing | `core/src/ops/deploy.rs:2605` |
-| `nobody answered within <n>s` | service checks | see worked example B | run it from the TUI | `host/src/main.rs:1744-1747` |
-| `stack declares native unit '<u>' but <u>/<u>.service is not in the stack` | native units | the unit file is missing from the stack directory | add it | `core/src/ops/deploy.rs:2094-2101` |
-| `could not place <path> on the container (<e>)` | native units | moving the binary into place failed; nothing was replaced | the why carries the shell's stderr | `core/src/ops/deploy.rs:2173-2180` |
+| `the deploy reported success but the container does not match` | reconcile | the live container differs from the stack file | the why lists the differences | `core/src/ops/deploy/storage_ownership.rs::is_running` |
+| `stopped by the operator` | service checks | you answered stop | nothing | `core/src/ops/deploy/mod.rs::deploy` |
+| `nobody answered within <n>s` | service checks | see worked example B | run it from the TUI | `host/src/tests/commands.rs::fix_51_concurrent_writes_of_one_path_all_succeed_and_stay_whole` |
+| `stack declares native unit '<u>' but <u>/<u>.service is not in the stack` | native units | the unit file is missing from the stack directory | add it | `core/src/ops/deploy/push_verify.rs::run` |
+| `could not place <path> on the container (<e>)` | native units | moving the binary into place failed; nothing was replaced | the why carries the shell's stderr | `core/src/ops/deploy/start_pull.rs::pull_plan` |
 
 Not errors, but surprises since 2026-09-27: a deploy **removes** what the
 stack files no longer declare, and says so per item. If something vanished
@@ -813,12 +813,12 @@ these lines:
 
 | Transcript line (verbatim) | What was removed | Source |
 |---|---|---|
-| `[orphans] removed <path> — no longer in the stack's files` | a file under `/opt/<stack>/` the stack no longer sends | `core/src/ops/deploy.rs:2137-2140` |
-| `[orphans] removed <path> — the stack no longer places it` | a `rootfs/` file; a unit or timer was `systemctl disable --now` first | `core/src/ops/deploy.rs:1101-1104` |
-| `[native] <unit> left the stack file — stopped and disabled` | a native unit dropped from `natives:`; its data and repository are kept | `core/src/ops/deploy.rs:1162-1165` |
-| `is no longer declared — detached; the directory` | a mount point; the host directory is kept | `core/src/ops/deploy.rs:844-848` |
-| `[route] <path> removed — the stack file no longer declares it` | the old route file after `gateway_route:` was dropped or the vmid changed | `core/src/ops/deploy.rs:1973-1976` |
-| `app '<app>' removed (config dirs kept)` | an app dropped from `apps:` | `core/src/ops/deploy.rs:2179` |
+| `[orphans] removed <path> — no longer in the stack's files` | a file under `/opt/<stack>/` the stack no longer sends | `core/src/ops/deploy/start.rs::registry_login` |
+| `[orphans] removed <path> — the stack no longer places it` | a `rootfs/` file; a unit or timer was `systemctl disable --now` first | `core/src/ops/deploy/provision_create.rs::create_args` |
+| `[native] <unit> left the stack file — stopped and disabled` | a native unit dropped from `natives:`; its data and repository are kept | `core/src/ops/deploy/mod.rs::deploy` |
+| `is no longer declared — detached; the directory` | a mount point; the host directory is kept | `core/src/ops/deploy/metrics.rs::metrics_discovery` |
+| `[route] <path> removed — the stack file no longer declares it` | the old route file after `gateway_route:` was dropped or the vmid changed | `core/src/ops/deploy/push_verify.rs::activate_rootfs` |
+| `app '<app>' removed (config dirs kept)` | an app dropped from `apps:` | `core/src/ops/deploy/start_pull.rs::all_images_present` |
 
 To get a removed file back, put it back in the stack's files and deploy; the
 intent repository on the host has the last version that was deployed
@@ -830,13 +830,13 @@ Also not an error: a deploy of a native stack does not
 upgrade a binary that is already installed. The transcript says
 `already installed, not shipped` for it; upgrades go through
 `homelab release-update-native` or the nightly updater
-(`core/src/ops/deploy.rs:2138-2162`).
+(`core/src/ops/deploy/start.rs::registry_login`).
 
 ### 8.5 Backup, restore and update
 
 | Symptom (verbatim) | Cause | First action | Source |
 |---|---|---|---|
-| `<label> deferred` followed by `is in use, so nothing was stopped and no snapshot was taken: <reason>` | an app was in use, so the backup stood aside. The client still prints `✗` and exits 1, but no bundle is written and nothing changed | nothing; it runs next night. If it keeps standing aside, the backup-age finding in `homelab check` says so | `core/src/ops/backup.rs:397-415`, `host/src/main.rs:3043-3054` |
+| `<label> deferred` followed by `is in use, so nothing was stopped and no snapshot was taken: <reason>` | an app was in use, so the backup stood aside. The client still prints `✗` and exits 1, but no bundle is written and nothing changed | nothing; it runs next night. If it keeps standing aside, the backup-age finding in `homelab check` says so | `core/src/ops/backup.rs:397-415`, `host/src/tests/support.rs::serve_on_loopback` |
 | `stack '<s>' would back up into the repository '<o>-config', which stack '<b>'` … | two stacks name the same owning app, so they would share one restic repository | rename the app in the newer stack's file | `core/src/ops/backup.rs:327-363` |
 | `<app> unhealthy after update` … `ROLLED BACK to previous image, now healthy.` | the new image failed its health check and the previous one was restored. This is still reported as a failure | the app runs on the old image; check the new image's release notes | `core/src/ops/update.rs:229-260` |
 | `<app> unhealthy after update AND after rollback` | the rollback did not bring it back either | hands on the container now | `core/src/ops/update.rs:262-265` |
@@ -866,24 +866,24 @@ Two things the update's transcript will not tell you directly:
 | `SHA256SUMS does not carry the ecosystem signature (<e>)` | the release's checksum file is unsigned or changed after signing; nothing installed | wait for the signed release | `core/src/release_sig.rs:33-39` |
 | `SHA256SUMS.minisig is not a minisign signature (<e>)` | the signature asset is malformed or missing | same | `core/src/release_sig.rs:27-32` |
 | `CHECKSUM MISMATCH for <asset> in <repo> <tag>` | the downloaded binary does not match its checksum; nothing installed | retry; if it repeats, do not install | `core/src/ops/native.rs:1078-1083` |
-| `no release found (gh authenticated? release exists?)` | on the workstation, `gh` could not name the newest release for `homelab release-update` | check `gh auth status` | `client/src/main.rs:812-816` |
-| `staged binary failed selfcheck (exit <n>): <e>` | a host binary for self-update could not run `--selfcheck`; nothing was replaced | wrong architecture or a truncated upload | `core/src/ops/selfupdate.rs:60-73`, `host/src/main.rs:1775-1778` |
+| `no release found (gh authenticated? release exists?)` | on the workstation, `gh` could not name the newest release for `homelab release-update` | check `gh auth status` | `client/src/commands/restore.rs::cmd_restore_native` |
+| `staged binary failed selfcheck (exit <n>): <e>` | a host binary for self-update could not run `--selfcheck`; nothing was replaced | wrong architecture or a truncated upload | `core/src/ops/selfupdate.rs:60-73`, `host/src/tests/commands.rs::fix_53_a_timeout_kills_everything_the_command_started` |
 
 ### 8.7 The nightly round
 
 The scheduler looks a minute after start, then every 20 minutes. It only
 works in the night window, `backup_hour` and the hour after it (fix-129),
 and a stack is due when its last backup is at least 20 hours
-old (`host/src/main.rs:2246-2273`, `1941-1943`). Parked stacks are left out
-(`host/src/main.rs:1997-2002`).
+old (`host/src/tests/config.rs::a_typo_is_reported`, `1941-1943`). Parked stacks are left out
+(`host/src/tests/tokens.rs::fix_120_issue_token_adds_one_entry_hashed_not_plain`).
 
 | Symptom | Cause | First action | Source |
 |---|---|---|---|
-| a stack is `disabled` in `homelab check` and was not backed up | a nightly run failed and the stack was parked (H8); the daemon log has the `FAILED` line and a notification went out once | fix the cause, then `homelab enable <stack>` | `host/src/main.rs:2472-2500`, `core/src/ops/fleetcheck.rs:587-597` |
+| a stack is `disabled` in `homelab check` and was not backed up | a nightly run failed and the stack was parked (H8); the daemon log has the `FAILED` line and a notification went out once | fix the cause, then `homelab enable <stack>` | `host/src/tests/notices.rs::fix_184_down_notice_waits_for_the_full_threshold`, `core/src/ops/fleetcheck.rs:587-597` |
 | a backup that stood aside did not park the stack | by design: a deferred backup is not a failed night | none | `core/src/ops/backup.rs:67-74` |
 | a rolled-back update parked the stack's updates | a rolled-back update is a failure (section 8.5), and a failed update parks the automatic updates (backups continue, fix-59) | fix or pin the image, then `homelab enable` | `park_after_night` in `host/src/main.rs` |
-| a CLI command started while the nightly backups run prints the round's lines and does not start | the backup phase holds the operation lock for the whole batch; your operation waits for it | wait, or use `homelab status` which does not take the lock | `host/src/main.rs:2177`, `2969` |
-| nothing ran at all | `backup_hour` is not set, or `date` failed, or state.json did not load | check the daemon log for the lines in section 5 | `host/src/main.rs:2255`, `2267-2280` |
+| a CLI command started while the nightly backups run prints the round's lines and does not start | the backup phase holds the operation lock for the whole batch; your operation waits for it | wait, or use `homelab status` which does not take the lock | `host/src/tests/config.rs::fix_120_host_policy_defaults_to_the_fleet_and_follows_host_toml`, `2969` |
+| nothing ran at all | `backup_hour` is not set, or `date` failed, or state.json did not load | check the daemon log for the lines in section 5 | `host/src/tests/config.rs::a_key_the_struct_does_not_read_is_reported_even_where_a_list_named_it`, `2267-2280` |
 
 ### 8.8 Notifications
 
@@ -891,16 +891,16 @@ Each notification is one JSON body with `source`, `op`, `label`, `ok`,
 `error` and `version` (`core/src/notify.rs:15-25`). Only an HTTP 2xx counts
 as delivered (`core/src/notify.rs:149-159`). The primary route is tried
 first, the fallback only when it fails (`core/src/notify.rs:174-185`,
-`host/src/main.rs:2865-2925`).
+`host/src/tests/doctor.rs::fix_130_the_new_doctor_probes_read_the_machine`).
 
 | Symptom | Cause | First action | Source |
 |---|---|---|---|
-| `homelab check` reports `no route accepted the last notification` | every route failed on the last attempt; the reason is kept in state | the finding quotes the reason; check the webhook targets in host.toml | `core/src/ops/fleetcheck.rs:899-933`, `host/src/main.rs:2933-2950` |
-| the same failure did not notify a second time | identical failures of the same operation are suppressed for 20 hours; a changed error text passes; successes always pass | expected. The counter lives in memory, so a daemon restart resets it | `host/src/main.rs:1796-1798`, `core/src/notify.rs:27-58` |
-| `cannot write the header file <path>: <e>` as the recorded reason | a route that needs a bearer token was skipped because its header file could not be written under `secrets/` | check that the state directory's `secrets/` is writable by the daemon | `host/src/main.rs:2884-2895` |
-| no notifications at all, and no failure recorded | no webhook is configured: with neither route set nothing is sent and nothing is recorded | `homelab config` shows the webhook setting | `host/src/main.rs:2868-2871` |
+| `homelab check` reports `no route accepted the last notification` | every route failed on the last attempt; the reason is kept in state | the finding quotes the reason; check the webhook targets in host.toml | `core/src/ops/fleetcheck.rs:899-933`, `host/src/tests/doctor.rs::fix_131_incident_show_reads_one_bundle_and_nothing_else` |
+| the same failure did not notify a second time | identical failures of the same operation are suppressed for 20 hours; a changed error text passes; successes always pass | expected. The counter lives in memory, so a daemon restart resets it | `host/src/tests/refusals.rs::fix_141_the_hello_names_the_build`, `core/src/notify.rs:27-58` |
+| `cannot write the header file <path>: <e>` as the recorded reason | a route that needs a bearer token was skipped because its header file could not be written under `secrets/` | check that the state directory's `secrets/` is writable by the daemon | `host/src/tests/doctor.rs::fix_130_the_new_doctor_probes_read_the_machine` |
+| no notifications at all, and no failure recorded | no webhook is configured: with neither route set nothing is sent and nothing is recorded | `homelab config` shows the webhook setting | `host/src/tests/doctor.rs::fix_130_the_new_doctor_probes_read_the_machine` |
 
-`homelab config` prints the webhook URL in full (`client/src/main.rs:1246-1250`).
+`homelab config` prints the webhook URL in full (`client/src/commands/new_stack.rs::cmd_new`).
 That URL carries the webhook id; keep the output out of anything shared.
 
 ### 8.9 Fleet-check findings
@@ -970,16 +970,16 @@ where each is read, where its other copies are, and how to put one back.
 
 - **Read from**: `HOMELAB_TOKEN` in the daemon's environment first, else
   `token` in host.toml. Fewer than 16 characters stops the daemon with the
-  `FATAL: token must be set` line (`host/src/main.rs:409-419`). If the unit
+  `FATAL: token must be set` line (`host/src/config/tokens.rs::validate_tokens`). If the unit
   sets `HOMELAB_TOKEN`, that value wins and editing host.toml changes
   nothing; `systemctl show homelab-host -p Environment` shows it (and prints
   the value).
 - **Copy on every workstation**: the client sends its token as a bearer
   header and the host accepts only an exact match
-  (`client/src/main.rs:1093-1096`, `host/src/main.rs:2128-2132`, test
-  `h12_bearer_check` at `host/src/main.rs:1438-1449`). So
+  (`client/src/commands/manual_checks.rs::cmd_checks`, `host/src/tests/notices.rs::fix_143_the_nightly_edge_check_reports_not_configured_without_a_token`, test
+  `h12_bearer_check` at `host/src/config/tokens.rs::write_tokens`). So
   `~/.config/homelab/env` or the repository's `.env` on any working
-  workstation holds the same value (`client/src/main.rs:45-54`).
+  workstation holds the same value (`client/src/commands/ctx.rs::repo_root`).
 - **Copy in the host-meta backup**: the host-meta snapshot includes
   `/etc/homelab/host.toml` (`core/src/ops/backup.rs:989`, `1056-1064`). It
   survives the loss of the host disk, but only holds the token if the token
@@ -998,11 +998,11 @@ until the new one is in place.
    ```
 
    The client accepts an `export ` prefix and strips surrounding quotes
-   (`client/src/main.rs:67`, `82`); copy the bare value.
+   (`client/src/commands/ctx.rs::stack_dir`, `82`); copy the bare value.
 
 2. On the Proxmox host, write it as the first line of host.toml, above any
    `[table]` header (a key below a header belongs to that table,
-   `host/src/main.rs:391-398`). `read -rs` keeps it off the screen:
+   `host/src/gather_capacity.rs::gather_host_capacity`). `read -rs` keeps it off the screen:
 
    ```bash
    # Proxmox host, as root
@@ -1017,7 +1017,7 @@ until the new one is in place.
    ```
 
    The file is kept at mode 600 because the daemon itself writes it that way
-   when it saves settings (`host/src/main.rs:702-723`).
+   when it saves settings (`host/src/config/load.rs::load_config_from`).
 
 3. On the workstation, `homelab ping` must answer. If it does not, restore
    `/etc/homelab/host.toml.bak`.
@@ -1100,7 +1100,7 @@ Recipe 2, no copy: let the daemon make a new pair and re-pin every client.
 
 The daemon starts without it; backups, restores and the host-meta snapshot
 fail. It lives at `/var/lib/homelab/secrets/restic.pw` unless host.toml says
-otherwise (`core/src/ops/backup.rs:128`, `host/src/main.rs:479`). The
+otherwise (`core/src/ops/backup.rs:128`, `host/src/config/tokens.rs::validate_tokens`). The
 host-meta snapshot contains the `secrets/` directory
 (`core/src/ops/backup.rs:971`, `1058`), but that snapshot is encrypted with
 the same password (`core/src/ops/backup.rs:1010-1021`), so it cannot give the

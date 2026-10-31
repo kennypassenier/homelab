@@ -8,7 +8,7 @@ list is built from this.
 
 - 46 `Command` variants (lib.rs:29-310), 7 `ServerMsg` kinds: Hello, Log, Ask,
   Transfer, State, Config, RpcDone (lib.rs:434-476). One WSS line on
-  `/api/ws`, bearer token, pinned self-signed TLS (host/src/main.rs:2873-2879).
+  `/api/ws`, bearer token, pinned self-signed TLS (host/src/tests/doctor.rs::fix_130_the_new_doctor_probes_read_the_machine).
 - Mutating commands take the global op lock (AR12, main.rs:4870), stream `Log`
   lines, end with one `RpcDone`. `Log`/`Ask`/`Transfer`/`State`/`Config` are
   broadcast to every session; log lines carry **no request id**.
@@ -18,7 +18,7 @@ list is built from this.
 - `GetState` hard-codes `running=true`, `restarts=0`, `online=true`,
   `env_sealed=true`, `cpu_pct=0`, `ram_pct=0` (main.rs:6440-6480).
 - Only the deploy's "service checks" step asks the operator (deploy.rs:3434);
-  the CLI cannot answer (client/src/main.rs:1801-1810), the TUI can (`a`/`s`).
+  the CLI cannot answer (client/src/commands/apply_plan.rs::print_deploy_detail), the TUI can (`a`/`s`).
 - `HostConfigView` exposes 3 of ~45 host.toml keys (backup_hour,
   notify_webhook, retention; lib.rs:314-322). The rest: ssh only.
 - No snapshot list, no container log tail, no metric series over the line.

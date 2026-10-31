@@ -51,7 +51,7 @@ Severity is the highest rating any reviewer gave unless noted; disagreements are
 - **Key:** `host-release-unsigned` · **Status:** open · **Effort:** M · **Kind:** code fix Claude can do alone
 - **Reviewers:** security, devops, system
 - **Note:** Kenny types the minisign passphrase at release time, as for the other projects.
-- **Evidence:** `client/src/release.rs:57-62`: `stage_release` uses `signed=false`, checksum only from the same GitHub release. `.github/workflows/release.yml:11-12`: `contents: write` for the job that runs clippy/test/build (every dependency's `build.rs`); `actions/checkout@v7` persists credentials; `softprops/action-gh-release@v3` pinned by mutable tag; no `--locked` on release build (`release.yml:20-25`); no check that the tag equals `Cargo.toml` or is on `main`; `release-update` with no argument installs whatever is `latest` (`client/src/main.rs:925-933`).
+- **Evidence:** `client/src/release.rs:57-62`: `stage_release` uses `signed=false`, checksum only from the same GitHub release. `.github/workflows/release.yml:11-12`: `contents: write` for the job that runs clippy/test/build (every dependency's `build.rs`); `actions/checkout@v7` persists credentials; `softprops/action-gh-release@v3` pinned by mutable tag; no `--locked` on release build (`release.yml:20-25`); no check that the tag equals `Cargo.toml` or is on `main`; `release-update` with no argument installs whatever is `latest` (`client/src/commands/host_cmd.rs::host_settings`).
 - **Failure scenario:** One compromised crate build script, a moved action tag, a stolen gh token or a stray tag push yields a release that the next `homelab release-update` installs as root on the hypervisor, with a checksum that passes by construction.
 - **Recommendation:** Sign `SHA256SUMS` with the ecosystem minisign key and flip `stage_release` to `signed=true`; make the host verify `SelfUpdateHost`/`InstallNative` too. Split `release.yml` into a read-only build job (`persist-credentials: false`, `--locked`) and a publish job. Pin actions by SHA; check tag == version and ancestry of `main`.
 
@@ -59,7 +59,7 @@ Severity is the highest rating any reviewer gave unless noted; disagreements are
 
 - **Key:** `api-token-is-root` · **Status:** open · **Effort:** M · **Kind:** code fix Claude can do alone
 - **Reviewers:** security, network, rust, system
-- **Evidence:** `SelfUpdateHost` installs any binary and runs it as root (`core/src/ops/selfupdate.rs`); `install-native --file` checks nothing. `data_mounts.host_path` may be any absolute path (`core/src/manifest.rs:685-697`) and `unprivileged: false` is honoured (`deploy.rs:700-701`). `exec_enabled` gates only `Rpc::ExecIn` (`host/src/main.rs:2865-2867`); `checks.yml` commands run regardless. `wipe`'s typed confirmation is client-side only. `bearer_ok` is a plain `==` (`main.rs:2139-2143`), the 401 branch logs nothing (`:2718-2723`), no rate limit; one static token shared by Garuda, WSL and Windows.
+- **Evidence:** `SelfUpdateHost` installs any binary and runs it as root (`core/src/ops/selfupdate.rs`); `install-native --file` checks nothing. `data_mounts.host_path` may be any absolute path (`core/src/manifest.rs:685-697`) and `unprivileged: false` is honoured (`deploy.rs:700-701`). `exec_enabled` gates only `Rpc::ExecIn` (`host/src/tests/doctor.rs::fix_130_the_new_doctor_probes_read_the_machine`); `checks.yml` commands run regardless. `wipe`'s typed confirmation is client-side only. `bearer_ok` is a plain `==` (`main.rs:2139-2143`), the 401 branch logs nothing (`:2718-2723`), no rate limit; one static token shared by Garuda, WSL and Windows.
 - **Failure scenario:** Malware on any of the three workstation OSes reads the Syncthing-synced token and gets root on the hypervisor; a probe from a compromised container leaves no trace.
 - **Recommendation:** Log every 401 with peer address and count it for `doctor`; constant-time compare. Add host-side policy in `host.toml` (`privileged_vmids`, `data_mount_roots`) that deploy refuses to exceed. Verify minisign on self-update (depends on host-release-unsigned). Per-machine tokens with names logged per mutating call.
 
@@ -67,7 +67,7 @@ Severity is the highest rating any reviewer gave unless noted; disagreements are
 
 - **Key:** `pve-management-on-container-vlan` · **Status:** open · **Effort:** M · **Kind:** needs a decision from Kenny (pve)
 - **Reviewers:** security, network
-- **Evidence:** `config/client.toml:15` points clients at `pve:8443` (rescue leg on VLAN 10, gap-13). Daemon listens on `0.0.0.0:8443` (`host/src/main.rs:420-425`). `captured/pve-host/firewall/host.fw` has `enable: 0`. OPNsense's T57 rule does not apply to the on-link pve (F183); only CT 116's `116.fw` drops it. Live firewall state not measured (`nft list ruleset; pve-firewall status`).
+- **Evidence:** `config/client.toml:15` points clients at `pve:8443` (rescue leg on VLAN 10, gap-13). Daemon listens on `0.0.0.0:8443` (`host/src/config/tokens.rs::validate_tokens`). `captured/pve-host/firewall/host.fw` has `enable: 0`. OPNsense's T57 rule does not apply to the on-link pve (F183); only CT 116's `116.fw` drops it. Live firewall state not measured (`nft list ruleset; pve-firewall status`).
 - **Failure scenario:** A compromised Jellyfin, FlareSolverr or *arr container talks directly to pve's SSH, Proxmox login and the orchestrator daemon, without passing OPNsense, and can ARP-spoof between the desktop and pve. The T57 goal 'a container must not reach the host' was undone for every guest but one.
 - **Recommendation:** Either a pve host firewall with an explicit admin allowlist (22/8006/8443 only from the workstation and the management net, drop the rest of the container subnet), or remove the rescue leg and bind the daemon to pve. Either way add `OUT DROP -dest pve` to every guest.
 
@@ -118,7 +118,7 @@ Severity is the highest rating any reviewer gave unless noted; disagreements are
 - **Key:** `nightly-report-always-red` · **Status:** open · **Effort:** M · **Kind:** code fix Claude can do alone
 - **Reviewers:** system, usability, devops
 - **Note:** Reviewers counted the open items differently (system: seven open; usability: six to confirm, ten answers reopened); both agree on 9 findings total.
-- **Evidence:** Live 2026-09-27: `homelab check` shows `9 finding(s)` (usability counts 1 broken, 6 to confirm, 2 noted; system says seven open manual checks) while state shows all 30 manual checks answered. `evaluate_manual` reopens any answer older than the stack's `applied_at` (`core/src/ops/manualchecks.rs:121-147`), and `applied_at` moves on every deploy. kp-soft's deliberate `nok` (D56) is `broken` with no accept state (gap-18). The nightly report goes through `notify_raw` without damper (`host/src/main.rs:2656-2690`), and every success also notifies (`core/src/notify.rs:46-48`). `check` therefore exits 1 every day and cannot gate anything.
+- **Evidence:** Live 2026-09-27: `homelab check` shows `9 finding(s)` (usability counts 1 broken, 6 to confirm, 2 noted; system says seven open manual checks) while state shows all 30 manual checks answered. `evaluate_manual` reopens any answer older than the stack's `applied_at` (`core/src/ops/manualchecks.rs:121-147`), and `applied_at` moves on every deploy. kp-soft's deliberate `nok` (D56) is `broken` with no accept state (gap-18). The nightly report goes through `notify_raw` without damper (`host/src/tests/config_save.rs::feat_settings_1_a_change_is_checked_like_a_start`), and every success also notifies (`core/src/notify.rs:46-48`). `check` therefore exits 1 every day and cannot gate anything.
 - **Failure scenario:** Kenny's phone gets the same red report every night, he learns to ignore it, and a real 'last backup was 60 hours ago' arrives in the same red envelope. From his side, answers he gave that morning do not stick.
 - **Recommendation:** Reopen a check only when that app's files or image digest changed (store the hash with the answer); say why it reopened. Add an 'accepted until <date> because <reason>' answer that shows as `noted`. Send the nightly report only when the alarming set changes (or weekly digest); drop success notifications or route them to a log-only topic. Give `check` a severity-based exit code. Allow answering several checks in one go.
 
@@ -126,7 +126,7 @@ Severity is the highest rating any reviewer gave unless noted; disagreements are
 
 - **Key:** `native-update-ignores-manual-policy` · **Status:** open · **Effort:** S · **Kind:** code fix Claude can do alone
 - **Reviewers:** system, devops
-- **Evidence:** `host/src/main.rs:2394-2408` filters `release_update` to Auto, but `:2409-2418` runs `update_native` for every native, which executes the unit's own `update_cmd` (`core/src/ops/native.rs:1205+`, `:1273-1283`). `stacks/kyu/http-switchboard/service.yml:28-39` and `stacks/almanac/service.yml:64,73` have both `update_cmd` and `update_policy: manual`. REGISTER step-16 confirms the kit `update` ran for kyu, kyu-runner and http-switchboard. The `update_cmd` path bypasses `core/src/release_sig.rs`.
+- **Evidence:** `host/src/tests/config_save.rs::feat_settings_1_the_view_hides_secrets_and_hashes` filters `release_update` to Auto, but `:2409-2418` runs `update_native` for every native, which executes the unit's own `update_cmd` (`core/src/ops/native.rs:1205+`, `:1273-1283`). `stacks/kyu/http-switchboard/service.yml:28-39` and `stacks/almanac/service.yml:64,73` have both `update_cmd` and `update_policy: manual`. REGISTER step-16 confirms the kit `update` ran for kyu, kyu-runner and http-switchboard. The `update_cmd` path bypasses `core/src/release_sig.rs`.
 - **Failure scenario:** http-switchboard, the one service that translates alarms and was set to manual so a nightly surprise cannot break the alert path, updates itself every night anyway, bypassing the orchestrator's signature check.
 - **Recommendation:** Gate `update_native` on the same policy (or add an explicit third value such as `self`), pick one update mechanism per service, and add a scheduler test: a manual native with an `update_cmd` gets no update op.
 
@@ -134,7 +134,7 @@ Severity is the highest rating any reviewer gave unless noted; disagreements are
 
 - **Key:** `failed-update-parks-backups` · **Status:** open · **Effort:** S · **Kind:** code fix Claude can do alone
 - **Reviewers:** system, devops, backup
-- **Evidence:** `core/src/ops/backup.rs:67-69`: `parks_the_stack(update_ok) = Failed || !update_ok`; the scheduler sets `enabled=false` (`host/src/main.rs:2443-2472`, `:2507-2531`); `nightly_plan` skips disabled stacks for backup and update (`:2008-2012`). Even a successful rollback returns `Err` (`update.rs:278-283`).
+- **Evidence:** `core/src/ops/backup.rs:67-69`: `parks_the_stack(update_ok) = Failed || !update_ok`; the scheduler sets `enabled=false` (`host/src/tests/config.rs::fix_false_alarm_watch_url_to_check`, `:2507-2531`); `nightly_plan` skips disabled stacks for backup and update (`:2008-2012`). Even a successful rollback returns `Err` (`update.rs:278-283`).
 - **Failure scenario:** One bad upstream `bazarr:latest` image, or a Drive 5xx at the backup hour, and the media stack (Jellyfin config included) gets no backups until someone types `homelab enable media`. During a week's holiday that is a week without backups.
 - **Recommendation:** Split the flag: park updates per app (with reason and digest), never backups. A failed backup should be retried every night and escalated, not parked.
 
@@ -142,7 +142,7 @@ Severity is the highest rating any reviewer gave unless noted; disagreements are
 
 - **Key:** `updates-run-after-failed-backup` · **Status:** open · **Effort:** S · **Kind:** code fix Claude can do alone
 - **Reviewers:** system
-- **Evidence:** `host/src/main.rs:2477`: `scheduled-update` runs unconditionally after the batch backup; natives at `:2401`, `:2411`. The backup defers for the whole stack when in use, but the update asks only about Jellyfin (`update.rs`).
+- **Evidence:** `host/src/tests/notices.rs::fix_184_down_notice_waits_for_the_full_threshold`: `scheduled-update` runs unconditionally after the batch backup; natives at `:2401`, `:2411`. The backup defers for the whole stack when in use, but the update asks only about Jellyfin (`update.rs`).
 - **Failure scenario:** Someone watches a film at 02:00, the media backup stands aside, and sonarr, radarr, prowlarr, bazarr and seerr are still updated and migrate their databases with no backup from that night.
 - **Recommendation:** Skip every automatic update of a stack whose backup tonight was not `Done`, and log the skip.
 
@@ -168,7 +168,7 @@ Severity is the highest rating any reviewer gave unless noted; disagreements are
 - **Key:** `state-writes-race` · **Status:** open · **Effort:** M · **Kind:** code fix Claude can do alone
 - **Reviewers:** system, rust
 - **Note:** system rated HIGH, rust MEDIUM.
-- **Evidence:** About a dozen load-modify-save sequences outside `op_lock` (`record_notify_outcome` `host/src/main.rs:2945-2961`, `record_backup_time` `:3176-3186`, `AnswerManualCheck` `:3910-3921`, scheduler writes). The nightly batch runs 3 backups at once (`run_backup_batch`, `buffer_unordered`), each calling `notify` (writes `notify-route-0.header`, `core/src/notify.rs:188-190`) and `record_notify_outcome`. `write_file` uses a fixed `<path>.tmp` (`main.rs:1581-1602`); errors are dropped by `let _ = store.save(...)`; no directory fsync. `StageNativeBinary` writes tens of MB without `op_lock` (`main.rs:3270-3276`). Predicted from code, not observed.
+- **Evidence:** About a dozen load-modify-save sequences outside `op_lock` (`record_notify_outcome` `host/src/tests/doctor.rs::fix_131_incident_show_reads_one_bundle_and_nothing_else`, `record_backup_time` `:3176-3186`, `AnswerManualCheck` `:3910-3921`, scheduler writes). The nightly batch runs 3 backups at once (`run_backup_batch`, `buffer_unordered`), each calling `notify` (writes `notify-route-0.header`, `core/src/notify.rs:188-190`) and `record_notify_outcome`. `write_file` uses a fixed `<path>.tmp` (`main.rs:1581-1602`); errors are dropped by `let _ = store.save(...)`; no directory fsync. `StageNativeBinary` writes tens of MB without `op_lock` (`main.rs:3270-3276`). Predicted from code, not observed.
 - **Failure scenario:** Two backups finish at the same moment in the night: state.json is torn and quarantined so every mutating operation is refused, or a `last_backup` is silently lost, or the notification header is half-written and the alert is dropped.
 - **Recommendation:** One `StateStore::update(|s| ...)` API behind a single async mutex; unique temp names (`<path>.<pid>.<n>.tmp`) and a directory fsync; write the notify header files once at start-up; stage native binaries through `exec.write_file` under the lock.
 
@@ -208,7 +208,7 @@ Severity is the highest rating any reviewer gave unless noted; disagreements are
 
 - **Key:** `daemon-units-outside-repo` · **Status:** open · **Effort:** M · **Kind:** live change on a machine (pve)
 - **Reviewers:** devops, system, logging, backup
-- **Evidence:** REGISTER gap-31 (open); `docs/DR_RUNBOOK.md:77-93` recreates a minimal unit (`Restart=on-failure`, no `Type=notify`, no `WatchdogSec`, no `OnFailure=`) while the live unit has `Type=notify` + `WatchdogSec` (REALIZATION_PLAN.md:112). `captured/pve-host/` holds only the smart collector. `homelab doctor` does not check the unit. `core/src/ops/selfupdate.rs:39-48` hardcodes `/var/lib/homelab/...` for the marker while the new binary clears `{state_dir}/selfupdate.pending` (`host/src/main.rs:1884`).
+- **Evidence:** REGISTER gap-31 (open); `docs/DR_RUNBOOK.md:77-93` recreates a minimal unit (`Restart=on-failure`, no `Type=notify`, no `WatchdogSec`, no `OnFailure=`) while the live unit has `Type=notify` + `WatchdogSec` (REALIZATION_PLAN.md:112). `captured/pve-host/` holds only the smart collector. `homelab doctor` does not check the unit. `core/src/ops/selfupdate.rs:39-48` hardcodes `/var/lib/homelab/...` for the marker while the new binary clears `{state_dir}/selfupdate.pending` (`host/src/tests/support.rs::config_from_text`).
 - **Failure scenario:** After a host rebuild following the runbook, the daemon runs without watchdog and without self-update rollback, and nothing reports it; the next bad self-update has no safety net.
 - **Recommendation:** Commit `homelab-host.service` and the rollback unit/script (e.g. `host/systemd/`), install them from the binary or the self-update op, include them in host-meta, render DR_RUNBOOK from them, and let `doctor` compare `OnFailure`, `WatchdogUSec`, `Type` and the marker path. Derive `SelfUpdateCfg` from `state_dir`.
 
@@ -216,7 +216,7 @@ Severity is the highest rating any reviewer gave unless noted; disagreements are
 
 - **Key:** `background-tasks-unsupervised` · **Status:** open · **Effort:** M · **Kind:** code fix Claude can do alone
 - **Reviewers:** rust
-- **Evidence:** `host/src/main.rs:1853`: `tokio::spawn(scheduler_loop)` with the handle dropped. 19 unwrap/expect in host code, 9 of them `state.settings.read()/write().unwrap()` and 2 `damper.lock().unwrap()` (poisoning). The watchdog is fed by its own 10 s loop (`:1896-1901`); `/api/health` answers a constant 'ok'. No signal handling at all (grep: 0). `READY=1` is sent (`:1895`) before the socket binds (`:1903`).
+- **Evidence:** `host/src/tests/refusals.rs::fix_211_a_command_with_only_known_fields_is_never_refused`: `tokio::spawn(scheduler_loop)` with the handle dropped. 19 unwrap/expect in host code, 9 of them `state.settings.read()/write().unwrap()` and 2 `damper.lock().unwrap()` (poisoning). The watchdog is fed by its own 10 s loop (`:1896-1901`); `/api/health` answers a constant 'ok'. No signal handling at all (grep: 0). `READY=1` is sent (`:1895`) before the socket binds (`:1903`).
 - **Failure scenario:** One panic in the scheduler ends nightly backups for good without a word, while systemd's watchdog stays happy. A `systemctl stop` or self-update restart kills a step mid-way.
 - **Recommendation:** Keep the task handles and `select!` on them so the process exits non-zero when the scheduler dies; feed `WATCHDOG=1` from the scheduler tick; add a SIGTERM handler that stops accepting, waits for `op_lock` with a bound and exits 0 (Kenny's adoption norm N1); replace `.unwrap()` on locks.
 
@@ -224,7 +224,7 @@ Severity is the highest rating any reviewer gave unless noted; disagreements are
 
 - **Key:** `timeout-leaves-container-work-running` · **Status:** open · **Effort:** M · **Kind:** code fix Claude can do alone
 - **Reviewers:** rust
-- **Evidence:** `RealExecutor::run` (`host/src/main.rs:1545-1569`) uses `kill_on_drop` + `tokio::time::timeout`, killing only `pct`, not `lxc-attach` or the script (no process group). Only `facts.rs:468` uses `timeout` inside the container. The registry-cache fallback (`deploy.rs:1616-1660`) runs `docker system prune -f` and a second pull after a timeout. Reasoned from code, not measured.
+- **Evidence:** `RealExecutor::run` (`host/src/tests/commands.rs::a_stalled_streaming_command_is_stopped_and_a_moving_one_is_not`) uses `kill_on_drop` + `tokio::time::timeout`, killing only `pct`, not `lxc-attach` or the script (no process group). Only `facts.rs:468` uses `timeout` inside the container. The registry-cache fallback (`deploy.rs:1616-1660`) runs `docker system prune -f` and a second pull after a timeout. Reasoned from code, not measured.
 - **Failure scenario:** A slow image pull times out; the step is reported failed, but the first pull keeps running next to the prune and the second pull, and changes the container after the operation said it stopped. 'Re-running is always safe' no longer holds.
 - **Recommendation:** Spawn with `.process_group(0)` and `killpg(SIGKILL)` on timeout; wrap `pct_sh` scripts as `timeout -k 10 <N> sh -c ...`. Measure once on a scratch CT that a timed-out `sleep 600` leaves nothing behind.
 
@@ -232,7 +232,7 @@ Severity is the highest rating any reviewer gave unless noted; disagreements are
 
 - **Key:** `host-questions-unanswerable` · **Status:** open · **Effort:** M · **Kind:** code fix Claude can do alone
 - **Reviewers:** rust, usability
-- **Evidence:** `host/src/main.rs:2766-2782`: the WebSocket loop handles one RPC at a time inline; the TUI uses one socket for `DeployStack` and `Command::Answer` (`client/src/tui/backend.rs:45-133`, `model.rs:606`, `:1511`), so the answer is not read until the deploy returns. `LiveAsker::ask` waits `ask_timeout_s` (`:1728-1765`). The CLI prints 'run this from the TUI to decide' and times out as `Unattended` after 120 s (`client/src/main.rs:1318-1343`); `apply` stops at the first failed deploy (`:780-789`); the TUI has no apply. Code-derived; no round-trip test exists.
+- **Evidence:** `host/src/tests/doctor.rs::doctor_probes_surface_stale_backup_and_dead_offsite`: the WebSocket loop handles one RPC at a time inline; the TUI uses one socket for `DeployStack` and `Command::Answer` (`client/src/tui/backend.rs:45-133`, `model.rs:606`, `:1511`), so the answer is not read until the deploy returns. `LiveAsker::ask` waits `ask_timeout_s` (`:1728-1765`). The CLI prints 'run this from the TUI to decide' and times out as `Unattended` after 120 s (`client/src/commands/new_stack.rs::print_scaffolded`); `apply` stops at the first failed deploy (`:780-789`); the TUI has no apply. Code-derived; no round-trip test exists.
 - **Failure scenario:** Kenny removes a route on purpose and runs `homelab apply`; the deploy asks 'routes went from 29 to 28, allow?', the CLI cannot answer, the TUI's answer never arrives, and the deploy fails with an incident bundle.
 - **Recommendation:** Spawn a task per request in `ws_session` (mutations are already serialised by `op_lock`), or at least handle `Answer`, `GetState`, `Ping` out of band; add a real WebSocket round-trip test. Let the CLI answer on a TTY, accept a pre-answer such as `--expect-lower routes`, add apply to the TUI, one language per surface.
 
@@ -241,7 +241,7 @@ Severity is the highest rating any reviewer gave unless noted; disagreements are
 - **Key:** `tui-connection-skips-guards` · **Status:** open · **Effort:** M · **Kind:** code fix Claude can do alone
 - **Reviewers:** rust, security
 - **Note:** rust rated HIGH; security rated the TOFU part MEDIUM (finding 9).
-- **Evidence:** Connection setup is written twice: `client/src/main.rs:1220-1380` (CLI) vs `client/src/tui/backend.rs:50-100` (TUI). The TUI lacks the refuse-mutating-to-older-host rule (`main.rs:1357-1375`, built after the 2026-08-31 data_mounts incident), `reconcile_pin` (`:1262`), and the 64 MiB frame limit (fix-30). The TUI TOFUs and saves any certificate (`backend.rs:66-68, 91-95`); the CLI outside the repo also TOFUs (`repo_config.rs:63-73`, `main.rs:1259-1316`), and the bearer is sent right after.
+- **Evidence:** Connection setup is written twice: `client/src/commands/stacks.rs::cmd_exec` (CLI) vs `client/src/tui/backend.rs:50-100` (TUI). The TUI lacks the refuse-mutating-to-older-host rule (`main.rs:1357-1375`, built after the 2026-08-31 data_mounts incident), `reconcile_pin` (`:1262`), and the 64 MiB frame limit (fix-30). The TUI TOFUs and saves any certificate (`backend.rs:66-68, 91-95`); the CLI outside the repo also TOFUs (`repo_config.rs:63-73`, `main.rs:1259-1316`), and the bearer is sent right after.
 - **Failure scenario:** On a new machine (the planned Windows client), the first TUI or out-of-repo CLI run sends the root-equivalent token to whatever answers at the address; and a TUI deploy to an older host can silently drop fields again, as in the 73-torrent `missingFiles` incident.
 - **Recommendation:** One `connect(host, token)` in `homelab_client` that applies pin, frame limit and version gate, used by both CLI and TUI, with a test. Compile the fleet pin into the client (like `RELEASE_PUBKEY`), or never send the bearer on a TOFU connection.
 
@@ -258,7 +258,7 @@ Severity is the highest rating any reviewer gave unless noted; disagreements are
 
 - **Key:** `error-detail-unmasked-to-phone` · **Status:** open · **Effort:** S · **Kind:** code fix Claude can do alone
 - **Reviewers:** logging, rust
-- **Evidence:** `core/src/ops/deploy.rs:1919-1934` (`docker compose logs --tail 20` into `CoreError::Command.detail`), `core/src/ops/native.rs:444-451` (`journalctl -n 20`), `executor::run_ok` (full stderr); `core/src/error.rs:69-74` `why = detail`; `host/src/main.rs:3076` (journal), bundle `report.json`, `:2840-2843` notification `error = what :: why` to HA's `/media/homelab_events.log`, logbook and phone. Neither the fix-30 cap nor the fix-39 mask applies.
+- **Evidence:** `core/src/ops/deploy/push.rs::content_for_container` (`docker compose logs --tail 20` into `CoreError::Command.detail`), `core/src/ops/native.rs:444-451` (`journalctl -n 20`), `executor::run_ok` (full stderr); `core/src/error.rs:69-74` `why = detail`; `host/src/tests/support.rs::serve_state_on_loopback` (journal), bundle `report.json`, `:2840-2843` notification `error = what :: why` to HA's `/media/homelab_events.log`, logbook and phone. Neither the fix-30 cap nor the fix-39 mask applies.
 - **Failure scenario:** A crash-looping app prints its configuration or DSN; that text lands verbatim in HA's log file, the logbook and a phone notification, possibly kilobytes long.
 - **Recommendation:** Run diagnostics through the shared masker and `trace_line` before embedding; cap `why` in the notification (about 1 KB, 'full text in <bundle>'); keep the full masked text only in the bundle.
 
@@ -266,7 +266,7 @@ Severity is the highest rating any reviewer gave unless noted; disagreements are
 
 - **Key:** `unparseable-frame-logged-whole` · **Status:** open · **Effort:** S · **Kind:** code fix Claude can do alone
 - **Reviewers:** logging
-- **Evidence:** `host/src/main.rs:2774`: `error!("unparseable request dropped :: {} :: {}", e, text)`; `DeploySpec.env` is 'the secrets channel' (`core/src/manifest.rs:418-420`); `StageNativeBinary`/`SelfUpdateHost` carry 40 to 95 MB of base64. Latent: not observed.
+- **Evidence:** `host/src/tests/doctor.rs::doctor_probes_surface_stale_backup_and_dead_offsite`: `error!("unparseable request dropped :: {} :: {}", e, text)`; `DeploySpec.env` is 'the secrets channel' (`core/src/manifest.rs:418-420`); `StageNativeBinary`/`SelfUpdateHost` carry 40 to 95 MB of base64. Latent: not observed.
 - **Failure scenario:** An older client against a newer host that made a field mandatory sends a deploy: every secret of that stack, or tens of MB of base64, lands in one pve journal line.
 - **Recommendation:** Log the serde error, frame length and method tag only, never the body.
 
@@ -306,7 +306,7 @@ Severity is the highest rating any reviewer gave unless noted; disagreements are
 
 - **Key:** `four-answers-to-is-anything-wrong` · **Status:** open · **Effort:** M · **Kind:** code fix Claude can do alone
 - **Reviewers:** usability, system
-- **Evidence:** Live, same minute: `doctor` green Ok (24.3 s), `check` red 9 findings exit 1 (41.1 s), `status` 1,473 lines of raw `state.json` with epoch times (`host/src/main.rs:3226-3240`), TUI ticker 'ALL SYSTEMS NOMINAL' that never reads check findings or incidents (`client/src/tui/view/mod.rs:596-660`). The morning check (op-2) takes four verbs and over 65 s.
+- **Evidence:** Live, same minute: `doctor` green Ok (24.3 s), `check` red 9 findings exit 1 (41.1 s), `status` 1,473 lines of raw `state.json` with epoch times (`host/src/tests/questions.rs::fix_240_another_session_answers_a_running_operations_question`), TUI ticker 'ALL SYSTEMS NOMINAL' that never reads check findings or incidents (`client/src/tui/view/mod.rs:596-660`). The morning check (op-2) takes four verbs and over 65 s.
 - **Failure scenario:** Kenny opens the TUI, sees 'ALL SYSTEMS NOMINAL', and misses the one broken item that `check` lists seventh of nine.
 - **Recommendation:** One verb (`homelab today` or bare `homelab`) and one TUI panel merging doctor, check, open incidents and manual checks, sorted by severity, one line and one remedy each, ending in 'Nothing needs you' or 'N things need you'. Turn `status` into a human table and put raw JSON behind `--json`. The ticker uses the same verdict or goes.
 
@@ -314,7 +314,7 @@ Severity is the highest rating any reviewer gave unless noted; disagreements are
 
 - **Key:** `restore-no-confirm-no-safety-snapshot` · **Status:** open · **Effort:** M · **Kind:** code fix Claude can do alone
 - **Reviewers:** usability
-- **Evidence:** `client/src/main.rs:870-893`: `homelab restore` goes straight to `RestoreStack`; the TUI asks for a typed name (`model.rs:801-825`). Host restore steps take no snapshot of current data (`core/src/ops/backup.rs:870-1010`). Picking an older snapshot needs a root shell and three `export RESTIC_*` lines (op-10). Code-derived.
+- **Evidence:** `client/src/commands/host_cmd.rs::host_restart`: `homelab restore` goes straight to `RestoreStack`; the TUI asks for a typed name (`model.rs:801-825`). Host restore steps take no snapshot of current data (`core/src/ops/backup.rs:870-1010`). Picking an older snapshot needs a root shell and three `export RESTIC_*` lines (op-10). Code-derived.
 - **Failure scenario:** Corruption happened before last night's backup, so `latest` is the corruption; a CLI restore overwrites the current state without asking, and that state is gone too.
 - **Recommendation:** Typed name on the CLI (`--yes` for scripts); automatic pre-restore snapshot with its id printed; `homelab snapshots stacks/<name>`; let the TUI show that list before restoring.
 
@@ -332,7 +332,7 @@ Severity is the highest rating any reviewer gave unless noted; disagreements are
 
 - **Key:** `apply-no-confirm-creates-drill` · **Status:** open · **Effort:** S · **Kind:** code fix Claude can do alone
 - **Reviewers:** system, usability
-- **Evidence:** `client/src/main.rs:780-790` deploys each plan entry straight away; no `--dry-run` exists. `scan_local_stacks` takes every dir with an `lxc-compose.yml` (`client/src/spec.rs:415-427`), including `stacks/drill` (vmid 119, 'destroy it in the same sitting'), not in host state; DR runbook lists `119-app-drill` (`docs/DR_RUNBOOK.md:271`). `homelab plan` prints counts, not a per-file diff (`main.rs:671-690`). Since ask-8 deploys also remove things.
+- **Evidence:** `client/src/commands/native_install.rs::cmd_update_native` deploys each plan entry straight away; no `--dry-run` exists. `scan_local_stacks` takes every dir with an `lxc-compose.yml` (`client/src/spec.rs:415-427`), including `stacks/drill` (vmid 119, 'destroy it in the same sitting'), not in host state; DR runbook lists `119-app-drill` (`docs/DR_RUNBOOK.md:271`). `homelab plan` prints counts, not a per-file diff (`main.rs:671-690`). Since ask-8 deploys also remove things.
 - **Failure scenario:** The next `homelab apply` creates CT 119, which is then backed up nightly and appears in monitors, the dashboard and the homepage.
 - **Recommendation:** An `ephemeral: true` (or `apply: false`) key that apply, runbook and check skip, or move drill out of `stacks/`. Show the plan and ask once (`--yes`, `--dry-run`); give `plan` the per-file diff including removals.
 
@@ -340,7 +340,7 @@ Severity is the highest rating any reviewer gave unless noted; disagreements are
 
 - **Key:** `check-blind-to-repo-drift` · **Status:** open · **Effort:** M · **Kind:** code fix Claude can do alone
 - **Reviewers:** system, devops
-- **Evidence:** The client sends only `(dir, vmid)` pairs (`client/src/main.rs:310-337`); `fleetcheck.rs:660-715` never compares the intent hash. Drift is computed only in the TUI (`model.rs:495-506`) and inside `apply`, which then acts. The nightly check has no stack files (`host/src/main.rs:2629-2635`). Nothing diffs `/opt/<stack>` in containers with the host's intent repo. No OS patch-state check (`apt list --upgradable`, `reboot-required`).
+- **Evidence:** The client sends only `(dir, vmid)` pairs (`client/src/commands/host_admin.rs::cmd_answer`); `fleetcheck.rs:660-715` never compares the intent hash. Drift is computed only in the TUI (`model.rs:495-506`) and inside `apply`, which then acts. The nightly check has no stack files (`host/src/tests/config_save.rs::feat_settings_1_a_change_is_checked_like_a_start`). Nothing diffs `/opt/<stack>` in containers with the host's intent repo. No OS patch-state check (`apt list --upgradable`, `reboot-required`).
 - **Failure scenario:** An edited but undeployed stack, a never-deployed stack, or an out-of-band edit inside a container stays invisible until the next deploy overwrites or acts on it.
 - **Recommendation:** Send the local intent hash and emit a `drift` finding; add `apply --plan` with exit codes (0 in sync, 2 pending); nightly hash-diff of `/opt/<stack>` against the intent repo; a patch-state finding.
 
@@ -455,7 +455,7 @@ Severity is the highest rating any reviewer gave unless noted; disagreements are
 
 - **Key:** `self-update-acceptance-weak` · **Status:** open · **Effort:** M · **Kind:** code fix Claude can do alone
 - **Reviewers:** devops, rust
-- **Evidence:** Acceptance is 'alive for 5 s' (`host/src/main.rs:1882-1891`); `READY=1` is sent at `:1895` before the TLS listener binds at `:1903`. `release-update` returns as soon as the restart is scheduled (`client/src/main.rs:947`); a rollback is only visible via a notification sent by the unversioned script.
+- **Evidence:** Acceptance is 'alive for 5 s' (`host/src/tests/support.rs::config_from_text`); `READY=1` is sent at `:1895` before the TLS listener binds at `:1903`. `release-update` returns as soon as the restart is scheduled (`client/src/commands/host_cmd.rs::report_drift`); a rollback is only visible via a notification sent by the unversioned script.
 - **Failure scenario:** A new binary that runs but cannot talk to the client (protocol change, broken RPC) is accepted, and the client can no longer ship the next fix; only ssh plus the manual DR steps remain.
 - **Recommendation:** Accept only after an authenticated RPC round-trip (or at least WS answered and scheduler alive); send `READY=1` after bind; make `release-update` wait up to about 60 s for the new version and exit non-zero on rollback or timeout.
 
@@ -463,7 +463,7 @@ Severity is the highest rating any reviewer gave unless noted; disagreements are
 
 - **Key:** `orchestrator-logs-only-on-pve` · **Status:** open · **Effort:** M · **Kind:** live change on a machine (pve)
 - **Reviewers:** logging, system, rust
-- **Evidence:** REGISTER fix-39 measured alloy and promtail inactive on pve; no journald cap in the repo; `backup_host_meta` (`core/src/ops/backup.rs:1058-1100`) excludes `incidents/`, `journal.jsonl`, `audit.log`. 'Nothing prunes bundles' (DEBUGGING_GUIDE §3.4, 90 bundles today). `journal.jsonl` read whole at every boot and failure (`host/src/main.rs:1814`, `:4418`; `core/src/incidents.rs:89-103`) with blocking `std::fs` on the runtime. `homelab incidents` lists names only.
+- **Evidence:** REGISTER fix-39 measured alloy and promtail inactive on pve; no journald cap in the repo; `backup_host_meta` (`core/src/ops/backup.rs:1058-1100`) excludes `incidents/`, `journal.jsonl`, `audit.log`. 'Nothing prunes bundles' (DEBUGGING_GUIDE §3.4, 90 bundles today). `journal.jsonl` read whole at every boot and failure (`host/src/tests/refusals.rs::fix_55_an_unparseable_frame_is_logged_without_its_body`, `:4418`; `core/src/incidents.rs:89-103`) with blocking `std::fs` on the runtime. `homelab incidents` lists names only.
 - **Failure scenario:** At night the only remote trace is one notification line; everything else needs a root shell on the hypervisor, and on pve disk loss the exec audit trail and every bundle go with it.
 - **Recommendation:** After fixing Loki's exposure and the mask: ship pve's journal (homelab-host, kernel, zfs-zed, smartd, pve*) via Alloy with redaction; add `homelab incidents show <name>`; prune bundles by age/count; bound `journal.jsonl`; add `incidents/` and `audit.log` to host-meta; capture a journald drop-in and let doctor report sizes.
 
@@ -471,7 +471,7 @@ Severity is the highest rating any reviewer gave unless noted; disagreements are
 
 - **Key:** `journal-lines-lack-op-context` · **Status:** open · **Effort:** S · **Kind:** code fix Claude can do alone
 - **Reviewers:** logging, system
-- **Evidence:** `docs/ARCHITECTURE_DECISIONS.md:26` (AR15) vs `ARCHITECTURE_REFERENCE.md:480` 'stderr only; no ring'; `BroadcastSink::emit` (`host/src/main.rs:1627-1631`) logs only `source=HOST` and the message; three backups interleave (`:2231`). tracing-subscriber ANSI on unless `NO_COLOR`; no `.with_ansi(false)`. The ANSI rendering in journalctl is 'verify on pve' (not measured).
+- **Evidence:** `docs/ARCHITECTURE_DECISIONS.md:26` (AR15) vs `ARCHITECTURE_REFERENCE.md:480` 'stderr only; no ring'; `BroadcastSink::emit` (`host/src/tests/commands.rs::fix_51_concurrent_writes_of_one_path_all_succeed_and_stay_whole`) logs only `source=HOST` and the message; three backups interleave (`:2231`). tracing-subscriber ANSI on unless `NO_COLOR`; no `.with_ansi(false)`. The ANSI rendering in journalctl is 'verify on pve' (not measured).
 - **Failure scenario:** At 02:00 a line like `image not found` cannot be attributed to one of three concurrent backups, and `grep 'WARN scheduler'` fails on escape codes.
 - **Recommendation:** Wrap each `run_op_locked` in an `info_span!` with op and stack; log step start/finish to the journal; `.with_ansi(false)` or JSON for journald; implement the JSONL ring or amend AR15.
 
@@ -681,7 +681,7 @@ Severity is the highest rating any reviewer gave unless noted; disagreements are
 
 - **Key:** `long-silences` · **Status:** open · **Effort:** M · **Kind:** code fix Claude can do alone
 - **Reviewers:** usability
-- **Evidence:** Live: `check` 41 s and `doctor` 24 s with nothing after 'link up'; the single op lock makes any mutating command wait for the whole nightly batch with no client message (`host/src/main.rs:2981`, runbook op-0).
+- **Evidence:** Live: `check` 41 s and `doctor` 24 s with nothing after 'link up'; the single op lock makes any mutating command wait for the whole nightly batch with no client message (`host/src/tests/doctor.rs::fix_131_old_bundles_are_removed_from_disk`, runbook op-0).
 - **Failure scenario:** A command typed at 02:30 hangs silently for an unknown time.
 - **Recommendation:** A progress line per phase; when the lock is taken, report 'waiting for the nightly backup (started 04:00, stack 5 of 14)' at once.
 
@@ -721,7 +721,7 @@ Severity is the highest rating any reviewer gave unless noted; disagreements are
 
 - **Key:** `changes-reach-prod-without-ci` · **Status:** open · **Effort:** M · **Kind:** code fix Claude can do alone
 - **Reviewers:** devops
-- **Evidence:** `deploy`/`apply` build from the working tree with no git status check (`client/src/main.rs:692-830`); intent commits say only `deploy <stack>` (`core/src/ops/deploy.rs:1254`); binaries report only `CARGO_PKG_VERSION` (`host/src/main.rs:36`); `make install` and `make host-binary` report the same version as the release; branch protection `enforce_admins=false`, no PR requirement (`gh api`).
+- **Evidence:** `deploy`/`apply` build from the working tree with no git status check (`client/src/commands/checks.rs::check_pins`); intent commits say only `deploy <stack>` (`core/src/ops/deploy/provision_mounts.rs::apply_mount_changes`); binaries report only `CARGO_PKG_VERSION` (`host/src/main.rs:36`); `make install` and `make host-binary` report the same version as the release; branch protection `enforce_admins=false`, no PR requirement (`gh api`).
 - **Failure scenario:** A stack file or host binary is live that exists in no commit; 'v3.59.3' names two different binaries; 'which commit is deployed on CT 104?' has no answer.
 - **Recommendation:** Embed `git describe --dirty` in both binaries and show it in `/api/version`, `status`, TUI; send HEAD SHA and dirty flag in `DeploySpec` and record it; warn or refuse on uncommitted stack dirs without `--dirty`; fix DEVELOPMENT.md's CI table.
 
@@ -804,7 +804,7 @@ Severity is the highest rating any reviewer gave unless noted; disagreements are
 
 - **Key:** `restart-skips-night` · **Status:** open · **Effort:** S · **Kind:** code fix Claude can do alone
 - **Reviewers:** system, devops
-- **Evidence:** `backup_due` requires `local_hour == backup_hour` (`host/src/main.rs:1952-1954`); ticks every 20 min and the first check waits 20 min (`:2260`). The backup-age finding catches it after 48 h.
+- **Evidence:** `backup_due` requires `local_hour == backup_hour` (`host/src/tests/config.rs::fix_120_host_policy_defaults_to_the_fleet_and_follows_host_toml`); ticks every 20 min and the first check waits 20 min (`:2260`). The backup-age finding catches it after 48 h.
 - **Failure scenario:** A self-update at 02:10 means no backups, updates, host-meta or fleet check that night.
 - **Recommendation:** 'Due and not yet run since the last window' with a catch-up window (e.g. until 06:00), and check once immediately at start-up.
 
@@ -828,7 +828,7 @@ Severity is the highest rating any reviewer gave unless noted; disagreements are
 
 - **Key:** `bundles-audit-world-readable` · **Status:** open · **Effort:** S · **Kind:** code fix Claude can do alone
 - **Reviewers:** security
-- **Evidence:** `core/src/incidents.rs:68-107` writes bundle files 0644; `audit.log` default mode records full exec commands (`host/src/main.rs:4011-4025`). Bundles carried secrets until masked on 2026-09-27.
+- **Evidence:** `core/src/incidents.rs:68-107` writes bundle files 0644; `audit.log` default mode records full exec commands (`host/src/tests/notices.rs::notify_routing_every_event_is_a_notice_and_only_urgent_pushes`). Bundles carried secrets until masked on 2026-09-27.
 - **Failure scenario:** Any local account on pve reads exec commands and bundle transcripts.
 - **Recommendation:** 0600 files and 0700 for `incidents/`.
 
@@ -836,7 +836,7 @@ Severity is the highest rating any reviewer gave unless noted; disagreements are
 
 - **Key:** `unauth-version-plaintext-kyu` · **Status:** open · **Effort:** S · **Kind:** code fix Claude can do alone
 - **Reviewers:** security, network
-- **Evidence:** `host/src/main.rs:1864-1865` (no token); notification bearer goes to kyu over plain HTTP; cloudflared tunnel token visible via `docker inspect` (root only, acceptable).
+- **Evidence:** `host/src/tests/refusals.rs::fix_211_a_command_with_only_known_fields_is_never_refused` (no token); notification bearer goes to kyu over plain HTTP; cloudflared tunnel token visible via `docker inspect` (root only, acceptable).
 - **Failure scenario:** Version disclosure to any neighbour; an ARP-spoofing container sniffs the kyu publish token.
 - **Recommendation:** Put `/api/version` behind auth; TLS to kyu or keep the traffic off the shared segment.
 
@@ -852,7 +852,7 @@ Severity is the highest rating any reviewer gave unless noted; disagreements are
 
 - **Key:** `rust-code-hygiene` · **Status:** open · **Effort:** M · **Kind:** code fix Claude can do alone
 - **Reviewers:** rust
-- **Evidence:** `step!` in 12 md5-identical copies; `tokio-rustls` declared unused in client; hand-written base64 in `host/src/tls.rs:79` though `base64` is a dependency; tungstenite twice; no `[workspace.dependencies]`/`[workspace.lints]`; edition 2021 blocked by `set_var` in `#[tokio::main]` (`client/src/main.rs:84`). tui-preview: 4,500 lines, 0 tests, near-copies of theme/fx. Host test sets `HOMELAB_CONFIG` and a fixed `/tmp` path (`main.rs:845-848`). 745 ticket references in comments; a doc comment on a `use` (`main.rs:2146`).
+- **Evidence:** `step!` in 12 md5-identical copies; `tokio-rustls` declared unused in client; hand-written base64 in `host/src/tls.rs:79` though `base64` is a dependency; tungstenite twice; no `[workspace.dependencies]`/`[workspace.lints]`; edition 2021 blocked by `set_var` in `#[tokio::main]` (`client/src/commands/ctx.rs::die`). tui-preview: 4,500 lines, 0 tests, near-copies of theme/fx. Host test sets `HOMELAB_CONFIG` and a fixed `/tmp` path (`main.rs:845-848`). 745 ticket references in comments; a doc comment on a `use` (`main.rs:2146`).
 - **Failure scenario:** Maintenance friction and flaky parallel tests.
 - **Recommendation:** One `step!` in `ops/mod.rs`; clean dependencies into workspace tables with `unsafe_code = "forbid"`; remove tui-preview or put it behind `default-members`; use `load_config_from`; keep one invariant sentence in code and move the story to commits/CASEBOOK.
 
@@ -860,7 +860,7 @@ Severity is the highest rating any reviewer gave unless noted; disagreements are
 
 - **Key:** `websocket-edge-cases` · **Status:** open · **Effort:** S · **Kind:** code fix Claude can do alone
 - **Reviewers:** rust
-- **Evidence:** `while let Some(Ok(Message::Text(..)))` (`host/src/main.rs:2766`); `Ok(msg) = log_rx.recv()` ignores `Lagged`.
+- **Evidence:** `while let Some(Ok(Message::Text(..)))` (`host/src/tests/doctor.rs::doctor_probes_surface_stale_backup_and_dead_offsite`); `Ok(msg) = log_rx.recv()` ignores `Lagged`.
 - **Failure scenario:** A slow client never sees a host question and it times out as unattended.
 - **Recommendation:** Handle Ping/Binary/Close explicitly; on `Lagged`, tell the client and resend pending `Ask`s.
 
@@ -924,7 +924,7 @@ Severity is the highest rating any reviewer gave unless noted; disagreements are
 
 - **Key:** `webhook-id-in-warn-line` · **Status:** open · **Effort:** S · **Kind:** code fix Claude can do alone
 - **Reviewers:** logging
-- **Evidence:** `host/src/main.rs:2932`: `notification route <url> failed`.
+- **Evidence:** `host/src/tests/doctor.rs::fix_131_incident_show_reads_one_bundle_and_nothing_else`: `notification route <url> failed`.
 - **Failure scenario:** The HA webhook id lands in the pve journal on every failed delivery.
 - **Recommendation:** Mask the path in the log line.
 
@@ -932,7 +932,7 @@ Severity is the highest rating any reviewer gave unless noted; disagreements are
 
 - **Key:** `exec-logged-verbatim` · **Status:** open · **Effort:** S · **Kind:** code fix Claude can do alone
 - **Reviewers:** logging
-- **Evidence:** By design (`host/src/main.rs:4011-4025`); a secret typed into `homelab exec` lands in both.
+- **Evidence:** By design (`host/src/tests/notices.rs::notify_routing_every_event_is_a_notice_and_only_urgent_pushes`); a secret typed into `homelab exec` lands in both.
 - **Failure scenario:** Kenny passes a password on an exec command line and it is stored on pve indefinitely.
 - **Recommendation:** State it in the USER_GUIDE, and optionally run the command through the masker before logging.
 
@@ -956,7 +956,7 @@ Severity is the highest rating any reviewer gave unless noted; disagreements are
 
 - **Key:** `dashboard-cleanup-name-collision` · **Status:** open · **Effort:** S · **Kind:** code fix Claude can do alone
 - **Reviewers:** grafana
-- **Evidence:** `core/src/ops/deploy.rs:2040-2055` runs `rm -f .../homelab-<stack>.json`; committed `homelab-hosts/disks/containers/errors/overview.json` share the namespace.
+- **Evidence:** `core/src/ops/deploy/push_secrets.rs::restore_missing_env` runs `rm -f .../homelab-<stack>.json`; committed `homelab-hosts/disks/containers/errors/overview.json` share the namespace.
 - **Failure scenario:** A stack named `overview` deletes the home dashboard.
 - **Recommendation:** Reserve those names in validation or use a `stack-<name>` uid prefix.
 
@@ -1029,7 +1029,7 @@ Severity is the highest rating any reviewer gave unless noted; disagreements are
 
 - **Key:** `small-sharp-edges` · **Status:** open · **Effort:** S · **Kind:** code fix Claude can do alone
 - **Reviewers:** usability
-- **Evidence:** `template-build` turns an unparsable argument into 999 and version 1 (`main.rs:497-499`, the F309 pattern); `homelab new` is local but demands a token (`main.rs:142-147`); 'HOMELAB_TOKEN is not set' names no remedy; TUI settings are saved to `host.toml` (`host/src/main.rs:4109`), outside the declarative repo and `check`.
+- **Evidence:** `template-build` turns an unparsable argument into 999 and version 1 (`main.rs:497-499`, the F309 pattern); `homelab new` is local but demands a token (`main.rs:142-147`); 'HOMELAB_TOKEN is not set' names no remedy; TUI settings are saved to `host.toml` (`host/src/tests/questions.rs::arch_host_link_a_stale_answer_does_not_answer_a_new_question`), outside the declarative repo and `check`.
 - **Failure scenario:** A typo in `template-build` silently builds template 999.
 - **Recommendation:** Refuse unparsable arguments; no token for local verbs; name `~/.config/homelab/env` in the error; make host settings declarative before any web UI.
 

@@ -71,7 +71,7 @@ Two facts fall out of that table:
 
 - One repository per stack, named `<stack>-config`.
 - Auto-restore on deploy, keyed on the stack rather than on the container.
-  `core/src/ops/deploy.rs` runs an "auto-restore check" step **before the
+  `core/src/ops/deploy/` runs an "auto-restore check" step **before the
   apps start**: if the config directories are empty and a snapshot exists, it
   restores; if the restore fails it warns loudly and continues rather than
   blocking the deploy.

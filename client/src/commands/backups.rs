@@ -1,4 +1,4 @@
-//! TODO
+//! Backup and snapshot verbs: backups, snapshots, incidents, verify-restore, native backups.
 
 use super::*;
 
@@ -32,66 +32,11 @@ pub(crate) async fn cmd_backup_native(c: &Ctx) {
     let host = &c.host;
     let token = &c.token;
     let args = &c.args;
-    let homelab_client::cli_args::Invocation::BackupNative { stack } = invocation(&args) else {
+    let homelab_client::cli_args::Invocation::BackupNative { stack } = invocation(args) else {
         die("internal: backup-native parsed as another verb")
     };
     let stack = homelab_client::repo_config::stack_name(&stack);
     rpc(host, token, Command::BackupNative { stack }).await;
-}
-
-/// fix-223: restore one (or every) unit of an adopted native stack
-/// from a snapshot — the same typed-name confirmation `restore` uses.
-pub(crate) async fn cmd_restore_native(c: &Ctx) {
-    let host = &c.host;
-    let token = &c.token;
-    let args = &c.args;
-    let source = &c.source;
-    let homelab_client::cli_args::Invocation::RestoreNative {
-        stack,
-        snapshot,
-        unit,
-        yes,
-    } = invocation(&args)
-    else {
-        die("internal: restore-native parsed as another verb")
-    };
-    println!(
-        "{}▶ restore-native {}{} from '{}'{}",
-        C_YELLOW,
-        stack,
-        unit.as_deref()
-            .map(|u| format!(" :: {}", u))
-            .unwrap_or_default(),
-        snapshot,
-        C_RESET
-    );
-    let confirm = if yes {
-        stack.clone()
-    } else {
-        let typed = read_typed(&format!(
-            "This overwrites the live data of '{}'{}. Type the stack name to confirm: ",
-            stack,
-            unit.as_deref()
-                .map(|u| format!(" (unit {})", u))
-                .unwrap_or_default()
-        ));
-        if typed != stack {
-            die("name mismatch — nothing was restored");
-        }
-        typed
-    };
-    rpc(
-        host,
-        token,
-        Command::RestoreNative {
-            stack,
-            snapshot,
-            confirm: Some(confirm),
-            unit,
-            source: source.clone(),
-        },
-    )
-    .await;
 }
 
 /// Route A: ask every configured device for its own configuration now,
@@ -179,7 +124,7 @@ pub(crate) async fn cmd_verify_restore(c: &Ctx) {
     let token = &c.token;
     let args = &c.args;
     let source = &c.source;
-    let homelab_client::cli_args::Invocation::VerifyRestore(a) = invocation(&args) else {
+    let homelab_client::cli_args::Invocation::VerifyRestore(a) = invocation(args) else {
         die("internal: verify-restore parsed as another verb")
     };
     let stack = homelab_client::repo_config::stack_name(&a.stack);
@@ -252,7 +197,7 @@ pub(crate) async fn cmd_backup(c: &Ctx) {
     let host = &c.host;
     let token = &c.token;
     let args = &c.args;
-    let homelab_client::cli_args::Invocation::Backup { stack } = invocation(&args) else {
+    let homelab_client::cli_args::Invocation::Backup { stack } = invocation(args) else {
         die("internal: backup parsed as another verb")
     };
     let dir = &stack_dir(&stack);
@@ -260,71 +205,4 @@ pub(crate) async fn cmd_backup(c: &Ctx) {
     // /appdata paths and needs no file and no secret from here.
     let manifest = spec::build_manifest(Path::new(dir)).unwrap_or_else(|e| die(&e));
     rpc(host, token, Command::BackupStack(Box::new(manifest))).await;
-}
-
-pub(crate) async fn cmd_restore(c: &Ctx) {
-    let host = &c.host;
-    let token = &c.token;
-    let args = &c.args;
-    let source = &c.source;
-    // fix-64: flags may stand anywhere; the rest is dir then snapshot.
-    // fix-112: `--app <name>` restores one app of the stack.
-    let homelab_client::cli_args::Invocation::Restore(homelab_client::RestoreArgs {
-        dir,
-        snapshot,
-        app,
-        yes,
-        skip_safety_copy,
-    }) = invocation(&args)
-    else {
-        die("internal: restore parsed as another verb")
-    };
-    // fix-101: every spelling of a stack names the same directory.
-    let dir = &stack_dir(&dir);
-    // F294: the manifest alone, for the same reason as F291 above.
-    let manifest = spec::build_manifest(Path::new(&dir)).unwrap_or_else(|e| die(&e));
-    let stack = manifest.stack_name.clone();
-    println!(
-        "{}▶ restore {}{} from '{}'{}",
-        C_YELLOW,
-        stack,
-        app.as_deref()
-            .map(|a| format!(" :: {}", a))
-            .unwrap_or_default(),
-        snapshot,
-        C_RESET
-    );
-    // fix-64: a restore overwrites live data, so the command line asks
-    // for the name the way the TUI always did; `--yes` answers it
-    // for scripts. The host refuses a request without it.
-    let confirm = if yes {
-        stack.clone()
-    } else {
-        let typed = read_typed(&format!(
-            "This overwrites the live data of '{}'{}. Type the stack name to confirm: ",
-            stack,
-            if skip_safety_copy {
-                ", WITHOUT a copy of it (--no-safety-copy)"
-            } else {
-                " (a copy of it is kept on the host first)"
-            }
-        ));
-        if typed != stack {
-            die("name mismatch — nothing was restored");
-        }
-        typed
-    };
-    rpc(
-        host,
-        token,
-        Command::RestoreStack {
-            manifest: Box::new(manifest),
-            snapshot,
-            confirm: Some(confirm),
-            skip_safety_copy,
-            app,
-            source: source.clone(),
-        },
-    )
-    .await;
 }

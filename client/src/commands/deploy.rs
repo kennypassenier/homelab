@@ -111,6 +111,46 @@ pub(crate) fn deploy_guard(
     decide(stack, applied.as_deref(), ancestry, force)
 }
 
+/// T85: each native binary goes over the link on its own, then the deploy
+/// follows with the map emptied — the host fills it back in from what was
+/// staged. Three binaries in one message measured 94.7 MiB against a
+/// 64 MiB frame (F303); one at a time never meets that ceiling, however
+/// many services a stack grows. False when a staging failed.
+async fn stage_native_binaries(
+    host: &str,
+    token: &str,
+    spec: &mut homelab_proto::DeploySpec,
+) -> bool {
+    let staged: Vec<(String, String)> = spec
+        .native_binaries
+        .iter()
+        .map(|(u, b)| (u.clone(), b.clone()))
+        .collect();
+    for (unit, b64) in staged {
+        println!(
+            "{}▶ staging {} ({} KiB of base64){}",
+            C_DIM,
+            unit,
+            b64.len() / 1024,
+            C_RESET
+        );
+        let stage = Command::StageNativeBinary {
+            stack: spec.manifest.stack_name.clone(),
+            unit: unit.clone(),
+            binary_b64: b64,
+        };
+        if !rpc_with(host, token, stage).await {
+            eprintln!(
+                "{}✗ staging the binary of {} failed — deploy not started, nothing changed{}",
+                C_RED, unit, C_RESET
+            );
+            return false;
+        }
+        spec.native_binaries.insert(unit, String::new());
+    }
+    true
+}
+
 pub(crate) async fn deploy_spec(
     host: &str,
     token: &str,
@@ -135,42 +175,8 @@ pub(crate) async fn deploy_spec(
     {
         eprintln!("{}{}{}", C_YELLOW, w, C_RESET);
     }
-    // T85: each native binary goes over the link on its own, then the deploy
-    // follows with the map emptied — the host fills it back in from what was
-    // staged. Three binaries in one message measured 94.7 MiB against a
-    // 64 MiB frame (F303); one at a time never meets that ceiling, however
-    // many services a stack grows.
-    let staged: Vec<(String, String)> = spec
-        .native_binaries
-        .iter()
-        .map(|(u, b)| (u.clone(), b.clone()))
-        .collect();
-    for (unit, b64) in staged {
-        println!(
-            "{}▶ staging {} ({} KiB of base64){}",
-            C_DIM,
-            unit,
-            b64.len() / 1024,
-            C_RESET
-        );
-        let ok = rpc_with(
-            host,
-            token,
-            Command::StageNativeBinary {
-                stack: spec.manifest.stack_name.clone(),
-                unit: unit.clone(),
-                binary_b64: b64,
-            },
-        )
-        .await;
-        if !ok {
-            eprintln!(
-                "{}✗ staging the binary of {} failed — deploy not started, nothing changed{}",
-                C_RED, unit, C_RESET
-            );
-            return false;
-        }
-        spec.native_binaries.insert(unit, String::new());
+    if !stage_native_binaries(host, token, &mut spec).await {
+        return false;
     }
     rpc_with(host, token, Command::DeployStack(Box::new(spec))).await
 }

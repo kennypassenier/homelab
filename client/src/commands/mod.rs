@@ -1,21 +1,48 @@
 //! The `homelab` verbs: one function per verb, grouped by topic.
 
+mod apply;
+mod apply_plan;
 mod backups;
+mod check_print;
 mod checks;
 mod ctx;
 mod deploy;
+mod exchange;
+mod exchange_frames;
+mod exchange_print;
 mod host_admin;
+mod host_cmd;
+mod manual_checks;
+mod native_install;
+mod new_stack;
+mod plan;
+mod reports;
+mod restore;
 mod rpc;
 mod stacks;
 mod startup;
+mod teardown;
 mod ui;
+mod ui_guard;
+mod ui_wait;
 mod updates;
 
-pub(crate) use checks::*;
+pub(crate) use apply_plan::*;
+pub(crate) use check_print::*;
 pub(crate) use ctx::*;
 pub(crate) use deploy::*;
+pub(crate) use exchange::*;
+pub(crate) use exchange_print::*;
+pub(crate) use host_cmd::*;
+pub(crate) use native_install::*;
+pub(crate) use new_stack::*;
+pub(crate) use plan::*;
+pub(crate) use restore::*;
 pub(crate) use rpc::*;
 pub(crate) use startup::*;
+pub(crate) use teardown::*;
+pub(crate) use ui_guard::*;
+pub(crate) use ui_wait::*;
 
 pub(crate) use homelab_client::output::Paint;
 pub(crate) use std::path::Path;
@@ -66,9 +93,12 @@ pub(crate) async fn run(explicit_host: Option<String>) {
 async fn dispatch(c: &Ctx, cmd: &str) {
     let handled = host_admin::dispatch(c, cmd).await
         || stacks::dispatch(c, cmd).await
+        || apply::dispatch(c, cmd).await
         || backups::dispatch(c, cmd).await
         || updates::dispatch(c, cmd).await
         || checks::dispatch(c, cmd).await
+        || manual_checks::dispatch(c, cmd).await
+        || reports::dispatch(c, cmd).await
         || ui::dispatch(c, cmd).await;
     if !handled {
         // fix-108: `help` (or no arguments). An unknown verb never reaches

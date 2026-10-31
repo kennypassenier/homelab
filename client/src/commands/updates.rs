@@ -1,4 +1,4 @@
-//! TODO
+//! Update verbs: tool updates, host and client self-update, update policy.
 
 use super::*;
 
@@ -20,142 +20,12 @@ pub(crate) async fn dispatch(c: &Ctx, cmd: &str) -> bool {
     true
 }
 
-/// T11: install a native service into a container the deploy has
-/// already created. The other half of C7 — until now the orchestrator
-/// could take over a hand-built container and could not build one.
-pub(crate) async fn cmd_install_native(c: &Ctx) {
-    let host = &c.host;
-    let token = &c.token;
-    let args = &c.args;
-    let dir = stack_dir(args.get(2).unwrap_or_else(|| {
-        die("usage: homelab install-native stacks/<name>[/<unit>] [<tag> | --file <path>]")
-    }));
-    let path = dir.join("service.yml");
-    let raw = std::fs::read_to_string(&path)
-        .unwrap_or_else(|e| die(&format!("cannot read {}: {}", path.display(), e)));
-    let m: homelab_proto::NativeServiceManifest =
-        serde_yaml::from_str(&raw).unwrap_or_else(|e| die(&format!("service.yml parse: {}", e)));
-    if let Err(problems) = homelab_core::native::validate_native(&m) {
-        die(&format!("service.yml invalid: {}", problems.join("; ")));
-    }
-    // B7: `--file <path>` hands the bytes over from disk — the
-    // rollback drill's way of installing a fake service, good and
-    // then deliberately broken. A release stays the normal source.
-    let source = homelab_client::release::install_source(&args[3..]).unwrap_or_else(|e| die(&e));
-    let from_file = matches!(source, homelab_client::release::InstallSource::File(_));
-    let repo = match m.release_repo.clone() {
-        Some(r) => r,
-        None if from_file => String::new(),
-        None => die(&format!(
-            "{} declares no release_repo — this service is adopt-only, and where its \
-             binary comes from is not written down anywhere. Add release_repo to its \
-             service.yml rather than installing by hand again",
-            m.unit
-        )),
-    };
-    // The unit file lives beside the service file, or in the unit's
-    // own directory when several services share one stack.
-    let unit_name = format!("{}.service", m.unit);
-    let candidates = [dir.join(&unit_name), dir.join(&m.unit).join(&unit_name)];
-    let unit_file = candidates
-        .iter()
-        .find_map(|p| std::fs::read_to_string(p).ok())
-        .unwrap_or_else(|| {
-            die(&format!(
-                "no {} found beside {} — the file that makes the service exist is not \
-                 in the repository, so a rebuilt container would have the binary and \
-                 nothing to run it",
-                unit_name,
-                dir.display()
-            ))
-        });
-    let asset = m.asset_name().to_string();
-    let binary_b64 = match source {
-        homelab_client::release::InstallSource::File(path) => {
-            let (b64, sha) = homelab_client::release::stage_file(&path).unwrap_or_else(|e| die(&e));
-            println!(
-                "{}▶ install-native {} :: CT {} · from file {} (sha256 {}){}",
-                C_CYAN, m.unit, m.vmid, path, sha, C_RESET
-            );
-            b64
-        }
-        homelab_client::release::InstallSource::Release(tag) => {
-            let tag = match tag {
-                Some(t) => t,
-                None => homelab_client::release::latest_tag_of(&repo).unwrap_or_else(|| {
-                    die(&format!("no release found in {} (gh authenticated?)", repo))
-                }),
-            };
-            println!(
-                "{}▶ install-native {} :: CT {} · {} {} from {}{}",
-                C_CYAN, m.unit, m.vmid, asset, tag, repo, C_RESET
-            );
-            let b64 = homelab_client::release::stage_asset(&repo, &tag, &asset)
-                .unwrap_or_else(|e| die(&e));
-            println!(
-                "{}✓ checksum verified — shipping over the line{}",
-                C_GREEN, C_RESET
-            );
-            b64
-        }
-    };
-    if let Some(why) = homelab_client::version::too_large(binary_b64.len()) {
-        die(&why);
-    }
-    rpc(
-        host,
-        token,
-        Command::InstallNative {
-            manifest: Box::new(m),
-            binary_b64,
-            unit_file,
-        },
-    )
-    .await;
-}
-
-pub(crate) async fn cmd_update_native(c: &Ctx) {
-    let host = &c.host;
-    let token = &c.token;
-    let args = &c.args;
-    let homelab_client::cli_args::Invocation::UpdateNative { stack } = invocation(&args) else {
-        die("internal: update-native parsed as another verb")
-    };
-    let stack = homelab_client::repo_config::stack_name(&stack);
-    rpc(host, token, Command::UpdateNative { stack }).await;
-}
-
-/// B1: the orchestrator's own release update of a native stack, now.
-pub(crate) async fn cmd_release_update_native(c: &Ctx) {
-    let host = &c.host;
-    let token = &c.token;
-    let args = &c.args;
-    let homelab_client::cli_args::Invocation::ReleaseUpdateNative { stack } = invocation(&args)
-    else {
-        die("internal: release-update-native parsed as another verb")
-    };
-    let stack = homelab_client::repo_config::stack_name(&stack);
-    rpc(host, token, Command::ReleaseUpdateNative { stack }).await;
-}
-
-/// fix-114: back to a native unit's kept previous binary.
-pub(crate) async fn cmd_rollback_native(c: &Ctx) {
-    let host = &c.host;
-    let token = &c.token;
-    let args = &c.args;
-    let homelab_client::cli_args::Invocation::RollbackNative { stack, unit } = invocation(&args)
-    else {
-        die("internal: rollback-native parsed as another verb")
-    };
-    rpc(host, token, Command::RollbackNative { stack, unit }).await;
-}
-
 /// Managed tools on the host (latch): `homelab tool status|update|rollback`.
 pub(crate) async fn cmd_tool(c: &Ctx) {
     let host = &c.host;
     let token = &c.token;
     let args = &c.args;
-    match homelab_client::tools_cli::command(&args) {
+    match homelab_client::tools_cli::command(args) {
         Ok(command) => rpc(host, token, command).await,
         Err(e) => die(&e),
     }
@@ -165,7 +35,7 @@ pub(crate) async fn cmd_update(c: &Ctx) {
     let host = &c.host;
     let token = &c.token;
     let args = &c.args;
-    let homelab_client::cli_args::Invocation::Update { stack, app } = invocation(&args) else {
+    let homelab_client::cli_args::Invocation::Update { stack, app } = invocation(args) else {
         die("internal: update parsed as another verb")
     };
     let dir = &stack_dir(&stack);

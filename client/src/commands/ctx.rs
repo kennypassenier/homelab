@@ -100,6 +100,45 @@ pub(crate) fn check_fleet_routes(base: &Path) {
     }
 }
 
+/// Sets one `KEY=value` line of an env file when it is a HOMELAB_* key the
+/// environment does not already have.
+fn apply_env_line(line: &str) {
+    let t = line.trim();
+    if t.starts_with('#') || t.is_empty() {
+        return;
+    }
+    let Some((k, v)) = t.split_once('=') else {
+        return;
+    };
+    let k = k.trim().trim_start_matches("export ").trim();
+    // Every HOMELAB_* key, not a hand-picked pair.
+    //
+    // The first version named HOMELAB_HOST and HOMELAB_TOKEN
+    // explicitly and silently left HOMELAB_LATCH_ENV behind, so
+    // `homelab check` worked from anywhere and `homelab deploy` of any
+    // stack with secrets did not — a fix that turned "works from any
+    // directory" into "works for some commands", which is worse than
+    // not fixing it, because it looks done.
+    if !k.starts_with("HOMELAB_") {
+        return;
+    }
+    if std::env::var(k).is_ok() {
+        return; // the environment already said so
+    }
+    let v = v.trim().trim_matches('"').trim_matches('\'');
+    if !v.is_empty() {
+        // SAFETY: this runs before the tokio runtime starts (this is
+        // the first thing main() calls), so no other thread exists
+        // yet to observe the write. The one exception to the
+        // workspace's `unsafe_code = "deny"` besides fix-53's
+        // `libc::killpg`.
+        #[allow(unsafe_code)]
+        unsafe {
+            std::env::set_var(k, v);
+        }
+    }
+}
+
 /// Fill HOMELAB_HOST/HOMELAB_TOKEN from a config file when they are not
 /// already in the environment.
 ///
@@ -117,41 +156,6 @@ pub(crate) fn load_config_env() {
         let Ok(text) = std::fs::read_to_string(&path) else {
             continue;
         };
-        for line in text.lines() {
-            let t = line.trim();
-            if t.starts_with('#') || t.is_empty() {
-                continue;
-            }
-            let Some((k, v)) = t.split_once('=') else {
-                continue;
-            };
-            let k = k.trim().trim_start_matches("export ").trim();
-            // Every HOMELAB_* key, not a hand-picked pair.
-            //
-            // The first version named HOMELAB_HOST and HOMELAB_TOKEN
-            // explicitly and silently left HOMELAB_LATCH_ENV behind, so
-            // `homelab check` worked from anywhere and `homelab deploy` of any
-            // stack with secrets did not — a fix that turned "works from any
-            // directory" into "works for some commands", which is worse than
-            // not fixing it, because it looks done.
-            if !k.starts_with("HOMELAB_") {
-                continue;
-            }
-            if std::env::var(k).is_ok() {
-                continue; // the environment already said so
-            }
-            let v = v.trim().trim_matches('"').trim_matches('\'');
-            if !v.is_empty() {
-                // SAFETY: this runs before the tokio runtime starts (this is
-                // the first thing main() calls), so no other thread exists
-                // yet to observe the write. The one exception to the
-                // workspace's `unsafe_code = "deny"` besides fix-53's
-                // `libc::killpg`.
-                #[allow(unsafe_code)]
-                unsafe {
-                    std::env::set_var(k, v);
-                }
-            }
-        }
+        text.lines().for_each(apply_env_line);
     }
 }

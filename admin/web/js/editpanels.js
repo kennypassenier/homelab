@@ -2175,7 +2175,7 @@ function checksEditCard(stack, e, apps, reload) {
     h("div", { class: "row-buttons" }, review, " ", status),
   );
   // feat-platform-10: `ui open checks <stack>/<app>` picks the app (see
-  // `pick("checks-app", app)` in driveedit.rs), then row ops address
+  // `pick("checks-app", app)` in driveedit/), then row ops address
   // `checks`/`manual`/`probes` the same way `stack-edit:<stack>` does for
   // apps/latch — `row-table:<list>:<stack>:<app>`, the SELECTED app.
   const unregister = register(`checks-edit:${stack}`, {

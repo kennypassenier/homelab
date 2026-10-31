@@ -518,7 +518,7 @@ mod tests {
         assert!(template("README.md").is_none());
     }
 
-    /// The driven form (driveedit.rs) and the Files card's own buttons
+    /// The driven form (driveedit/) and the Files card's own buttons
     /// both build this JSON and hand it to `POST …/plan` /
     /// `POST …/commit` un-typed (`serde_json::from_value`); this is the
     /// wire shape that decode has to accept: the outer `StackEdit`'s own

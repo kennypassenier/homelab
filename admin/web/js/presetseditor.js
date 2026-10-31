@@ -495,7 +495,7 @@ export async function openPresetEditor(name, onChanged) {
     body.replaceChildren(...parts);
   };
   // feat-platform-10: the Live view replay works this very dialog —
-  // `preset <name>` and `new-preset` both open it (driveedit.rs's
+  // `preset <name>` and `new-preset` both open it (driveedit/'s
   // `EditKind::Preset`/`NewPreset`), so one handle name serves both.
   const unregister = register("preset-editor", {
     dialog: d.dialog,

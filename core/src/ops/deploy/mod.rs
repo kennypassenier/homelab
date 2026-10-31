@@ -12,6 +12,24 @@ use crate::safety;
 use crate::sink::{Level, PipelineEvent};
 use crate::state::{StackState, StateStore};
 
+mod compose;
+mod incomplete;
+mod memory;
+mod orphans;
+mod plan;
+mod restore_checks;
+mod vault;
+
+pub use compose::compose_reports_created;
+pub use memory::{MIN_MEMORY_AVAILABLE, memory_available_fraction};
+pub use orphans::{generated_dirs, orphan_files, orphan_files_keeping};
+pub use plan::{STEPS, plan_names};
+pub(crate) use restore_checks::record_restore_checks;
+pub use vault::vault_key;
+
+use incomplete::mark_incomplete;
+use vault::legacy_vault_key;
+
 /// Shorthand: run a step, bail out of the operation on failure (A3).
 ///
 /// S2: before bailing, leave a record that this stack was half-deployed. The
@@ -45,325 +63,10 @@ macro_rules! stepv {
     };
 }
 
-/// Record that a deploy stopped part-way, so the stack is at least visible.
-///
-/// Deliberately silent about its own failures: this runs while another error
-/// is already on its way to the operator, and a second one stacked on top of
-/// it helps nobody. The worst case is the state we had before — no record —
-/// which is exactly what this exists to avoid, so it is worth attempting and
-/// not worth escalating.
-async fn mark_incomplete(
-    exec: &dyn crate::executor::Executor,
-    ctx: &OpCtx<'_>,
-    m: &crate::manifest::StackManifest,
-    step: &str,
-) {
-    // A1 promises that a refused target runs ZERO commands, and D10 promises
-    // the same for a manifest that does not validate. Writing a state record
-    // is a command. These four steps all run before anything on the machine
-    // has been touched, so a failure in them leaves nothing half-done and
-    // there is nothing to record — recording anyway would both break the
-    // guarantee and invent a stack the operator never deployed.
-    const BEFORE_ANYTHING_CHANGES: [&str; 4] = [
-        "validate",
-        "safety gates",
-        "registry cache",
-        "hardware readiness",
-    ];
-    if BEFORE_ANYTHING_CHANGES.contains(&step) {
-        return;
-    }
-    let store = StateStore::new(exec, &ctx.state_dir);
-    let Ok(mut state) = store.load().await else {
-        return;
-    };
-    match state.stacks.get_mut(&m.stack_name) {
-        // Known already: keep everything, just mark where it stopped. The
-        // manifest on record stays the last one that fully applied, because
-        // that is what actually ran — not what this attempt wanted.
-        Some(existing) => existing.incomplete_step = Some(step.to_string()),
-        // Never recorded: write the minimum that makes it exist. Nightly
-        // backups key off this entry, and 12 GB of configuration with no
-        // backup was how this defect announced itself.
-        None => {
-            state.stacks.insert(
-                m.stack_name.clone(),
-                StackState {
-                    applied_source: None,
-                    vmid: m.vmid,
-                    hostname: m.hostname.clone(),
-                    apps: m.apps.clone(),
-                    applied_at: ctx.now_unix,
-                    last_backup: 0,
-                    applied_hash: String::new(),
-                    manifest: Some(m.clone()),
-                    enabled: true,
-                    route_file: None,
-                    extra_route_files: Vec::new(),
-                    natives: Vec::new(),
-                    incomplete_step: Some(step.to_string()),
-                    pushed_file_hashes: std::collections::BTreeMap::new(),
-                    component_digests: Default::default(),
-                },
-            );
-        }
-    }
-    let _ = store.save(state).await;
-    ctx.sink.emit(PipelineEvent::Line {
-        level: Level::Warn,
-        source: "HOST".into(),
-        msg: format!(
-            "[state] '{}' recorded as incomplete at step '{}' — it is managed, \
-             but what is on the container is not what the stack file says",
-            m.stack_name, step
-        ),
-    });
-}
-/// Did `docker compose up -d` create or recreate a container? Compose ends
-/// such a status line with the word `Created` or `Recreated`.
-///
-/// shell-strings-quoting (expert panel, 2026-09-27): this was
-/// `contains("reated")`, which a warning that a volume "was not created by
-/// Docker Compose" also matches, and the restart a changed file needs was
-/// then skipped.
-pub fn compose_reports_created(out: &str) -> bool {
-    out.lines().any(|l| {
-        let mut words = l.split_whitespace();
-        words.next() == Some("Container")
-            && matches!(words.last(), Some("Created") | Some("Recreated"))
-    })
-}
-
 /// F129 · per app: where its compose lives in the container, what it said
 /// before the cache rewrite, and the mode to write it back with.
 type CacheOriginals =
     std::sync::Arc<std::sync::Mutex<std::collections::BTreeMap<String, (String, String, String)>>>;
-
-/// Files under `/opt/<stack>/` on the container that this deploy did not send.
-///
-/// Compared against the spec's own file list, so the answer is "what the
-/// repository no longer has" rather than "what looks old". Best-effort: a
-/// container that will not answer produces an empty list rather than a
-/// finding, because an unasked question must never become one.
-///
-/// `.env` files are excluded on purpose — they come from the host vault
-/// (D12), never from the repository, so every one of them would be reported
-/// as an orphan forever.
-pub async fn orphan_files(
-    exec: &dyn crate::executor::Executor,
-    m: &crate::manifest::StackManifest,
-    spec: &DeploySpec,
-) -> Vec<String> {
-    orphan_files_keeping(exec, m, spec, &[]).await
-}
-
-/// Directories inside container `vmid` that the orchestrator fills on behalf
-/// of OTHER stacks: on the gateway, the route fragments (H1). Their files
-/// are in no stack's file list, so without this a deploy of the gateway
-/// would take them for its own orphans and remove every other stack's route.
-pub fn generated_dirs(safety: &crate::safety::SafetyConfig, vmid: u16) -> Vec<String> {
-    let mut v = Vec::new();
-    if vmid == safety.gateway_vmid {
-        v.push(safety.gateway_routes_dir.clone());
-    }
-    v
-}
-
-/// [`orphan_files`], leaving out anything under the `keep` directories
-/// (absolute paths inside the container, see [`generated_dirs`]).
-pub async fn orphan_files_keeping(
-    exec: &dyn crate::executor::Executor,
-    m: &crate::manifest::StackManifest,
-    spec: &DeploySpec,
-    keep: &[String],
-) -> Vec<String> {
-    let sent: std::collections::BTreeSet<&str> =
-        spec.files.iter().map(|f| f.path.as_str()).collect();
-    let kept = |rel: &str| {
-        let abs = format!("/opt/{}/{}", m.stack_name, rel);
-        keep.iter()
-            .any(|d| abs.starts_with(&format!("{}/", d.trim_end_matches('/'))))
-    };
-    let out = match pct_sh(
-        exec,
-        m.vmid,
-        &format!(
-            "cd {0} 2>/dev/null && find . -type f -printf '%P\\n' 2>/dev/null || true",
-            shq(&format!("/opt/{}", m.stack_name))
-        ),
-        120,
-    )
-    .await
-    {
-        Ok(o) => o,
-        Err(_) => return Vec::new(),
-    };
-    out.stdout
-        .lines()
-        .map(str::trim)
-        .filter(|l| !l.is_empty())
-        .filter(|l| !l.ends_with(".env"))
-        .filter(|l| !sent.contains(*l))
-        .filter(|l| !kept(l))
-        .map(str::to_string)
-        .collect()
-}
-
-/// A5: the vault filename for a file a unit reads.
-///
-/// fix-37: `<parent dir>/<name>`, so `/appdata/kyu/kyu-runner-config/token.env`
-/// becomes `kyu-runner-config/token.env` under `<state_dir>/secrets/<stack>/`.
-/// It used to be the bare file name, on the belief that two units on one
-/// stack cannot name the same file. They can: kyu-runner and
-/// http-switchboard both read `token.env`, so they shared ONE vault copy and
-/// the vault kept whichever was copied last; a rebuild would have given both
-/// the same token.
-/// Below this share of available memory a deploy does not start
-/// (corr-kuma-memory, 2026-09-27).
-pub const MIN_MEMORY_AVAILABLE: f64 = 0.15;
-
-/// `MemAvailable / MemTotal` from a container's /proc/meminfo (lxcfs shows
-/// the container's own limit). None when either line is missing.
-pub fn memory_available_fraction(meminfo: &str) -> Option<f64> {
-    let field = |name: &str| {
-        meminfo.lines().find_map(|l| {
-            let rest = l.strip_prefix(name)?.trim_start_matches(':').trim();
-            rest.split_whitespace().next()?.parse::<f64>().ok()
-        })
-    };
-    let total = field("MemTotal")?;
-    let avail = field("MemAvailable")?;
-    (total > 0.0).then(|| avail / total)
-}
-
-pub fn vault_key(path: &str) -> String {
-    let mut parts = path.rsplit('/');
-    let name = parts.next().unwrap_or(path);
-    match parts.next() {
-        Some(dir) if !dir.is_empty() => format!("{}/{}", dir, name),
-        _ => name.to_string(),
-    }
-}
-
-/// The flat key older deploys wrote, still read when it is unambiguous.
-fn legacy_vault_key(path: &str) -> String {
-    path.rsplit('/').next().unwrap_or(path).to_string()
-}
-
-/// fix-147 (restore-check-failure, 2026-09-27): remember each empty
-/// directory or native unit whose backup could not be checked, and forget
-/// each one whose check succeeded. Keys are `<stack>:<path or unit>`. A
-/// failure to record is said, never fatal: it must not block a deploy either.
-pub(crate) async fn record_restore_checks(
-    ctx: &OpCtx<'_>,
-    stack: &str,
-    failed: &[(String, String)],
-    ok: &[String],
-) {
-    if failed.is_empty() && ok.is_empty() {
-        return;
-    }
-    let now = ctx.now_unix;
-    let recorded = crate::state::StateStore::new(ctx.exec, &ctx.state_dir)
-        .update(|s| {
-            for what in ok {
-                s.restore_check_failures
-                    .remove(&format!("{}:{}", stack, what));
-            }
-            for (what, why) in failed {
-                s.restore_check_failures.insert(
-                    format!("{}:{}", stack, what),
-                    crate::state::RestoreCheckFailure {
-                        stack: stack.to_string(),
-                        what: what.clone(),
-                        at: now,
-                        why: why.clone(),
-                    },
-                );
-            }
-        })
-        .await;
-    if let Err(e) = recorded {
-        ctx.sink.emit(PipelineEvent::Line {
-            level: Level::Warn,
-            source: "HOST".into(),
-            msg: format!(
-                "[e3] could not record the backup checks of {} :: {}",
-                stack, e
-            ),
-        });
-    }
-}
-
-/// fix-171 round 2: deploy's own step plan — fixed, EVERY deploy, regardless
-/// of how many apps the manifest declares, whether it has a firewall, gives
-/// a gateway route, or needs a log shipper. Every step here is already
-/// invoked unconditionally and no-ops when its precondition does not hold
-/// (`baseline` when the container does not exist yet, `native units` when
-/// the manifest declares none); the six that used to be invoked only
-/// conditionally (`firewall`, `firewall after create`,
-/// `refresh the tile watcher's firewall`, `gateway route`,
-/// `retire gateway route`, `log shipper`) now take an explicit `skip` mark
-/// in their `else` branch instead of silently not appearing — so `n`
-/// reaches this list's length exactly, every time, and the dashboard's
-/// total is this constant rather than a guess from a past run's count
-/// (fix-171's first attempt, rejected for exactly that reason). Shared with
-/// the dashboard (`admin::shell::actions::execute`) so Apply and a batch of
-/// several deploys can announce the combined total before the first one
-/// starts.
-pub const STEPS: &[&str] = &[
-    "validate",
-    "safety gates",
-    "baseline",
-    "registry cache",
-    "hardware readiness",
-    "host storage",
-    "auto-restore check",
-    "metrics discovery",
-    "firewall",
-    "provision container",
-    "firewall after create",
-    "refresh the tile watcher's firewall",
-    "wait for systemd",
-    "bootstrap docker",
-    "runaway guards",
-    "log rotation",
-    "retire dropped",
-    "commit intent",
-    "push files",
-    "start apps",
-    "storage ownership",
-    "verify health",
-    "gateway route",
-    "retire gateway route",
-    "orphan files",
-    "garbage collect",
-    "log shipper",
-    "native units",
-    "record state",
-    "reconcile",
-    "app settings",
-    "service checks",
-];
-
-/// redesign-stacks-6: the deploy's whole plan for `spec` — [`STEPS`], with
-/// the nested `backup` op's names right after "safety gates" when the spec
-/// asks for a backup first (`DeploySpec::backup_first`). Still fixed per
-/// spec: a stack with nothing to back up skip-marks those names rather than
-/// leaving them out. The single source `deploy` plans from and the
-/// dashboard's batch total sums.
-pub fn plan_names(spec: &DeploySpec) -> Vec<String> {
-    let mut v: Vec<String> = Vec::with_capacity(STEPS.len() + 8);
-    for s in STEPS {
-        v.push(s.to_string());
-        if *s == "safety gates" && spec.backup_first {
-            v.extend(crate::ops::backup::backup_plan_names(
-                &spec.manifest.stack_name,
-            ));
-        }
-    }
-    v
-}
 
 pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
     let m = &spec.manifest;

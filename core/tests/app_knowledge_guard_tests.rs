@@ -82,7 +82,7 @@ fn sources(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
         let p = e.path();
         if p.is_dir() {
             if p.file_name()
-                .is_some_and(|n| n == "node_modules" || n == "test")
+                .is_some_and(|n| n == "node_modules" || n == "test" || n == "tests")
             {
                 continue;
             }

@@ -78,6 +78,7 @@ fn args_for(kind: ActionKind, stack: &str) -> ActionArgs {
     }
     match kind {
         ActionKind::Exec => a.command = Some("df -h".into()),
+        ActionKind::ToolUpdate | ActionKind::ToolRollback => a.tool = Some("latch".into()),
         ActionKind::TemplateBuild => a.version = Some("5".into()),
         ActionKind::AnswerCheck => {
             a.check = Some("c4bca102".into());

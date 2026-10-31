@@ -34,41 +34,44 @@ fn routes_of(stack: &str) -> Vec<homelab_core::routes::RouteDecl> {
 /// covers: fix-91
 #[test]
 fn the_four_hand_written_routes_are_declared_byte_for_byte() {
+    // (stack, file, sha256 of the file live on CT 104 until the :443 rollout,
+    // sha256 of the declared file now). The two differ by the websecure entry
+    // point that home-route-tls added; the first deploy of each stack after
+    // the rollout writes the declared one, and the live column then retires.
     let live = [
         (
             "almanac",
             "112-app-almanac.yml",
             "58dea0b1b28ba220b1ea697a29c864450bcb09ab5aedf111c89d93ad7111bd12",
+            "21316577e340992b30d054703cfc75391b59d91fa429a313bcb92320165dee00",
         ),
         (
             "kyu",
             "manual-kyu.yml",
             "5ea7603ea6cf6b7ce034598710945405b04351d443e1f9c03e19b763c1f9762a",
+            "7415268f093874ee5a40727cce5018e89c2e7e42189618b6f11a0d8f125d6efa",
         ),
         (
             "gateway",
             "manual-homeassistant.yml",
             "4b3fe3c81aa5a652445a79aa689504899b3016594f62c01a53fcc5cb76803574",
+            "19c8cf2e5420c884e12e5ea72b987b71fe736244eedc657809485aaa776bd12b",
         ),
         (
             "gateway",
             "manual-routes.yml",
             "45c36dc59b7136fdad2db3097d70544b225f765c73357eccf302f18c7416ec50",
+            "1fa04a383f750718ceb14055f9c97fd8bb370159c54c68b2fea6e8e4f1befea6",
         ),
     ];
-    for (stack, file, want) in live {
+    for (stack, file, _live_now, want) in live {
         let routes = routes_of(stack);
         let decl = routes
             .iter()
             .find(|r| r.filename == file)
             .unwrap_or_else(|| panic!("{} does not declare {}", stack, file));
         assert_eq!(decl.stack, stack);
-        assert_eq!(
-            sha(&decl.content),
-            want,
-            "{} differs from the live file",
-            file
-        );
+        assert_eq!(sha(&decl.content), want, "{file} is not the declared file");
     }
 }
 

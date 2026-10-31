@@ -1,6 +1,8 @@
 //! rust-code-hygiene (expert panel, 2026-09-27): guards for the workspace
 //! itself. Each reads a manifest or a source tree, not a struct's layout.
 
+mod common;
+
 use std::path::{Path, PathBuf};
 
 fn root() -> PathBuf {
@@ -127,19 +129,16 @@ fn every_declared_dependency_is_used() {
 /// path instead.
 #[test]
 fn no_host_code_changes_the_process_environment() {
-    let src = read("host/src/main.rs");
+    let src = common::host_production_source();
     // The positive twin: the file is read, and it still takes the config
     // path as a value rather than through the environment — so the negative
     // checks below are not passing merely because this read returned
     // nothing, or because the function they describe was renamed away.
     assert!(
         src.contains("load_config_from"),
-        "host/src/main.rs: load_config_from not found"
+        "host/src: load_config_from not found"
     );
-    assert!(
-        !src.contains("env::set_var"),
-        "host/src/main.rs sets a variable"
-    );
+    assert!(!src.contains("env::set_var"), "host/src sets a variable");
     assert!(!src.contains("env::remove_var"));
 }
 

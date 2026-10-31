@@ -14,7 +14,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 const PREFIX = "/static/kp/";
@@ -57,22 +57,57 @@ let root;
 let barrel;
 
 /**
+ * The names a module exports, read from its source: declarations,
+ * `export { … }` lists (with or without `from`) and `export * from` chains.
+ */
+function exportedNames(file, seen = new Set()) {
+  if (seen.has(file) || !existsSync(file)) return new Set();
+  seen.add(file);
+  const text = readFileSync(file, "utf8");
+  const names = new Set();
+  for (const m of text.matchAll(
+    /^export\s+(?:async\s+)?(?:const|let|var|function\*?|class)\s+([A-Za-z0-9_$]+)/gm,
+  ))
+    names.add(m[1]);
+  for (const m of text.matchAll(/^export\s*\{([^}]*)\}/gm))
+    for (const part of m[1].split(",")) {
+      const name = part
+        .trim()
+        .split(/\s+as\s+/)
+        .pop()
+        ?.trim();
+      if (name) names.add(name);
+    }
+  for (const m of text.matchAll(/^export\s*\*\s*from\s*["']([^"']+)["']/gm))
+    for (const n of exportedNames(join(dirname(file), m[1]), seen))
+      names.add(n);
+  return names;
+}
+
+/**
  * A file that re-exports every kp-themes module, standing in for the bundle
  * (same names, no browser needed). The module list is the type barrel's, so
- * the two cannot disagree.
+ * the two cannot disagree. A name two modules both export (the bundle picks
+ * one) is taken from the first module, so no star export is ambiguous.
  */
 function bundleBarrel() {
   if (barrel) return barrel;
   const types = fileURLToPath(new URL("../../types/kp", import.meta.url));
-  const lines = readdirSync(types)
+  const taken = new Set();
+  const lines = [];
+  for (const f of readdirSync(types)
     .filter((f) => f.endsWith(".d.ts"))
-    .map((f) => f.slice(0, -".d.ts".length))
-    .map(
-      (name) =>
-        `export * from ${JSON.stringify(
-          pathToFileURL(join(root, "js", `${name}.js`)).href,
-        )};`,
-    );
+    .sort()) {
+    const name = f.slice(0, -".d.ts".length);
+    const file = join(root, "js", `${name}.js`);
+    if (!existsSync(file)) continue;
+    const fresh = [...exportedNames(file)].filter((n) => !taken.has(n));
+    for (const n of fresh) taken.add(n);
+    if (fresh.length)
+      lines.push(
+        `export { ${fresh.join(", ")} } from ${JSON.stringify(pathToFileURL(file).href)};`,
+      );
+  }
   const dir = join(tmpdir(), "homelab-kp-barrel");
   mkdirSync(dir, { recursive: true });
   barrel = join(dir, `kp-bundle-${process.pid}.mjs`);

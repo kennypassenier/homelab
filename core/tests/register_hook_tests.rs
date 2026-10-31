@@ -1002,7 +1002,7 @@ fn web_scratch(dir: &Path) -> std::path::PathBuf {
     std::fs::create_dir_all(repo.join(".githooks")).unwrap();
     std::fs::create_dir_all(&web).unwrap();
     let src = repo_root().join("admin/web");
-    for part in ["js", "scripts", "test", "package.json"] {
+    for part in ["js", "scripts", "test", "types", "package.json"] {
         let ok = Command::new("cp")
             .arg("-a")
             .arg(src.join(part))

@@ -7,11 +7,11 @@ fn inbox_dup_finding_1_an_empty_app_other_than_the_stack_is_named() {
         "has data to back up but no snapshot exists yet (app keep)"
     );
     assert_eq!(
-        no_snapshot_words("media", &["media".into()]),
+        no_snapshot_words("stack-x", &["stack-x".into()]),
         "has data to back up but no snapshot exists yet"
     );
     assert_eq!(
-        no_snapshot_words("media", &[]),
+        no_snapshot_words("stack-x", &[]),
         "has data to back up but no snapshot exists yet"
     );
 }

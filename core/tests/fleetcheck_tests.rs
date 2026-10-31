@@ -4,6 +4,8 @@
 //! 2026-08-30 and that nothing reported. If the check cannot find them when
 //! they are handed to it, it is decoration.
 
+mod common;
+
 use homelab_core::manifest::StackManifest;
 use homelab_core::ops::fleetcheck::{
     BootFact, CoverageFact, GrowthFact, GrowthLimits, LiveFacts, RouteFact, Severity, StackDigest,
@@ -1446,10 +1448,7 @@ fn gap_32_noted_findings_alone_do_not_make_the_check_fail() {
         ..noted
     };
     assert!(!check_passes(&[drift]));
-    let host = std::fs::read_to_string(
-        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../host/src/main.rs"),
-    )
-    .unwrap();
+    let host = common::host_production_source();
     assert!(
         host.contains("ok: homelab_core::ops::fleetcheck::check_passes(&findings)"),
         "the host's `homelab check` must answer with the same rule"

@@ -1170,6 +1170,24 @@ fn the_runbook_warns_that_a_restore_revives_retired_almanac_profiles() {
 /// wrong; leaving the question unanswered is.
 const CLI_ONLY: &[(&str, &str)] = &[
     (
+        "ToolStatus",
+        "managed-tools-5: `homelab tool status` and the dashboard's Programs card show \
+         the managed programs; the TUI has no page for them and the nightly round \
+         keeps them current, so a terminal reader has nothing to act on",
+    ),
+    (
+        "ToolUpdate",
+        "managed-tools-5: `homelab tool update <name>` and the dashboard's action run a \
+         managed-program update; the nightly round does the same on its own, so the \
+         TUI needs no third way",
+    ),
+    (
+        "ToolRollback",
+        "managed-tools-5: `homelab tool rollback <name>` and the dashboard's action put \
+         the previous version back; it is a repair done on purpose, not a screen to \
+         browse, so the TUI does not carry it",
+    ),
+    (
         "CancelExec",
         "feat-kpadopt-2 (homelab-admin): stops one running ExecIn by its request \
          id; the dashboard Console keeps those ids and cancels its own commands. \

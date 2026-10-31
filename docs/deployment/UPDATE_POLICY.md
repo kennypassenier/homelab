@@ -90,7 +90,6 @@ fails while this section is stale.
 | admin | admin | `manual` | nothing; updated on request | `kennypassenier/homelab` |
 | almanac | almanac | `self` | runs its own update verb | `kennypassenier/almanac` |
 | drill | drillsvc | `manual` | nothing; updated on request | none |
-| inbox | inbox | `manual` | nothing; updated on request | none |
 | kitchen | kitchen | `manual` | nothing; updated on request | `kennypassenier/kitchen` |
 | kyu | http-switchboard | `manual` | nothing; updated on request | `kennypassenier/http-switchboard` |
 | kyu | kyu | `auto` | installs a newer release | `kennypassenier/kyu` |

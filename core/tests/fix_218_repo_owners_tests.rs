@@ -14,12 +14,15 @@ use homelab_core::native::NativeServiceManifest;
 use homelab_core::ops::backup::stack_repo_owners;
 use homelab_core::state::StackState;
 
-fn recorded(stack: &str, with_manifest: bool) -> StackState {
+fn recorded(stack: &str, with_manifest: bool, empty_storage: bool) -> StackState {
     let root = concat!(env!("CARGO_MANIFEST_DIR"), "/../stacks/");
-    let manifest: StackManifest = serde_yaml::from_str(
+    let mut manifest: StackManifest = serde_yaml::from_str(
         &std::fs::read_to_string(format!("{root}{stack}/lxc-compose.yml")).unwrap(),
     )
     .unwrap();
+    if empty_storage {
+        manifest.storage.clear();
+    }
     let native: NativeServiceManifest = serde_yaml::from_str(
         &std::fs::read_to_string(format!("{root}{stack}/service.yml")).unwrap(),
     )
@@ -41,10 +44,11 @@ fn recorded(stack: &str, with_manifest: bool) -> StackState {
 /// recorded) as its body, this failed with `left: []` (2026-10-03).
 #[test]
 fn fix_218_native_stack_with_an_empty_storage_manifest_still_owns_its_unit_repository() {
-    // The real stack files, recorded the way a deploy records them.
-    let st = recorded("inbox", true);
+    // The real stack files, recorded the way a deploy records them, with the
+    // storage list emptied (the shape inbox had until it was retired).
+    let st = recorded("almanac", true, true);
     assert!(st.manifest.is_some() && st.is_native());
-    assert_eq!(stack_repo_owners(&st), vec!["inbox".to_string()]);
+    assert_eq!(stack_repo_owners(&st), vec!["almanac".to_string()]);
 }
 
 /// covers: fix-218
@@ -53,7 +57,7 @@ fn fix_218_native_stack_with_an_empty_storage_manifest_still_owns_its_unit_repos
 #[test]
 fn fix_218_native_stack_with_a_mount_lists_each_repository_once() {
     // almanac: a bind mount owned by `almanac` and the native unit `almanac`.
-    let st = recorded("almanac", true);
+    let st = recorded("almanac", true, false);
     assert_eq!(stack_repo_owners(&st), vec!["almanac".to_string()]);
 }
 
@@ -62,6 +66,6 @@ fn fix_218_native_stack_with_a_mount_lists_each_repository_once() {
 /// passed on the old choice too.
 #[test]
 fn fix_218_native_stack_recorded_without_a_manifest_reads_its_units() {
-    let st = recorded("inbox", false);
-    assert_eq!(stack_repo_owners(&st), vec!["inbox".to_string()]);
+    let st = recorded("almanac", false, false);
+    assert_eq!(stack_repo_owners(&st), vec!["almanac".to_string()]);
 }

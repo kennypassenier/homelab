@@ -123,7 +123,7 @@ fn d12_latch_sourced_secrets() {
     );
 
     // 3. MR1 (Kenny, 2026-09-05): both sources for one app → the LOCAL file
-    //    wins and latch is not consulted for that app at all. This was a hard
+    //    wins and latch is not consulted for the VALUE of that app at all. This was a hard
     //    refusal until that day. What changed the decision was a measurement:
     //    the repository held two local .env files against thirteen
     //    latch-backed apps, and the refusal had never once fired on a real
@@ -143,9 +143,14 @@ fn d12_latch_sourced_secrets() {
         "the local file wins over latch"
     );
     let after = std::fs::read_to_string(&log).unwrap().lines().count();
+    // env-drift-warning-1 (Kenny, 2026-10-30: warn): latch is asked once, only
+    // to compare names with the local file for the drift note. Its answer
+    // (here an error) never replaces the local value and never stops the
+    // deploy, which the value assertion above already proved.
     assert_eq!(
-        before, after,
-        "latch must not be invoked for an app that already has a local .env"
+        before + 1,
+        after,
+        "one latch read per app with a local .env, for the drift note only"
     );
     std::fs::remove_file(dir.join("kyu/.env")).unwrap();
     remove_env("LATCH_STUB_MODE");

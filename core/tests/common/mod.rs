@@ -150,3 +150,32 @@ pub fn git_ok(dir: &Path, args: &[&str]) -> bool {
         .status
         .success()
 }
+
+/// The host daemon's production source as one text: every `.rs` under
+/// `host/src` except its `tests` directory. The host is split into modules,
+/// so a check that a phrase is in "the host" reads all of it, not one file.
+pub fn host_production_source() -> String {
+    fn walk(dir: &Path, out: &mut Vec<PathBuf>) {
+        let Ok(entries) = std::fs::read_dir(dir) else {
+            return;
+        };
+        for entry in entries.flatten() {
+            let p = entry.path();
+            if p.is_dir() {
+                if p.file_name().is_some_and(|n| n != "tests") {
+                    walk(&p, out);
+                }
+            } else if p.extension().is_some_and(|e| e == "rs") {
+                out.push(p);
+            }
+        }
+    }
+    let mut files = Vec::new();
+    walk(&repo_root().join("host/src"), &mut files);
+    files.sort();
+    files
+        .iter()
+        .map(|f| std::fs::read_to_string(f).unwrap_or_default())
+        .collect::<Vec<_>>()
+        .join("\n")
+}

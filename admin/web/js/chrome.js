@@ -56,7 +56,6 @@ import {
 } from "./shortcuts.js";
 import { current, listen, subscribe } from "./store.js";
 import {
-  OPEN_EVENT,
   RUN_EVENT,
   attachPalettes,
   palette,
@@ -78,6 +77,13 @@ import {
   registerShortcuts,
 } from "/static/kp/dist/kp-themes.min.js";
 import { settleStoredTheme } from "./themesettle.js";
+
+/**
+ * The event kp's command palette fires when it opens. The bundle does not
+ * export `OPEN_EVENT` (the palette, date picker and combobox each export one
+ * and a shared name is dropped), so the palette's own value is kept here.
+ */
+const PALETTE_OPEN_EVENT = "kp-palette-open";
 
 /**
  * @typedef {{navigate: (href: string) => void,
@@ -662,7 +668,7 @@ export function mountChrome(where, ctx) {
     palette(dialog)?.refresh();
   };
   input.addEventListener("input", refill);
-  dialog.addEventListener(OPEN_EVENT, (e) => {
+  dialog.addEventListener(PALETTE_OPEN_EVENT, (e) => {
     if (!(/** @type {CustomEvent} */ (e).detail?.open)) return;
     refill();
     // The "Open app" group is fed by the Apps page's list; on any other page

@@ -18,7 +18,7 @@ import {
   statePlate,
   buildProgressbar,
   setIndeterminate,
-  setProgress as kpSetProgress,
+  syncProgressbar,
 } from "/static/kp/dist/kp-themes.min.js";
 
 /**
@@ -709,7 +709,22 @@ export function statTile(label, value = "") {
  */
 export function setProgress(el, pct) {
   if (pct == null || !Number.isFinite(pct)) setIndeterminate(el, true);
-  else kpSetProgress(el, pct);
+  else setKpProgress(el, pct);
+}
+
+/**
+ * kp-themes' `setProgress(el, value)` for a 0 to 100 bar. The single bundle
+ * leaves that name out (progressbar.js and upload.js both export it, and a
+ * name two modules share is dropped), so this repeats its three steps from
+ * kp's progressbar.js, using the bundle's own `syncProgressbar`; no bar
+ * here ever shows kp's failure state, which is the one step left out.
+ * @param {HTMLElement} el
+ * @param {number} value
+ */
+function setKpProgress(el, value) {
+  el.removeAttribute("data-kp-indeterminate");
+  el.setAttribute("aria-valuenow", String(Math.min(100, Math.max(0, value))));
+  syncProgressbar(el);
 }
 
 /**

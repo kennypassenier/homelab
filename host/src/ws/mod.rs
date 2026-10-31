@@ -8,7 +8,9 @@ mod ui_commands;
 mod upgrade;
 mod worker;
 
-pub(crate) use frames::{unknown_field_refusal, unparseable_frame_line};
+pub(crate) use frames::unknown_field_refusal;
+#[cfg(test)]
+pub(crate) use frames::unparseable_frame_line;
 pub(crate) use upgrade::ws_upgrade;
 
 use crate::*;

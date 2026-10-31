@@ -117,7 +117,10 @@ pub fn settings_body(fields: &[Field], values: &Values) -> Value {
 }
 
 /// The tile's map within `tiles`, made fresh the first time it is touched.
-pub(super) fn tile_entry<'a>(tiles: &'a mut Map<String, Value>, key: &str) -> &'a mut Map<String, Value> {
+pub(super) fn tile_entry<'a>(
+    tiles: &'a mut Map<String, Value>,
+    key: &str,
+) -> &'a mut Map<String, Value> {
     tiles
         .entry(key.to_string())
         .or_insert_with(|| Value::Object(Map::new()))

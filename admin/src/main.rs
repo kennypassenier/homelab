@@ -102,7 +102,15 @@ async fn main() -> std::process::ExitCode {
     // default, is the router's fallback, and `index.html` answers for every
     // extensionless path that is not the kit's. `/app` and `/app/…` from
     // before 3.1.0 get a 308 to the same path at the root (the kit's own).
-    app.webapp(WebApp::embedded(FILES));
+    // chassis-rs 4.0.0: the kit would add its own effects runtime to every page
+    // (the dashboard attaches them itself in chrome.js, so twice would stack)
+    // and make the dashboard an installable app (its service worker is not
+    // wanted behind this CSP); both stay off.
+    app.webapp(
+        WebApp::embedded(FILES)
+            .without_kit_runtime()
+            .without_pwa(),
+    );
     // feat-shell-1 (redesign 3.71.0, Kenny approved 2026-10-03): six areas,
     // in the order a person needs them — `Apps · Inbox · Stacks · Activity
     // │ Backups · System` — are the bar's only links (admin/web/js/areas.js

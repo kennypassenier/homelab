@@ -41,7 +41,7 @@ services:
   # multi-platform image does not guarantee. Profile `tool`: `compose up`
   # never starts it. Host network so 127.0.0.1:5004 is the keep registry.
   keep-copy:
-    image: quay.io/skopeo/stable:v1.22.3@sha256:24940638e4abb0edfedc78a680554f316069d0212a00159276759421a059e611
+    image: quay.io/skopeo/stable:v1.22.3@sha256:ad1d2e25cf0234bb50476e753a8fc9debd4f0582cdd2ab6fd7bad9bacdfe3b9b
     profiles: ["tool"]
     entrypoint: ["skopeo"]
     network_mode: host

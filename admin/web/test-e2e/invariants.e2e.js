@@ -122,6 +122,28 @@ async function wipePrefs(context) {
 }
 
 /**
+ * kp-themes 12 draws a chart only once it has been on screen (it shows a
+ * skeleton until then), so a case that reads every chart's legend or hint
+ * scrolls the cards past first.
+ * @param {import("playwright").Page} page
+ */
+async function revealCharts(page) {
+  await page.evaluate(async () => {
+    for (const card of document.querySelectorAll(".mk-card")) {
+      card.scrollIntoView({ block: "center" });
+      const chart = card.querySelector(".kp-chart");
+      for (
+        let i = 0;
+        i < 20 && chart?.getAttribute("data-kp-state") === "loading";
+        i++
+      )
+        await new Promise((r) => setTimeout(r, 50));
+    }
+    window.scrollTo(0, 0);
+  });
+}
+
+/**
  * A logged-in page left on /stacks (feat-shell-1: the stack list's
  * address since 3.71.0; /overview redirects there).
  * @param {import("playwright").BrowserContext} context
@@ -1391,6 +1413,7 @@ test("invariants: no /charts series label matches a raw-id pattern and every cha
     const context = await browser.newContext();
     const page = await freshPage(context);
     await page.goto(`${BASE}/charts`, { waitUntil: "load" });
+    await revealCharts(page);
     // The host's own charts (no ?stack=) carry the temperature/SMART/
     // network/memory panels the demo metrics server answers with raw ids.
     // redesign-371-metrics: each chart is a card (`.mk-card`) drawing the
@@ -6594,6 +6617,7 @@ test("invariants: review metrics — the wording is the demo's, Connections is g
     });
     const t = await freshPage(touch);
     await t.goto(`${BASE}/charts`);
+    await revealCharts(t);
     // kp hides a one-source chart's hint (nothing to single out): wait
     // for a chart that has one.
     await t.waitForSelector(".kp-chart__hint:not([hidden])");

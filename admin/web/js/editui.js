@@ -17,20 +17,20 @@ import { h } from "./dom.js";
 import { gridRow } from "./gridrow.js";
 import { mountJobPanel } from "./jobpanel.js";
 import { commitBody, committedText, planView } from "./plan.js";
-import { attachDiffs, setDiff } from "/static/kp/js/diff.js";
-import { clearError, showError } from "/static/kp/js/forms.js";
+import { attachDiffs, setDiff } from "/static/kp/dist/kp-themes.min.js";
+import { clearError, showError } from "/static/kp/dist/kp-themes.min.js";
 import {
   discardUnsaved,
   markUnsavedClean,
   setUnsavedSaving,
   unsaved,
-} from "/static/kp/js/unsaved.js";
+} from "/static/kp/dist/kp-themes.min.js";
 import {
   BEFORE_STEP_EVENT,
   FINISH_EVENT,
   attachWizards,
   wizard,
-} from "/static/kp/js/wizard.js";
+} from "/static/kp/dist/kp-themes.min.js";
 
 /**
  * One field, drawn from its description; the input's id is the field's id,

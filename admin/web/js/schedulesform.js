@@ -17,15 +17,19 @@ import {
   runsWithClash,
   scheduleTitle,
 } from "./schedules.js";
-import { openConfirmation } from "/static/kp/js/components.js";
-import { attachRuns, setRuns } from "/static/kp/js/runs.js";
+import { openConfirmation } from "/static/kp/dist/kp-themes.min.js";
+import { attachRuns, setRuns } from "/static/kp/dist/kp-themes.min.js";
 import {
   attachSentences,
   sentence,
   setSentenceFieldState,
   setSentenceWhy,
-} from "/static/kp/js/sentence.js";
-import { attachTimes, setTime, timeValue } from "/static/kp/js/timefield.js";
+} from "/static/kp/dist/kp-themes.min.js";
+import {
+  attachTimes,
+  setTime,
+  timeValue,
+} from "/static/kp/dist/kp-themes.min.js";
 import {
   attachUnsaved,
   markUnsavedClean,
@@ -33,8 +37,8 @@ import {
   unsavedSaved,
   discardUnsaved,
   setUnsavedSaving,
-} from "/static/kp/js/unsaved.js";
-import { attachWeekdays, weekdaysOf } from "/static/kp/js/weekdays.js";
+} from "/static/kp/dist/kp-themes.min.js";
+import { attachWeekdays, weekdaysOf } from "/static/kp/dist/kp-themes.min.js";
 
 // Live view reaches every field and button of the form (invariant 39).
 export const SCHED_ACTION = declareField({

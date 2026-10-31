@@ -78,13 +78,13 @@ import {
   chartSelect,
   chartZoom,
   setTrendData,
-} from "/static/kp/js/chart.js";
-import { RANGE_EVENT, attachRanges } from "/static/kp/js/range.js";
+} from "/static/kp/dist/kp-themes.min.js";
+import { RANGE_EVENT, attachRanges } from "/static/kp/dist/kp-themes.min.js";
 import {
   REFRESH_EVENT,
   attachRefresh,
   refreshOf,
-} from "/static/kp/js/auto-refresh.js";
+} from "/static/kp/dist/kp-themes.min.js";
 import {
   GANTT_OPEN_EVENT,
   GANTT_WINDOW_EVENT,
@@ -92,16 +92,20 @@ import {
   setGanttRuns,
   setGanttState,
   setGanttWindow,
-} from "/static/kp/js/gantt.js";
-import { CHANGE_EVENT, combobox, drawnSelect } from "/static/kp/js/combobox.js";
-import { attachUsualPickers, setUsual } from "/static/kp/js/usual-picker.js";
-import { attachIdmarks, idmarkColours } from "/static/kp/js/idmark.js";
-import { attachHoverCards } from "/static/kp/js/hovercard.js";
+} from "/static/kp/dist/kp-themes.min.js";
+import {
+  CHANGE_EVENT,
+  combobox,
+  drawnSelect,
+} from "/static/kp/dist/kp-themes.min.js";
+import { attachUsualPickers, setUsual } from "/static/kp/dist/kp-themes.min.js";
+import { attachIdmarks, idmarkColours } from "/static/kp/dist/kp-themes.min.js";
+import { attachHoverCards } from "/static/kp/dist/kp-themes.min.js";
 import {
   STACKBAR_PICK_EVENT,
   STACKBAR_RETRY_EVENT,
   setStackbar,
-} from "/static/kp/js/stackbar.js";
+} from "/static/kp/dist/kp-themes.min.js";
 import {
   HEAT_PICK_EVENT,
   HEAT_ROW_EVENT,
@@ -110,16 +114,16 @@ import {
   setHeatLegend,
   setHeatPick,
   setHeatRows,
-} from "/static/kp/js/heat.js";
+} from "/static/kp/dist/kp-themes.min.js";
 import {
   RETRY_EVENT as TABLE_RETRY_EVENT,
   attachDataTables,
   dataTable as tableOf,
-} from "/static/kp/js/datatable.js";
+} from "/static/kp/dist/kp-themes.min.js";
 import { gridRow, formGrid } from "../gridrow.js";
-import { attachBarCells, setBarCell } from "/static/kp/js/barcell.js";
+import { attachBarCells, setBarCell } from "/static/kp/dist/kp-themes.min.js";
 import { syncRows } from "../inplace.js";
-import { attachUptimes, setUptime } from "/static/kp/js/uptime.js";
+import { attachUptimes, setUptime } from "/static/kp/dist/kp-themes.min.js";
 import { periodsOf, uptimeQuery } from "../uptimeview.js";
 import { REFRESH_S } from "../quiet.js";
 

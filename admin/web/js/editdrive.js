@@ -16,7 +16,7 @@ import { openNewStack } from "./newstack.js";
 import { openPublishDialog } from "./editpanels.js";
 import { openPresetEditor } from "./presetseditor.js";
 import { openRollback } from "./rollbackdialog.js";
-import { clearError, showError } from "/static/kp/js/forms.js";
+import { clearError, showError } from "/static/kp/dist/kp-themes.min.js";
 
 /**
  * @typedef {import("./driveview.js").DriveForm} DriveForm

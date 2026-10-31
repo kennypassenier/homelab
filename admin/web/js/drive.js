@@ -48,7 +48,7 @@ import {
   stillDriving,
 } from "./driveview.js";
 import { listen } from "./store.js";
-import { attachSwitches } from "/static/kp/js/forms.js";
+import { attachSwitches } from "/static/kp/dist/kp-themes.min.js";
 
 /** @param {number} ms */
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));

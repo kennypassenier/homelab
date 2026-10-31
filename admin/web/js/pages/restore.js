@@ -33,13 +33,13 @@ import { current, rereadStore, subscribe } from "../store.js";
 import { openAction } from "../actiondialog.js";
 import { pageHeader } from "../ui.js";
 import { gridRow, formGrid, buttonGroup } from "../gridrow.js";
-import { drawnSelect } from "/static/kp/js/combobox.js";
+import { drawnSelect } from "/static/kp/dist/kp-themes.min.js";
 import {
   BEFORE_STEP_EVENT,
   STEP_EVENT,
   attachWizards,
   wizard,
-} from "/static/kp/js/wizard.js";
+} from "/static/kp/dist/kp-themes.min.js";
 import {
   DATED_EVENT,
   DATED_RETRY_EVENT,
@@ -47,25 +47,29 @@ import {
   datedValue,
   setDatedOptions,
   setDatedState,
-} from "/static/kp/js/dated-options.js";
-import { runMoment } from "/static/kp/js/runs.js";
-import { setCode } from "/static/kp/js/code.js";
+} from "/static/kp/dist/kp-themes.min.js";
+import { runMoment } from "/static/kp/dist/kp-themes.min.js";
+import { setCode } from "/static/kp/dist/kp-themes.min.js";
 import {
   attachSteplists,
   buildSteplist,
   setStep,
-} from "/static/kp/js/steplist.js";
-import { ACK_EVENT, ackGate, attachAckGates } from "/static/kp/js/ack-gate.js";
+} from "/static/kp/dist/kp-themes.min.js";
+import {
+  ACK_EVENT,
+  ackGate,
+  attachAckGates,
+} from "/static/kp/dist/kp-themes.min.js";
 import {
   TYPE_CONFIRM_EVENT,
   attachTypeConfirms,
-} from "/static/kp/js/components.js";
-import { attachDisabledReasons } from "/static/kp/js/reason.js";
+} from "/static/kp/dist/kp-themes.min.js";
+import { attachDisabledReasons } from "/static/kp/dist/kp-themes.min.js";
 import {
   CARD_RETRY_EVENT,
   attachCardStates,
   setCardState,
-} from "/static/kp/js/card-state.js";
+} from "/static/kp/dist/kp-themes.min.js";
 
 const STACK = declare({
   id: "restore-stack",
@@ -140,7 +144,7 @@ const STEPS = /** @type {const} */ ([
   "Restore",
 ]);
 
-/** The job step states the kp step list knows. @type {Record<string, import("/static/kp/js/steplist.js").StepState>} */
+/** The job step states the kp step list knows. @type {Record<string, import("/static/kp/dist/kp-themes.min.js").StepState>} */
 const STEP_STATE = {
   ok: "done",
   bad: "failed",
@@ -526,7 +530,9 @@ export function mount(root, ctx) {
   });
   cleanups.push(wizards);
   const w = () =>
-    /** @type {import("/static/kp/js/wizard.js").WizardHandle} */ (wizard(wiz));
+    /** @type {import("/static/kp/dist/kp-themes.min.js").WizardHandle} */ (
+      wizard(wiz)
+    );
 
   // ── data ─────────────────────────────────────────────────────────────
   /** The repositories (apps) with at least one snapshot. */

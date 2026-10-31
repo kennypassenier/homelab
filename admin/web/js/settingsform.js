@@ -19,10 +19,10 @@ import {
   shownValue,
   unitOf,
 } from "./settingsrows.js";
-import { attachAll } from "/static/kp/js/auto.js";
-import { combobox } from "/static/kp/js/combobox.js";
-import { setQuantity } from "/static/kp/js/quantity.js";
-import { setTime } from "/static/kp/js/timefield.js";
+import { attachAll } from "/static/kp/dist/kp-themes.min.js";
+import { combobox } from "/static/kp/dist/kp-themes.min.js";
+import { setQuantity } from "/static/kp/dist/kp-themes.min.js";
+import { setTime } from "/static/kp/dist/kp-themes.min.js";
 
 /** @typedef {import("./editforms.js").HostField} HostField */
 

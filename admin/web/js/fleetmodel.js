@@ -125,7 +125,7 @@ export function cpuDay(body, name, points = 48) {
  * @param {(mb: number | null | undefined) => string} gb
  * @param {number[] | undefined} [trend] the last 24 h of CPU, oldest first;
  *   undefined while it is being read (no row yet), `[]` when it could not be
- * @returns {import("/static/kp/js/entity-card.js").EntityData}
+ * @returns {import("/static/kp/dist/kp-themes.min.js").EntityData}
  */
 export function entityOf(r, gb, trend) {
   const parked = r.state.label === "parked";
@@ -194,7 +194,7 @@ export function entityOf(r, gb, trend) {
  *   percent per stack, from `/data/capacity`
  * @param {string | null} only narrow to one stack
  * @param {(mb: number | null | undefined) => string} gb
- * @returns {import("/static/kp/js/bullets.js").BulletRow[]}
+ * @returns {import("/static/kp/dist/kp-themes.min.js").BulletRow[]}
  */
 export function hungryRows(rows, measure, capacity, only, gb) {
   const val = (/** @type {Row} */ r) => {
@@ -238,8 +238,8 @@ export function hungryRows(rows, measure, capacity, only, gb) {
  * @param {{every: number, narrow: boolean}} axis
  * @param {(night: string) => string} dayLabel dd/mm/yyyy of a night key
  * @returns {{columns: {key: string, label: string, minor: boolean}[],
- *   summary: import("/static/kp/js/heat.js").HeatRow,
- *   rows: import("/static/kp/js/heat.js").HeatRow[], nights: string[]}}
+ *   summary: import("/static/kp/dist/kp-themes.min.js").HeatRow,
+ *   rows: import("/static/kp/dist/kp-themes.min.js").HeatRow[], nights: string[]}}
  */
 export function nightsGrid(rows, reads, nowS, count, axis, dayLabel) {
   const now = nightsNow(nowS);
@@ -254,7 +254,7 @@ export function nightsGrid(rows, reads, nowS, count, axis, dayLabel) {
       (i % axis.every === 0 && nights.length - 1 - i >= axis.every)
     ),
   }));
-  /** @type {import("/static/kp/js/heat.js").HeatRow[]} */
+  /** @type {import("/static/kp/dist/kp-themes.min.js").HeatRow[]} */
   const out = rows.map((r) => {
     const read = reads[r.name] ?? { status: /** @type {const} */ ("pending") };
     return {

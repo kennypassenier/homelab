@@ -26,20 +26,20 @@ import {
   ENTITY_NEW_EVENT,
   setEntityGrid,
   setEntityGridState,
-} from "/static/kp/js/entity-card.js";
-import { matchIntent } from "/static/kp/js/intent.js";
+} from "/static/kp/dist/kp-themes.min.js";
+import { matchIntent } from "/static/kp/dist/kp-themes.min.js";
 import {
   SEGMENTED_EVENT,
   attachSegmented,
   getSegmentedValues,
   setSegmentedValues,
-} from "/static/kp/js/segmented.js";
+} from "/static/kp/dist/kp-themes.min.js";
 import {
   TOOLBAR_CLEAR_EVENT,
   TOOLBAR_REMOVE_EVENT,
   attachToolbars,
   setToolbarActive,
-} from "/static/kp/js/toolbar.js";
+} from "/static/kp/dist/kp-themes.min.js";
 
 /** @typedef {import("../presetsview.js").PresetView} PresetView */
 
@@ -363,7 +363,7 @@ export function mount(root, ctx) {
     return okText && wanted().every((n) => (n === "gpu" ? p.gpu : p.vpn));
   };
 
-  /** @param {PresetView} p @returns {import("/static/kp/js/entity-card.js").EntityData} */
+  /** @param {PresetView} p @returns {import("/static/kp/dist/kp-themes.min.js").EntityData} */
   const entity = (p) => {
     const has = sets(p);
     const empty = (p.apps ?? []).length === 0;

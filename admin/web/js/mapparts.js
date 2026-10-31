@@ -11,7 +11,7 @@ import { neighbours } from "./mapview.js";
 
 /**
  * @typedef {import("./topology.js").Topology} Topology
- * @typedef {import("/static/kp/js/deplist.js").DepItem} DepItem
+ * @typedef {import("/static/kp/dist/kp-themes.min.js").DepItem} DepItem
  */
 
 /**

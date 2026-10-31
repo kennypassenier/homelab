@@ -13,14 +13,17 @@ import { register } from "./drivehooks.js";
 import { rollbackView } from "./rollback.js";
 import { stage } from "./stage.js";
 import { sortKeys } from "./sortkeys.js";
-import { attachCardStates, setCardState } from "/static/kp/js/card-state.js";
-import { attachDataTables, compare } from "/static/kp/js/datatable.js";
+import {
+  attachCardStates,
+  setCardState,
+} from "/static/kp/dist/kp-themes.min.js";
+import { attachDataTables, compare } from "/static/kp/dist/kp-themes.min.js";
 import {
   attachDatedOptions,
   datedOptions,
   datedValue,
   setDatedOptions,
-} from "/static/kp/js/dated-options.js";
+} from "/static/kp/dist/kp-themes.min.js";
 
 /**
  * @param {string} stack

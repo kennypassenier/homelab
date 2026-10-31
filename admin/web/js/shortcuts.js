@@ -151,7 +151,7 @@ export function onPageKey(name, run) {
  * Every key of the app, as kp's engine takes them.
  * @param {{navigate: (href: string) => void,
  *   route: () => import("./router.js").Route, focusSearch: () => void}} ctx
- * @returns {import("/static/kp/js/shortcuts.js").Shortcut[]}
+ * @returns {import("/static/kp/dist/kp-themes.min.js").Shortcut[]}
  */
 export function appShortcuts(ctx) {
   const onStack = () => ctx.route().page === "stack";

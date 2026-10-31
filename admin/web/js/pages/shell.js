@@ -20,9 +20,9 @@ import {
   setConsoleComplete,
   setConsoleContext,
   setConsoleRun,
-} from "/static/kp/js/console.js";
-import { setKeys, attachKeys } from "/static/kp/js/keys.js";
-import { attachDisabledReasons } from "/static/kp/js/reason.js";
+} from "/static/kp/dist/kp-themes.min.js";
+import { setKeys, attachKeys } from "/static/kp/dist/kp-themes.min.js";
+import { attachDisabledReasons } from "/static/kp/dist/kp-themes.min.js";
 import { declare, declareField, drivable } from "../drivable.js";
 import { shellResult, shellTargets } from "../parity.js";
 import { current, subscribe } from "../store.js";
@@ -500,7 +500,7 @@ export function mount(root) {
     const job = /** @type {number} */ (r.body.job);
     /** @type {(() => void) | null} */
     let stop = null;
-    /** @type {import("/static/kp/js/console.js").ConsoleJob} */
+    /** @type {import("/static/kp/dist/kp-themes.min.js").ConsoleJob} */
     const consoleJob = {
       update: (handler) => {
         const paint = () => {

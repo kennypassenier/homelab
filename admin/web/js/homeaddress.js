@@ -27,7 +27,7 @@ import { declare, drivable } from "./drivable.js";
 import { mountJobPanel } from "./jobpanel.js";
 import { jobEnd } from "./pinupdate.js";
 import { REFRESH_MS, changeGate } from "./quiet.js";
-import { attachDisabledReasons } from "/static/kp/js/reason.js";
+import { attachDisabledReasons } from "/static/kp/dist/kp-themes.min.js";
 
 const UPDATE = declare({
   id: "home-address-update",

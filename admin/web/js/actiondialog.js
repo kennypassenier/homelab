@@ -63,22 +63,25 @@ import { current } from "./store.js";
 import { declare, dialogControl, drivable } from "./drivable.js";
 import { countOf } from "./ui.js";
 import { stage } from "./stage.js";
-import { attachCardStates, setCardState } from "/static/kp/js/card-state.js";
-import { clearError, showError } from "/static/kp/js/forms.js";
+import {
+  attachCardStates,
+  setCardState,
+} from "/static/kp/dist/kp-themes.min.js";
+import { clearError, showError } from "/static/kp/dist/kp-themes.min.js";
 import {
   DATED_EVENT,
   DATED_RETRY_EVENT,
   attachDatedOptions,
   setDatedOptions,
   setDatedState,
-} from "/static/kp/js/dated-options.js";
+} from "/static/kp/dist/kp-themes.min.js";
 import {
   BEFORE_STEP_EVENT,
   FINISH_EVENT,
   STEP_EVENT,
   attachWizards,
   wizard,
-} from "/static/kp/js/wizard.js";
+} from "/static/kp/dist/kp-themes.min.js";
 
 /**
  * @typedef {{apps?: string[], units?: string[],

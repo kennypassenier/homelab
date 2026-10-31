@@ -1,5 +1,5 @@
 // The ONE time chart every page draws is kp-themes' own (11.0.0, served at
-// /static/kp/js/chart.js: legend, plot, drag-zoom, keys, event marks, bands,
+// /static/kp/dist/kp-themes.min.js: legend, plot, drag-zoom, keys, event marks, bands,
 // typical level and runs — see /home/kenny/Projects/kp-themes/docs/USER_GUIDE.md).
 // This module is the thin adapter between it and the pages, kept small on
 // purpose: everything the legend, the crosshair, the drag-zoom, the keyboard,
@@ -34,7 +34,7 @@ import {
   dashOf as kpDashOf,
   formatChartValue,
   setChartData,
-} from "/static/kp/js/chart.js";
+} from "/static/kp/dist/kp-themes.min.js";
 
 /**
  * @typedef {[number, number]} Point unix seconds, value
@@ -57,7 +57,7 @@ import {
  *   `key`: the chart's name for Live view (its card), `label` otherwise;
  *   `typical`: a dashed line at each source's typical level and a ring on
  *   every run of six readings on one side of it (kp's `median` and `runs`)
- * @typedef {import("/static/kp/js/chart.js").ChartData} ChartData
+ * @typedef {import("/static/kp/dist/kp-themes.min.js").ChartData} ChartData
  */
 
 // ---------- Live view: declared once, same ids as timechart.js ----------
@@ -91,7 +91,7 @@ const ZOOM_RESET = declare({
   shows: "while the charts are zoomed in (drag across a chart)",
 });
 
-/** @type {import("/static/kp/js/chart.js").ChartDecorate} */
+/** @type {import("/static/kp/dist/kp-themes.min.js").ChartDecorate} */
 const decorate = (part, info) => {
   if (info.kind === "source")
     drivable(part, SOURCE, `${info.key ?? ""}/${info.label ?? ""}`);
@@ -99,7 +99,7 @@ const decorate = (part, info) => {
   else if (info.kind === "zoom-reset") drivable(part, ZOOM_RESET);
 };
 
-/** @type {import("/static/kp/js/chart.js").ChartOptions} */
+/** @type {import("/static/kp/dist/kp-themes.min.js").ChartOptions} */
 const CHART_OPTIONS = { decorate };
 
 /** The dash of the `i`-th source's line — kp's own (0 = solid). */
@@ -144,7 +144,7 @@ const TONE = { bad: "critical", warn: "warning", info: "info" };
  * `{at, until, kind, tone}` (seconds) to kp's `ChartEvent` (milliseconds):
  * a window of work carries its `until`, so kp draws it as a band.
  * @param {Annotation} a
- * @returns {import("/static/kp/js/chart.js").ChartEvent}
+ * @returns {import("/static/kp/dist/kp-themes.min.js").ChartEvent}
  */
 const toKpEvent = (a) => ({
   at: a.at,

@@ -14,7 +14,7 @@ import {
   attachLogViewers,
   clearLogViewer,
   setLogViewer,
-} from "/static/kp/js/logviewer.js";
+} from "/static/kp/dist/kp-themes.min.js";
 
 const LOG_COPY = declare({
   id: "job-log-copy",

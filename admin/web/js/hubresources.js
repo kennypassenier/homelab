@@ -11,7 +11,10 @@ import { stackEntries } from "./stacktabs.js";
 import { timeChart } from "./charts.js";
 import { current } from "./store.js";
 import { section } from "./ui.js";
-import { attachCardStates, setCardState } from "/static/kp/js/card-state.js";
+import {
+  attachCardStates,
+  setCardState,
+} from "/static/kp/dist/kp-themes.min.js";
 
 /** The window the tab shows, in seconds. */
 const WINDOW_S = 24 * 3600;

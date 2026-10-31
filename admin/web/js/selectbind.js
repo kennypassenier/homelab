@@ -7,7 +7,7 @@
 import {
   attachSelectionBars,
   setSelectionRules,
-} from "/static/kp/js/selection-bar.js";
+} from "/static/kp/dist/kp-themes.min.js";
 
 /**
  * @param {HTMLElement} root the element that holds the bar and its list

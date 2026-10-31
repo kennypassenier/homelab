@@ -5,10 +5,14 @@
 
 import { h, stateBadge } from "./dom.js";
 import { declare, drivable } from "./drivable.js";
-import { showAlarm } from "/static/kp/js/alarm.js";
-import { attachDialogs, openAtTop, toast } from "/static/kp/js/overlays.js";
-import { attachCommands } from "/static/kp/js/command.js";
-import { buildTypeConfirm } from "/static/kp/js/components.js";
+import { showAlarm } from "/static/kp/dist/kp-themes.min.js";
+import {
+  attachDialogs,
+  openAtTop,
+  toast,
+} from "/static/kp/dist/kp-themes.min.js";
+import { attachCommands } from "/static/kp/dist/kp-themes.min.js";
+import { buildTypeConfirm } from "/static/kp/dist/kp-themes.min.js";
 
 let dialogIds = 0;
 

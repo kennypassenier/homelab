@@ -8,7 +8,7 @@ import { install } from "./support/minidom.mjs";
 
 const doc = install();
 const { settleStoredTheme } = await import("../js/themesettle.js");
-const kp = await import("/static/kp/js/theme-core.js");
+const kp = await import("/static/kp/dist/kp-themes.min.js");
 
 /** A storage with one value. @param {string | null} value */
 const storage = (value) => {

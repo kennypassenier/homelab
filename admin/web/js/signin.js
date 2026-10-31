@@ -21,17 +21,17 @@ import { markErrors } from "./editui.js";
 import { esc } from "./settingsform.js";
 // @ts-ignore — a kit asset, not part of this app's own module graph.
 import { registerPasskey } from "/static/passkeys.js";
-import { attachAll } from "/static/kp/js/auto.js";
-import { setCardState } from "/static/kp/js/card-state.js";
-import { form as kpForm } from "/static/kp/js/forms.js";
-import { hideSecret, revealSecret } from "/static/kp/js/patterns.js";
+import { attachAll } from "/static/kp/dist/kp-themes.min.js";
+import { setCardState } from "/static/kp/dist/kp-themes.min.js";
+import { form as kpForm } from "/static/kp/dist/kp-themes.min.js";
+import { hideSecret, revealSecret } from "/static/kp/dist/kp-themes.min.js";
 import {
   PASSKEYS_REGISTER_EVENT,
   PASSKEYS_RETRY_EVENT,
   setPasskeys,
-} from "/static/kp/js/passkeys.js";
-import { setQr } from "/static/kp/js/qr.js";
-import { attachDisabledReasons } from "/static/kp/js/reason.js";
+} from "/static/kp/dist/kp-themes.min.js";
+import { setQr } from "/static/kp/dist/kp-themes.min.js";
+import { attachDisabledReasons } from "/static/kp/dist/kp-themes.min.js";
 
 /**
  * @typedef {{id: string, label: string, created_at: string,
@@ -163,7 +163,7 @@ async function renamePasskey(id, name) {
 /**
  * The passkeys as kp's list takes them.
  * @param {PasskeyView[]} list
- * @returns {import("/static/kp/js/passkeys.js").PasskeyRow[]}
+ * @returns {import("/static/kp/dist/kp-themes.min.js").PasskeyRow[]}
  */
 export function passkeyRows(list) {
   return list.map((p) => ({
@@ -317,7 +317,7 @@ export function mountSignin(box, report) {
   /** @type {PasskeysData | null} */
   let data = null;
   const reload = () => void loadPasskeys().catch(() => {});
-  /** @param {import("/static/kp/js/passkeys.js").PasskeysSpec} extra */
+  /** @param {import("/static/kp/dist/kp-themes.min.js").PasskeysSpec} extra */
   const draw = (extra) => {
     setPasskeys(list, {
       register: false,
@@ -756,42 +756,44 @@ export function mountSignin(box, report) {
 
   /** @param {string} name */
   const revokeTokenDialog = (name) => {
-    void import("/static/kp/js/components.js").then(({ openConfirmation }) => {
-      const btn = /** @type {HTMLElement} */ (
-        tokenGrid.querySelector(`[data-token="${CSS.escape(name)}"]`)
-      );
-      openConfirmation(btn, {
-        phrase: `Revoke ${name}?`,
-        typeName: name,
-        loses: [
-          "That machine's token stops working at once.",
-          "No other machine's token is affected.",
-        ],
-        acceptLabel: "Revoke",
-        onAccept: async () => {
-          if (driven()) return;
-          const r = await send(
-            "DELETE",
-            `/data/tokens/${encodeURIComponent(name)}?confirm=${encodeURIComponent(name)}`,
-            undefined,
-            "revoke a token",
-          );
-          if (!r.ok) {
-            notify(`Not revoked: ${r.error.why}`, "error");
-            return;
-          }
-          notify(`${name} revoked.`, "success");
-          void loadTokens();
-        },
-      });
-      // Live view types the name into the confirmation field by its id.
-      queueMicrotask(() => {
-        const input = document.querySelector(
-          "dialog[open] .kp-type-confirm__input",
+    void import("/static/kp/dist/kp-themes.min.js").then(
+      ({ openConfirmation }) => {
+        const btn = /** @type {HTMLElement} */ (
+          tokenGrid.querySelector(`[data-token="${CSS.escape(name)}"]`)
         );
-        if (input) input.id = TOKEN_REVOKE_CONFIRM;
-      });
-    });
+        openConfirmation(btn, {
+          phrase: `Revoke ${name}?`,
+          typeName: name,
+          loses: [
+            "That machine's token stops working at once.",
+            "No other machine's token is affected.",
+          ],
+          acceptLabel: "Revoke",
+          onAccept: async () => {
+            if (driven()) return;
+            const r = await send(
+              "DELETE",
+              `/data/tokens/${encodeURIComponent(name)}?confirm=${encodeURIComponent(name)}`,
+              undefined,
+              "revoke a token",
+            );
+            if (!r.ok) {
+              notify(`Not revoked: ${r.error.why}`, "error");
+              return;
+            }
+            notify(`${name} revoked.`, "success");
+            void loadTokens();
+          },
+        });
+        // Live view types the name into the confirmation field by its id.
+        queueMicrotask(() => {
+          const input = document.querySelector(
+            "dialog[open] .kp-type-confirm__input",
+          );
+          if (input) input.id = TOKEN_REVOKE_CONFIRM;
+        });
+      },
+    );
   };
   issueBtn.addEventListener("click", () => issueTokenDialog());
 

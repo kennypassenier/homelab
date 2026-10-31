@@ -14,7 +14,7 @@ import {
   stackCommands,
 } from "../js/commands.js";
 import { MAX_SHOWN, noMatch, rankPalette } from "../js/intent.js";
-import { matchIntent } from "/static/kp/js/intent.js";
+import { matchIntent } from "/static/kp/dist/kp-themes.min.js";
 
 /** @param {string} action @param {Partial<import("../js/actionforms.js").CatalogEntry>} [o] */
 const entry = (action, o = {}) =>

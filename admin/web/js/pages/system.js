@@ -31,14 +31,17 @@ import {
   attachStatusLists,
   buildStatusList,
   setStatus,
-} from "/static/kp/js/statusrow.js";
-import { attachCardStates, setCardState } from "/static/kp/js/card-state.js";
+} from "/static/kp/dist/kp-themes.min.js";
+import {
+  attachCardStates,
+  setCardState,
+} from "/static/kp/dist/kp-themes.min.js";
 import {
   attachVersionDeltas,
   setVersionDelta,
   summarizeDeltas,
-} from "/static/kp/js/version-delta.js";
-import { renderDiagnostics } from "/static/kp/js/diagnostics.js";
+} from "/static/kp/dist/kp-themes.min.js";
+import { renderDiagnostics } from "/static/kp/dist/kp-themes.min.js";
 
 /**
  * @typedef {{state: "ok" | "warn" | "failed" | "empty", label: string, detail: string}} Live

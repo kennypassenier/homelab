@@ -27,32 +27,35 @@ import {
   REFRESH_EVENT,
   attachRefresh,
   refreshOf,
-} from "/static/kp/js/auto-refresh.js";
-import { attachCardStates, setCardState } from "/static/kp/js/card-state.js";
+} from "/static/kp/dist/kp-themes.min.js";
+import {
+  attachCardStates,
+  setCardState,
+} from "/static/kp/dist/kp-themes.min.js";
 import {
   CONNECTION_RETRY_EVENT,
   attachConnection,
   setConnection,
-} from "/static/kp/js/connection.js";
+} from "/static/kp/dist/kp-themes.min.js";
 import {
   ENTITY_GRID_RETRY_EVENT,
   ENTITY_RETRY_EVENT,
   ENTITY_STAR_EVENT,
   attachEntityCards,
   setEntityGrid,
-} from "/static/kp/js/entity-card.js";
-import { attachTileKeys, tileStop } from "/static/kp/js/tiles.js";
+} from "/static/kp/dist/kp-themes.min.js";
+import { attachTileKeys, tileStop } from "/static/kp/dist/kp-themes.min.js";
 import {
   FACET_EVENT,
   attachFacets,
   setFacetCounts,
   setFacetItems,
   setFacetValues,
-} from "/static/kp/js/facets.js";
-import { attachHoverCards } from "/static/kp/js/hovercard.js";
-import { attachUptimes, setUptime } from "/static/kp/js/uptime.js";
+} from "/static/kp/dist/kp-themes.min.js";
+import { attachHoverCards } from "/static/kp/dist/kp-themes.min.js";
+import { attachUptimes, setUptime } from "/static/kp/dist/kp-themes.min.js";
 import { periodsOf, shareText, tileKey, uptimeQuery } from "../uptimeview.js";
-import { attachMenuButtons } from "/static/kp/js/menu-button.js";
+import { attachMenuButtons } from "/static/kp/dist/kp-themes.min.js";
 
 /**
  * @typedef {{stack: string, host: string, url: string, name: string,
@@ -414,7 +417,7 @@ export function mount(root) {
       : base;
   };
 
-  /** @param {Tile} t @returns {import("/static/kp/js/entity-card.js").EntityData} */
+  /** @param {Tile} t @returns {import("/static/kp/dist/kp-themes.min.js").EntityData} */
   const entityOf = (t) => {
     const word = wordOf(tileState(watch, t));
     return {

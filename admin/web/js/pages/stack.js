@@ -61,7 +61,7 @@ import { openRollback } from "../rollbackdialog.js";
 import { STACK_TABS, stackHref } from "../router.js";
 import { incidentRows } from "../activity.js";
 import { addDays } from "../backupsview.js";
-import { setProblems } from "/static/kp/js/problems.js";
+import { setProblems } from "/static/kp/dist/kp-themes.min.js";
 import { resourcesTab } from "../hubresources.js";
 import {
   depItems,
@@ -73,17 +73,21 @@ import {
   CARD_RETRY_EVENT,
   attachCardStates,
   setCardState,
-} from "/static/kp/js/card-state.js";
-import { setDeplist } from "/static/kp/js/deplist.js";
+} from "/static/kp/dist/kp-themes.min.js";
+import { setDeplist } from "/static/kp/dist/kp-themes.min.js";
 import {
   VERSION_SORT,
   attachVersionDeltas,
   releaseUrl,
   versionLevel,
-} from "/static/kp/js/version-delta.js";
-import { setCode } from "/static/kp/js/code.js";
-import { HEAT_PICK_EVENT, setHeat, setHeatLegend } from "/static/kp/js/heat.js";
-import { UPTIME_PICK_EVENT, setUptime } from "/static/kp/js/uptime.js";
+} from "/static/kp/dist/kp-themes.min.js";
+import { setCode } from "/static/kp/dist/kp-themes.min.js";
+import {
+  HEAT_PICK_EVENT,
+  setHeat,
+  setHeatLegend,
+} from "/static/kp/dist/kp-themes.min.js";
+import { UPTIME_PICK_EVENT, setUptime } from "/static/kp/dist/kp-themes.min.js";
 import {
   DANGER,
   LEVELS,
@@ -119,9 +123,9 @@ import {
 import { stackEntries, stackIncidents } from "../stacktabs.js";
 import { current, retryStream, subscribe } from "../store.js";
 import { setParams } from "../urlstate.js";
-import { attachDataTables } from "/static/kp/js/datatable.js";
-import { setIdmark } from "/static/kp/js/idmark.js";
-import { sourceColour } from "/static/kp/js/log.js";
+import { attachDataTables } from "/static/kp/dist/kp-themes.min.js";
+import { setIdmark } from "/static/kp/dist/kp-themes.min.js";
+import { sourceColour } from "../logcolour.js";
 import {
   FACET_EVENT,
   attachFacets,
@@ -129,23 +133,27 @@ import {
   setFacetCounts,
   setFacetItems,
   setFacetValues,
-} from "/static/kp/js/facets.js";
+} from "/static/kp/dist/kp-themes.min.js";
 import {
   LOGVIEWER_EVENT,
   LOGVIEWER_RETRY_EVENT,
   appendLogLines,
   attachLogViewers,
   setLogViewer,
-} from "/static/kp/js/logviewer.js";
-import { FOLLOW_EVENT } from "/static/kp/js/newpill.js";
+} from "/static/kp/dist/kp-themes.min.js";
+import { FOLLOW_EVENT } from "/static/kp/dist/kp-themes.min.js";
 import { facetGroup } from "../logfacets.js";
 import { formGrid, gridRow } from "../gridrow.js";
-import { watchTabOverflow } from "/static/kp/js/overlays.js";
-import { attachToolbars } from "/static/kp/js/toolbar.js";
-import { setTabCount } from "/static/kp/js/tabbar.js";
-import { registerShortcuts } from "/static/kp/js/shortcuts.js";
+import { watchTabOverflow } from "/static/kp/dist/kp-themes.min.js";
+import { attachToolbars } from "/static/kp/dist/kp-themes.min.js";
+import { setTabCount } from "/static/kp/dist/kp-themes.min.js";
+import { registerShortcuts } from "/static/kp/dist/kp-themes.min.js";
 import { GROUP_STACK, unlessDialog } from "../shortcuts.js";
-import { FEED_RETRY_EVENT, attachFeeds, setFeed } from "/static/kp/js/feed.js";
+import {
+  FEED_RETRY_EVENT,
+  attachFeeds,
+  setFeed,
+} from "/static/kp/dist/kp-themes.min.js";
 import { mount as mountSecrets } from "./secrets.js";
 import {
   countOf,
@@ -664,7 +672,7 @@ export function mount(root, params) {
   const tabCount = (
     /** @type {string} */ tab,
     /** @type {number | null | "loading" | "error"} */ n,
-    /** @type {{tone?: import("/static/kp/js/tabbar.js").TabCountTone | null, unit?: string | null, showUnit?: boolean, title?: string}} */ o = {},
+    /** @type {{tone?: import("/static/kp/dist/kp-themes.min.js").TabCountTone | null, unit?: string | null, showUnit?: boolean, title?: string}} */ o = {},
   ) => {
     const a = tabs.querySelector(
       `a[href="${CSS.escape(stackHref(name, tab))}"]`,
@@ -1545,7 +1553,7 @@ function problemAction(c, p) {
  * The history rows as kp feed rows: the outcome's mark, what happened, who
  * started it as the actor chip, the detail and when.
  * @param {ReturnType<typeof historyFeed>} rows
- * @returns {import("/static/kp/js/feed.js").FeedRow[]}
+ * @returns {import("/static/kp/dist/kp-themes.min.js").FeedRow[]}
  */
 function feedRows(rows) {
   /** @type {Map<string, number>} */

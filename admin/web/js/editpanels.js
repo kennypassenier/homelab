@@ -97,14 +97,14 @@ import { filesCard } from "./editfiles.js";
 import { stage } from "./stage.js";
 import { badgeCell, errorBox, fetchJson, h, tableBlock, td } from "./dom.js";
 import { driven, handle, register } from "./drivehooks.js";
-import { attachDataTables, dataTable } from "/static/kp/js/datatable.js";
-import { attachSwitches } from "/static/kp/js/forms.js";
-import { attachAll } from "/static/kp/js/auto.js";
+import { attachDataTables, dataTable } from "/static/kp/dist/kp-themes.min.js";
+import { attachSwitches } from "/static/kp/dist/kp-themes.min.js";
+import { attachAll } from "/static/kp/dist/kp-themes.min.js";
 import {
   CARD_RETRY_EVENT,
   attachCardStates,
   setCardState,
-} from "/static/kp/js/card-state.js";
+} from "/static/kp/dist/kp-themes.min.js";
 import { declare, drivable, viaForm } from "./drivable.js";
 import { buttonGroup, gridRow } from "./gridrow.js";
 

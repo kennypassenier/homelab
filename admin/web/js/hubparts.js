@@ -10,7 +10,7 @@ import {
   buildStatusList,
   countStatus,
   setStatus,
-} from "/static/kp/js/statusrow.js";
+} from "/static/kp/dist/kp-themes.min.js";
 
 /**
  * @typedef {import("./stackhub.js").Health} Health
@@ -48,7 +48,7 @@ export function fixFor(key) {
  * reservation is a warn row, a failed check is failed; a check the host
  * could not measure is empty (never green).
  * @param {Health[]} rows
- * @returns {import("/static/kp/js/statusrow.js").StatusRow[]}
+ * @returns {import("/static/kp/dist/kp-themes.min.js").StatusRow[]}
  */
 export function statusRows(rows) {
   return rows.map((r) => {
@@ -93,7 +93,7 @@ export function commandFor(key, stack) {
  * @param {Problem[]} items
  * @param {string} stack
  * @param {(p: Problem) => Node | null} actionOf
- * @returns {import("/static/kp/js/problems.js").Problem[]}
+ * @returns {import("/static/kp/dist/kp-themes.min.js").Problem[]}
  */
 export function problemItems(items, stack, actionOf) {
   return items.map((p) => {
@@ -117,10 +117,10 @@ export function problemItems(items, stack, actionOf) {
  * @param {{from: string, to: string, kind: string}[]} edges
  * @param {string} stack
  * @param {(name: string) => "running" | "stopped" | "unknown"} stateOf
- * @returns {import("/static/kp/js/deplist.js").DepItem[]}
+ * @returns {import("/static/kp/dist/kp-themes.min.js").DepItem[]}
  */
 export function depItems(edges, stack, stateOf) {
-  /** @type {Map<string, import("/static/kp/js/deplist.js").DepItem>} */
+  /** @type {Map<string, import("/static/kp/dist/kp-themes.min.js").DepItem>} */
   const out = new Map();
   for (const e of edges) {
     if (e.kind === "named") continue;
@@ -206,7 +206,7 @@ export function statusBlock(host, opts) {
   const detach = attachStatusLists(host);
   return {
     /**
-     * @param {import("/static/kp/js/statusrow.js").StatusRow[]} rows
+     * @param {import("/static/kp/dist/kp-themes.min.js").StatusRow[]} rows
      * @param {(id: string) => Node | null} [extra] a node to put in a row's body (an Answer… button)
      * @returns {{ok: number, total: number}}
      */

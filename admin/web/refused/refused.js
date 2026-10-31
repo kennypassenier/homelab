@@ -4,7 +4,7 @@
 // raises kp-themes' Alarm with them. Served at `/refused.js`
 // (`access::REFUSAL_SCRIPT`), before any lock, like `/static/`.
 
-import { showAlarm } from "/static/kp/js/alarm.js";
+import { showAlarm } from "/static/kp/dist/kp-themes.min.js";
 
 const main = document.getElementById("refusal");
 if (main) {

@@ -21,13 +21,13 @@ import {
   streamNow,
   subscribe,
 } from "./store.js";
-import { setStrings } from "/static/kp/js/strings.js";
+import { setStrings } from "/static/kp/dist/kp-themes.min.js";
 import {
   CONNECTION_RETRY_EVENT,
   attachConnection,
   connectionOf,
   setConnection,
-} from "/static/kp/js/connection.js";
+} from "/static/kp/dist/kp-themes.min.js";
 
 /**
  * The stack whose Traefik and cloudflared carry the dashboard's own
@@ -77,8 +77,8 @@ export function offlineWords(action) {
  * What the banner shows for what the live channel and the host link say.
  * @param {{stream: import("./store.js").Stream, up: boolean | null,
  *   link: string, queued: number}} s
- * @returns {{state: import("/static/kp/js/connection.js").ConnectionState,
- *   detail: import("/static/kp/js/connection.js").ConnectionDetail}}
+ * @returns {{state: import("/static/kp/dist/kp-themes.min.js").ConnectionState,
+ *   detail: import("/static/kp/dist/kp-themes.min.js").ConnectionDetail}}
  */
 export function connectionFor(s) {
   const pending = Math.max(0, s.queued);

@@ -43,7 +43,7 @@ import { setParams } from "../urlstate.js";
 import { facetGroup } from "../logfacets.js";
 import { gridRow, formGrid } from "../gridrow.js";
 import { formatClock, formatDateTime } from "../format.js";
-import { sourceColour } from "/static/kp/js/log.js";
+import { sourceColour } from "../logcolour.js";
 import {
   LOGVIEWER_EVENT,
   LOGVIEWER_RETRY_EVENT,
@@ -51,36 +51,36 @@ import {
   attachLogViewers,
   logViewerText,
   setLogViewer,
-} from "/static/kp/js/logviewer.js";
-import { FOLLOW_EVENT, newPill } from "/static/kp/js/newpill.js";
+} from "/static/kp/dist/kp-themes.min.js";
+import { FOLLOW_EVENT, newPill } from "/static/kp/dist/kp-themes.min.js";
 import {
   FACET_EVENT,
   attachFacets,
   setFacetCounts,
   setFacetItems,
   setFacetValues,
-} from "/static/kp/js/facets.js";
-import { runFlashButton } from "/static/kp/js/flash.js";
+} from "/static/kp/dist/kp-themes.min.js";
+import { runFlashButton } from "/static/kp/dist/kp-themes.min.js";
 import {
   SEGMENTED_EVENT,
   attachSegmented,
   setSegmentedValues,
-} from "/static/kp/js/segmented.js";
+} from "/static/kp/dist/kp-themes.min.js";
 import {
   UPTIME_PICK_EVENT,
   attachUptimes,
   setUptime,
-} from "/static/kp/js/uptime.js";
+} from "/static/kp/dist/kp-themes.min.js";
 import {
   HEAT_PICK_EVENT,
   HEAT_ROW_EVENT,
   attachHeats,
   setHeat,
   setHeatRows,
-} from "/static/kp/js/heat.js";
-import { attachHoverCards } from "/static/kp/js/hovercard.js";
-import { attachFootprints } from "/static/kp/js/footprint.js";
-import { attachDisabledReasons } from "/static/kp/js/reason.js";
+} from "/static/kp/dist/kp-themes.min.js";
+import { attachHoverCards } from "/static/kp/dist/kp-themes.min.js";
+import { attachFootprints } from "/static/kp/dist/kp-themes.min.js";
+import { attachDisabledReasons } from "/static/kp/dist/kp-themes.min.js";
 
 /** Lines kept in the page, as the server's ring. */
 const KEEP = 2000;
@@ -698,7 +698,7 @@ export function mountHostLog(root, opts) {
           : "empty";
     const every = Math.max(1, Math.round(buckets.length / 12));
     const colour = (/** @type {number} */ i) => `var(--chart-${(i % 5) + 1})`;
-    /** @type {import("/static/kp/js/uptime.js").UptimeSpec} */
+    /** @type {import("/static/kp/dist/kp-themes.min.js").UptimeSpec} */
     const stripSpec = {
       label: "Lines in the window",
       periods: buckets.map((b) => ({

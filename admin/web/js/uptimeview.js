@@ -4,7 +4,7 @@
 // server's buckets as kp's strip periods. No DOM, so `node --test` drives it.
 
 import { ZONE, formatClock, formatDay } from "./format.js";
-import { uptimePercent } from "/static/kp/js/uptime.js";
+import { uptimePercent } from "/static/kp/dist/kp-themes.min.js";
 
 /**
  * Seconds Brussels is ahead of UTC at `unix` (the request's `offset_s`, so a
@@ -28,7 +28,7 @@ export function uptimeQuery(unit, now) {
  * @typedef {{start: number, state: "up" | "degraded" | "down" | "none",
  *   uptime: number | null, up?: number, dep?: number, down?: number,
  *   ms_avg?: number | null, ms_max?: number | null}} Bucket
- * @typedef {import("/static/kp/js/uptime.js").UptimePeriod} UptimePeriod
+ * @typedef {import("/static/kp/dist/kp-themes.min.js").UptimePeriod} UptimePeriod
  */
 
 /**

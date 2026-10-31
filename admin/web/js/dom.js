@@ -10,15 +10,15 @@ import {
 } from "./urlstate.js";
 import { freshRead } from "./slowread.js";
 import { busyWords, emptyWords, failReason } from "./tablestate.js";
-import { VIEW_EVENT, dataTable } from "/static/kp/js/datatable.js";
-import { leave } from "/static/kp/js/motion.js";
-import { update } from "/static/kp/js/update.js";
-import { statePlate } from "/static/kp/js/state-plate.js";
+import { VIEW_EVENT, dataTable } from "/static/kp/dist/kp-themes.min.js";
+import { leave } from "/static/kp/dist/kp-themes.min.js";
+import { update } from "/static/kp/dist/kp-themes.min.js";
+import { statePlate } from "/static/kp/dist/kp-themes.min.js";
 import {
   buildProgressbar,
   setIndeterminate,
   setProgress as kpSetProgress,
-} from "/static/kp/js/progressbar.js";
+} from "/static/kp/dist/kp-themes.min.js";
 
 /**
  * @typedef {Node | string | number | null | undefined | false | Child[]}
@@ -569,7 +569,7 @@ export async function fetchReport(url, what, signal) {
  * feat-overview-8: a table's search and filters live in the address. What
  * the address holds is applied once; every change is written back without a
  * new history entry, so Back still leaves the page.
- * @param {import("/static/kp/js/datatable.js").DataTableHandle | null} handle
+ * @param {import("/static/kp/dist/kp-themes.min.js").DataTableHandle | null} handle
  * @param {string} name the table's remember name
  * @returns {() => void} stop following
  */

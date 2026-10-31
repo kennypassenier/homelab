@@ -90,14 +90,14 @@ import {
   CARD_RETRY_EVENT,
   attachCardStates,
   setCardState,
-} from "/static/kp/js/card-state.js";
+} from "/static/kp/dist/kp-themes.min.js";
 import { jobLogViewer } from "../joblog.js";
 import { setParams } from "../urlstate.js";
 import { tabRow } from "../dom.js";
 import { mountJobsTable } from "./jobs.js";
 import { mountHostLog } from "./log.js";
 import { mount as mountSchedules } from "./schedules.js";
-import { attachDataTables, dataTable } from "/static/kp/js/datatable.js";
+import { attachDataTables, dataTable } from "/static/kp/dist/kp-themes.min.js";
 import {
   attachGantts,
   setGanttKinds,
@@ -106,21 +106,25 @@ import {
   setGanttRuns,
   setGanttSelection,
   setGanttState,
-} from "/static/kp/js/gantt.js";
+} from "/static/kp/dist/kp-themes.min.js";
 import {
   attachHeats,
   setHeat,
   setHeatLegend,
   setHeatPick,
   setHeatRows,
-} from "/static/kp/js/heat.js";
-import { attachSteplists } from "/static/kp/js/steplist.js";
-import { attachTicks, tickTo } from "/static/kp/js/tick.js";
-import { attachToolbars } from "/static/kp/js/toolbar.js";
-import { attachSegmented } from "/static/kp/js/segmented.js";
-import { FEED_RETRY_EVENT, attachFeeds, setFeed } from "/static/kp/js/feed.js";
-import { leave } from "/static/kp/js/motion.js";
-import { registerShortcuts } from "/static/kp/js/shortcuts.js";
+} from "/static/kp/dist/kp-themes.min.js";
+import { attachSteplists } from "/static/kp/dist/kp-themes.min.js";
+import { attachTicks, tickTo } from "/static/kp/dist/kp-themes.min.js";
+import { attachToolbars } from "/static/kp/dist/kp-themes.min.js";
+import { attachSegmented } from "/static/kp/dist/kp-themes.min.js";
+import {
+  FEED_RETRY_EVENT,
+  attachFeeds,
+  setFeed,
+} from "/static/kp/dist/kp-themes.min.js";
+import { leave } from "/static/kp/dist/kp-themes.min.js";
+import { registerShortcuts } from "/static/kp/dist/kp-themes.min.js";
 import { GROUP_ACTIVITY, unlessDialog } from "../shortcuts.js";
 import { REFRESH_MS, changeGate } from "../quiet.js";
 
@@ -1534,7 +1538,7 @@ function mountNow(body, x) {
         ? `${count(c.n, "operation", "operations")}${c.f ? `, ${c.f} failed (${[...c.kinds].join(", ")})` : ", all fine"}`
         : "not touched";
     };
-    /** @type {import("/static/kp/js/heat.js").HeatSpec} */
+    /** @type {import("/static/kp/dist/kp-themes.min.js").HeatSpec} */
     const spec = {
       columns,
       rows: names.map((s) => ({

@@ -20,18 +20,18 @@ import {
   stackCommit,
   wireBar,
 } from "./editui.js";
-import { attachAutosize } from "/static/kp/js/autosize.js";
+import { attachAutosize } from "/static/kp/dist/kp-themes.min.js";
 import {
   attachCodeFields,
   setCodeFieldError,
-} from "/static/kp/js/code-field.js";
-import { showError } from "/static/kp/js/forms.js";
+} from "/static/kp/dist/kp-themes.min.js";
+import { showError } from "/static/kp/dist/kp-themes.min.js";
 import {
   attachJsonFields,
   explainJson,
   jsonField,
-} from "/static/kp/js/json-field.js";
-import { selectPane } from "/static/kp/js/master-detail.js";
+} from "/static/kp/dist/kp-themes.min.js";
+import { selectPane } from "/static/kp/dist/kp-themes.min.js";
 
 /** @param {string} text */
 const lineCount = (text) => (text === "" ? 0 : text.split("\n").length);

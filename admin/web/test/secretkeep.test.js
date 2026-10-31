@@ -22,7 +22,7 @@ const { shownValue } = await import("../js/settingsrows.js");
 
 const SECRET = "hunter2-NEVER-STORE-ME";
 const unsavedSource = readFileSync(
-  fileURLToPath(import.meta.resolve("/static/kp/js/unsaved.js")),
+  fileURLToPath(import.meta.resolve("/static/kp/dist/kp-themes.min.js")),
   "utf8",
 );
 const settingsSource = readFileSync(

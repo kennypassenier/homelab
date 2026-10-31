@@ -26,17 +26,23 @@ import { startFollowingSystem } from "./thisbrowser.js";
 import { mountFollow } from "./drive.js";
 import { h } from "./dom.js";
 import { countText, inboxNow, onInbox, worst } from "./inboxlist.js";
-import { attachNavMenus, attachNavToggles } from "/static/kp/js/components.js";
-import { attachNavFolds } from "/static/kp/js/nav-fold.js";
-import { attachMotion } from "/static/kp/js/motion.js";
-import { attachTableRegions } from "/static/kp/js/tables.js";
-import { attachActionColumns } from "/static/kp/js/actions.js";
-import { attachTileSets } from "/static/kp/js/tiles.js";
-import { attachKpiStrips, attachKpiToggles } from "/static/kp/js/kpi.js";
-import { attachDismissals } from "/static/kp/js/overlays.js";
-import { attachSelects } from "/static/kp/js/combobox.js";
-import { attachLoadingPieces } from "/static/kp/js/loading-pieces.js";
-import { attachFootprints } from "/static/kp/js/footprint.js";
+import {
+  attachNavMenus,
+  attachNavToggles,
+} from "/static/kp/dist/kp-themes.min.js";
+import { attachNavFolds } from "/static/kp/dist/kp-themes.min.js";
+import { attachMotion } from "/static/kp/dist/kp-themes.min.js";
+import { attachTableRegions } from "/static/kp/dist/kp-themes.min.js";
+import { attachActionColumns } from "/static/kp/dist/kp-themes.min.js";
+import { attachTileSets } from "/static/kp/dist/kp-themes.min.js";
+import {
+  attachKpiStrips,
+  attachKpiToggles,
+} from "/static/kp/dist/kp-themes.min.js";
+import { attachDismissals } from "/static/kp/dist/kp-themes.min.js";
+import { attachSelects } from "/static/kp/dist/kp-themes.min.js";
+import { attachLoadingPieces } from "/static/kp/dist/kp-themes.min.js";
+import { attachFootprints } from "/static/kp/dist/kp-themes.min.js";
 import { loadPages, pages, subscribePages } from "./pages.js";
 import {
   STACK_TABS,
@@ -50,7 +56,10 @@ import {
 import { current, start, subscribe } from "./store.js";
 import { stage } from "./stage.js";
 import { breadcrumbs } from "./ui.js";
-import { attachCardStates, setCardState } from "/static/kp/js/card-state.js";
+import {
+  attachCardStates,
+  setCardState,
+} from "/static/kp/dist/kp-themes.min.js";
 import { mount as activity } from "./pages/activity.js";
 import { mount as backups } from "./pages/backups.js";
 import { mount as firewall } from "./pages/firewall.js";

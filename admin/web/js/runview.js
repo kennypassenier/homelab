@@ -29,21 +29,24 @@
 import { h, progressBar, setProgress } from "./dom.js";
 import { humanDuration } from "./format.js";
 import { jobLogViewer } from "./joblog.js";
-import { setCode } from "/static/kp/js/code.js";
+import { setCode } from "/static/kp/dist/kp-themes.min.js";
 import { progressLine, steadyEta } from "./progress.js";
-import { attachProblems, setProblems } from "/static/kp/js/problems.js";
-import { setStackbar } from "/static/kp/js/stackbar.js";
+import { attachProblems, setProblems } from "/static/kp/dist/kp-themes.min.js";
+import { setStackbar } from "/static/kp/dist/kp-themes.min.js";
 import {
   attachSteplists,
   buildSteplist,
   setStep,
-} from "/static/kp/js/steplist.js";
-import { attachTicks } from "/static/kp/js/tick.js";
-import { attachTimerDiscs, timerDiscOf } from "/static/kp/js/timer-disc.js";
+} from "/static/kp/dist/kp-themes.min.js";
+import { attachTicks } from "/static/kp/dist/kp-themes.min.js";
+import {
+  attachTimerDiscs,
+  timerDiscOf,
+} from "/static/kp/dist/kp-themes.min.js";
 
 /**
  * @typedef {{id: string, title: string, note: string,
- *   state: import("/static/kp/js/steplist.js").StepState,
+ *   state: import("/static/kp/dist/kp-themes.min.js").StepState,
  *   time?: string}} RunStep
  * @typedef {{label: string, tone: string}} RunBadge
  * @typedef {{title: string, sub: string, badge: RunBadge | null,

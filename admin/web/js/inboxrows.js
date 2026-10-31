@@ -668,7 +668,7 @@ function sentence(clause, fallback) {
  * A host question as kp-themes' question card reads it: what it asks, what
  * each answer sets in motion, and the safe answer when nobody answers.
  * @param {import("./asks.js").Ask} a
- * @returns {import("/static/kp/js/question-card.js").QuestionSpec}
+ * @returns {import("/static/kp/dist/kp-themes.min.js").QuestionSpec}
  */
 export function askSpec(a) {
   const allow = sentence(a.if_allowed, "the operation goes on");

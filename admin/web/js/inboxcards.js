@@ -31,19 +31,22 @@ import {
 import { kindBadge, levelBadge } from "./notices.js";
 import { current, rereadStore, setAsks, subscribe } from "./store.js";
 import { toastRegion } from "./ui.js";
-import { attachCardStates, setCardState } from "/static/kp/js/card-state.js";
+import {
+  attachCardStates,
+  setCardState,
+} from "/static/kp/dist/kp-themes.min.js";
 import {
   askQuestion,
   attachQuestions,
   questionOf,
-} from "/static/kp/js/question-card.js";
-import { attachDisabledReasons } from "/static/kp/js/reason.js";
-import { attachRowSelect } from "/static/kp/js/row-select.js";
+} from "/static/kp/dist/kp-themes.min.js";
+import { attachDisabledReasons } from "/static/kp/dist/kp-themes.min.js";
+import { attachRowSelect } from "/static/kp/dist/kp-themes.min.js";
 import {
   attachSelectionBars,
   setSelectionRules,
-} from "/static/kp/js/selection-bar.js";
-import { undoToast } from "/static/kp/js/undo-toast.js";
+} from "/static/kp/dist/kp-themes.min.js";
+import { undoToast } from "/static/kp/dist/kp-themes.min.js";
 
 const ANSWER = declare({
   id: "inbox-answer",
@@ -89,8 +92,8 @@ const shownState = new WeakMap();
  * `setCardState`, but only when the state or its words changed: the pages
  * paint on every live event, and a card must not redraw its plate for it.
  * @param {HTMLElement} el
- * @param {import("/static/kp/js/card-state.js").CardState} state
- * @param {import("/static/kp/js/card-state.js").CardStateOptions} [options]
+ * @param {import("/static/kp/dist/kp-themes.min.js").CardState} state
+ * @param {import("/static/kp/dist/kp-themes.min.js").CardStateOptions} [options]
  */
 export function putState(el, state, options) {
   const key = `${state}|${options?.title ?? ""}|${options?.text ?? ""}|${options?.words ?? ""}`;
@@ -181,7 +184,7 @@ export function mountQuestions(page) {
   attachQuestions(box);
   const detachReasons = attachDisabledReasons(el);
 
-  /** @type {Map<string, {ask: import("./asks.js").Ask, handle: import("/static/kp/js/question-card.js").QuestionHandle}>} */
+  /** @type {Map<string, {ask: import("./asks.js").Ask, handle: import("/static/kp/dist/kp-themes.min.js").QuestionHandle}>} */
   const cards = new Map();
   const OPEN = ["waiting", "urgent", "refused", "sending"];
 

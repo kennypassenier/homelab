@@ -12,8 +12,8 @@
 // (a row's detail, its expand cell) alone. `setBulletsQuiet` does it for the
 // kp bullets list, which draws its whole list again on every call.
 
-import { setBullets } from "/static/kp/js/bullets.js";
-import { setEntity, setEntityGrid } from "/static/kp/js/entity-card.js";
+import { setBullets } from "/static/kp/dist/kp-themes.min.js";
+import { setEntity, setEntityGrid } from "/static/kp/dist/kp-themes.min.js";
 
 /** @param {Node} n @returns {string | null} the key an element is matched by */
 function keyOf(n) {

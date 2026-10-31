@@ -13,7 +13,7 @@ import { formatDateTime } from "./format.js";
 import { addDays, drillState, drillWords, humanBytes } from "./backupsview.js";
 import { repoPeriods, nightDate, sizeText } from "./backupgrid.js";
 import { stackHref } from "./router.js";
-import { datedAge } from "/static/kp/js/dated-options.js";
+import { datedAge } from "/static/kp/dist/kp-themes.min.js";
 
 /** The table's columns as the datatable counts them: the open arrow it prepends is 0, the ticks 1 (kp-gaps/homelab.md: a filter counts that control column). */
 export const COL = /** @type {const} */ ({
@@ -374,8 +374,8 @@ export function repoRow(x) {
  * @param {ParentNode} root
  * @param {Map<string, {read: StackRead, repo: Repo}>} refs
  * @param {{last: string, current: string}} now
- * @param {(el: HTMLElement, spec: import("/static/kp/js/uptime.js").UptimeSpec) => void} setUptime
- * @param {(el: HTMLElement, spec: import("/static/kp/js/barcell.js").BarCell) => void} setBarCell
+ * @param {(el: HTMLElement, spec: import("/static/kp/dist/kp-themes.min.js").UptimeSpec) => void} setUptime
+ * @param {(el: HTMLElement, spec: import("/static/kp/dist/kp-themes.min.js").BarCell) => void} setBarCell
  */
 export function feedCells(root, refs, now, setUptime, setBarCell) {
   for (const el of /** @type {HTMLElement[]} */ ([

@@ -11,7 +11,7 @@ import {
   tabTarget,
 } from "../js/shortcuts.js";
 import { route } from "../js/router.js";
-import { ALTGR_KEYS } from "/static/kp/js/shortcuts.js";
+import { ALTGR_KEYS } from "/static/kp/dist/kp-themes.min.js";
 
 test("g then a letter names a page; an unknown letter names none", () => {
   assert.equal(goTarget("h"), "/host");

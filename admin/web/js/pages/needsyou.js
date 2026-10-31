@@ -62,12 +62,19 @@ import {
 import { current, rereadStore, subscribe } from "../store.js";
 import { stage } from "../stage.js";
 import { countOf, pageHeader } from "../ui.js";
-import { paintRemembered } from "/static/kp/js/remember.js";
+import { paintRemembered } from "/static/kp/dist/kp-themes.min.js";
 import { legacyUpdateHref, updateHref } from "../updateflow.js";
-import { attachCardStates, setCardState } from "/static/kp/js/card-state.js";
-import { attachRowKeys, removeRow, setRowBusy } from "/static/kp/js/actions.js";
-import { setKeys } from "/static/kp/js/keys.js";
-import { setProblems } from "/static/kp/js/problems.js";
+import {
+  attachCardStates,
+  setCardState,
+} from "/static/kp/dist/kp-themes.min.js";
+import {
+  attachRowKeys,
+  removeRow,
+  setRowBusy,
+} from "/static/kp/dist/kp-themes.min.js";
+import { setKeys } from "/static/kp/dist/kp-themes.min.js";
+import { setProblems } from "/static/kp/dist/kp-themes.min.js";
 import {
   attachSegmented,
   itemsOf,
@@ -75,14 +82,14 @@ import {
   setSegmentedItems,
   setSegmentedValues,
   valueOf,
-} from "/static/kp/js/segmented.js";
-import { registerShortcuts } from "/static/kp/js/shortcuts.js";
+} from "/static/kp/dist/kp-themes.min.js";
+import { registerShortcuts } from "/static/kp/dist/kp-themes.min.js";
 import {
   SNOOZE_EVENT,
   attachSnoozes,
   setSnoozeBusy,
-} from "/static/kp/js/snooze.js";
-import { attachVersionDeltas } from "/static/kp/js/version-delta.js";
+} from "/static/kp/dist/kp-themes.min.js";
+import { attachVersionDeltas } from "/static/kp/dist/kp-themes.min.js";
 
 const CHECK_AGAIN = declare({
   id: "inbox-check-again",

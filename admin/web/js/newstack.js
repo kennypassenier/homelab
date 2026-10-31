@@ -29,7 +29,7 @@ import {
   STEP_EVENT,
   attachWizards,
   wizard,
-} from "/static/kp/js/wizard.js";
+} from "/static/kp/dist/kp-themes.min.js";
 
 /**
  * @param {(href: string) => void} [navigate]

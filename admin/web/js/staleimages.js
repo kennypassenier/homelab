@@ -10,7 +10,7 @@ import {
   releaseUrl,
   versionLevel,
   versionNumbers,
-} from "/static/kp/js/version-delta.js";
+} from "/static/kp/dist/kp-themes.min.js";
 
 export { githubRepo, releaseUrl, versionNumbers };
 

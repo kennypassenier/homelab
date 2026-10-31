@@ -7,7 +7,7 @@ import {
   INTENT_MAX_SHOWN,
   noMatchText,
   rankCommands,
-} from "/static/kp/js/intent.js";
+} from "/static/kp/dist/kp-themes.min.js";
 
 /**
  * The palette's sections, in the order they are shown (FLOWS.md §1.2):

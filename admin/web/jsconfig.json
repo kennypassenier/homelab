@@ -14,7 +14,7 @@
     "skipLibCheck": true,
     "types": ["node"],
     "paths": {
-      "/static/kp/js/*": ["./types/kp/*"]
+      "/static/kp/dist/kp-themes.min.js": ["./types/kp-bundle.d.ts"]
     }
   },
   "include": [

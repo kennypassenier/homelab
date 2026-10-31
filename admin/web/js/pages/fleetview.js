@@ -50,8 +50,11 @@ import {
   segSwitch,
   tableSlot,
 } from "../ui.js";
-import { attachSwitches } from "/static/kp/js/forms.js";
-import { attachCardStates, setCardState } from "/static/kp/js/card-state.js";
+import { attachSwitches } from "/static/kp/dist/kp-themes.min.js";
+import {
+  attachCardStates,
+  setCardState,
+} from "/static/kp/dist/kp-themes.min.js";
 import { usesOf } from "../mapparts.js";
 import { mapGraph } from "./mapgraph.js";
 

@@ -63,23 +63,29 @@ import {
   swatch,
   toggleGroup,
 } from "../ui.js";
-import { attachTrendCharts, setTrendData } from "/static/kp/js/chart.js";
-import { runFlashButton } from "/static/kp/js/flash.js";
-import { attachPatterns } from "/static/kp/js/patterns.js";
+import {
+  attachTrendCharts,
+  setTrendData,
+} from "/static/kp/dist/kp-themes.min.js";
+import { runFlashButton } from "/static/kp/dist/kp-themes.min.js";
+import { attachPatterns } from "/static/kp/dist/kp-themes.min.js";
 import {
   REFRESH_EVENT,
   attachRefresh,
   refreshOf,
-} from "/static/kp/js/auto-refresh.js";
-import { attachSegmented, SEGMENTED_EVENT } from "/static/kp/js/segmented.js";
+} from "/static/kp/dist/kp-themes.min.js";
+import {
+  attachSegmented,
+  SEGMENTED_EVENT,
+} from "/static/kp/dist/kp-themes.min.js";
 import {
   VIEW_EVENT,
   attachDataTables,
   dataTable as tableOf,
-} from "/static/kp/js/datatable.js";
-import { attachBarCells, setBarCell } from "/static/kp/js/barcell.js";
-import { attachStackbars, setStackbar } from "/static/kp/js/stackbar.js";
-import { attachUptimes, setUptime } from "/static/kp/js/uptime.js";
+} from "/static/kp/dist/kp-themes.min.js";
+import { attachBarCells, setBarCell } from "/static/kp/dist/kp-themes.min.js";
+import { attachStackbars, setStackbar } from "/static/kp/dist/kp-themes.min.js";
+import { attachUptimes, setUptime } from "/static/kp/dist/kp-themes.min.js";
 import { periodsOf, shareText, uptimeQuery } from "../uptimeview.js";
 import {
   ENTITY_ACTION_EVENT,
@@ -87,26 +93,26 @@ import {
   attachEntityCards,
   setEntityGrid,
   setEntityGridState,
-} from "/static/kp/js/entity-card.js";
+} from "/static/kp/dist/kp-themes.min.js";
 import {
   BULLETS_PICK_EVENT,
   BULLETS_RETRY_EVENT,
   attachBullets,
   setBullets,
-} from "/static/kp/js/bullets.js";
+} from "/static/kp/dist/kp-themes.min.js";
 import {
   attachStatusLists,
   buildStatusList,
   countStatus,
-} from "/static/kp/js/statusrow.js";
+} from "/static/kp/dist/kp-themes.min.js";
 import {
   CARD_RETRY_EVENT,
   attachCardStates,
   setCardState,
-} from "/static/kp/js/card-state.js";
-import { attachFootprints } from "/static/kp/js/footprint.js";
-import { attachHoverCards } from "/static/kp/js/hovercard.js";
-import { registerShortcuts } from "/static/kp/js/shortcuts.js";
+} from "/static/kp/dist/kp-themes.min.js";
+import { attachFootprints } from "/static/kp/dist/kp-themes.min.js";
+import { attachHoverCards } from "/static/kp/dist/kp-themes.min.js";
+import { registerShortcuts } from "/static/kp/dist/kp-themes.min.js";
 import { GROUP_HOST, unlessDialog } from "../shortcuts.js";
 import { gridRow, formGrid } from "../gridrow.js";
 import {
@@ -1369,7 +1375,7 @@ export function mount(root, ctx) {
         h("div", { class: "kp-kv__row" }, h("dt", null, k), h("dd", null, v)),
       ),
     );
-    /** @type {import("/static/kp/js/uptime.js").UptimeSpec} */
+    /** @type {import("/static/kp/dist/kp-themes.min.js").UptimeSpec} */
     const uptimeSpec = {
       label: "Line to the host",
       periods: pings.map((ms, i) => ({

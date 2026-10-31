@@ -5,7 +5,10 @@
 // the theme's stale plate. This keeps the dashboard's two calls (a verb,
 // unix seconds, and live data marked stale after three minutes).
 
-import { attachAgo, setAgo as kpSetAgo } from "/static/kp/js/freshness.js";
+import {
+  attachAgo,
+  setAgo as kpSetAgo,
+} from "/static/kp/dist/kp-themes.min.js";
 
 /** Live data older than this is stale: the host reads every 60 s. */
 const STALE_AFTER_S = 180;

@@ -4,7 +4,7 @@
 // (UI_PRINCIPLES: loading/empty/failed fill the footprint).
 
 import { h } from "./dom.js";
-import { statePlate } from "/static/kp/js/state-plate.js";
+import { statePlate } from "/static/kp/dist/kp-themes.min.js";
 
 /**
  * Cover `host` (an element with `class="ac-cover"`) with a plate, or take

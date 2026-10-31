@@ -26,7 +26,7 @@
  * share it. The component draws the header (status, path, +N −M), folds
  * the unchanged lines and marks the changed words.
  * @param {FileDiff[]} list
- * @returns {import("/static/kp/js/diff.js").DiffFile[]}
+ * @returns {import("/static/kp/dist/kp-themes.min.js").DiffFile[]}
  */
 export function fileViews(list) {
   return list.map((f) => ({

@@ -13,8 +13,8 @@ import { humanBytes } from "./backupsview.js";
 import { elapsedS, finished, jobPanel, jobSteps } from "./jobs.js";
 import { runSpec } from "./runspec.js";
 import { buildRunView } from "./runview.js";
-import { openBusyCard } from "/static/kp/js/busy-card.js";
-import { statePlate } from "/static/kp/js/state-plate.js";
+import { openBusyCard } from "/static/kp/dist/kp-themes.min.js";
+import { statePlate } from "/static/kp/dist/kp-themes.min.js";
 
 /**
  * What the panel says when the dashboard no longer holds the job
@@ -83,7 +83,7 @@ export function mountJobPanel(jobId, opts = {}) {
     dataJob: String(jobId),
   });
   const { element, plate } = view;
-  /** @type {import("/static/kp/js/busy-card.js").BusyCard | null} */
+  /** @type {import("/static/kp/dist/kp-themes.min.js").BusyCard | null} */
   let busy = null;
   /** How many paints in a row found the job ended and nothing changed. */
   let settled = 0;

@@ -49,15 +49,15 @@ import { editable } from "../editforms.js";
 import { mountSignin } from "../signin.js";
 import { mountHomeAddress } from "../homeaddress.js";
 import { chip, dot, ensureStyle } from "../ui.js";
-import { attachAll } from "/static/kp/js/auto.js";
-import { attachContents, setContents } from "/static/kp/js/page-contents.js";
-import { attachDisabledReasons } from "/static/kp/js/reason.js";
-import { setCardState } from "/static/kp/js/card-state.js";
-import { setProblems } from "/static/kp/js/problems.js";
-import { attachToolbars } from "/static/kp/js/toolbar.js";
+import { attachAll } from "/static/kp/dist/kp-themes.min.js";
+import { attachContents, setContents } from "/static/kp/dist/kp-themes.min.js";
+import { attachDisabledReasons } from "/static/kp/dist/kp-themes.min.js";
+import { setCardState } from "/static/kp/dist/kp-themes.min.js";
+import { setProblems } from "/static/kp/dist/kp-themes.min.js";
+import { attachToolbars } from "/static/kp/dist/kp-themes.min.js";
 import { REFRESH_S, changeGate } from "../quiet.js";
-import { REFRESH_EVENT, refreshDone } from "/static/kp/js/auto-refresh.js";
-import { unsaved, unsavedSaved } from "/static/kp/js/unsaved.js";
+import { REFRESH_EVENT, refreshDone } from "/static/kp/dist/kp-themes.min.js";
+import { unsaved, unsavedSaved } from "/static/kp/dist/kp-themes.min.js";
 
 // fix-239: Live view reaches every control here: host.toml's rows through
 // the host-settings form (`homelab ui open host-settings`, `row edit
@@ -1414,7 +1414,8 @@ function resolveButton(choice, reload) {
   drivable(b, REPO_CHOICE, choice);
   b.addEventListener("click", async () => {
     if (choice === "drop") {
-      const { openConfirmation } = await import("/static/kp/js/components.js");
+      const { openConfirmation } =
+        await import("/static/kp/dist/kp-themes.min.js");
       openConfirmation(b, {
         phrase: "Drop the unpushed commits?",
         typeName: "drop",

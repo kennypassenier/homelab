@@ -13,8 +13,8 @@ import {
   stackWord,
 } from "./activityview.js";
 import { formatDateTime, humanDuration } from "./format.js";
-import { buildSteplist } from "/static/kp/js/steplist.js";
-import { setCode } from "/static/kp/js/code.js";
+import { buildSteplist } from "/static/kp/dist/kp-themes.min.js";
+import { setCode } from "/static/kp/dist/kp-themes.min.js";
 
 /** The History's columns, in order (kp datatable headers). */
 export const HISTORY_COLUMNS = /** @type {const} */ ([
@@ -159,7 +159,7 @@ export function historyDetail(r, x) {
     ["Took", r.took == null ? "so far: —" : humanDuration(r.took)],
     ["By", r.actor.text],
   ];
-  /** @type {import("/static/kp/js/steplist.js").StepRow[]} */
+  /** @type {import("/static/kp/dist/kp-themes.min.js").StepRow[]} */
   const rows =
     e.kind === "op" && e.steps.length
       ? e.steps.map((s, i) => {

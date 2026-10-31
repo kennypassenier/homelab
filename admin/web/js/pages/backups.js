@@ -89,13 +89,13 @@ import {
   attachDataTables,
   dataTable,
   VIEW_EVENT,
-} from "/static/kp/js/datatable.js";
-import { attachRowSelect } from "/static/kp/js/row-select.js";
-import { attachUptimes, setUptime } from "/static/kp/js/uptime.js";
-import { attachBarCells, setBarCell } from "/static/kp/js/barcell.js";
-import { attachIdmarks } from "/static/kp/js/idmark.js";
-import { attachActionColumns } from "/static/kp/js/actions.js";
-import { attachHoverCards } from "/static/kp/js/hovercard.js";
+} from "/static/kp/dist/kp-themes.min.js";
+import { attachRowSelect } from "/static/kp/dist/kp-themes.min.js";
+import { attachUptimes, setUptime } from "/static/kp/dist/kp-themes.min.js";
+import { attachBarCells, setBarCell } from "/static/kp/dist/kp-themes.min.js";
+import { attachIdmarks } from "/static/kp/dist/kp-themes.min.js";
+import { attachActionColumns } from "/static/kp/dist/kp-themes.min.js";
+import { attachHoverCards } from "/static/kp/dist/kp-themes.min.js";
 import {
   HEAT_PAGE_EVENT,
   HEAT_PICK_EVENT,
@@ -104,14 +104,14 @@ import {
   setHeat,
   setHeatPick,
   setHeatRows,
-} from "/static/kp/js/heat.js";
-import { attachFootprints } from "/static/kp/js/footprint.js";
+} from "/static/kp/dist/kp-themes.min.js";
+import { attachFootprints } from "/static/kp/dist/kp-themes.min.js";
 import {
   SEGMENTED_EVENT,
   attachSegmented,
   setSegmentedValues,
-} from "/static/kp/js/segmented.js";
-import { RANGE_EVENT, attachRanges } from "/static/kp/js/range.js";
+} from "/static/kp/dist/kp-themes.min.js";
+import { RANGE_EVENT, attachRanges } from "/static/kp/dist/kp-themes.min.js";
 import {
   CALENDAR_MONTH_EVENT,
   CALENDAR_PICK_EVENT,
@@ -121,35 +121,35 @@ import {
   setCalendarDays,
   setCalendarLegend,
   setCalendarState,
-} from "/static/kp/js/calendar.js";
+} from "/static/kp/dist/kp-themes.min.js";
 import {
   CARD_RETRY_EVENT,
   attachCardStates,
   setCardState,
-} from "/static/kp/js/card-state.js";
+} from "/static/kp/dist/kp-themes.min.js";
 import {
   STACKBAR_PICK_EVENT,
   STACKBAR_RETRY_EVENT,
   attachStackbars,
   setStackbar,
-} from "/static/kp/js/stackbar.js";
+} from "/static/kp/dist/kp-themes.min.js";
 import {
   FACET_EVENT,
   attachFacets,
   getFacetValues,
   setFacetItems,
   setFacetValues,
-} from "/static/kp/js/facets.js";
+} from "/static/kp/dist/kp-themes.min.js";
 import {
   SELECTION_ACTION_EVENT,
   attachSelectionBars,
-} from "/static/kp/js/selection-bar.js";
+} from "/static/kp/dist/kp-themes.min.js";
 import {
   STATUS_RETRY_EVENT,
   attachStatusLists,
   buildStatusList,
   countStatus,
-} from "/static/kp/js/statusrow.js";
+} from "/static/kp/dist/kp-themes.min.js";
 import {
   WEEK_RANGE_EVENT,
   attachWeeks,
@@ -157,9 +157,9 @@ import {
   setWeekLegend,
   setWeekStart,
   setWeekState,
-} from "/static/kp/js/week.js";
-import { drawnSelect } from "/static/kp/js/combobox.js";
-import { registerShortcuts } from "/static/kp/js/shortcuts.js";
+} from "/static/kp/dist/kp-themes.min.js";
+import { drawnSelect } from "/static/kp/dist/kp-themes.min.js";
+import { registerShortcuts } from "/static/kp/dist/kp-themes.min.js";
 import { GROUP_BACKUPS, unlessDialog } from "../shortcuts.js";
 
 // review M5: every page field Live view may set is declared (drivable.js
@@ -658,7 +658,7 @@ export function mount(root) {
     ),
   );
   // kp's heat legend (setHeat `legend`), under each grid it explains.
-  /** @type {Pick<import("/static/kp/js/heat.js").HeatSpec, "legend" | "legendKeys">} */
+  /** @type {Pick<import("/static/kp/dist/kp-themes.min.js").HeatSpec, "legend" | "legendKeys">} */
   const heatLegend = {
     legend: [
       { tone: "ok", label: "backed up" },
@@ -955,7 +955,7 @@ export function mount(root) {
     attachBarCells(root),
   );
   const table = () =>
-    /** @type {import("/static/kp/js/datatable.js").DataTableHandle | null} */ (
+    /** @type {import("/static/kp/dist/kp-themes.min.js").DataTableHandle | null} */ (
       dataTable(shell.wrap)
     );
   cleanups.push(bindTableUrl(table(), "repos"));
@@ -1104,7 +1104,7 @@ export function mount(root) {
   /**
    * Live view reaches what the grids draw through kp-themes 11.2.0's decorate
    * hook: the night cells, the stack names and the paging buttons.
-   * @type {(part: HTMLElement, info: import("/static/kp/js/heat.js").HeatDecorateInfo) => void}
+   * @type {(part: HTMLElement, info: import("/static/kp/dist/kp-themes.min.js").HeatDecorateInfo) => void}
    */
   const heatDecorate = (part, info) => {
     if (info.kind === "row-label")
@@ -1370,7 +1370,7 @@ export function mount(root) {
   const weekEvents = () => {
     const stack = S.weekStack;
     const r = stack ? reads[stack] : null;
-    /** @type {import("/static/kp/js/week.js").WeekEvent[]} */
+    /** @type {import("/static/kp/dist/kp-themes.min.js").WeekEvent[]} */
     const out = [];
     if (!stack || !r || r.status !== "ok") return out;
     const now = nn();

@@ -4,7 +4,7 @@
 // Clear all. The tags and the line are the page's; the bar is kp's.
 
 import { h } from "./dom.js";
-import { setToolbarActive } from "/static/kp/js/toolbar.js";
+import { setToolbarActive } from "/static/kp/dist/kp-themes.min.js";
 
 /**
  * @param {{label: string, markRemove: (button: HTMLElement, id: string) => void,

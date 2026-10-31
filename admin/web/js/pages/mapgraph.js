@@ -29,8 +29,8 @@ import {
   graphSelect,
   setGraphData,
   setGraphState,
-} from "/static/kp/js/graph.js";
-import { registerShortcuts } from "/static/kp/js/shortcuts.js";
+} from "/static/kp/dist/kp-themes.min.js";
+import { registerShortcuts } from "/static/kp/dist/kp-themes.min.js";
 import { GROUP_MAP, unlessDialog } from "../shortcuts.js";
 import { declare, drivable } from "../drivable.js";
 import { EDGE_KINDS, hubOf, hues, isStack } from "../mapview.js";
@@ -73,7 +73,7 @@ const LOOK = {
 
 /**
  * @typedef {import("../topology.js").Topology} Topology
- * @typedef {import("/static/kp/js/graph.js").GraphData} GraphData
+ * @typedef {import("/static/kp/dist/kp-themes.min.js").GraphData} GraphData
  */
 
 /**
@@ -172,7 +172,7 @@ export function mapGraph(opts) {
   /** Name the graph's controls for Live view; it calls this on every draw. */
   const decorate = (
     /** @type {Element} */ part,
-    /** @type {import("/static/kp/js/graph.js").GraphDecorateInfo} */ info,
+    /** @type {import("/static/kp/dist/kp-themes.min.js").GraphDecorateInfo} */ info,
   ) => {
     const p = /** @type {HTMLElement} */ (part);
     if (info.kind === "node" && info.value) drivable(p, NODE, info.value);

@@ -5,7 +5,7 @@
 import {
   agoText as kpAgoText,
   humanDuration as kpHumanDuration,
-} from "/static/kp/js/freshness.js";
+} from "/static/kp/dist/kp-themes.min.js";
 
 /**
  * A span of seconds in the unit a person reads best, kp-themes' own

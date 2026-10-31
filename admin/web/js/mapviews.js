@@ -21,29 +21,32 @@ import {
 import { firewallOf, isStack, staleGroups } from "./mapview.js";
 import { current } from "./store.js";
 import { section, segSwitch } from "./ui.js";
-import { setBarCell } from "/static/kp/js/barcell.js";
+import { setBarCell } from "/static/kp/dist/kp-themes.min.js";
 import { setBulletsQuiet } from "./inplace.js";
-import { attachCardStates, setCardState } from "/static/kp/js/card-state.js";
-import { attachDataTables } from "/static/kp/js/datatable.js";
-import { setDeplist } from "/static/kp/js/deplist.js";
+import {
+  attachCardStates,
+  setCardState,
+} from "/static/kp/dist/kp-themes.min.js";
+import { attachDataTables } from "/static/kp/dist/kp-themes.min.js";
+import { setDeplist } from "/static/kp/dist/kp-themes.min.js";
 import {
   MATRIX_PICK_EVENT,
   MATRIX_RETRY_EVENT,
   setHeatLegend,
   setMatrix,
-} from "/static/kp/js/heat.js";
-import { attachIdmarks } from "/static/kp/js/idmark.js";
+} from "/static/kp/dist/kp-themes.min.js";
+import { attachIdmarks } from "/static/kp/dist/kp-themes.min.js";
 import { bindSelection } from "./selectbind.js";
 import {
   setSelectionBusy,
   setSelectionResult,
-} from "/static/kp/js/selection-bar.js";
-import { setStackbar } from "/static/kp/js/stackbar.js";
+} from "/static/kp/dist/kp-themes.min.js";
+import { setStackbar } from "/static/kp/dist/kp-themes.min.js";
 import {
   attachVersionDeltas,
   releaseUrl,
   versionLevel,
-} from "/static/kp/js/version-delta.js";
+} from "/static/kp/dist/kp-themes.min.js";
 
 /** @typedef {import("./topology.js").Topology} Topology */
 

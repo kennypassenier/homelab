@@ -22,16 +22,16 @@ import {
   attachDataTables,
   compare,
   dataTable,
-} from "/static/kp/js/datatable.js";
+} from "/static/kp/dist/kp-themes.min.js";
 import {
   attachGantts,
   setGanttRuns,
   setGanttSelection,
   setGanttState,
   setGanttZones,
-} from "/static/kp/js/gantt.js";
-import { attachTicks, tickTo } from "/static/kp/js/tick.js";
-import { attachToolbars } from "/static/kp/js/toolbar.js";
+} from "/static/kp/dist/kp-themes.min.js";
+import { attachTicks, tickTo } from "/static/kp/dist/kp-themes.min.js";
+import { attachToolbars } from "/static/kp/dist/kp-themes.min.js";
 
 const JOB_BAR = declare({
   id: "activity-job-bar",

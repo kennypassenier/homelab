@@ -30,8 +30,11 @@ import { planView } from "./plan.js";
 import { updateHref } from "./updateflow.js";
 import { dialogControl } from "./drivable.js";
 import { stage } from "./stage.js";
-import { attachCardStates, setCardState } from "/static/kp/js/card-state.js";
-import { attachVersionDeltas } from "/static/kp/js/version-delta.js";
+import {
+  attachCardStates,
+  setCardState,
+} from "/static/kp/dist/kp-themes.min.js";
+import { attachVersionDeltas } from "/static/kp/dist/kp-themes.min.js";
 
 /**
  * One stale-image row, as the Fleet view has it.

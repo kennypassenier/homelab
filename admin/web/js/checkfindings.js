@@ -13,7 +13,7 @@ import { findingsView } from "./findingsview.js";
 import { h, slowRead } from "./dom.js";
 import { stage } from "./stage.js";
 import { switchCheck } from "./editpanels.js";
-import { setCardState } from "/static/kp/js/card-state.js";
+import { setCardState } from "/static/kp/dist/kp-themes.min.js";
 
 const FOLD = declare({
   id: "inbox-check-findings",

@@ -18,7 +18,7 @@ import {
   attachUploads,
   setDone,
   setError,
-} from "/static/kp/js/upload.js";
+} from "/static/kp/dist/kp-themes.min.js";
 
 /**
  * Open the import dialog.

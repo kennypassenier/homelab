@@ -34,8 +34,8 @@ const aria = (n, s, what) => `${s}, ${nightDate(n)}: ${what}`;
 
 /**
  * @typedef {import("./backupsview.js").StackRead} StackRead
- * @typedef {import("/static/kp/js/heat.js").HeatSpec} HeatSpec
- * @typedef {import("/static/kp/js/heat.js").HeatCell} HeatCell
+ * @typedef {import("/static/kp/dist/kp-themes.min.js").HeatSpec} HeatSpec
+ * @typedef {import("/static/kp/dist/kp-themes.min.js").HeatCell} HeatCell
  * @typedef {{last: string, current: string}} NightsNow
  */
 
@@ -228,11 +228,11 @@ export function monthNights(year, month) {
  * @param {Record<string, StackRead>} reads
  * @param {NightsNow} now
  * @param {{from: string, to: string}} range
- * @returns {Record<string, import("/static/kp/js/calendar.js").CalendarDay>}
+ * @returns {Record<string, import("/static/kp/dist/kp-themes.min.js").CalendarDay>}
  */
 export function calendarDays(reads, now, range) {
   const pending = Object.values(reads).some((r) => r.status === "pending");
-  /** @type {Record<string, import("/static/kp/js/calendar.js").CalendarDay>} */
+  /** @type {Record<string, import("/static/kp/dist/kp-themes.min.js").CalendarDay>} */
   const days = {};
   for (let d = range.from; d <= range.to; d = addDays(d, 1)) {
     if (pending) {
@@ -266,7 +266,7 @@ export function calendarDays(reads, now, range) {
  * @param {Record<string, StackRead>} reads
  * @param {string} night
  * @param {NightsNow} now
- * @returns {import("/static/kp/js/statusrow.js").StatusRow[]}
+ * @returns {import("/static/kp/dist/kp-themes.min.js").StatusRow[]}
  */
 export function nightRows(names, reads, night, now) {
   return names.map((s) => {
@@ -345,7 +345,7 @@ export function nightSummary(c, night) {
  * @param {StackRead} read
  * @param {import("./backupsview.js").Repo} repo
  * @param {NightsNow} now
- * @returns {import("/static/kp/js/uptime.js").UptimePeriod[]}
+ * @returns {import("/static/kp/dist/kp-themes.min.js").UptimePeriod[]}
  */
 export function repoPeriods(read, repo, now) {
   const have = new Map();

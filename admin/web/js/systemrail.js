@@ -10,7 +10,7 @@
 
 import { SUB_PAGES, subPageAt } from "./areas.js";
 import { h } from "./dom.js";
-import { attachSidenavs } from "/static/kp/js/sidenav.js";
+import { attachSidenavs } from "/static/kp/dist/kp-themes.min.js";
 
 /** The icon of each page, drawn with the text colour (24 by 24, one stroke). */
 const ICONS = /** @type {Record<string, string[]>} */ ({

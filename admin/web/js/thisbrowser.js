@@ -9,18 +9,22 @@
 import { TOUR_NAME, startTour } from "./helptour.js";
 import { FOLLOW_KEY } from "./driveview.js";
 import { esc } from "./settingsform.js";
-import { attachCalm } from "/static/kp/js/calm.js";
-import { openConfirmation } from "/static/kp/js/components.js";
-import { REMEMBER_PREFIX } from "/static/kp/js/remember.js";
-import { attachSegmented } from "/static/kp/js/segmented.js";
-import { THEMES, applyTheme, currentTheme } from "/static/kp/js/theme-core.js";
+import { attachCalm } from "/static/kp/dist/kp-themes.min.js";
+import { openConfirmation } from "/static/kp/dist/kp-themes.min.js";
+import { REMEMBER_PREFIX } from "/static/kp/dist/kp-themes.min.js";
+import { attachSegmented } from "/static/kp/dist/kp-themes.min.js";
+import {
+  THEMES,
+  applyTheme,
+  currentTheme,
+} from "/static/kp/dist/kp-themes.min.js";
 import {
   PICK_EVENT,
   attachThemePickers,
   themeOptionsMarkup,
-} from "/static/kp/js/theme-picker.js";
-import { forgetTour } from "/static/kp/js/tour.js";
-import { toast } from "/static/kp/js/overlays.js";
+} from "/static/kp/dist/kp-themes.min.js";
+import { forgetTour } from "/static/kp/dist/kp-themes.min.js";
+import { toast } from "/static/kp/dist/kp-themes.min.js";
 
 /** Where "follow my system" and the two themes it picks between are kept. */
 const FOLLOW_SYSTEM = "homelab.theme-follow-system";

@@ -12,7 +12,7 @@ import {
   applyTheme,
   isTheme,
   storeTheme,
-} from "/static/kp/js/theme-core.js";
+} from "/static/kp/dist/kp-themes.min.js";
 
 /**
  * @param {Pick<Storage, "getItem"> | null} [storage] where the choice is

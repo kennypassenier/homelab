@@ -24,8 +24,11 @@
 import { act, actionLabel, onAct, send } from "../act.js";
 import { refusalCallout } from "../actui.js";
 import { stage } from "../stage.js";
-import { attachCardStates, setCardState } from "/static/kp/js/card-state.js";
-import { attachDeplists, deplist } from "/static/kp/js/deplist.js";
+import {
+  attachCardStates,
+  setCardState,
+} from "/static/kp/dist/kp-themes.min.js";
+import { attachDeplists, deplist } from "/static/kp/dist/kp-themes.min.js";
 import {
   ensureStyle,
   errorBox,
@@ -38,7 +41,7 @@ import {
 } from "../dom.js";
 import { declare, drivable } from "../drivable.js";
 import { diffBlocks } from "../editui.js";
-import { attachCountdowns } from "/static/kp/js/countdown.js";
+import { attachCountdowns } from "/static/kp/dist/kp-themes.min.js";
 import { formatDateTime, humanDuration } from "../format.js";
 import { inboxNow } from "../inboxlist.js";
 import { humanBytes } from "../backupsview.js";
@@ -68,23 +71,23 @@ import {
   updatesBody,
   whoNotices,
 } from "../updateflow.js";
-import { ackGate, attachAckGates } from "/static/kp/js/ack-gate.js";
-import { attachDataTables } from "/static/kp/js/datatable.js";
-import { attachIdmarks } from "/static/kp/js/idmark.js";
-import { setPipeline, attachPipelines } from "/static/kp/js/pipeline.js";
+import { ackGate, attachAckGates } from "/static/kp/dist/kp-themes.min.js";
+import { attachDataTables } from "/static/kp/dist/kp-themes.min.js";
+import { attachIdmarks } from "/static/kp/dist/kp-themes.min.js";
+import { setPipeline, attachPipelines } from "/static/kp/dist/kp-themes.min.js";
 import { bindSelection } from "../selectbind.js";
-import { attachDisabledReasons } from "/static/kp/js/reason.js";
+import { attachDisabledReasons } from "/static/kp/dist/kp-themes.min.js";
 import {
   attachSteplists,
   buildSteplist,
   setStep,
-} from "/static/kp/js/steplist.js";
+} from "/static/kp/dist/kp-themes.min.js";
 import {
   attachVersionDeltas,
   VERSION_SORT,
   summarizeDeltas,
   versionLevel,
-} from "/static/kp/js/version-delta.js";
+} from "/static/kp/dist/kp-themes.min.js";
 
 const PICK = declare({
   id: "update-pick",

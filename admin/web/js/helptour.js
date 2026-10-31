@@ -19,7 +19,7 @@ import {
   shouldStartTour,
   startTour as startKpTour,
   tourRemembered,
-} from "/static/kp/js/tour.js";
+} from "/static/kp/dist/kp-themes.min.js";
 
 /** Review item 15: the bar's "?" (chrome.js), a Live view control on every
  * page — `bar`: found in the bar, never by going to a page first. */

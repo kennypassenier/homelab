@@ -17,7 +17,7 @@
 // `fwSummary` (fwview.js, re-exported here) is the one-stack summary the
 // stack hub's Settings tab draws.
 
-import { registerShortcuts } from "/static/kp/js/shortcuts.js";
+import { registerShortcuts } from "/static/kp/dist/kp-themes.min.js";
 import { GROUP_FIREWALL, unlessDialog } from "../shortcuts.js";
 import { agoEl, setAgo } from "../ago.js";
 import { bindTableUrl, ensureStyle, fetchJson, h } from "../dom.js";
@@ -57,7 +57,7 @@ import {
   VIEW_EVENT,
   attachDataTables,
   dataTable,
-} from "/static/kp/js/datatable.js";
+} from "/static/kp/dist/kp-themes.min.js";
 import {
   MATRIX_LIGHT_EVENT,
   MATRIX_PICK_EVENT,
@@ -66,16 +66,16 @@ import {
   setMatrix,
   setMatrixLit,
   setMatrixPick,
-} from "/static/kp/js/heat.js";
-import { attachFootprints } from "/static/kp/js/footprint.js";
-import { attachIdmarks } from "/static/kp/js/idmark.js";
-import { attachHoverCards } from "/static/kp/js/hovercard.js";
-import { attachKeys } from "/static/kp/js/keys.js";
+} from "/static/kp/dist/kp-themes.min.js";
+import { attachFootprints } from "/static/kp/dist/kp-themes.min.js";
+import { attachIdmarks } from "/static/kp/dist/kp-themes.min.js";
+import { attachHoverCards } from "/static/kp/dist/kp-themes.min.js";
+import { attachKeys } from "/static/kp/dist/kp-themes.min.js";
 import {
   SEGMENTED_EVENT,
   attachSegmented,
   setSegmentedValues,
-} from "/static/kp/js/segmented.js";
+} from "/static/kp/dist/kp-themes.min.js";
 import {
   TRACE_RETRY_EVENT,
   TRACE_RULE_EVENT,
@@ -84,24 +84,28 @@ import {
   setTrace,
   trace,
   traceSummary,
-} from "/static/kp/js/path-trace.js";
+} from "/static/kp/dist/kp-themes.min.js";
 import {
   CHANGE_EVENT,
   attachComboboxes,
   combobox,
-} from "/static/kp/js/combobox.js";
+} from "/static/kp/dist/kp-themes.min.js";
 import {
   TOGGLE_CHANGED_EVENT,
   attachToggles,
   toggle as toggleOf,
-} from "/static/kp/js/toggle.js";
-import { ACK_EVENT, ackGate, attachAckGates } from "/static/kp/js/ack-gate.js";
+} from "/static/kp/dist/kp-themes.min.js";
+import {
+  ACK_EVENT,
+  ackGate,
+  attachAckGates,
+} from "/static/kp/dist/kp-themes.min.js";
 import {
   CARD_RETRY_EVENT,
   attachCardStates,
   setCardState,
-} from "/static/kp/js/card-state.js";
-import { attachDisabledReasons } from "/static/kp/js/reason.js";
+} from "/static/kp/dist/kp-themes.min.js";
+import { attachDisabledReasons } from "/static/kp/dist/kp-themes.min.js";
 
 export { fwSummary } from "../fwview.js";
 

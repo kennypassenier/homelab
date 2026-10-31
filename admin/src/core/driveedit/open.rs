@@ -121,15 +121,8 @@ pub(super) fn plan_steps(first: FormStep) -> Vec<FormStep> {
     ]
 }
 
-/// `homelab ui open` of an edit form.
-pub fn open(
-    st: &mut DriveState,
-    step: &UiStep,
-    kind: EditKind,
-    form: &str,
-    target: Option<&str>,
-    cx: &Ctx,
-) -> Result<Applied, Refusal> {
+/// The dialog is not open already and the token may open this kind.
+fn openable(st: &DriveState, step: &UiStep, kind: EditKind, cx: &Ctx) -> Result<(), Refusal> {
     if let Some(f) = &st.form {
         return Err(refused(
             step,
@@ -150,6 +143,19 @@ pub fn open(
             "drive it with a token of that scope, or leave it to Kenny",
         ));
     }
+    Ok(())
+}
+
+/// `homelab ui open` of an edit form.
+pub fn open(
+    st: &mut DriveState,
+    step: &UiStep,
+    kind: EditKind,
+    form: &str,
+    target: Option<&str>,
+    cx: &Ctx,
+) -> Result<Applied, Refusal> {
+    openable(st, step, kind, cx)?;
     let req = Req {
         step,
         kind,

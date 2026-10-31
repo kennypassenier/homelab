@@ -63,13 +63,13 @@ pub fn commit_body(edit: &Value, v: &Values) -> Value {
     Value::Object(out)
 }
 
-/// `newStackWizard`'s steps, for the presets the repository holds.
-pub fn new_stack_steps(presets: &[Value], suggest: Option<u64>) -> Vec<FormStep> {
-    let e = es();
+/// What the wizard's fields start at: the first preset's own sizes.
+fn starting_values(presets: &[Value], suggest: Option<u64>) -> BTreeMap<&'static str, String> {
+    let d = &es().new_defaults;
     let first = presets.first();
     let pick =
         |k: &str, d: u64| -> String { first.and_then(|p| p[k].as_u64()).unwrap_or(d).to_string() };
-    let now: BTreeMap<&str, String> = [
+    [
         (
             "preset",
             first
@@ -78,47 +78,44 @@ pub fn new_stack_steps(presets: &[Value], suggest: Option<u64>) -> Vec<FormStep>
                 .to_string(),
         ),
         ("vmid", suggest.map(|v| v.to_string()).unwrap_or_default()),
-        ("ram_mb", pick("ram_mb", e.new_defaults.ram_mb)),
-        ("cores", pick("cores", e.new_defaults.cores)),
-        ("disk_gb", pick("disk_gb", e.new_defaults.disk_gb)),
+        ("ram_mb", pick("ram_mb", d.ram_mb)),
+        ("cores", pick("cores", d.cores)),
+        ("disk_gb", pick("disk_gb", d.disk_gb)),
         ("swap_mb", String::new()),
     ]
     .into_iter()
-    .collect();
-    e.new_stack
+    .collect()
+}
+
+fn preset_choices(presets: &[Value]) -> Vec<Choice> {
+    presets
         .iter()
-        .map(|s| FormStep {
-            id: s.id.clone(),
-            label: s.label.clone(),
-            fields: s
-                .fields
-                .iter()
-                .map(|d| {
-                    let mut f = d.field();
-                    if d.name == "preset" {
-                        f.choices = Some(
-                            presets
-                                .iter()
-                                .map(|p| {
-                                    let n = p["name"].as_str().unwrap_or("").to_string();
-                                    Choice {
-                                        label: format!(
-                                            "{n} · {}",
-                                            p["description"].as_str().unwrap_or("")
-                                        ),
-                                        value: n,
-                                    }
-                                })
-                                .collect(),
-                        );
-                    }
-                    if let Some(v) = now.get(d.name.as_str()) {
-                        f.current = Some(json!(v));
-                    }
-                    f
-                })
-                .collect(),
+        .map(|p| {
+            let n = p["name"].as_str().unwrap_or("").to_string();
+            Choice {
+                label: format!("{n} · {}", p["description"].as_str().unwrap_or("")),
+                value: n,
+            }
         })
+        .collect()
+}
+
+/// `newStackWizard`'s steps, for the presets the repository holds.
+pub fn new_stack_steps(presets: &[Value], suggest: Option<u64>) -> Vec<FormStep> {
+    let now = starting_values(presets, suggest);
+    let field_of = |d: &EditFieldDef| {
+        let mut f = d.field();
+        if d.name == "preset" {
+            f.choices = Some(preset_choices(presets));
+        }
+        if let Some(v) = now.get(d.name.as_str()) {
+            f.current = Some(json!(v));
+        }
+        f
+    };
+    es().new_stack
+        .iter()
+        .map(|s| step_of(&s.id, &s.label, s.fields.iter().map(field_of).collect()))
         .collect()
 }
 
@@ -136,9 +133,53 @@ pub fn data_fields(paths: &[String]) -> Vec<Field> {
         .collect()
 }
 
+fn trimmed(v: &Values, k: &str) -> String {
+    text_of(v.get(k)).trim().to_string()
+}
+
+/// feat-tiles-3: the wizard's Tile step, folded into this SAME body
+/// (`newStackTile` on the browser's side) so `prepare_new` applies it to
+/// the staged manifest in the one commit, not a second one after.
+fn wizard_tile(v: &Values) -> Option<Value> {
+    let t = |k: &str| trimmed(v, k);
+    let hostname = t("tile_hostname");
+    if hostname.is_empty() {
+        return None;
+    }
+    let mut tile = Map::new();
+    tile.insert("hostname".into(), json!(hostname));
+    let name = t("tile_name");
+    tile.insert(
+        "name".into(),
+        json!(if name.is_empty() { t("name") } else { name }),
+    );
+    let group = t("tile_group");
+    tile.insert(
+        "group".into(),
+        json!(if group.is_empty() {
+            "Own".into()
+        } else {
+            group
+        }),
+    );
+    let description = t("tile_description");
+    if !description.is_empty() {
+        tile.insert("description".into(), json!(description));
+    }
+    for (field, key) in [
+        ("tile_watch_every", "watch_every"),
+        ("tile_down_after", "down_after"),
+    ] {
+        if !t(field).is_empty() {
+            tile.insert(key.into(), js_number(&t(field)));
+        }
+    }
+    Some(Value::Object(tile))
+}
+
 /// `newStackBody`.
 pub fn new_stack_body(v: &Values) -> Value {
-    let t = |k: &str| text_of(v.get(k)).trim().to_string();
+    let t = |k: &str| trimmed(v, k);
     let n = |k: &str| js_number(&t(k));
     let mut out = Map::new();
     out.insert("name".into(), json!(t("name")));
@@ -156,38 +197,8 @@ pub fn new_stack_body(v: &Values) -> Value {
         .map(|(k, _)| json!(&k["nodata:".len()..]))
         .collect();
     out.insert("no_data".into(), Value::Array(no_data));
-    // feat-tiles-3: the wizard's Tile step, folded into this SAME body —
-    // `newStackTile` on the browser's side — so `prepare_new` applies it
-    // to the staged manifest in the one commit, not a second one after.
-    let hostname = t("tile_hostname");
-    if !hostname.is_empty() {
-        let mut tile = Map::new();
-        tile.insert("hostname".into(), json!(hostname));
-        let name = t("tile_name");
-        tile.insert(
-            "name".into(),
-            json!(if name.is_empty() { t("name") } else { name }),
-        );
-        let group = t("tile_group");
-        tile.insert(
-            "group".into(),
-            json!(if group.is_empty() {
-                "Own".into()
-            } else {
-                group
-            }),
-        );
-        let description = t("tile_description");
-        if !description.is_empty() {
-            tile.insert("description".into(), json!(description));
-        }
-        if !t("tile_watch_every").is_empty() {
-            tile.insert("watch_every".into(), n("tile_watch_every"));
-        }
-        if !t("tile_down_after").is_empty() {
-            tile.insert("down_after".into(), n("tile_down_after"));
-        }
-        out.insert("tile".into(), Value::Object(tile));
+    if let Some(tile) = wizard_tile(v) {
+        out.insert("tile".into(), tile);
     }
     Value::Object(out)
 }

@@ -28,6 +28,49 @@ pub fn check_new_step(
     errors
 }
 
+fn parse_int(kind: &Value, t: &str) -> Result<Value, String> {
+    let (min, max) = (
+        kind["min"].as_u64().unwrap_or(0),
+        kind["max"].as_u64().unwrap_or(u64::MAX),
+    );
+    match t.parse::<u64>() {
+        Ok(n) if all_digits(t) && (min..=max).contains(&n) => Ok(json!(n)),
+        _ => Err(say(
+            "key_int",
+            &[("min", &min.to_string()), ("max", &max.to_string())],
+        )),
+    }
+}
+
+fn parse_vmid(t: &str) -> Result<Value, String> {
+    match t.parse::<u64>() {
+        Ok(n) if all_digits(t) && n >= 100 => Ok(json!(n)),
+        _ => Err(say("key_vmid", &[])),
+    }
+}
+
+fn parse_vmid_list(t: &str) -> Result<Value, String> {
+    let parts: Vec<Option<u64>> = t
+        .split(|c: char| c.is_whitespace() || c == ',')
+        .filter(|x| !x.is_empty())
+        .map(|x| x.parse::<u64>().ok().filter(|n| *n >= 100))
+        .collect();
+    if parts.iter().all(Option::is_some) {
+        Ok(json!(parts.into_iter().flatten().collect::<Vec<_>>()))
+    } else {
+        Err(say("key_vmid_list", &[]))
+    }
+}
+
+/// The text itself when it fits the pattern, else the message `key`.
+fn patterned(t: &str, pattern: &str, key: &str) -> Result<Value, String> {
+    if matches(pattern, t) {
+        Ok(json!(t))
+    } else {
+        Err(say(key, &[]))
+    }
+}
+
 /// `parseKey`: a typed text as the key's JSON value; null removes it.
 pub fn parse_key(kind: &Value, input: &Value) -> Result<Value, String> {
     let ty = kind["type"].as_str().unwrap_or("text");
@@ -41,49 +84,11 @@ pub fn parse_key(kind: &Value, input: &Value) -> Result<Value, String> {
         return Ok(Value::Null);
     }
     match ty {
-        "int" => {
-            let (min, max) = (
-                kind["min"].as_u64().unwrap_or(0),
-                kind["max"].as_u64().unwrap_or(u64::MAX),
-            );
-            match t.parse::<u64>() {
-                Ok(n) if all_digits(&t) && (min..=max).contains(&n) => Ok(json!(n)),
-                _ => Err(say(
-                    "key_int",
-                    &[("min", &min.to_string()), ("max", &max.to_string())],
-                )),
-            }
-        }
-        "vmid" => match t.parse::<u64>() {
-            Ok(n) if all_digits(&t) && n >= 100 => Ok(json!(n)),
-            _ => Err(say("key_vmid", &[])),
-        },
-        "url" => {
-            if matches(r"https?://\S+", &t) {
-                Ok(json!(t))
-            } else {
-                Err(say("key_url", &[]))
-            }
-        }
-        "window" => {
-            if matches(r"\d+[smhdw]", &t) {
-                Ok(json!(t))
-            } else {
-                Err(say("key_window", &[]))
-            }
-        }
-        "vmid_list" => {
-            let parts: Vec<Option<u64>> = t
-                .split(|c: char| c.is_whitespace() || c == ',')
-                .filter(|x| !x.is_empty())
-                .map(|x| x.parse::<u64>().ok().filter(|n| *n >= 100))
-                .collect();
-            if parts.iter().all(Option::is_some) {
-                Ok(json!(parts.into_iter().flatten().collect::<Vec<_>>()))
-            } else {
-                Err(say("key_vmid_list", &[]))
-            }
-        }
+        "int" => parse_int(kind, &t),
+        "vmid" => parse_vmid(&t),
+        "url" => patterned(&t, r"https?://\S+", "key_url"),
+        "window" => patterned(&t, r"\d+[smhdw]", "key_window"),
+        "vmid_list" => parse_vmid_list(&t),
         "text_list" => Ok(json!(
             t.split(',')
                 .map(str::trim)
@@ -91,13 +96,8 @@ pub fn parse_key(kind: &Value, input: &Value) -> Result<Value, String> {
                 .collect::<Vec<_>>()
         )),
         "table" => Ok(json!(t)),
-        _ => {
-            if t.contains('\n') {
-                Err(say("key_line", &[]))
-            } else {
-                Ok(json!(t))
-            }
-        }
+        _ if t.contains('\n') => Err(say("key_line", &[])),
+        _ => Ok(json!(t)),
     }
 }
 

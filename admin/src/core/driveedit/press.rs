@@ -42,6 +42,12 @@ pub(super) fn to_plan(form: &mut OpenForm, body: &Value, action: Option<&str>) {
     e.plan = None;
 }
 
+/// On to the next page of the form.
+fn advance(form: &mut OpenForm) -> Applied {
+    form.step_index += 1;
+    plain()
+}
+
 /// Whether the kind ends in a plan page and a commit page.
 fn has_plan(kind: EditKind) -> bool {
     kind == EditKind::Import || kind.preset_edit() || kind.stack_edit()
@@ -111,10 +117,7 @@ fn press_step(
 ) -> Result<Applied, Refusal> {
     let step_id = form.step.clone();
     match (kind, step_id.as_str(), button) {
-        (k, "plan", "next") if has_plan(k) => {
-            form.step_index += 1;
-            Ok(plain())
-        }
+        (k, "plan", "next") if has_plan(k) => Ok(advance(form)),
         (k, "commit", "confirm") if has_plan(k) => Ok(confirm_commit(form, kind)),
         (EditKind::Import, "bundle", "next") => Ok(import_bundle(form)),
         (EditKind::Preset | EditKind::NewPreset, "meta", "next") => {
@@ -129,10 +132,7 @@ fn press_step(
         (k, _, "next") if k.stack_edit() => Ok(plan_press(form, k)),
         (EditKind::NewStack, "plan", "confirm") => Ok(new_stack_confirm(form)),
         (EditKind::NewStack, _, "next") => Ok(new_stack_next(form)),
-        (EditKind::HostSettings, "keys", "next") => {
-            form.step_index = 1;
-            Ok(plain())
-        }
+        (EditKind::HostSettings, "keys", "next") => Ok(advance(form)),
         (EditKind::HostSettings, "review", "confirm") => Ok(host_write(form)),
         (EditKind::Batch, _, "confirm") => Ok(batch_confirm(form)),
         (EditKind::Rollback, _, "next") => rollback_next(form, step, cx),

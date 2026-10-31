@@ -73,6 +73,15 @@ pub(super) fn num_text(v: &Value) -> String {
     }
 }
 
+/// A tile timing field's tile key and the tile's own name for it.
+fn tile_key(name: &str) -> Option<(&str, &'static str)> {
+    if let Some(key) = name.strip_prefix("tile_watch_every:") {
+        return Some((key, "watch_every"));
+    }
+    name.strip_prefix("tile_down_after:")
+        .map(|key| (key, "down_after"))
+}
+
 /// `settingsBody`: only what differs from now.
 pub fn settings_body(fields: &[Field], values: &Values) -> Value {
     let mut out = Map::new();
@@ -95,13 +104,9 @@ pub fn settings_body(fields: &[Field], values: &Values) -> Value {
         }
         if let Some(key) = f.name.strip_prefix("image:") {
             images.insert(key.to_string(), json!(t));
-        } else if let Some(key) = f.name.strip_prefix("tile_watch_every:") {
+        } else if let Some((key, field)) = tile_key(&f.name) {
             if !t.is_empty() {
-                tile_entry(&mut tiles, key).insert("watch_every".into(), js_number(t));
-            }
-        } else if let Some(key) = f.name.strip_prefix("tile_down_after:") {
-            if !t.is_empty() {
-                tile_entry(&mut tiles, key).insert("down_after".into(), js_number(t));
+                tile_entry(&mut tiles, key).insert(field.into(), js_number(t));
             }
         } else if !t.is_empty() {
             out.insert(f.name.clone(), js_number(t));

@@ -146,6 +146,14 @@ fn list_dialog(
     ))
 }
 
+fn unknown_op(step: &UiStep, list: &str, other: &str) -> Refusal {
+    refused(
+        step,
+        format!("there is no row step {other}"),
+        format!("row add {list}, or row edit|up|down|delete {list}:<number>"),
+    )
+}
+
 pub(super) fn row_list(
     form: &mut OpenForm,
     step: &UiStep,
@@ -172,31 +180,13 @@ pub(super) fn row_list(
         }
         "up" | "down" => {
             let i = row_index(step, list, n, count)?;
-            let Some(j) = swap_target(op, i, count) else {
-                return Err(refused(
-                    step,
-                    format!(
-                        "row {} is the {} already",
-                        i + 1,
-                        if op == "up" { "first" } else { "last" }
-                    ),
-                    "move another row",
-                ));
-            };
-            rows.swap(i, j);
-            set_model_list(form, list, rows);
+            set_model_list(form, list, moved(step, "row", (op, i), rows)?);
         }
         "delete" => {
             rows.remove(row_index(step, list, n, count)?);
             set_model_list(form, list, rows);
         }
-        other => {
-            return Err(refused(
-                step,
-                format!("there is no row step {other}"),
-                format!("row add {list}, or row edit|up|down|delete {list}:<number>"),
-            ));
-        }
+        other => return Err(unknown_op(step, list, other)),
     }
     Ok(plain())
 }

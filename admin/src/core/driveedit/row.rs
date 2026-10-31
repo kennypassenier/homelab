@@ -3,21 +3,10 @@
 
 use super::*;
 
-pub fn row(
-    form: &mut OpenForm,
-    step: &UiStep,
-    op: &str,
-    target: Option<&str>,
-) -> Result<Applied, Refusal> {
-    let no_table = || {
-        refused(
-            step,
-            format!("the form {} has no table", form.title),
-            "row steps are for the firewall and the host settings",
-        )
-    };
+/// The form has a table, was not sent, and has no dialog open.
+fn table_form(form: &OpenForm, step: &UiStep) -> Result<EditKind, Refusal> {
     let Family::Edit(kind) = form.desc.family else {
-        return Err(no_table());
+        return Err(no_table(form, step));
     };
     if form.sent() {
         return Err(refused(
@@ -33,6 +22,24 @@ pub fn row(
             "press save or cancel first",
         ));
     }
+    Ok(kind)
+}
+
+fn no_table(form: &OpenForm, step: &UiStep) -> Refusal {
+    refused(
+        step,
+        format!("the form {} has no table", form.title),
+        "row steps are for the firewall and the host settings",
+    )
+}
+
+pub fn row(
+    form: &mut OpenForm,
+    step: &UiStep,
+    op: &str,
+    target: Option<&str>,
+) -> Result<Applied, Refusal> {
+    let kind = table_form(form, step)?;
     match kind {
         EditKind::Firewall => row_firewall(form, step, op, target),
         EditKind::HostSettings => row_host_key(form, step, op, target),
@@ -41,7 +48,7 @@ pub fn row(
         | EditKind::Latch
         | EditKind::Checks
         | EditKind::Tiles => row_list(form, step, kind, op, target),
-        _ => Err(no_table()),
+        _ => Err(no_table(form, step)),
     }
 }
 
@@ -68,6 +75,28 @@ pub(super) fn swap_target(op: &str, i: usize, n: usize) -> Option<usize> {
     } else {
         Some(i + 1).filter(|j| *j < n)
     }
+}
+
+/// The rows with row `i` moved one place on "up" / "down".
+pub(super) fn moved(
+    step: &UiStep,
+    noun: &str,
+    (op, i): (&str, usize),
+    mut rows: Vec<Value>,
+) -> Result<Vec<Value>, Refusal> {
+    let Some(j) = swap_target(op, i, rows.len()) else {
+        return Err(refused(
+            step,
+            format!(
+                "{noun} {} is the {} already",
+                i + 1,
+                if op == "up" { "first" } else { "last" }
+            ),
+            format!("move another {noun}"),
+        ));
+    };
+    rows.swap(i, j);
+    Ok(rows)
 }
 
 /// Replace one list of the form's model.
@@ -144,19 +173,7 @@ fn row_firewall(
         "add" | "edit" => edit(form).sub = Some(rule_dialog(step, op, target, &rules)?),
         "up" | "down" => {
             let i = rule_index(step, target, n)?;
-            let Some(j) = swap_target(op, i, n) else {
-                return Err(refused(
-                    step,
-                    format!(
-                        "rule {} is the {} already",
-                        i + 1,
-                        if op == "up" { "first" } else { "last" }
-                    ),
-                    "move another rule",
-                ));
-            };
-            rules.swap(i, j);
-            set_model_list(form, "rules", rules);
+            set_model_list(form, "rules", moved(step, "rule", (op, i), rules)?);
         }
         "delete" => {
             rules.remove(rule_index(step, target, n)?);

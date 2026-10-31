@@ -150,18 +150,38 @@ pub(super) fn preset_meta_current(name: &str, meta: &Value) -> Value {
     }
 }
 
-/// feat-preset-1: the Files card's own fields, appended to the "meta"
-/// step — `file`'s choices are the preset's files (minus `preset.yml`),
-/// `template`'s the starter templates; the rest start blank.
-pub(super) fn preset_file_fields(data: &Value) -> Vec<Field> {
-    let mut names: Vec<String> = data["files"]
+/// The keys of a JSON object, sorted.
+fn sorted_keys(v: &Value, skip: Option<&str>) -> Vec<String> {
+    let mut keys: Vec<String> = v
         .as_object()
         .into_iter()
         .flatten()
         .map(|(k, _)| k.clone())
-        .filter(|k| k != presetedit::PRESET_META)
+        .filter(|k| Some(k.as_str()) != skip)
         .collect();
-    names.sort();
+    keys.sort();
+    keys
+}
+
+/// A picker's choices: the empty choice first, then each name.
+fn choices_after(first_label: &str, names: &[String]) -> Vec<Choice> {
+    let mut choices = vec![Choice {
+        value: String::new(),
+        label: first_label.into(),
+    }];
+    choices.extend(names.iter().map(|n| Choice {
+        value: n.clone(),
+        label: n.clone(),
+    }));
+    choices
+}
+
+/// feat-preset-1: the Files card's own fields, appended to the "meta"
+/// step: `file`'s choices are the preset's files (minus `preset.yml`),
+/// `template`'s the starter templates; the rest start blank.
+pub(super) fn preset_file_fields(data: &Value) -> Vec<Field> {
+    let names = sorted_keys(&data["files"], Some(presetedit::PRESET_META));
+    // The templates keep the object's own order, as they always did.
     let templates: Vec<String> = data["file_templates"]
         .as_object()
         .into_iter()
@@ -173,32 +193,11 @@ pub(super) fn preset_file_fields(data: &Value) -> Vec<Field> {
         .map(|d| {
             let mut f = d.field();
             match d.name.as_str() {
-                "file" => {
-                    let mut choices = vec![Choice {
-                        value: String::new(),
-                        label: "(new file)".into(),
-                    }];
-                    choices.extend(names.iter().map(|n| Choice {
-                        value: n.clone(),
-                        label: n.clone(),
-                    }));
-                    f.choices = Some(choices);
-                    f.current = Some(json!(""));
-                }
-                "template" => {
-                    let mut choices = vec![Choice {
-                        value: String::new(),
-                        label: "Blank".into(),
-                    }];
-                    choices.extend(templates.iter().map(|n| Choice {
-                        value: n.clone(),
-                        label: n.clone(),
-                    }));
-                    f.choices = Some(choices);
-                    f.current = Some(json!(""));
-                }
-                _ => f.current = Some(json!("")),
+                "file" => f.choices = Some(choices_after("(new file)", &names)),
+                "template" => f.choices = Some(choices_after("Blank", &templates)),
+                _ => {}
             }
+            f.current = Some(json!(""));
             f
         })
         .collect()

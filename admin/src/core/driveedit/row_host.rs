@@ -85,6 +85,21 @@ fn key_fields(f: &Value, key: &str, start: Value, access: &str, ty: &str) -> Vec
     fields
 }
 
+/// The host.toml key's description as the page read it.
+fn host_key(data: &Value, step: &UiStep, key: &str) -> Result<Value, Refusal> {
+    let fields = data["page"]["fields"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default();
+    fields.into_iter().find(|f| f["key"] == key).ok_or_else(|| {
+        refused(
+            step,
+            format!("host.toml has no key {key:?}"),
+            "the keys are the rows of homelab ui state",
+        )
+    })
+}
+
 pub(super) fn row_host_key(
     form: &mut OpenForm,
     step: &UiStep,
@@ -107,23 +122,13 @@ pub(super) fn row_host_key(
     }
     let key = target.unwrap_or("");
     let e = edit(form);
-    let fields = e.data["page"]["fields"]
-        .as_array()
-        .cloned()
-        .unwrap_or_default();
-    let Some(f) = fields.iter().find(|f| f["key"] == key) else {
-        return Err(refused(
-            step,
-            format!("host.toml has no key {key:?}"),
-            "the keys are the rows of homelab ui state",
-        ));
-    };
+    let f = host_key(&e.data, step, key)?;
     let access = f["access"].as_str().unwrap_or("");
     ssh_only(key, access, step)?;
     let ty = f["kind"]["type"].as_str().unwrap_or("text");
-    let start = start_of(e.staged.get(key), ty, f);
+    let start = start_of(e.staged.get(key), ty, &f);
     let title = format!("{} · {key}", f["label"].as_str().unwrap_or(key));
-    let sub_fields = key_fields(f, key, start, access, ty);
+    let sub_fields = key_fields(&f, key, start, access, ty);
     e.sub = Some(sub_of("key", title, json!(key), sub_fields));
     Ok(plain())
 }

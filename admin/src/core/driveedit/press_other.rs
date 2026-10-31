@@ -131,6 +131,20 @@ pub(super) fn batch_confirm(form: &mut OpenForm) -> Applied {
     })
 }
 
+/// The units and commits the action's own dialog offers.
+fn rollback_sources(data: &Value) -> Sources {
+    Sources {
+        units: strings(&data["native_units"]),
+        commits: data["commits"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(|c| c["commit"].as_str().map(str::to_string))
+            .collect(),
+        ..Sources::default()
+    }
+}
+
 /// The roll back dialog hands over to the action's own dialog.
 pub(super) fn rollback_next(
     form: &mut OpenForm,
@@ -153,17 +167,7 @@ pub(super) fn rollback_next(
             "leave it to Kenny",
         ));
     }
-    let data = edit(form).data.clone();
-    let sources = Sources {
-        units: strings(&data["native_units"]),
-        commits: data["commits"]
-            .as_array()
-            .into_iter()
-            .flatten()
-            .filter_map(|c| c["commit"].as_str().map(str::to_string))
-            .collect(),
-        ..Sources::default()
-    };
+    let sources = rollback_sources(&edit(form).data);
     let mut next = OpenForm::new(drive::action_form(action, &form.stack), &sources);
     next.values.insert(preset.0.into(), json!(preset.1));
     next.refresh();

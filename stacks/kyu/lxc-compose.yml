@@ -248,7 +248,7 @@ tiles:
     description: "Message hub"
   # Kenny, 2026-10-01: kyu-runner must be watched too. It has no page of its
   # own, so its tile opens its health endpoint, which the minute watch asks
-  # directly (the same address Uptime Kuma probes).
+  # directly (the same address the old Uptime Kuma probed).
   kyu-runner.health:
     name: "Kyu-runner"
     group: "Own"

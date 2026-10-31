@@ -7,27 +7,27 @@ http:
   routers:
     jellyfin:
       rule: "Host(`fin.kp-soft.dev`)"
-      entryPoints: [web]
+      entryPoints: [web, websecure]
       service: jellyfin
     sonarr:
       rule: "Host(`son.kp-soft.dev`)"
-      entryPoints: [web]
+      entryPoints: [web, websecure]
       service: sonarr
     radarr:
       rule: "Host(`rad.kp-soft.dev`)"
-      entryPoints: [web]
+      entryPoints: [web, websecure]
       service: radarr
     bazarr:
       rule: "Host(`baz.kp-soft.dev`)"
-      entryPoints: [web]
+      entryPoints: [web, websecure]
       service: bazarr
     prowlarr:
       rule: "Host(`prowl.kp-soft.dev`)"
-      entryPoints: [web]
+      entryPoints: [web, websecure]
       service: prowlarr
     seerr:
       rule: "Host(`seerr.kp-soft.dev`)"
-      entryPoints: [web]
+      entryPoints: [web, websecure]
       service: seerr
 
   services:

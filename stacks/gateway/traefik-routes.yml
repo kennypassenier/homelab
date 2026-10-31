@@ -15,7 +15,7 @@ http:
   routers:
     traefik-dashboard:
       rule: "Host(`traefik.kp-soft.dev`)"
-      entryPoints: [web]
+      entryPoints: [web, websecure]
       service: api@internal
 
   # go.kp-soft.dev is gone on purpose (Kenny, form B2c). The GoAccess report

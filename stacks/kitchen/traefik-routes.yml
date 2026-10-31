@@ -15,12 +15,16 @@ http:
   routers:
     kitchen:
       rule: "Host(`kitchen.kp-soft.dev`)"
-      entryPoints: [web]
+      # websecure: the home route (2026-10-30), the pilot hostname.
+      entryPoints: [web, websecure]
       service: kitchen
 
     eten:
       rule: "Host(`eten.kp-soft.dev`)"
-      entryPoints: [web]
+      # websecure too (2026-10-30): with a wildcard override at home this name
+      # reaches Traefik on :443; the app tells the parents' host apart by the
+      # Host header, so it behaves the same there as through the tunnel.
+      entryPoints: [web, websecure]
       service: kitchen
 
   services:

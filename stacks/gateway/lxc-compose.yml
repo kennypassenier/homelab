@@ -177,8 +177,8 @@ firewall:
     replaced them).
     Port 80 is open to nobody (traefik-lan-host-header-bypass): the tunnel reaches
     Traefik over gateway_net inside this container (172.18.0.1 in the access log),
-    which never crosses the veth. Uptime Kuma's bare-Host monitor on :80 has to move
-    before this is enabled.
+    which never crosses the veth. The home route (2026-10-30) comes in on :443 instead,
+    from the trusted workstation only.
   rules:
     - comment: "pve's rescue address: never from a container"
       dir: out
@@ -292,6 +292,12 @@ firewall:
       proto: tcp
       dport: "3100"
       note: Loki push from every container's Alloy and from pve
+    - dir: in
+      action: ACCEPT
+      source: 10.10.10.0/24
+      proto: tcp
+      dport: "443"
+      note: the home route (2026-10-30, Kenny chose the Trusted network) - TLS on Traefik for every device at home that resolves *.kp-soft.dev here
     - dir: in
       action: ACCEPT
       source: 10.10.10.13

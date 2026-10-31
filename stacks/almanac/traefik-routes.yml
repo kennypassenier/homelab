@@ -21,12 +21,12 @@ http:
   routers:
     almanac:
       rule: "Host(`almanac.kp-soft.dev`)"
-      entryPoints: [web]
+      entryPoints: [web, websecure]
       service: almanac
 
     almanac-block-metrics:
       rule: "Host(`almanac.kp-soft.dev`) && PathPrefix(`/metrics`)"
-      entryPoints: [web]
+      entryPoints: [web, websecure]
       priority: 100
       middlewares: [almanac-not-here]
       service: almanac

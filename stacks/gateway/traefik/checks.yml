@@ -40,14 +40,16 @@ checks:
   # exactly what "all my routes stopped working" looked like from Kenny's
   # side — every hostname in the house answered 403 at once.
   #
-  # `kuma.` rather than the gateway's own `grafana.`: it is rendered by
+  # `kitchen.` rather than a hostname of the gateway's own: it is rendered by
   # another stack into the route directory and its backend lives on another
-  # container, so this reading also covers the file provider picking up a
-  # foreign route — which is what F138 broke.
+  # container (CT 121), so this reading also covers the file provider picking
+  # up a foreign route — which is what F138 broke. (It asked for `kuma.` until
+  # 2026-10-30; Uptime Kuma is gone, the answer had become a bare 404 from no
+  # router at all, and proved nothing about a backend.)
   - name: "a real request through the whole chain"
     command: >-
       curl -s -m 15 -o /dev/null -w '%{http_code}'
-      -H "Host: kuma.kp-soft.dev" http://127.0.0.1/
+      -H "Host: kitchen.kp-soft.dev" http://127.0.0.1/
     expect: must_match
     layer: application
     blind_spot: >-
@@ -56,6 +58,27 @@ checks:
       those cannot be checked from here, because Access answers 302 to an
       unauthenticated request whatever is behind it. The 302 this reading
       returns is the app's own redirect to its login page, not Access's.
+
+  # Home route (2026-10-30, Kenny: "waarschuw 14 dagen voor het verlopen"; it
+  # replaces what Uptime Kuma did). Traefik renews the wildcard certificate by
+  # itself 30 days before it expires, so fewer than 14 days left means the
+  # renewal has been failing for 16 days (token revoked, Cloudflare or Let's
+  # Encrypt unreachable). Prints `ok` or nothing; Traefik's own default
+  # certificate, which it serves before the first issue and lasts a year,
+  # does not count.
+  - name: "the wildcard certificate has at least 14 days left"
+    command: >-
+      cert=$(echo | openssl s_client -connect 127.0.0.1:443
+      -servername kitchen.kp-soft.dev 2>/dev/null | openssl x509 2>/dev/null);
+      echo "$cert" | openssl x509 -noout -subject | grep -q 'TRAEFIK DEFAULT' && exit 1;
+      echo "$cert" | openssl x509 -noout -checkend 1209600 >/dev/null && echo ok
+    expect: must_be_present
+    layer: application
+    blind_spot: >-
+      Reads the certificate Traefik serves on this machine, not what a
+      browser at home sees; it does not prove the home name resolves here
+      (that is the OPNsense override) nor that the issuer is trusted: the
+      staging issuer passes.
 
   - name: "traefik logs to docker, not to a file"
     command: >-

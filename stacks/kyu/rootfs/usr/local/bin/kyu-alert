@@ -9,7 +9,7 @@
 #
 # Limitation, stated rather than hidden: if the hub itself is down there is
 # nowhere to publish, and this exits non-zero into the journal. It covers a
-# broken helper, not a dead hub — the hub has Uptime Kuma watching /healthz.
+# broken helper, not a dead hub — the dashboard's watch asks the hub's /healthz.
 #
 # Paths and credentials come from the environment (standing rule 28); the
 # unit hands them in through EnvironmentFile=.

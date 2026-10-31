@@ -21,7 +21,7 @@ http:
   routers:
     supersync:
       rule: "Host(`sp.kp-soft.dev`)"
-      entryPoints: [web]
+      entryPoints: [web, websecure]
       service: supersync
 
   services:

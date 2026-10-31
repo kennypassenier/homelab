@@ -385,7 +385,7 @@ fn firewall_effects(
             {
                 out.push(effect(
                         "warning",
-                        "inbound policy DROP and no inbound rule: nothing can reach this container, Uptime Kuma and Traefik included",
+                        "inbound policy DROP and no inbound rule: nothing can reach this container, the dashboard watch and Traefik included",
                         None,
                     ));
             }

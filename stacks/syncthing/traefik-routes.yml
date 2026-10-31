@@ -15,7 +15,7 @@ http:
   routers:
     syncthing:
       rule: "Host(`sync.kp-soft.dev`)"
-      entryPoints: [web]
+      entryPoints: [web, websecure]
       service: syncthing
 
   services:

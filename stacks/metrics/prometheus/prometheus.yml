@@ -43,7 +43,7 @@ scrape_configs:
 
   # Almanac serves /metrics unauthenticated, deliberately: a scraper
   # that cannot authenticate reports a healthy service as down. Its
-  # liveness endpoint is /healthz and belongs to Uptime Kuma, not here.
+  # liveness endpoint is /healthz and belongs to the dashboard's checks, not here.
   - job_name: almanac
     static_configs:
       - targets: ["10.10.10.12:8080"]

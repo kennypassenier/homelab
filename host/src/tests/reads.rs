@@ -229,7 +229,7 @@ pub(crate) fn feat_platform_2_app_status_comes_from_the_reading() {
         "probed and absent: not running"
     );
     assert_eq!(
-        live_app(Some(&r), 107, "kuma"),
+        live_app(Some(&r), 107, "jellyfin"),
         (true, 0),
         "guest not probed: unknown"
     );

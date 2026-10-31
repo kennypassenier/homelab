@@ -1,6 +1,11 @@
-# Traefik v3. Receives everything from the Cloudflare tunnel on :80 — there is
-# no :443 here, TLS terminates at Cloudflare, which is why every route says
-# entryPoints: [web].
+# Traefik v3. Receives everything from the Cloudflare tunnel on :80, where TLS
+# terminated at Cloudflare. Since 2026-10-30 there is also :443 (websecure) for
+# the home route: at home *.kp-soft.dev resolves to this machine (OPNsense
+# override) and a Let's Encrypt wildcard certificate, issued by DNS-01 through
+# Cloudflare, terminates TLS here. A route lists both entrypoints,
+# entryPoints: [web, websecure]; TLS is switched on by the websecure
+# entrypoint itself, so a router never carries a tls section and :80 stays
+# plain for the tunnel.
 services:
   traefik:
     # fix-82 (manual-images-latest-unpinned, 2026-09-27): the version and
@@ -17,6 +22,7 @@ services:
       # the paid product; nothing here uses it.
       - "--api.disabledashboardad=true"
       - "--entrypoints.web.address=:80"
+      - "--entrypoints.websecure.address=:443"
       # The tunnel's requests reach :80 through docker's bridge, so every
       # visitor arrived as 172.18.0.1 (measured 2026-09-27: 462 of 464
       # kp-soft.dev requests) and CrowdSec, which whitelists 172.16.0.0/12,
@@ -45,6 +51,23 @@ services:
       # and future router and survives the route files being re-rendered,
       # which per-route attachment does not.
       - "--entrypoints.web.http.middlewares=crowdsec-bouncer@docker"
+      - "--entrypoints.websecure.http.middlewares=crowdsec-bouncer@docker"
+      # Home route TLS (2026-10-30): one wildcard certificate for the apex and
+      # every subdomain, so the hostnames never appear in the public
+      # certificate logs one by one. DNS-01 through Cloudflare needs the zone
+      # token CF_DNS_API_TOKEN (latch, gateway/traefik/.env, Zone:DNS:Edit +
+      # Zone:Zone:Read on kp-soft.dev only). The challenge is checked against
+      # a public resolver on purpose: the house resolver answers *.kp-soft.dev
+      # itself and would never see the _acme-challenge record. Renewal is
+      # Traefik's own, 30 days before expiry. The first run used Let's Encrypt's
+      # staging CA (2026-10-30); this is the real one.
+      - "--entrypoints.websecure.http.tls=true"
+      - "--entrypoints.websecure.http.tls.certResolver=le"
+      - "--entrypoints.websecure.http.tls.domains[0].main=kp-soft.dev"
+      - "--entrypoints.websecure.http.tls.domains[0].sans=*.kp-soft.dev"
+      - "--certificatesresolvers.le.acme.storage=/etc/traefik/acme.json"
+      - "--certificatesresolvers.le.acme.dnschallenge.provider=cloudflare"
+      - "--certificatesresolvers.le.acme.dnschallenge.resolvers=1.1.1.1:53,8.8.8.8:53"
       - "--accesslog=true"
       - "--accesslog.filepath=/var/log/traefik/access.log"
       - "--accesslog.format=json"
@@ -80,6 +103,7 @@ services:
       - /appdata/gateway/traefik-config/plugins-local:/plugins-local:ro
     ports:
       - "80:80"
+      - "443:443"
       - "8090:8080"
       - "8082:8082"
     restart: unless-stopped

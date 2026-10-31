@@ -16,11 +16,11 @@ http:
   routers:
     prometheus:
       rule: "Host(`prom.kp-soft.dev`)"
-      entryPoints: [web]
+      entryPoints: [web, websecure]
       service: prometheus
     alertmanager:
       rule: "Host(`alerts.kp-soft.dev`)"
-      entryPoints: [web]
+      entryPoints: [web, websecure]
       service: alertmanager
 
   services:

@@ -183,8 +183,8 @@ groups:
           click_url: "https://admin.kp-soft.dev/health?block=checks"
 
       # ── The alert chain itself ───────────────────────────────────────
-      # A Watchdog rule routed to an Uptime Kuma push monitor follows once
-      # that push path exists; an always-firing rule on today's single route
+      # A Watchdog rule routed to a push monitor follows once that push
+      # path exists; an always-firing rule on today's single route
       # would reach the phone every 12 hours.
       - alert: AlertDeliveryFailing
         expr: increase(alertmanager_notifications_failed_total[15m]) > 0

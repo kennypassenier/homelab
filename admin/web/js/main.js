@@ -29,20 +29,20 @@ import { countText, inboxNow, onInbox, worst } from "./inboxlist.js";
 import {
   attachNavMenus,
   attachNavToggles,
-} from "/static/kp/dist/kp-themes.min.js";
-import { attachNavFolds } from "/static/kp/dist/kp-themes.min.js";
-import { attachMotion } from "/static/kp/dist/kp-themes.min.js";
-import { attachTableRegions } from "/static/kp/dist/kp-themes.min.js";
-import { attachActionColumns } from "/static/kp/dist/kp-themes.min.js";
-import { attachTileSets } from "/static/kp/dist/kp-themes.min.js";
-import {
+  attachNavFolds,
+  attachMotion,
+  attachTableRegions,
+  attachActionColumns,
+  attachTileSets,
   attachKpiStrips,
   attachKpiToggles,
+  attachDismissals,
+  attachSelects,
+  attachLoadingPieces,
+  attachFootprints,
+  attachCardStates,
+  setCardState,
 } from "/static/kp/dist/kp-themes.min.js";
-import { attachDismissals } from "/static/kp/dist/kp-themes.min.js";
-import { attachSelects } from "/static/kp/dist/kp-themes.min.js";
-import { attachLoadingPieces } from "/static/kp/dist/kp-themes.min.js";
-import { attachFootprints } from "/static/kp/dist/kp-themes.min.js";
 import { loadPages, pages, subscribePages } from "./pages.js";
 import {
   STACK_TABS,
@@ -56,10 +56,6 @@ import {
 import { current, start, subscribe } from "./store.js";
 import { stage } from "./stage.js";
 import { breadcrumbs } from "./ui.js";
-import {
-  attachCardStates,
-  setCardState,
-} from "/static/kp/dist/kp-themes.min.js";
 import { mount as activity } from "./pages/activity.js";
 import { mount as backups } from "./pages/backups.js";
 import { mount as firewall } from "./pages/firewall.js";

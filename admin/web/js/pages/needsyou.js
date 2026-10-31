@@ -62,34 +62,28 @@ import {
 import { current, rereadStore, subscribe } from "../store.js";
 import { stage } from "../stage.js";
 import { countOf, pageHeader } from "../ui.js";
-import { paintRemembered } from "/static/kp/dist/kp-themes.min.js";
-import { legacyUpdateHref, updateHref } from "../updateflow.js";
 import {
+  paintRemembered,
   attachCardStates,
   setCardState,
-} from "/static/kp/dist/kp-themes.min.js";
-import {
   attachRowKeys,
   removeRow,
   setRowBusy,
-} from "/static/kp/dist/kp-themes.min.js";
-import { setKeys } from "/static/kp/dist/kp-themes.min.js";
-import { setProblems } from "/static/kp/dist/kp-themes.min.js";
-import {
+  setKeys,
+  setProblems,
   attachSegmented,
   itemsOf,
   resetSegmented,
   setSegmentedItems,
   setSegmentedValues,
   valueOf,
-} from "/static/kp/dist/kp-themes.min.js";
-import { registerShortcuts } from "/static/kp/dist/kp-themes.min.js";
-import {
+  registerShortcuts,
   SNOOZE_EVENT,
   attachSnoozes,
   setSnoozeBusy,
+  attachVersionDeltas,
 } from "/static/kp/dist/kp-themes.min.js";
-import { attachVersionDeltas } from "/static/kp/dist/kp-themes.min.js";
+import { legacyUpdateHref, updateHref } from "../updateflow.js";
 
 const CHECK_AGAIN = declare({
   id: "inbox-check-again",

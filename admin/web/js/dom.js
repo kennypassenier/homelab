@@ -10,11 +10,12 @@ import {
 } from "./urlstate.js";
 import { freshRead } from "./slowread.js";
 import { busyWords, emptyWords, failReason } from "./tablestate.js";
-import { VIEW_EVENT, dataTable } from "/static/kp/dist/kp-themes.min.js";
-import { leave } from "/static/kp/dist/kp-themes.min.js";
-import { update } from "/static/kp/dist/kp-themes.min.js";
-import { statePlate } from "/static/kp/dist/kp-themes.min.js";
 import {
+  VIEW_EVENT,
+  dataTable,
+  leave,
+  update,
+  statePlate,
   buildProgressbar,
   setIndeterminate,
   setProgress as kpSetProgress,

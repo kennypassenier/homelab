@@ -21,7 +21,55 @@ import { schedulableActions } from "../actionforms.js";
 import { agoEl, setAgo } from "../ago.js";
 import { refusalCallout } from "../actui.js";
 import { fetchJson, h, patchKeyed, tableBlock } from "../dom.js";
-import { attachCountdowns } from "/static/kp/dist/kp-themes.min.js";
+import {
+  attachCountdowns,
+  ACTION_TILE,
+  attachActionTiles,
+  registerShortcuts,
+  attachCardStates,
+  setCardState,
+  openConfirmation,
+  COUNTDOWN_END_EVENT,
+  attachDataTables,
+  dataTable,
+  GANTT_OPEN_EVENT,
+  attachGantts,
+  setGanttKinds,
+  setGanttLegend,
+  setGanttPoints,
+  setGanttRuns,
+  setGanttState,
+  attachHeats,
+  attachMatrices,
+  setHeat,
+  setMatrix,
+  PANE_RETRY_EVENT,
+  PANE_SELECT_EVENT,
+  attachMasterDetails,
+  masterDetail,
+  setPaneState,
+  attachRuns,
+  setRuns,
+  setRunsState,
+  SELECTION_ACTION_EVENT,
+  attachSelectionBars,
+  setSelectionBusy,
+  setSelectionProgress,
+  setSelectionResult,
+  SNOOZE_END_EVENT,
+  SNOOZE_EVENT,
+  attachSnoozes,
+  setSnoozeBusy,
+  setSnoozedUntil,
+  undoToast,
+  attachUptimes,
+  setUptime,
+  WEEK_OPEN_EVENT,
+  attachWeeks,
+  setWeekEvents,
+  setWeekLegend,
+  setWeekState,
+} from "/static/kp/dist/kp-themes.min.js";
 import { declare, declareField, drivable } from "../drivable.js";
 import { openJobDialog } from "../jobpanel.js";
 import {
@@ -59,69 +107,7 @@ import {
   toast,
   toastRegion,
 } from "../ui.js";
-import {
-  ACTION_TILE,
-  attachActionTiles,
-} from "/static/kp/dist/kp-themes.min.js";
-import { registerShortcuts } from "/static/kp/dist/kp-themes.min.js";
 import { GROUP_SCHEDULES, noDialog, unlessDialog } from "../shortcuts.js";
-import {
-  attachCardStates,
-  setCardState,
-} from "/static/kp/dist/kp-themes.min.js";
-import { openConfirmation } from "/static/kp/dist/kp-themes.min.js";
-import { COUNTDOWN_END_EVENT } from "/static/kp/dist/kp-themes.min.js";
-import { attachDataTables, dataTable } from "/static/kp/dist/kp-themes.min.js";
-import {
-  GANTT_OPEN_EVENT,
-  attachGantts,
-  setGanttKinds,
-  setGanttLegend,
-  setGanttPoints,
-  setGanttRuns,
-  setGanttState,
-} from "/static/kp/dist/kp-themes.min.js";
-import {
-  attachHeats,
-  attachMatrices,
-  setHeat,
-  setMatrix,
-} from "/static/kp/dist/kp-themes.min.js";
-import {
-  PANE_RETRY_EVENT,
-  PANE_SELECT_EVENT,
-  attachMasterDetails,
-  masterDetail,
-  setPaneState,
-} from "/static/kp/dist/kp-themes.min.js";
-import {
-  attachRuns,
-  setRuns,
-  setRunsState,
-} from "/static/kp/dist/kp-themes.min.js";
-import {
-  SELECTION_ACTION_EVENT,
-  attachSelectionBars,
-  setSelectionBusy,
-  setSelectionProgress,
-  setSelectionResult,
-} from "/static/kp/dist/kp-themes.min.js";
-import {
-  SNOOZE_END_EVENT,
-  SNOOZE_EVENT,
-  attachSnoozes,
-  setSnoozeBusy,
-  setSnoozedUntil,
-} from "/static/kp/dist/kp-themes.min.js";
-import { undoToast } from "/static/kp/dist/kp-themes.min.js";
-import { attachUptimes, setUptime } from "/static/kp/dist/kp-themes.min.js";
-import {
-  WEEK_OPEN_EVENT,
-  attachWeeks,
-  setWeekEvents,
-  setWeekLegend,
-  setWeekState,
-} from "/static/kp/dist/kp-themes.min.js";
 
 /**
  * @typedef {import("../schedules.js").ScheduleView} ScheduleView

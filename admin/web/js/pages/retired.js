@@ -50,13 +50,15 @@ import {
   splitInUse,
   wipeStatus,
 } from "../retiredview.js";
-import { setBarCell } from "/static/kp/dist/kp-themes.min.js";
-import { openConfirmation } from "/static/kp/dist/kp-themes.min.js";
-import { attachDataTables } from "/static/kp/dist/kp-themes.min.js";
-import { attachIdmarks } from "/static/kp/dist/kp-themes.min.js";
+import {
+  setBarCell,
+  openConfirmation,
+  attachDataTables,
+  attachIdmarks,
+  setSelectionBusy,
+  setStackbar,
+} from "/static/kp/dist/kp-themes.min.js";
 import { bindSelection } from "../selectbind.js";
-import { setSelectionBusy } from "/static/kp/dist/kp-themes.min.js";
-import { setStackbar } from "/static/kp/dist/kp-themes.min.js";
 
 const NOTHING = "Nothing retired is kept right now.";
 

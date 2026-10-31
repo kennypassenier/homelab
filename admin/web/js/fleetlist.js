@@ -35,17 +35,18 @@ import { stackHref } from "./router.js";
 import { current } from "./store.js";
 import { updateHrefFor } from "./updateflow.js";
 import { keyRow, section, segSwitch } from "./ui.js";
-import { setBarCell } from "/static/kp/dist/kp-themes.min.js";
-import { setEntityGridState } from "/static/kp/dist/kp-themes.min.js";
-import { setEntityGridQuiet } from "./inplace.js";
-import { bindSelection } from "./selectbind.js";
-import { attachIdmarks } from "/static/kp/dist/kp-themes.min.js";
 import {
+  setBarCell,
+  setEntityGridState,
+  attachIdmarks,
   setSelectionBusy,
   setSelectionResult,
+  undoToast,
+  dataTable,
+  attachDataTables,
 } from "/static/kp/dist/kp-themes.min.js";
-import { undoToast } from "/static/kp/dist/kp-themes.min.js";
-import { dataTable, attachDataTables } from "/static/kp/dist/kp-themes.min.js";
+import { setEntityGridQuiet } from "./inplace.js";
+import { bindSelection } from "./selectbind.js";
 
 /** @typedef {import("./stacksview.js").Row} Row */
 

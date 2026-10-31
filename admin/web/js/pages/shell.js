@@ -20,9 +20,10 @@ import {
   setConsoleComplete,
   setConsoleContext,
   setConsoleRun,
+  setKeys,
+  attachKeys,
+  attachDisabledReasons,
 } from "/static/kp/dist/kp-themes.min.js";
-import { setKeys, attachKeys } from "/static/kp/dist/kp-themes.min.js";
-import { attachDisabledReasons } from "/static/kp/dist/kp-themes.min.js";
 import { declare, declareField, drivable } from "../drivable.js";
 import { shellResult, shellTargets } from "../parity.js";
 import { current, subscribe } from "../store.js";

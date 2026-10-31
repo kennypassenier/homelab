@@ -12,10 +12,12 @@ import { gbText } from "./format.js";
 import { ramText } from "./presetsview.js";
 import { current } from "./store.js";
 import { ensureStyle, section } from "./ui.js";
-import { setCardState } from "/static/kp/dist/kp-themes.min.js";
-import { attachDataTables } from "/static/kp/dist/kp-themes.min.js";
+import {
+  setCardState,
+  attachDataTables,
+  setStackbar,
+} from "/static/kp/dist/kp-themes.min.js";
 import { bindSelection } from "./selectbind.js";
-import { setStackbar } from "/static/kp/dist/kp-themes.min.js";
 
 /** @typedef {import("./presetsview.js").PresetView} PresetView */
 

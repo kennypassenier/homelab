@@ -27,8 +27,24 @@ import { stage } from "../stage.js";
 import {
   attachCardStates,
   setCardState,
+  attachDeplists,
+  deplist,
+  attachCountdowns,
+  ackGate,
+  attachAckGates,
+  attachDataTables,
+  attachIdmarks,
+  setPipeline,
+  attachPipelines,
+  attachDisabledReasons,
+  attachSteplists,
+  buildSteplist,
+  setStep,
+  attachVersionDeltas,
+  VERSION_SORT,
+  summarizeDeltas,
+  versionLevel,
 } from "/static/kp/dist/kp-themes.min.js";
-import { attachDeplists, deplist } from "/static/kp/dist/kp-themes.min.js";
 import {
   ensureStyle,
   errorBox,
@@ -41,7 +57,6 @@ import {
 } from "../dom.js";
 import { declare, drivable } from "../drivable.js";
 import { diffBlocks } from "../editui.js";
-import { attachCountdowns } from "/static/kp/dist/kp-themes.min.js";
 import { formatDateTime, humanDuration } from "../format.js";
 import { inboxNow } from "../inboxlist.js";
 import { humanBytes } from "../backupsview.js";
@@ -71,23 +86,7 @@ import {
   updatesBody,
   whoNotices,
 } from "../updateflow.js";
-import { ackGate, attachAckGates } from "/static/kp/dist/kp-themes.min.js";
-import { attachDataTables } from "/static/kp/dist/kp-themes.min.js";
-import { attachIdmarks } from "/static/kp/dist/kp-themes.min.js";
-import { setPipeline, attachPipelines } from "/static/kp/dist/kp-themes.min.js";
 import { bindSelection } from "../selectbind.js";
-import { attachDisabledReasons } from "/static/kp/dist/kp-themes.min.js";
-import {
-  attachSteplists,
-  buildSteplist,
-  setStep,
-} from "/static/kp/dist/kp-themes.min.js";
-import {
-  attachVersionDeltas,
-  VERSION_SORT,
-  summarizeDeltas,
-  versionLevel,
-} from "/static/kp/dist/kp-themes.min.js";
 
 const PICK = declare({
   id: "update-pick",

@@ -21,17 +21,18 @@ import { markErrors } from "./editui.js";
 import { esc } from "./settingsform.js";
 // @ts-ignore — a kit asset, not part of this app's own module graph.
 import { registerPasskey } from "/static/passkeys.js";
-import { attachAll } from "/static/kp/dist/kp-themes.min.js";
-import { setCardState } from "/static/kp/dist/kp-themes.min.js";
-import { form as kpForm } from "/static/kp/dist/kp-themes.min.js";
-import { hideSecret, revealSecret } from "/static/kp/dist/kp-themes.min.js";
 import {
+  attachAll,
+  setCardState,
+  form as kpForm,
+  hideSecret,
+  revealSecret,
   PASSKEYS_REGISTER_EVENT,
   PASSKEYS_RETRY_EVENT,
   setPasskeys,
+  setQr,
+  attachDisabledReasons,
 } from "/static/kp/dist/kp-themes.min.js";
-import { setQr } from "/static/kp/dist/kp-themes.min.js";
-import { attachDisabledReasons } from "/static/kp/dist/kp-themes.min.js";
 
 /**
  * @typedef {{id: string, label: string, created_at: string,

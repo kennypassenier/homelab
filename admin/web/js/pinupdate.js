@@ -33,8 +33,8 @@ import { stage } from "./stage.js";
 import {
   attachCardStates,
   setCardState,
+  attachVersionDeltas,
 } from "/static/kp/dist/kp-themes.min.js";
-import { attachVersionDeltas } from "/static/kp/dist/kp-themes.min.js";
 
 /**
  * One stale-image row, as the Fleet view has it.

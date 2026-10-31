@@ -31,17 +31,13 @@ import {
   attachStatusLists,
   buildStatusList,
   setStatus,
-} from "/static/kp/dist/kp-themes.min.js";
-import {
   attachCardStates,
   setCardState,
-} from "/static/kp/dist/kp-themes.min.js";
-import {
   attachVersionDeltas,
   setVersionDelta,
   summarizeDeltas,
+  renderDiagnostics,
 } from "/static/kp/dist/kp-themes.min.js";
-import { renderDiagnostics } from "/static/kp/dist/kp-themes.min.js";
 
 /**
  * @typedef {{state: "ok" | "warn" | "failed" | "empty", label: string, detail: string}} Live

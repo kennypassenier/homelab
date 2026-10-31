@@ -30,7 +30,17 @@ import {
   stackKind,
   stackLine,
 } from "../secretsview.js";
-import { registerShortcuts } from "/static/kp/dist/kp-themes.min.js";
+import {
+  registerShortcuts,
+  attachAll,
+  attachDisabledReasons,
+  setCardState,
+  deplist,
+  setMatrix,
+  setPaneState,
+  hideSecret,
+  undoToast,
+} from "/static/kp/dist/kp-themes.min.js";
 import {
   GROUP_SECRETS,
   noDialog,
@@ -40,14 +50,6 @@ import {
 import { current, listen, subscribe } from "../store.js";
 import { esc } from "../settingsform.js";
 import { liveStatus, pageHeader, toast } from "../ui.js";
-import { attachAll } from "/static/kp/dist/kp-themes.min.js";
-import { attachDisabledReasons } from "/static/kp/dist/kp-themes.min.js";
-import { setCardState } from "/static/kp/dist/kp-themes.min.js";
-import { deplist } from "/static/kp/dist/kp-themes.min.js";
-import { setMatrix } from "/static/kp/dist/kp-themes.min.js";
-import { setPaneState } from "/static/kp/dist/kp-themes.min.js";
-import { hideSecret } from "/static/kp/dist/kp-themes.min.js";
-import { undoToast } from "/static/kp/dist/kp-themes.min.js";
 
 // review M5: every page field Live view may set is declared (drivable.js
 // `declareField`); the client and the dashboard refuse any other.

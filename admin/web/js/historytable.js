@@ -13,8 +13,7 @@ import {
   stackWord,
 } from "./activityview.js";
 import { formatDateTime, humanDuration } from "./format.js";
-import { buildSteplist } from "/static/kp/dist/kp-themes.min.js";
-import { setCode } from "/static/kp/dist/kp-themes.min.js";
+import { buildSteplist, setCode } from "/static/kp/dist/kp-themes.min.js";
 
 /** The History's columns, in order (kp datatable headers). */
 export const HISTORY_COLUMNS = /** @type {const} */ ([

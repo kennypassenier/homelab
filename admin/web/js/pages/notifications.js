@@ -29,29 +29,28 @@ import {
 } from "../notifyrules.js";
 import { current, subscribe } from "../store.js";
 import { ensureStyle, pageHeader, segSwitch, toastRegion } from "../ui.js";
-import { ackGate, attachAckGates } from "/static/kp/dist/kp-themes.min.js";
-import { attachCardStates } from "/static/kp/dist/kp-themes.min.js";
 import {
+  ackGate,
+  attachAckGates,
+  attachCardStates,
   attachFacets,
   setFacetItems,
   setFacetValues,
-} from "/static/kp/dist/kp-themes.min.js";
-import { attachFootprints } from "/static/kp/dist/kp-themes.min.js";
-import { attachNotices, setNotices } from "/static/kp/dist/kp-themes.min.js";
-import { toast } from "/static/kp/dist/kp-themes.min.js";
-import {
+  attachFootprints,
+  attachNotices,
+  setNotices,
+  toast,
   attachSnoozes,
   setSnoozeBusy,
   setSnoozedUntil,
-} from "/static/kp/dist/kp-themes.min.js";
-import { attachTimes, setTime } from "/static/kp/dist/kp-themes.min.js";
-import {
+  attachTimes,
+  setTime,
   QUIET_EVENT,
   attachQuietHours,
   quietValue,
   setQuiet,
+  undoToast,
 } from "/static/kp/dist/kp-themes.min.js";
-import { undoToast } from "/static/kp/dist/kp-themes.min.js";
 
 // review M5: every page field Live view may set is declared.
 const NOTIFY_DIGEST = declareField({

@@ -97,10 +97,11 @@ import { filesCard } from "./editfiles.js";
 import { stage } from "./stage.js";
 import { badgeCell, errorBox, fetchJson, h, tableBlock, td } from "./dom.js";
 import { driven, handle, register } from "./drivehooks.js";
-import { attachDataTables, dataTable } from "/static/kp/dist/kp-themes.min.js";
-import { attachSwitches } from "/static/kp/dist/kp-themes.min.js";
-import { attachAll } from "/static/kp/dist/kp-themes.min.js";
 import {
+  attachDataTables,
+  dataTable,
+  attachSwitches,
+  attachAll,
   CARD_RETRY_EVENT,
   attachCardStates,
   setCardState,

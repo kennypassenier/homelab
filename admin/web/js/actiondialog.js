@@ -66,16 +66,13 @@ import { stage } from "./stage.js";
 import {
   attachCardStates,
   setCardState,
-} from "/static/kp/dist/kp-themes.min.js";
-import { clearError, showError } from "/static/kp/dist/kp-themes.min.js";
-import {
+  clearError,
+  showError,
   DATED_EVENT,
   DATED_RETRY_EVENT,
   attachDatedOptions,
   setDatedOptions,
   setDatedState,
-} from "/static/kp/dist/kp-themes.min.js";
-import {
   BEFORE_STEP_EVENT,
   FINISH_EVENT,
   STEP_EVENT,

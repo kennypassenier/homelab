@@ -57,23 +57,19 @@
 import { agoEl, setAgo } from "./ago.js";
 import { h, setLive } from "./dom.js";
 import { dialogControl, drivable } from "./drivable.js";
-import { attachDataTables } from "/static/kp/dist/kp-themes.min.js";
-import { toast as kpToast } from "/static/kp/dist/kp-themes.min.js";
-import { setAttention } from "/static/kp/dist/kp-themes.min.js";
-import { statePlate } from "/static/kp/dist/kp-themes.min.js";
 import {
+  attachDataTables,
+  toast as kpToast,
+  setAttention,
+  statePlate,
   KPI_TOGGLE_EVENT,
   drawSparkline,
   setMeter,
-} from "/static/kp/dist/kp-themes.min.js";
-import {
   MENU_SELECT_EVENT,
   attachMenuButtons,
   closeMenu,
   openMenu,
   setMenu,
-} from "/static/kp/dist/kp-themes.min.js";
-import {
   SEGMENTED_EVENT,
   attachSegmented,
   getSegmentedValues,
@@ -83,8 +79,8 @@ import {
   setSegmentedItems,
   setSegmentedValues,
   valueOf,
+  setKeys,
 } from "/static/kp/dist/kp-themes.min.js";
-import { setKeys } from "/static/kp/dist/kp-themes.min.js";
 
 /**
  * The Live view control a clickable block is: a declared id (drivable.js),

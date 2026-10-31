@@ -29,20 +29,19 @@
 import { h, progressBar, setProgress } from "./dom.js";
 import { humanDuration } from "./format.js";
 import { jobLogViewer } from "./joblog.js";
-import { setCode } from "/static/kp/dist/kp-themes.min.js";
-import { progressLine, steadyEta } from "./progress.js";
-import { attachProblems, setProblems } from "/static/kp/dist/kp-themes.min.js";
-import { setStackbar } from "/static/kp/dist/kp-themes.min.js";
 import {
+  setCode,
+  attachProblems,
+  setProblems,
+  setStackbar,
   attachSteplists,
   buildSteplist,
   setStep,
-} from "/static/kp/dist/kp-themes.min.js";
-import { attachTicks } from "/static/kp/dist/kp-themes.min.js";
-import {
+  attachTicks,
   attachTimerDiscs,
   timerDiscOf,
 } from "/static/kp/dist/kp-themes.min.js";
+import { progressLine, steadyEta } from "./progress.js";
 
 /**
  * @typedef {{id: string, title: string, note: string,

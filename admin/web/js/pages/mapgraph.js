@@ -29,8 +29,8 @@ import {
   graphSelect,
   setGraphData,
   setGraphState,
+  registerShortcuts,
 } from "/static/kp/dist/kp-themes.min.js";
-import { registerShortcuts } from "/static/kp/dist/kp-themes.min.js";
 import { GROUP_MAP, unlessDialog } from "../shortcuts.js";
 import { declare, drivable } from "../drivable.js";
 import { EDGE_KINDS, hubOf, hues, isStack } from "../mapview.js";

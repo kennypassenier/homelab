@@ -35,8 +35,8 @@ import {
   CARD_RETRY_EVENT,
   attachCardStates,
   setCardState,
+  buildTypeConfirm,
 } from "/static/kp/dist/kp-themes.min.js";
-import { buildTypeConfirm } from "/static/kp/dist/kp-themes.min.js";
 
 /**
  * @typedef {{name: string, label: string, type: "choice" | "flag" | "text",

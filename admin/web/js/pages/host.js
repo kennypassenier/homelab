@@ -66,53 +66,42 @@ import {
 import {
   attachTrendCharts,
   setTrendData,
-} from "/static/kp/dist/kp-themes.min.js";
-import { runFlashButton } from "/static/kp/dist/kp-themes.min.js";
-import { attachPatterns } from "/static/kp/dist/kp-themes.min.js";
-import {
+  runFlashButton,
+  attachPatterns,
   REFRESH_EVENT,
   attachRefresh,
   refreshOf,
-} from "/static/kp/dist/kp-themes.min.js";
-import {
   attachSegmented,
   SEGMENTED_EVENT,
-} from "/static/kp/dist/kp-themes.min.js";
-import {
   VIEW_EVENT,
   attachDataTables,
   dataTable as tableOf,
-} from "/static/kp/dist/kp-themes.min.js";
-import { attachBarCells, setBarCell } from "/static/kp/dist/kp-themes.min.js";
-import { attachStackbars, setStackbar } from "/static/kp/dist/kp-themes.min.js";
-import { attachUptimes, setUptime } from "/static/kp/dist/kp-themes.min.js";
-import { periodsOf, shareText, uptimeQuery } from "../uptimeview.js";
-import {
+  attachBarCells,
+  setBarCell,
+  attachStackbars,
+  setStackbar,
+  attachUptimes,
+  setUptime,
   ENTITY_ACTION_EVENT,
   ENTITY_GRID_RETRY_EVENT,
   attachEntityCards,
   setEntityGrid,
   setEntityGridState,
-} from "/static/kp/dist/kp-themes.min.js";
-import {
   BULLETS_PICK_EVENT,
   BULLETS_RETRY_EVENT,
   attachBullets,
   setBullets,
-} from "/static/kp/dist/kp-themes.min.js";
-import {
   attachStatusLists,
   buildStatusList,
   countStatus,
-} from "/static/kp/dist/kp-themes.min.js";
-import {
   CARD_RETRY_EVENT,
   attachCardStates,
   setCardState,
+  attachFootprints,
+  attachHoverCards,
+  registerShortcuts,
 } from "/static/kp/dist/kp-themes.min.js";
-import { attachFootprints } from "/static/kp/dist/kp-themes.min.js";
-import { attachHoverCards } from "/static/kp/dist/kp-themes.min.js";
-import { registerShortcuts } from "/static/kp/dist/kp-themes.min.js";
+import { periodsOf, shareText, uptimeQuery } from "../uptimeview.js";
 import { GROUP_HOST, unlessDialog } from "../shortcuts.js";
 import { gridRow, formGrid } from "../gridrow.js";
 import {

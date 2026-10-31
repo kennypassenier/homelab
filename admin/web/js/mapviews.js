@@ -21,32 +21,26 @@ import {
 import { firewallOf, isStack, staleGroups } from "./mapview.js";
 import { current } from "./store.js";
 import { section, segSwitch } from "./ui.js";
-import { setBarCell } from "/static/kp/dist/kp-themes.min.js";
-import { setBulletsQuiet } from "./inplace.js";
 import {
+  setBarCell,
   attachCardStates,
   setCardState,
-} from "/static/kp/dist/kp-themes.min.js";
-import { attachDataTables } from "/static/kp/dist/kp-themes.min.js";
-import { setDeplist } from "/static/kp/dist/kp-themes.min.js";
-import {
+  attachDataTables,
+  setDeplist,
   MATRIX_PICK_EVENT,
   MATRIX_RETRY_EVENT,
   setHeatLegend,
   setMatrix,
-} from "/static/kp/dist/kp-themes.min.js";
-import { attachIdmarks } from "/static/kp/dist/kp-themes.min.js";
-import { bindSelection } from "./selectbind.js";
-import {
+  attachIdmarks,
   setSelectionBusy,
   setSelectionResult,
-} from "/static/kp/dist/kp-themes.min.js";
-import { setStackbar } from "/static/kp/dist/kp-themes.min.js";
-import {
+  setStackbar,
   attachVersionDeltas,
   releaseUrl,
   versionLevel,
 } from "/static/kp/dist/kp-themes.min.js";
+import { setBulletsQuiet } from "./inplace.js";
+import { bindSelection } from "./selectbind.js";
 
 /** @typedef {import("./topology.js").Topology} Topology */
 

@@ -89,14 +89,14 @@ import {
   attachDataTables,
   dataTable,
   VIEW_EVENT,
-} from "/static/kp/dist/kp-themes.min.js";
-import { attachRowSelect } from "/static/kp/dist/kp-themes.min.js";
-import { attachUptimes, setUptime } from "/static/kp/dist/kp-themes.min.js";
-import { attachBarCells, setBarCell } from "/static/kp/dist/kp-themes.min.js";
-import { attachIdmarks } from "/static/kp/dist/kp-themes.min.js";
-import { attachActionColumns } from "/static/kp/dist/kp-themes.min.js";
-import { attachHoverCards } from "/static/kp/dist/kp-themes.min.js";
-import {
+  attachRowSelect,
+  attachUptimes,
+  setUptime,
+  attachBarCells,
+  setBarCell,
+  attachIdmarks,
+  attachActionColumns,
+  attachHoverCards,
   HEAT_PAGE_EVENT,
   HEAT_PICK_EVENT,
   HEAT_ROW_EVENT,
@@ -104,15 +104,12 @@ import {
   setHeat,
   setHeatPick,
   setHeatRows,
-} from "/static/kp/dist/kp-themes.min.js";
-import { attachFootprints } from "/static/kp/dist/kp-themes.min.js";
-import {
+  attachFootprints,
   SEGMENTED_EVENT,
   attachSegmented,
   setSegmentedValues,
-} from "/static/kp/dist/kp-themes.min.js";
-import { RANGE_EVENT, attachRanges } from "/static/kp/dist/kp-themes.min.js";
-import {
+  RANGE_EVENT,
+  attachRanges,
   CALENDAR_MONTH_EVENT,
   CALENDAR_PICK_EVENT,
   attachCalendars,
@@ -121,45 +118,33 @@ import {
   setCalendarDays,
   setCalendarLegend,
   setCalendarState,
-} from "/static/kp/dist/kp-themes.min.js";
-import {
   CARD_RETRY_EVENT,
   attachCardStates,
   setCardState,
-} from "/static/kp/dist/kp-themes.min.js";
-import {
   STACKBAR_PICK_EVENT,
   STACKBAR_RETRY_EVENT,
   attachStackbars,
   setStackbar,
-} from "/static/kp/dist/kp-themes.min.js";
-import {
   FACET_EVENT,
   attachFacets,
   getFacetValues,
   setFacetItems,
   setFacetValues,
-} from "/static/kp/dist/kp-themes.min.js";
-import {
   SELECTION_ACTION_EVENT,
   attachSelectionBars,
-} from "/static/kp/dist/kp-themes.min.js";
-import {
   STATUS_RETRY_EVENT,
   attachStatusLists,
   buildStatusList,
   countStatus,
-} from "/static/kp/dist/kp-themes.min.js";
-import {
   WEEK_RANGE_EVENT,
   attachWeeks,
   setWeekEvents,
   setWeekLegend,
   setWeekStart,
   setWeekState,
+  drawnSelect,
+  registerShortcuts,
 } from "/static/kp/dist/kp-themes.min.js";
-import { drawnSelect } from "/static/kp/dist/kp-themes.min.js";
-import { registerShortcuts } from "/static/kp/dist/kp-themes.min.js";
 import { GROUP_BACKUPS, unlessDialog } from "../shortcuts.js";
 
 // review M5: every page field Live view may set is declared (drivable.js

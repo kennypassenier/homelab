@@ -13,8 +13,7 @@ import { humanBytes } from "./backupsview.js";
 import { elapsedS, finished, jobPanel, jobSteps } from "./jobs.js";
 import { runSpec } from "./runspec.js";
 import { buildRunView } from "./runview.js";
-import { openBusyCard } from "/static/kp/dist/kp-themes.min.js";
-import { statePlate } from "/static/kp/dist/kp-themes.min.js";
+import { openBusyCard, statePlate } from "/static/kp/dist/kp-themes.min.js";
 
 /**
  * What the panel says when the dashboard no longer holds the job

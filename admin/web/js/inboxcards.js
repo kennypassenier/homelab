@@ -34,19 +34,15 @@ import { toastRegion } from "./ui.js";
 import {
   attachCardStates,
   setCardState,
-} from "/static/kp/dist/kp-themes.min.js";
-import {
   askQuestion,
   attachQuestions,
   questionOf,
-} from "/static/kp/dist/kp-themes.min.js";
-import { attachDisabledReasons } from "/static/kp/dist/kp-themes.min.js";
-import { attachRowSelect } from "/static/kp/dist/kp-themes.min.js";
-import {
+  attachDisabledReasons,
+  attachRowSelect,
   attachSelectionBars,
   setSelectionRules,
+  undoToast,
 } from "/static/kp/dist/kp-themes.min.js";
-import { undoToast } from "/static/kp/dist/kp-themes.min.js";
 
 const ANSWER = declare({
   id: "inbox-answer",

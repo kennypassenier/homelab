@@ -27,35 +27,29 @@ import {
   REFRESH_EVENT,
   attachRefresh,
   refreshOf,
-} from "/static/kp/dist/kp-themes.min.js";
-import {
   attachCardStates,
   setCardState,
-} from "/static/kp/dist/kp-themes.min.js";
-import {
   CONNECTION_RETRY_EVENT,
   attachConnection,
   setConnection,
-} from "/static/kp/dist/kp-themes.min.js";
-import {
   ENTITY_GRID_RETRY_EVENT,
   ENTITY_RETRY_EVENT,
   ENTITY_STAR_EVENT,
   attachEntityCards,
   setEntityGrid,
-} from "/static/kp/dist/kp-themes.min.js";
-import { attachTileKeys, tileStop } from "/static/kp/dist/kp-themes.min.js";
-import {
+  attachTileKeys,
+  tileStop,
   FACET_EVENT,
   attachFacets,
   setFacetCounts,
   setFacetItems,
   setFacetValues,
+  attachHoverCards,
+  attachUptimes,
+  setUptime,
+  attachMenuButtons,
 } from "/static/kp/dist/kp-themes.min.js";
-import { attachHoverCards } from "/static/kp/dist/kp-themes.min.js";
-import { attachUptimes, setUptime } from "/static/kp/dist/kp-themes.min.js";
 import { periodsOf, shareText, tileKey, uptimeQuery } from "../uptimeview.js";
-import { attachMenuButtons } from "/static/kp/dist/kp-themes.min.js";
 
 /**
  * @typedef {{stack: string, host: string, url: string, name: string,

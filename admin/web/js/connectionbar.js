@@ -21,8 +21,8 @@ import {
   streamNow,
   subscribe,
 } from "./store.js";
-import { setStrings } from "/static/kp/dist/kp-themes.min.js";
 import {
+  setStrings,
   CONNECTION_RETRY_EVENT,
   attachConnection,
   connectionOf,

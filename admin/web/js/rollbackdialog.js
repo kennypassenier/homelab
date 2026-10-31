@@ -16,9 +16,8 @@ import { sortKeys } from "./sortkeys.js";
 import {
   attachCardStates,
   setCardState,
-} from "/static/kp/dist/kp-themes.min.js";
-import { attachDataTables, compare } from "/static/kp/dist/kp-themes.min.js";
-import {
+  attachDataTables,
+  compare,
   attachDatedOptions,
   datedOptions,
   datedValue,

@@ -60,34 +60,24 @@ import {
   RUN_EVENT,
   attachPalettes,
   palette,
-} from "/static/kp/dist/kp-themes.min.js";
-import {
   THEMES,
   applyTheme,
   currentTheme,
   storeTheme,
-} from "/static/kp/dist/kp-themes.min.js";
-import { settleStoredTheme } from "./themesettle.js";
-import {
   attachThemePickers,
   themeMenuMarkup,
-} from "/static/kp/dist/kp-themes.min.js";
-import { attachEffects } from "/static/kp/dist/kp-themes.min.js";
-import {
+  attachEffects,
   attachDialogs,
   toast as kpToast,
-} from "/static/kp/dist/kp-themes.min.js";
-import {
   attachTabbars,
   setTabbarBadge,
   setTabbarBusy,
   setTabbarCurrent,
-} from "/static/kp/dist/kp-themes.min.js";
-import {
   attachShortcuts,
   configureShortcuts,
   registerShortcuts,
 } from "/static/kp/dist/kp-themes.min.js";
+import { settleStoredTheme } from "./themesettle.js";
 
 /**
  * @typedef {{navigate: (href: string) => void,

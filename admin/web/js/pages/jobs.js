@@ -22,16 +22,15 @@ import {
   attachDataTables,
   compare,
   dataTable,
-} from "/static/kp/dist/kp-themes.min.js";
-import {
   attachGantts,
   setGanttRuns,
   setGanttSelection,
   setGanttState,
   setGanttZones,
+  attachTicks,
+  tickTo,
+  attachToolbars,
 } from "/static/kp/dist/kp-themes.min.js";
-import { attachTicks, tickTo } from "/static/kp/dist/kp-themes.min.js";
-import { attachToolbars } from "/static/kp/dist/kp-themes.min.js";
 
 const JOB_BAR = declare({
   id: "activity-job-bar",

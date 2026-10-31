@@ -51,36 +51,29 @@ import {
   attachLogViewers,
   logViewerText,
   setLogViewer,
-} from "/static/kp/dist/kp-themes.min.js";
-import { FOLLOW_EVENT, newPill } from "/static/kp/dist/kp-themes.min.js";
-import {
+  FOLLOW_EVENT,
+  newPill,
   FACET_EVENT,
   attachFacets,
   setFacetCounts,
   setFacetItems,
   setFacetValues,
-} from "/static/kp/dist/kp-themes.min.js";
-import { runFlashButton } from "/static/kp/dist/kp-themes.min.js";
-import {
+  runFlashButton,
   SEGMENTED_EVENT,
   attachSegmented,
   setSegmentedValues,
-} from "/static/kp/dist/kp-themes.min.js";
-import {
   UPTIME_PICK_EVENT,
   attachUptimes,
   setUptime,
-} from "/static/kp/dist/kp-themes.min.js";
-import {
   HEAT_PICK_EVENT,
   HEAT_ROW_EVENT,
   attachHeats,
   setHeat,
   setHeatRows,
+  attachHoverCards,
+  attachFootprints,
+  attachDisabledReasons,
 } from "/static/kp/dist/kp-themes.min.js";
-import { attachHoverCards } from "/static/kp/dist/kp-themes.min.js";
-import { attachFootprints } from "/static/kp/dist/kp-themes.min.js";
-import { attachDisabledReasons } from "/static/kp/dist/kp-themes.min.js";
 
 /** Lines kept in the page, as the server's ring. */
 const KEEP = 2000;

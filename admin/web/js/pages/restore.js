@@ -33,39 +33,29 @@ import { current, rereadStore, subscribe } from "../store.js";
 import { openAction } from "../actiondialog.js";
 import { pageHeader } from "../ui.js";
 import { gridRow, formGrid, buttonGroup } from "../gridrow.js";
-import { drawnSelect } from "/static/kp/dist/kp-themes.min.js";
 import {
+  drawnSelect,
   BEFORE_STEP_EVENT,
   STEP_EVENT,
   attachWizards,
   wizard,
-} from "/static/kp/dist/kp-themes.min.js";
-import {
   DATED_EVENT,
   DATED_RETRY_EVENT,
   attachDatedOptions,
   datedValue,
   setDatedOptions,
   setDatedState,
-} from "/static/kp/dist/kp-themes.min.js";
-import { runMoment } from "/static/kp/dist/kp-themes.min.js";
-import { setCode } from "/static/kp/dist/kp-themes.min.js";
-import {
+  runMoment,
+  setCode,
   attachSteplists,
   buildSteplist,
   setStep,
-} from "/static/kp/dist/kp-themes.min.js";
-import {
   ACK_EVENT,
   ackGate,
   attachAckGates,
-} from "/static/kp/dist/kp-themes.min.js";
-import {
   TYPE_CONFIRM_EVENT,
   attachTypeConfirms,
-} from "/static/kp/dist/kp-themes.min.js";
-import { attachDisabledReasons } from "/static/kp/dist/kp-themes.min.js";
-import {
+  attachDisabledReasons,
   CARD_RETRY_EVENT,
   attachCardStates,
   setCardState,

@@ -61,7 +61,44 @@ import { openRollback } from "../rollbackdialog.js";
 import { STACK_TABS, stackHref } from "../router.js";
 import { incidentRows } from "../activity.js";
 import { addDays } from "../backupsview.js";
-import { setProblems } from "/static/kp/dist/kp-themes.min.js";
+import {
+  setProblems,
+  CARD_RETRY_EVENT,
+  attachCardStates,
+  setCardState,
+  setDeplist,
+  VERSION_SORT,
+  attachVersionDeltas,
+  releaseUrl,
+  versionLevel,
+  setCode,
+  HEAT_PICK_EVENT,
+  setHeat,
+  setHeatLegend,
+  UPTIME_PICK_EVENT,
+  setUptime,
+  attachDataTables,
+  setIdmark,
+  FACET_EVENT,
+  attachFacets,
+  getFacetValues,
+  setFacetCounts,
+  setFacetItems,
+  setFacetValues,
+  LOGVIEWER_EVENT,
+  LOGVIEWER_RETRY_EVENT,
+  appendLogLines,
+  attachLogViewers,
+  setLogViewer,
+  FOLLOW_EVENT,
+  watchTabOverflow,
+  attachToolbars,
+  setTabCount,
+  registerShortcuts,
+  FEED_RETRY_EVENT,
+  attachFeeds,
+  setFeed,
+} from "/static/kp/dist/kp-themes.min.js";
 import { resourcesTab } from "../hubresources.js";
 import {
   depItems,
@@ -69,25 +106,6 @@ import {
   statusBlock,
   statusRows,
 } from "../hubparts.js";
-import {
-  CARD_RETRY_EVENT,
-  attachCardStates,
-  setCardState,
-} from "/static/kp/dist/kp-themes.min.js";
-import { setDeplist } from "/static/kp/dist/kp-themes.min.js";
-import {
-  VERSION_SORT,
-  attachVersionDeltas,
-  releaseUrl,
-  versionLevel,
-} from "/static/kp/dist/kp-themes.min.js";
-import { setCode } from "/static/kp/dist/kp-themes.min.js";
-import {
-  HEAT_PICK_EVENT,
-  setHeat,
-  setHeatLegend,
-} from "/static/kp/dist/kp-themes.min.js";
-import { UPTIME_PICK_EVENT, setUptime } from "/static/kp/dist/kp-themes.min.js";
 import {
   DANGER,
   LEVELS,
@@ -123,37 +141,10 @@ import {
 import { stackEntries, stackIncidents } from "../stacktabs.js";
 import { current, retryStream, subscribe } from "../store.js";
 import { setParams } from "../urlstate.js";
-import { attachDataTables } from "/static/kp/dist/kp-themes.min.js";
-import { setIdmark } from "/static/kp/dist/kp-themes.min.js";
 import { sourceColour } from "../logcolour.js";
-import {
-  FACET_EVENT,
-  attachFacets,
-  getFacetValues,
-  setFacetCounts,
-  setFacetItems,
-  setFacetValues,
-} from "/static/kp/dist/kp-themes.min.js";
-import {
-  LOGVIEWER_EVENT,
-  LOGVIEWER_RETRY_EVENT,
-  appendLogLines,
-  attachLogViewers,
-  setLogViewer,
-} from "/static/kp/dist/kp-themes.min.js";
-import { FOLLOW_EVENT } from "/static/kp/dist/kp-themes.min.js";
 import { facetGroup } from "../logfacets.js";
 import { formGrid, gridRow } from "../gridrow.js";
-import { watchTabOverflow } from "/static/kp/dist/kp-themes.min.js";
-import { attachToolbars } from "/static/kp/dist/kp-themes.min.js";
-import { setTabCount } from "/static/kp/dist/kp-themes.min.js";
-import { registerShortcuts } from "/static/kp/dist/kp-themes.min.js";
 import { GROUP_STACK, unlessDialog } from "../shortcuts.js";
-import {
-  FEED_RETRY_EVENT,
-  attachFeeds,
-  setFeed,
-} from "/static/kp/dist/kp-themes.min.js";
 import { mount as mountSecrets } from "./secrets.js";
 import {
   countOf,

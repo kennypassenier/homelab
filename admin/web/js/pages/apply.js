@@ -43,11 +43,13 @@ import { fileViews } from "../plan.js";
 import { stackHref } from "../router.js";
 import { current } from "../store.js";
 import { bindSelection } from "../selectbind.js";
-import { openConfirmation } from "/static/kp/dist/kp-themes.min.js";
-import { attachDataTables } from "/static/kp/dist/kp-themes.min.js";
-import { attachIdmarks } from "/static/kp/dist/kp-themes.min.js";
-import { attachDisabledReasons } from "/static/kp/dist/kp-themes.min.js";
-import { attachSentences } from "/static/kp/dist/kp-themes.min.js";
+import {
+  openConfirmation,
+  attachDataTables,
+  attachIdmarks,
+  attachDisabledReasons,
+  attachSentences,
+} from "/static/kp/dist/kp-themes.min.js";
 
 const SKIP_FIELD = declareField({
   id: "apply-skip-backups",

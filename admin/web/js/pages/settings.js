@@ -49,15 +49,20 @@ import { editable } from "../editforms.js";
 import { mountSignin } from "../signin.js";
 import { mountHomeAddress } from "../homeaddress.js";
 import { chip, dot, ensureStyle } from "../ui.js";
-import { attachAll } from "/static/kp/dist/kp-themes.min.js";
-import { attachContents, setContents } from "/static/kp/dist/kp-themes.min.js";
-import { attachDisabledReasons } from "/static/kp/dist/kp-themes.min.js";
-import { setCardState } from "/static/kp/dist/kp-themes.min.js";
-import { setProblems } from "/static/kp/dist/kp-themes.min.js";
-import { attachToolbars } from "/static/kp/dist/kp-themes.min.js";
+import {
+  attachAll,
+  attachContents,
+  setContents,
+  attachDisabledReasons,
+  setCardState,
+  setProblems,
+  attachToolbars,
+  REFRESH_EVENT,
+  refreshDone,
+  unsaved,
+  unsavedSaved,
+} from "/static/kp/dist/kp-themes.min.js";
 import { REFRESH_S, changeGate } from "../quiet.js";
-import { REFRESH_EVENT, refreshDone } from "/static/kp/dist/kp-themes.min.js";
-import { unsaved, unsavedSaved } from "/static/kp/dist/kp-themes.min.js";
 
 // fix-239: Live view reaches every control here: host.toml's rows through
 // the host-settings form (`homelab ui open host-settings`, `row edit

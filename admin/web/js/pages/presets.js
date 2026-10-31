@@ -26,15 +26,11 @@ import {
   ENTITY_NEW_EVENT,
   setEntityGrid,
   setEntityGridState,
-} from "/static/kp/dist/kp-themes.min.js";
-import { matchIntent } from "/static/kp/dist/kp-themes.min.js";
-import {
+  matchIntent,
   SEGMENTED_EVENT,
   attachSegmented,
   getSegmentedValues,
   setSegmentedValues,
-} from "/static/kp/dist/kp-themes.min.js";
-import {
   TOOLBAR_CLEAR_EVENT,
   TOOLBAR_REMOVE_EVENT,
   attachToolbars,

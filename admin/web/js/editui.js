@@ -17,15 +17,15 @@ import { h } from "./dom.js";
 import { gridRow } from "./gridrow.js";
 import { mountJobPanel } from "./jobpanel.js";
 import { commitBody, committedText, planView } from "./plan.js";
-import { attachDiffs, setDiff } from "/static/kp/dist/kp-themes.min.js";
-import { clearError, showError } from "/static/kp/dist/kp-themes.min.js";
 import {
+  attachDiffs,
+  setDiff,
+  clearError,
+  showError,
   discardUnsaved,
   markUnsavedClean,
   setUnsavedSaving,
   unsaved,
-} from "/static/kp/dist/kp-themes.min.js";
-import {
   BEFORE_STEP_EVENT,
   FINISH_EVENT,
   attachWizards,

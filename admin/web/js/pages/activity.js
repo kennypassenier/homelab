@@ -90,15 +90,8 @@ import {
   CARD_RETRY_EVENT,
   attachCardStates,
   setCardState,
-} from "/static/kp/dist/kp-themes.min.js";
-import { jobLogViewer } from "../joblog.js";
-import { setParams } from "../urlstate.js";
-import { tabRow } from "../dom.js";
-import { mountJobsTable } from "./jobs.js";
-import { mountHostLog } from "./log.js";
-import { mount as mountSchedules } from "./schedules.js";
-import { attachDataTables, dataTable } from "/static/kp/dist/kp-themes.min.js";
-import {
+  attachDataTables,
+  dataTable,
   attachGantts,
   setGanttKinds,
   setGanttLegend,
@@ -106,25 +99,28 @@ import {
   setGanttRuns,
   setGanttSelection,
   setGanttState,
-} from "/static/kp/dist/kp-themes.min.js";
-import {
   attachHeats,
   setHeat,
   setHeatLegend,
   setHeatPick,
   setHeatRows,
-} from "/static/kp/dist/kp-themes.min.js";
-import { attachSteplists } from "/static/kp/dist/kp-themes.min.js";
-import { attachTicks, tickTo } from "/static/kp/dist/kp-themes.min.js";
-import { attachToolbars } from "/static/kp/dist/kp-themes.min.js";
-import { attachSegmented } from "/static/kp/dist/kp-themes.min.js";
-import {
+  attachSteplists,
+  attachTicks,
+  tickTo,
+  attachToolbars,
+  attachSegmented,
   FEED_RETRY_EVENT,
   attachFeeds,
   setFeed,
+  leave,
+  registerShortcuts,
 } from "/static/kp/dist/kp-themes.min.js";
-import { leave } from "/static/kp/dist/kp-themes.min.js";
-import { registerShortcuts } from "/static/kp/dist/kp-themes.min.js";
+import { jobLogViewer } from "../joblog.js";
+import { setParams } from "../urlstate.js";
+import { tabRow } from "../dom.js";
+import { mountJobsTable } from "./jobs.js";
+import { mountHostLog } from "./log.js";
+import { mount as mountSchedules } from "./schedules.js";
 import { GROUP_ACTIVITY, unlessDialog } from "../shortcuts.js";
 import { REFRESH_MS, changeGate } from "../quiet.js";
 

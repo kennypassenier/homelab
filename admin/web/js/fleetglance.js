@@ -18,12 +18,10 @@ import {
   setHeatLegend,
   HEAT_PICK_EVENT,
   HEAT_ROW_EVENT,
-} from "/static/kp/dist/kp-themes.min.js";
-import {
   setStackbar,
   STACKBAR_PICK_EVENT,
+  attachHoverCards,
 } from "/static/kp/dist/kp-themes.min.js";
-import { attachHoverCards } from "/static/kp/dist/kp-themes.min.js";
 
 /** @typedef {import("./stacksview.js").Row} Row */
 

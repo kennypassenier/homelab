@@ -50,8 +50,8 @@ import {
   segSwitch,
   tableSlot,
 } from "../ui.js";
-import { attachSwitches } from "/static/kp/dist/kp-themes.min.js";
 import {
+  attachSwitches,
   attachCardStates,
   setCardState,
 } from "/static/kp/dist/kp-themes.min.js";

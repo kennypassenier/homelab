@@ -1,0 +1,40 @@
+/* ux-stacknew-2: New stack's wizard on a page (like restore.css). Every step
+   is a card on one height so the wizard does not jump between steps. */
+.ns-page {
+  display: grid;
+  gap: var(--kp-space-lg, 1.5rem);
+}
+.ns-holder,
+.ns-wizard {
+  min-inline-size: 0;
+}
+.ns-step {
+  min-block-size: 18rem;
+  display: grid;
+  gap: var(--kp-space-md, 1rem);
+  align-content: start;
+}
+.ns-actions {
+  display: flex;
+  gap: var(--kp-space-sm, 0.5rem);
+  justify-content: flex-end;
+}
+.ns-actions > #new-cancel {
+  margin-inline-end: auto;
+}
+.ns-done {
+  display: grid;
+  gap: var(--kp-space-md, 1rem);
+}
+@media (max-width: 48rem) {
+  .ns-actions {
+    display: grid;
+    grid-template-columns: 1fr;
+  }
+  .ns-actions > #new-cancel {
+    margin-inline-end: 0;
+  }
+  .ns-step {
+    min-block-size: 0;
+  }
+}

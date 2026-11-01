@@ -1,30 +1,45 @@
 // TUI parity (`homelab import <bundle.yml> <new-name> <vmid>`): a bundle an
-// export wrote becomes a new stack, through the same plan dialog and commit
-// every edit ends in. The bundle is pasted or uploaded (a file read in the
-// browser, never sent anywhere but here); it never carries secrets, and one
-// that names a .env is refused by the server. Claude drives the same form:
-// homelab ui open import.
+// export wrote becomes a new stack, through the same review and commit every
+// New stack route ends on (newreview.js). ux-stacknew-2 (Kenny, 2026-11-01):
+// it runs on a page of its own, /stacks/new/bundle, like the other routes.
+// The bundle is pasted or uploaded (a file read in the browser, never sent
+// anywhere but here); it never carries secrets, and one that names a .env is
+// refused by the server. Claude drives the same form: homelab ui open import.
 
-import { notify, openDialog } from "./actui.js";
 import { fetchJson, h } from "./dom.js";
 import { driven, register } from "./drivehooks.js";
 import { IMPORT_FIELDS, importBody, importErrors } from "./editforms.js";
-import { editField, markErrors, openPlanDialog } from "./editui.js";
+import { editField, markErrors } from "./editui.js";
+import { reviewPart } from "./newreview.js";
+import { wizardShell } from "./newwizard.js";
 import { commitBody } from "./plan.js";
-import { stackHref } from "./router.js";
 import {
+  BEFORE_STEP_EVENT,
   FILE_EVENT,
   REMOVE_EVENT,
+  STEP_EVENT,
   attachUploads,
   setDone,
   setError,
 } from "/static/kp/dist/kp-themes.min.js";
 
 /**
- * Open the import dialog.
- * @param {(href: string) => void} navigate
+ * Open the import route: it is a page now, so this goes there.
+ * @param {(href: string) => void} [navigate]
  */
 export async function openImport(navigate) {
+  if (navigate) navigate("/stacks/new/bundle");
+  else location.assign("/stacks/new/bundle");
+}
+
+/**
+ * The bundle route's wizard, drawn into `holder`: step one reads the bundle
+ * and the new name and number, step two is the review every route shares.
+ * @param {HTMLElement} holder
+ * @param {{navigate: (href: string) => void}} o
+ * @returns {() => void} stop
+ */
+export function mountBundleWizard(holder, o) {
   /** @type {import("./editforms.js").Values} */
   const values = { bundle: "", name: "", vmid: "" };
   /** @type {Map<string, HTMLElement>} */
@@ -88,36 +103,8 @@ export async function openImport(navigate) {
     if (fromFile) setBundle("");
     fromFile = false;
   });
-  const review = h(
-    "button",
-    {
-      type: "button",
-      class: "kp-button kp-button--primary",
-      id: "import-review",
-    },
-    "Review",
-  );
+
   const note = h("p", { class: "measured", role: "status" });
-  const d = openDialog({
-    title: "Import a stack",
-    description:
-      "A bundle an export wrote (Export bundle on a stack's page, or homelab export) becomes a new stack: its name, number, address and /appdata paths are replaced by the new ones. Secrets are never in a bundle: add them through latch before the first deploy.",
-    body: [
-      h(
-        "div",
-        { class: "kp-field" },
-        h("span", { class: "kp-field__label" }, "Upload a bundle"),
-        drop,
-      ),
-      ...fields,
-      note,
-      h("div", { class: "kp-dialog__actions" }, review),
-    ],
-    id: "import-dialog",
-    wide: true,
-  });
-  d.dialog.dataset.form = "import";
-  const detachUpload = attachUploads(d.dialog);
   /** @type {{names: string[], vmids: number[]}} */
   let taken = { names: [], vmids: [] };
   void fetchJson("/data/presets", "the taken names and numbers").then((r) => {
@@ -127,40 +114,74 @@ export async function openImport(navigate) {
       note.textContent =
         "The dashboard has no working copy yet, so nothing can be imported.";
   });
-  review.addEventListener("click", () => {
-    // Live view: the plan and the commit run on the dashboard's server;
-    // the replay opens the plan dialog itself.
-    if (!driven()) {
-      const errors = importErrors(values, taken);
-      markErrors(inputs, errors);
-      if (Object.keys(errors).length) return;
-    }
-    const body = importBody(values);
-    openPlanDialog({
-      id: "import",
-      title: `Import · ${body.name}`,
-      planUrl: "/data/stacks-import/plan",
-      planBody: body,
-      commitUrl: "/data/stacks-import/commit",
-      commitBody: (v) => commitBody(body, v),
-      onCommitted: () => {
-        notify(`stacks/${body.name} is committed.`, "success", {
-          label: "Open it",
-          onClick: () => navigate(stackHref(body.name, "settings")),
-        });
+
+  /** @type {ReturnType<typeof wizardShell>} */
+  let shell;
+  const review = reviewPart({
+    what: "the imported stack",
+    planUrl: "/data/stacks-import/plan",
+    planBody: () => importBody(values),
+    commitUrl: "/data/stacks-import/commit",
+    commitBody: (cv) => commitBody(importBody(values), cv),
+    stackName: () => String(values.name).trim(),
+    canCommit: (ok) => (shell.next.disabled = !ok),
+    onCommitted: (a) => shell.showCommitted(a, importBody(values).name),
+  });
+  shell = wizardShell(holder, {
+    id: "import",
+    navigate: o.navigate,
+    onFinish: () => review.commit(),
+    steps: [
+      {
+        id: "bundle",
+        label: "Bundle",
+        body: [
+          h(
+            "div",
+            { class: "kp-field" },
+            h("span", { class: "kp-field__label" }, "Upload a bundle"),
+            drop,
+          ),
+          ...fields,
+          note,
+        ],
       },
-    });
+      { id: "review", label: "Review", body: review.els },
+    ],
   });
-  // feat-platform-10: the Live view replay works this very dialog.
+  const detachUpload = attachUploads(holder);
+  shell.wiz.addEventListener(BEFORE_STEP_EVENT, (e) => {
+    if (/** @type {CustomEvent} */ (e).detail.direction !== "forward") return;
+    // Live view: the server holds a driven step to the same checks.
+    if (driven()) return;
+    const errors = importErrors(values, taken);
+    markErrors(inputs, errors);
+    if (Object.keys(errors).length) e.preventDefault();
+  });
+  shell.wiz.addEventListener(STEP_EVENT, (e) => {
+    const step = /** @type {CustomEvent} */ (e).detail.step;
+    if (step === 0) shell.next.disabled = false;
+    if (step === 1) void review.load();
+  });
+  // feat-platform-10: the Live view replay works this very wizard.
   const unregister = register("import", {
-    dialog: d.dialog,
-    closed: d.closed,
-    review: () => review,
-    close: () => d.close(),
+    dialog: holder,
+    closed: shell.closed,
+    step: () => shell.handle?.step() ?? 0,
+    goTo: (/** @type {number} */ i) =>
+      shell.handle ? shell.handle.goTo(i) : Promise.resolve(false),
+    next: () => shell.next,
+    back: () => shell.back,
+    cancel: () => shell.cancel,
+    planReady: () => review.planReady(),
+    runError: review.runError,
+    showCommitted: (/** @type {any} */ a) =>
+      shell.showCommitted(a, importBody(values).name),
+    close: () => shell.cancel.click(),
   });
-  d.closed.then(() => {
+  return () => {
     unregister();
     detachUpload();
-  });
-  return d;
+    shell.stop();
+  };
 }

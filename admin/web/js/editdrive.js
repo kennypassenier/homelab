@@ -254,7 +254,7 @@ async function newStack(navigate) {
     },
     button: (name) =>
       name === "close"
-        ? closeOf(h()?.dialog)
+        ? (h()?.cancel() ?? null)
         : name === "back"
           ? (h()?.back() ?? null)
           : (h()?.next() ?? null),
@@ -293,7 +293,7 @@ async function newStack(navigate) {
 }
 
 /**
- * TUI parity: the import dialog, then the plan dialog every edit ends in.
+ * TUI parity: the import page's wizard, the bundle step then the shared review.
  * @param {(href: string) => void} navigate
  * @returns {Promise<DrivenControl>}
  */
@@ -302,49 +302,38 @@ async function importEdit(navigate) {
   void openImport(navigate);
   const first = await waitHandle("import", 5000);
   first?.closed.then(done);
-  /** @type {DriveForm | null} */
-  let current = null;
-  const top = () => handle("plan")?.dialog ?? handle("import")?.dialog ?? null;
+  const w = () => handle("import");
   return {
     get dialog() {
-      return top();
+      return w()?.dialog ?? null;
     },
     closed,
-    close: () => {
-      handle("plan")?.close();
-      handle("import")?.close();
-    },
+    close: () => w()?.close(),
     input: (_n, id) => byId(id),
     set: (_n, v, id) => {
       const el = byId(id);
       if (el) setInput(el, v);
     },
-    button: (name) => {
-      if (name === "close") return closeOf(top());
-      if (!current || current.step_index === 0)
-        return handle("import")?.review() ?? null;
-      const p = handle("plan");
-      return name === "back" ? (p?.back() ?? null) : (p?.next() ?? null);
-    },
+    // ux-stacknew-2: one wizard, the bundle step then the shared review.
+    button: (name) =>
+      name === "close"
+        ? (w()?.cancel() ?? null)
+        : name === "back"
+          ? (w()?.back() ?? null)
+          : (w()?.next() ?? null),
     row: () => null,
     sync: async (f) => {
-      current = f;
+      const p = w();
+      if (!p) return;
       fill(f, (x) => x.step === "bundle");
-      if (f.step_index === 0) handle("plan")?.close();
-      else {
-        let p = handle("plan");
-        if (!p) {
-          handle("import")?.review().click();
-          p = await waitHandle("plan", 3000);
-        }
-        if (p) {
-          await p.ready;
-          const want = f.step === "commit" ? 1 : 0;
-          if (p.step() !== want) await p.goTo(want);
-          fill(f, (x) => x.step === "commit");
-          p.runError(f.run_error);
-          if (f.edit?.result) p.showCommitted(f.edit.result);
-        }
+      if (f.step_index === 0) {
+        if (p.step() !== 0) await p.goTo(0);
+      } else {
+        if (p.step() !== 1) await p.goTo(1);
+        await waitFor(() => p.planReady(), 8000);
+        fill(f, (x) => x.step === "commit");
+        p.runError(f.run_error);
+        if (f.edit?.result) p.showCommitted(f.edit.result);
       }
       mark(f);
     },

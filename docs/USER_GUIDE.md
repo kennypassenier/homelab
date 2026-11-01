@@ -729,7 +729,7 @@ repository and the host, on the same pages and dialogs a click uses:
 | `host-settings` | the Settings page's host.toml | `keys` (`row edit <key>`, then `key-<key>` and, for a key that asks it, `key-<key>-confirm`; `press save`) → `review`; `confirm` writes host.toml, and when any staged key only takes effect at the host's next start also queues `restart-host` (the review button then reads "Save and restart the host"; the queued job is refused if another job is already running). Needs a token of scope `all` |
 | `batch <action> <s1>,<s2>` | the fleet page's batch dialog | `review` (the action's shared fields, and `act-confirm-<stack>` per stack when it asks a typed name); `confirm` queues the batch |
 | `rollback <stack>` | the Roll back dialog | `choose` (`rollback-commit` or `rollback-unit`); `next` opens the deploy-commit or rollback-native dialog with it picked, as the row's button does |
-| `import` | the Import dialog (TUI parity) | `bundle` (`import-bundle`, `import-name`, `import-vmid`) → `plan` → `commit`; `confirm` commits and pushes the new stack |
+| `import` | the Import page, /stacks/new/bundle (TUI parity) | `bundle` (`import-bundle`, `import-name`, `import-vmid`) → `plan` → `commit`; `confirm` commits and pushes the new stack |
 
 Each final press runs on the dashboard's server through the same function
 the button's route runs (one commit and push through the working copy's

@@ -5386,7 +5386,9 @@ test("invariants: Live view's presses of the four Update controls (a failed upda
     ["/activity", "activity-update-again"],
     ["/stacks?view=cards", "stacks-row-update"],
     ["/map", "pin-update"],
-    ["/stacks/gateway", "stack-head", "gateway/update"],
+    // ux-stackhub-5: Update is held back on a stack with no newer image;
+    // the demo has newer pinned images on kp-soft (and admin), not on gateway.
+    ["/stacks/kp-soft", "stack-head", "kp-soft/update"],
   ]);
   for (const [name, x] of /** @type {const} */ ([
     ["Run it again", again],
@@ -5409,7 +5411,7 @@ test("invariants: Live view's presses of the four Update controls (a failed upda
   const [stack, ...app] = String(pin.row).split("/");
   assert.equal(pin.url.searchParams.get("stack"), stack);
   assert.equal(pin.url.searchParams.get("app"), app.join("/"));
-  assert.equal(head.url.searchParams.get("stack"), "gateway");
+  assert.equal(head.url.searchParams.get("stack"), "kp-soft");
   // redesign-openpoints-1: answers at once, no 3 s wait for a dialog.
   assert.ok(head.ms < 2000, `Live view answered after ${head.ms} ms`);
 });
@@ -7369,9 +7371,15 @@ test("invariants: redesign-config every control Firewall, Settings and Presets d
     };
     for (const path of ["firewall", "settings", "presets"]) {
       await page.goto(`${BASE}/${path}`);
-      await page.locator(`#page ${filled[path]}`).first().waitFor({
-        timeout: 10000,
-      });
+      // ux-hostsettings: Settings draws its host.toml groups folded, so its
+      // first row is attached but hidden until "fold all" opens them below.
+      await page
+        .locator(`#page ${filled[path]}`)
+        .first()
+        .waitFor({
+          state: path === "settings" ? "attached" : "visible",
+          timeout: 10000,
+        });
       // Open what folds, so the controls inside are on screen too.
       if (path === "firewall")
         await page

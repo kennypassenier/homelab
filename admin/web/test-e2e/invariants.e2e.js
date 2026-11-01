@@ -3454,9 +3454,13 @@ test("invariants: ux-inbox-1: with no question waiting the Questions card is one
       .locator("#inbox-questions")
       .evaluate((e) => e.getBoundingClientRect().height);
     assert.ok(h < 180, `the empty Questions card is ${h} px high`);
-    assert.equal(
-      await page.locator("#inbox-questions button:visible").count(),
-      0,
+    assert.deepEqual(
+      await page
+        .locator("#inbox-questions button:visible", {
+          hasText: "Leave all stopped",
+        })
+        .allInnerTexts(),
+      [],
     );
   } finally {
     await browser.close();

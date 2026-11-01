@@ -1,0 +1,119 @@
+# Stack intent (schema v2 — intent only, no machine-written state).
+#
+# CT 123 holds one native service: habits, Kenny's tasks, time tracking and
+# focus app for the PC and the phone. It is a chassis-rs single binary run by
+# a systemd unit; `service.yml` beside this file describes the service, this
+# file describes the container around it. Modelled on CT 121 (kitchen), the
+# newest chassis-rs service with its state bind-mounted from the host.
+#
+# Rebuilding it, in order:
+#   1. this manifest recreates the container (`homelab deploy`);
+#   2. the binary is installed the way C7 installs it (`homelab install-native`,
+#      release kennypassenier/habits, a private repository: the host needs a
+#      GitHub token that can read it);
+#   3. the state comes back from the nightly backup of the bind mount below.
+
+stack_name: habits
+vmid: 123
+hostname: 123-app-habits
+native_only: true
+
+network:
+  ip: 10.10.10.23/24
+  gateway: 10.10.10.1
+  bridge: vmbr0
+  vlan: 10
+
+# Same sizing as kitchen and almanac (one small Rust binary). Revisit after
+# the first week of measurements.
+resources:
+  cores: 1
+  memory_mb: 512
+  swap_mb: 0
+  disk_gb: 4
+  storage: local-lvm
+
+lxc:
+  template: clone:996
+  unprivileged: true
+  features: nesting=1
+  protection: true
+
+boot:
+  onboot: true
+  order: 50
+
+# Habits' state on the host, bind-mounted in, so destroying the container
+# costs nothing and the normal backup reaches it. The unit sets
+# HABITS_STATE_DIR explicitly, so the homelab layout (/appdata/<stack>/
+# <stack>-config) works without a code change. The binary stays at
+# /opt/habits/bin.
+storage:
+  - host_path: /appdata/habits/habits-config
+    mount_point: /appdata/habits/habits-config
+    # ASSUMPTION to verify on first deploy: the habits user is the third one
+    # created (Alloy takes 999 and 998 first), so uid 997 inside, 100997 mapped
+    # out of an unprivileged LXC — the same as CT 121 (kitchen). If
+    # `id habits` says otherwise, fix this line and re-deploy.
+    host_owner_uid: 100997
+    app: habits
+
+apps: []
+
+natives: [habits]
+
+gateway_route:
+  filename: 123-app-habits.yml
+
+firewall:
+  enabled: true
+  comment: |-
+    CT 123 (habits), habits (native).
+    Modelled on kitchen's rules. In: Traefik on CT 104 (habits.kp-soft.dev),
+    Prometheus on CT 113 (habits metrics, node exporter). Kenny's desktop is
+    added by the renderer from host.toml `trusted_sources`. Out: Loki push
+    (Alloy), Almanac (HABITS_ALMANAC_URL: the events habits hands to the
+    calendar) and DNS; the internet stays open for GitHub release updates.
+  rules:
+    - comment: "pve's rescue address: never from a container"
+      dir: out
+      action: DROP
+      dest: 10.10.10.250
+    - comment: "the neighbours it uses"
+      dir: out
+      action: ACCEPT
+      dest: 10.10.10.13
+      proto: tcp
+      dport: "3100"
+      note: Loki push (Alloy)
+    - dir: out
+      action: ACCEPT
+      dest: 10.10.10.12
+      proto: tcp
+      dport: "8080"
+      note: Almanac (HABITS_ALMANAC_URL)
+    - comment: "every other neighbour in VLAN 10 stays out of reach"
+      dir: out
+      action: DROP
+      dest: 10.10.10.0/24
+    - comment: "who may reach the container"
+      dir: in
+      action: ACCEPT
+      source: 10.10.10.13
+      proto: tcp
+      dport: "8080,9100"
+      note: Prometheus (habits metrics, node exporter)
+    - dir: in
+      action: ACCEPT
+      source: 10.10.10.4
+      proto: tcp
+      dport: "8080"
+      note: Traefik routes habits
+
+# This stack's tile on the dashboard's start page, keyed by the hostname it opens.
+tiles:
+  habits.kp-soft.dev:
+    name: "Habits"
+    group: "Own"
+    order: 304
+    description: "Tasks, time and focus"

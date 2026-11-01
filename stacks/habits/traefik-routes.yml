@@ -1,0 +1,19 @@
+# Traefik route for Habits (CT 123).
+#
+# habits.kp-soft.dev: through the Cloudflare tunnel, behind the wildcard
+# Cloudflare Access policy like every kp-soft.dev name (same shape as
+# kitchen's route). No per-name tunnel entry or DNS record is written here;
+# the tunnel's ingress is a wildcard to http://traefik:80. At home the name
+# reaches Traefik on :443 once the wildcard override is in OPNsense.
+http:
+  routers:
+    habits:
+      rule: "Host(`habits.kp-soft.dev`)"
+      entryPoints: [web, websecure]
+      service: habits
+
+  services:
+    habits:
+      loadBalancer:
+        servers:
+          - url: "http://10.10.10.23:8080"

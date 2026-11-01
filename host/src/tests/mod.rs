@@ -8,6 +8,7 @@ mod doctor;
 mod history;
 mod night;
 mod notices;
+mod notify_kyu;
 mod questions;
 mod reads;
 mod refusals;

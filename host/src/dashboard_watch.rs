@@ -86,7 +86,7 @@ pub(crate) async fn watch_dashboard(state: AppState, url: String) {
     let mut failing_since: Option<u64> = None;
     let mut told = false;
     // fix-184: whether the down notice that `told` remembers was actually
-    // pushed out (urgent, and not swallowed by the 20 h damper) — the
+    // pushed out (urgent, and accepted by kyu) — the
     // recovery notice is urgent in turn only when this is true, never on
     // its own (see `watch_facts`).
     let mut down_pushed = false;

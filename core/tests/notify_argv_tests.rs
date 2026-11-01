@@ -49,6 +49,6 @@ fn fix_35_a_route_without_a_token_sends_no_auth_header() {
     assert_eq!(args.last().unwrap(), "http://ha/api/webhook/<id>");
     assert!(
         args.windows(2)
-            .any(|w| w[0] == "-w" && w[1] == "%{http_code}")
+            .any(|w| w[0] == "-w" && w[1].starts_with("%{http_code}"))
     );
 }

@@ -24,58 +24,69 @@ pub(crate) fn notices_path(state_dir: &str) -> String {
     format!("{}/notices.jsonl", state_dir)
 }
 
-/// Decision notify-routing (Kenny, 2026-09-30): every event becomes a notice
-/// the dashboard reads (`Command::Notices`); only an urgent one is also
-/// pushed at once, through kyu (fallback: Home Assistant) as before, with
-/// the short text and the link to the dashboard page. The damper (H13)
-/// still keeps one failure from paging every night; it now judges pushes
-/// only, so the centre keeps every occurrence.
-/// Returns whether this notice actually left the centre as an urgent push
-/// (`notify_webhook`), as opposed to staying "centre only" or being
-/// swallowed by the 20 h damper — fix-184's `watch_dashboard` uses this to
-/// decide whether a later recovery is itself allowed to push.
-pub(crate) async fn publish_notice(state: &AppState, exec: &RealExecutor, f: NoticeFacts) -> bool {
-    let now = unix_now();
-    let mut pushed_out = false;
-    let push = if !f.urgency.urgent {
-        "centre only".to_string()
-    } else if !state
-        .damper
-        .lock()
-        .unwrap_or_else(PoisonError::into_inner)
-        .should_send(&f.op, f.ok, Some(&f.ex.what), now)
-    {
-        "not pushed again: the same failure went out within 20 h".to_string()
-    } else {
-        pushed_out = true;
-        let url = homelab_core::notify::click_url(&state.config.dashboard_url, &f.ex.page);
-        let short = homelab_core::notify::push_short(&f.ex.title, &f.ex.remedy);
-        let payload = homelab_core::notify::push_payload(
-            "homelab-host",
-            &f.op,
-            &f.label,
-            f.ok,
-            Some(&short),
-            VERSION,
-            Some(url.as_str()).filter(|u| !u.is_empty()),
-        );
-        match notify_raw(state, exec, payload).await {
-            Ok(()) => "sent".to_string(),
-            Err(why) => format!("failed: {}", why),
-        }
-    };
+/// The next notice sequence number (grows across restarts).
+fn next_notice_seq(state: &AppState) -> u64 {
     let now_ms = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_millis() as u64)
         .unwrap_or(0);
-    let seq = {
-        let mut last = state
-            .notice_seq
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner);
-        *last = homelab_core::notify::next_seq(*last, now_ms);
-        *last
+    let mut last = state
+        .notice_seq
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner);
+    *last = homelab_core::notify::next_seq(*last, now_ms);
+    *last
+}
+
+/// The one push to kyu for an urgent notice: the payload, the dedup key
+/// (kyu drops a repeated failure for 20 h), and what became of it.
+async fn push_urgent(
+    state: &AppState,
+    exec: &RealExecutor,
+    f: &NoticeFacts,
+) -> Result<String, String> {
+    let url = homelab_core::notify::click_url(&state.config.dashboard_url, &f.ex.page);
+    let short = homelab_core::notify::push_short(&f.ex.title, &f.ex.remedy);
+    let payload = homelab_core::notify::push_payload(
+        "homelab-host",
+        &f.op,
+        &f.label,
+        f.ok,
+        Some(&short),
+        VERSION,
+        Some(url.as_str()).filter(|u| !u.is_empty()),
+    );
+    let dedup = homelab_core::notify_kyu::dedup_key(&f.op, f.ok, Some(&f.ex.what));
+    notify_raw(state, exec, payload, dedup).await
+}
+
+/// Decision notify-routing (Kenny, 2026-09-30): every event becomes a notice
+/// the dashboard reads (`Command::Notices`); only an urgent one is also
+/// pushed at once, to kyu (`notify_webhook`), with the short text and the
+/// link to the dashboard page. Decision kyu-notify ("Eenvoudig"): that is
+/// ONE POST; kyu damps repeats (`Kyu-Dedup-Key`) and owns retries and the
+/// fallback to Home Assistant. When kyu does not accept it, a second notice
+/// "Notification could not be delivered" is written beside the first.
+/// Returns whether kyu accepted the push, as opposed to "centre only" or a
+/// failure — fix-184's `watch_dashboard` uses this to decide whether a
+/// later recovery is itself allowed to push.
+pub(crate) async fn publish_notice(state: &AppState, exec: &RealExecutor, f: NoticeFacts) -> bool {
+    let now = unix_now();
+    let mut failure = None;
+    let push = if !f.urgency.urgent {
+        "centre only".to_string()
+    } else {
+        match push_urgent(state, exec, &f).await {
+            Ok(text) => text,
+            Err(why) => {
+                let text = format!("failed: {}", why);
+                failure = Some(why);
+                text
+            }
+        }
     };
+    let pushed_out = f.urgency.urgent && failure.is_none();
+    let seq = next_notice_seq(state);
     let notice = homelab_core::notify::HostNotice {
         seq,
         at: now,
@@ -99,6 +110,15 @@ pub(crate) async fn publish_notice(state: &AppState, exec: &RealExecutor, f: Not
         findings: f.findings,
     };
     record_notice(state, &notice);
+    if let Some(why) = failure {
+        let lost = homelab_core::notify_kyu::undelivered_notice(
+            next_notice_seq(state),
+            now,
+            &notice,
+            &why,
+        );
+        record_notice(state, &lost);
+    }
     pushed_out
 }
 

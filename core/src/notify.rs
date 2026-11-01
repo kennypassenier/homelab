@@ -2,8 +2,6 @@
 //! is built here so its shape is golden-tested — the HA automation parses
 //! these fields, and a silent rename would break the events log.
 
-use std::collections::HashMap;
-
 /// One event, exactly as POSTed to the webhook — and the ONLY place a
 /// payload is built.
 ///
@@ -64,39 +62,6 @@ pub fn notify_error_text(error: &str) -> String {
     )
 }
 
-/// Failure-repeat damping: an identical failing event inside the window is
-/// suppressed (a stack that fails every night must not page every night);
-/// successes are never suppressed, and a CHANGED error text passes through
-/// (it is new information).
-pub struct NotifyDamper {
-    window_s: u64,
-    last_sent: HashMap<String, u64>,
-}
-
-impl NotifyDamper {
-    pub fn new(window_s: u64) -> Self {
-        Self {
-            window_s,
-            last_sent: HashMap::new(),
-        }
-    }
-
-    /// Decide-and-record. `now` injected — core reads no clocks.
-    pub fn should_send(&mut self, op: &str, ok: bool, error: Option<&str>, now: u64) -> bool {
-        if ok {
-            return true;
-        }
-        let key = format!("{}|{}", op, error.unwrap_or(""));
-        match self.last_sent.get(&key) {
-            Some(&t) if now.saturating_sub(t) < self.window_s => false,
-            _ => {
-                self.last_sent.insert(key, now);
-                true
-            }
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -136,22 +101,6 @@ mod tests {
             host.replace("\"homelab-host\"", "\"homelab-admin\""),
             "one shape for every sender"
         );
-    }
-
-    #[test]
-    fn damper_suppresses_repeats_within_window_only() {
-        let mut d = NotifyDamper::new(20 * 3600);
-        let t0 = 1_800_000_000;
-        assert!(d.should_send("backup-media", false, Some("timeout"), t0));
-        // Same failure an hour later: suppressed.
-        assert!(!d.should_send("backup-media", false, Some("timeout"), t0 + 3600));
-        // Different error text: new information, passes.
-        assert!(d.should_send("backup-media", false, Some("repo locked"), t0 + 3600));
-        // After the window: resends (still broken → remind once a day).
-        assert!(d.should_send("backup-media", false, Some("timeout"), t0 + 21 * 3600));
-        // Successes are never suppressed.
-        assert!(d.should_send("backup-media", true, None, t0));
-        assert!(d.should_send("backup-media", true, None, t0 + 1));
     }
 
     /// F86: the nightly fleet check is the most important report the system
@@ -263,38 +212,15 @@ pub fn verdict(ran: bool, http_code: &str) -> Delivery {
     if !ran {
         return Delivery::Failed("curl did not run or timed out".into());
     }
-    match http_code.trim().parse::<u16>() {
+    // The status is the first word: `-w` may append `Kyu-Duplicate`
+    // (see `notify_kyu::was_duplicate`).
+    let status = http_code.split_whitespace().next().unwrap_or("");
+    match status.parse::<u16>() {
         Ok(c) if (200..300).contains(&c) => Delivery::Delivered,
         Ok(0) => Delivery::Failed("no answer (connection refused, DNS, or timeout)".into()),
         Ok(c) => Delivery::Failed(format!("HTTP {}", c)),
-        Err(_) => Delivery::Failed(format!("unreadable status {:?}", http_code.trim())),
+        Err(_) => Delivery::Failed(format!("unreadable status {:?}", status)),
     }
-}
-
-/// Where a notification goes, in order, and why there is a second entry.
-///
-/// The primary is kyu (Y2): a durable hub, so an HA outage no longer loses
-/// the message. The fallback is Home Assistant directly, for the one case Y2
-/// carved out — kyu itself being down, which is exactly what happens while
-/// the orchestrator is updating it.
-///
-/// This replaces the static "operations targeting the messaging stack use the
-/// direct path" rule with something strictly stronger: a list to keep up to
-/// date cannot know that kyu is down for a reason nobody wrote down, and
-/// trying the second path when the first one fails covers that case and every
-/// other one. Kenny's standing rule about hand-maintained lists, applied to a
-/// list that had not been written yet.
-pub fn route<'a>(primary: Option<&'a str>, fallback: Option<&'a str>) -> Vec<&'a str> {
-    let mut v = Vec::new();
-    if let Some(p) = primary {
-        v.push(p);
-    }
-    if let Some(f) = fallback
-        && Some(f) != primary
-    {
-        v.push(f);
-    }
-    v
 }
 
 /// fix-123: a route as a log line may show it: scheme, host and port,
@@ -362,7 +288,9 @@ pub fn curl_args_pinned(
         // and without this the exit code alone cannot tell a 200 from a 404
         // on a topic that no longer exists.
         "-w",
-        "%{http_code}",
+        // `%header{}` needs curl 7.84; an older curl prints the text as
+        // is, which `notify_kyu::was_duplicate` reads as "not a duplicate".
+        "%{http_code} %header{kyu-duplicate}",
         "-X",
         "POST",
         "-H",

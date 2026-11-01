@@ -7,6 +7,7 @@ pub mod actions_config;
 pub mod actions_progress;
 pub mod applyview;
 pub mod asks;
+pub mod commit_via;
 pub mod config;
 pub mod credentials;
 pub mod drift;

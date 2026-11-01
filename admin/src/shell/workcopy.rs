@@ -15,6 +15,14 @@
 //! body. The key is provisioned from latch (`HOMELAB_ADMIN_DEPLOY_KEY_B64`,
 //! written to its file once at start by [`provision_credentials`]); the
 //! transaction only hands its path to ssh.
+//!
+//! key-move: with a [`HostCommit`] attached (`HOMELAB_ADMIN_COMMIT_VIA=host`)
+//! the transaction stops after the validation and sends the files to the
+//! host, which commits and pushes with the key only it holds; this copy then
+//! fetches the result (`workcopy/host.rs`). Nothing is committed here then.
+
+mod host;
+pub use host::{HostCommit, ViaHostLink};
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -44,6 +52,8 @@ pub struct RepoStatus {
     pub dirty: Vec<String>,
     /// Whether the deploy key file is there (ssh remotes only).
     pub key_present: Option<bool>,
+    /// key-move: who commits and pushes an edit, `dashboard` or `host`.
+    pub commits_via: &'static str,
     /// Unix seconds of the last successful fetch.
     pub fetched_at: Option<i64>,
     /// Why the last fetch or clone failed.
@@ -84,6 +94,8 @@ pub struct WorkingCopy {
     lock: Mutex<()>,
     status: Mutex<RepoStatus>,
     clock: std::sync::Arc<dyn Fn() -> i64 + Send + Sync>,
+    /// key-move: set, the host commits and pushes every edit.
+    host: Option<std::sync::Arc<dyn HostCommit>>,
 }
 
 fn refusal(what: &str, why: impl Into<String>, fix: impl Into<String>) -> Refusal {
@@ -139,7 +151,14 @@ impl WorkingCopy {
             lock: Mutex::new(()),
             status: Mutex::new(status),
             clock,
+            host: None,
         }
+    }
+
+    /// key-move: hand every commit to the host instead of pushing here.
+    pub fn with_host_commit(mut self, host: std::sync::Arc<dyn HostCommit>) -> Self {
+        self.host = Some(host);
+        self
     }
 
     /// Whether the remote is reached over ssh (and so needs the key).
@@ -386,6 +405,11 @@ impl WorkingCopy {
         let mut s = self.status.lock().map(|s| s.clone()).unwrap_or_default();
         s.present = self.present();
         s.key_present = self.is_ssh().then(|| self.git.key.is_file());
+        s.commits_via = if self.host.is_some() {
+            "host"
+        } else {
+            "dashboard"
+        };
         if s.present {
             s.head = self.head();
             let range = format!("{}..HEAD", self.origin());
@@ -526,6 +550,9 @@ impl WorkingCopy {
                 problems.join("; "),
                 "correct the edit; nothing was written",
             ));
+        }
+        if let Some(host) = &self.host {
+            return self.commit_via_host(host.as_ref(), &what, changes, message);
         }
         let before = self
             .git(&["rev-parse", "HEAD"])
@@ -670,6 +697,14 @@ impl WorkingCopy {
                 problems.join("; "),
                 "correct the edit; nothing was written",
             ));
+        }
+        if let Some(host) = &self.host {
+            return self.commit_via_host(
+                host.as_ref(),
+                &what,
+                std::slice::from_ref(change),
+                message,
+            );
         }
         let before = self
             .git(&["rev-parse", "HEAD"])
@@ -880,6 +915,9 @@ impl WorkingCopy {
             let _ = me.git(&["reset", "--quiet", "--hard", &before]);
             let _ = me.git(&["clean", "-fdq", "--", "presets"]);
         };
+        if let Some(host) = &self.host {
+            return self.commit_via_host(host.as_ref(), &what, changes, message);
+        }
         if let Err(e) = write_changes(&self.repo, changes) {
             undo(self);
             return Err(refusal(
@@ -1002,6 +1040,13 @@ impl WorkingCopy {
     pub fn resolve(&self, choice: Unpushed) -> Result<(), Refusal> {
         const WHAT: &str = "the unpushed commits";
         let _g = self.hold();
+        if self.host.is_some() && choice != Unpushed::Drop {
+            return Err(refusal(
+                WHAT,
+                "the host commits and pushes every edit, so this copy cannot push",
+                "drop them; make the edit again and the host commits it",
+            ));
+        }
         self.ensure()?;
         self.git(&["fetch", "--quiet", "origin", &self.git.branch])
             .map_err(|e| {
@@ -1096,8 +1141,12 @@ fn parse_commit_line(l: &str) -> Option<CommitRef> {
     })
 }
 
+/// key-move: an https remote (only allowed with `COMMIT_VIA=host`, where
+/// the copy only reads) needs no key either.
 pub fn is_ssh(remote: &str) -> bool {
     !(remote.starts_with('/')
+        || remote.starts_with("https://")
+        || remote.starts_with("http://")
         || remote.starts_with("file://")
         || remote.starts_with("./")
         || remote.starts_with("../"))

@@ -1146,6 +1146,7 @@ export function mount(root, opts = {}) {
    * @param {{repo: {present: boolean, remote: string, branch: string,
    *   head: CommitRef | null, unpushed: CommitRef[], behind: number,
    *   dirty: string[], key_present: boolean | null, fetched_at: number | null,
+   *   commits_via: "dashboard" | "host",
    *   error: string | null}, deployed_unpushed: {stack: string, commit: string}[]}} v
    */
   const drawRepo = (v) => {
@@ -1277,6 +1278,17 @@ export function mount(root, opts = {}) {
               { class: "cf-chip", title: "Files changed but not committed" },
               `${r.dirty.length} uncommitted`,
             ),
+            r.commits_via === "host"
+              ? h(
+                  "span",
+                  {
+                    class: "cf-chip",
+                    title:
+                      "The host commits and pushes every edit with its own deploy key; this copy only reads the remote",
+                  },
+                  "pushed by the host",
+                )
+              : null,
             r.key_present === null
               ? null
               : h(

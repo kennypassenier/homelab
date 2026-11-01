@@ -39,7 +39,7 @@ pub fn mount(
 ) -> Result<AppDb, String> {
     let cfg = actions_config::from_env(&|k| std::env::var(k).ok())?;
     let mut w = Wiring::open(app, cfg, (host, live, shared), demo_host, &hooks)?;
-    let wc = w.working_copy();
+    let wc = w.working_copy()?;
     let files = w.stack_files(&wc);
     let watched = w.mount_watch();
     let actions = w.start_actions(&files);
@@ -123,13 +123,29 @@ impl<'a> Wiring<'a> {
     }
 
     /// milestone edit (arch-edit-txn): the working copy, cloned at start.
-    fn working_copy(&self) -> Arc<WorkingCopy> {
-        Arc::new(WorkingCopy::new(
+    /// key-move: with `HOMELAB_ADMIN_COMMIT_VIA=host` every commit goes to
+    /// the host over the host link instead of being pushed from here.
+    fn working_copy(&self) -> Result<Arc<WorkingCopy>, String> {
+        let wc = WorkingCopy::new(
             self.cfg.repo.clone(),
             self.cfg.git.clone(),
             self.cfg.scratch_dir(),
             self.clock.clone(),
-        ))
+        );
+        if self.cfg.commit_via != crate::core::commit_via::CommitVia::Host {
+            return Ok(Arc::new(wc));
+        }
+        let runtime = tokio::runtime::Handle::try_current()
+            .map_err(|e| format!("COMMIT_VIA=host needs the dashboard's runtime: {e}"))?;
+        tracing::info!(
+            "edits are committed and pushed by the host (HOMELAB_ADMIN_COMMIT_VIA=host)"
+        );
+        let link = crate::shell::workcopy::ViaHostLink::new(
+            self.host.clone(),
+            runtime,
+            std::time::Duration::from_secs(self.cfg.host_commit_timeout_s),
+        );
+        Ok(Arc::new(wc.with_host_commit(Arc::new(link))))
     }
 
     fn stack_files(&self, wc: &Arc<WorkingCopy>) -> Arc<dyn StackFiles> {

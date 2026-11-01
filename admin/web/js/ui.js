@@ -541,9 +541,10 @@ function ctxBar(m, label) {
  * fits its own width. While `loading` each tile is its own skeleton in the
  * final geometry.
  * @param {Kpi[]} tiles
- * @param {{loading?: boolean, label?: string, drive?: {id: string}}} [opts]
+ * @param {{loading?: boolean, label?: string, drive?: {id: string},
+ *   columns?: string}} [opts]
  *   `drive`: the Live view control every tile is, on its own row (the
- *   tile's key)
+ *   tile's key); `columns`: kp's column list for the widths "all 3 2 1"
  * @returns {{el: HTMLElement, tiles: Map<string, ReturnType<typeof kpi>>}}
  */
 export function kpiStrip(tiles, opts = {}) {
@@ -551,7 +552,7 @@ export function kpiStrip(tiles, opts = {}) {
   const map = new Map();
   const e = h("div", {
     class: "kp-kpis",
-    "data-kp-kpis-columns": "all 3 2 1",
+    "data-kp-kpis-columns": opts.columns ?? "all 3 2 1",
     role: "group",
     "aria-label": opts.label ?? "Key figures",
   });

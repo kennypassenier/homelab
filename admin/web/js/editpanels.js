@@ -212,7 +212,9 @@ function headLine(e) {
 
 /**
  * @param {HTMLElement} panel
- * @param {{name: string}} params
+ * @param {{name: string, onRendered?: () => void}} params `onRendered`: the
+ *   cards were drawn (again, after a commit); the stack hub's size drawer
+ *   closes on it, its card being a new one
  * @returns {() => void}
  */
 export function settingsTab(panel, params) {
@@ -282,6 +284,7 @@ export function settingsTab(panel, params) {
     if (e.manifest && (e.manifest.native_only || e.natives.length))
       parts.push(card(nativeCard(stack, e, load).node, "native"));
     setCardState(reading, "ready");
+    params.onRendered?.();
     panel.replaceChildren(...parts);
     // feat-platform-10: the row tables' kp datatables need their wraps in
     // the live document first (drawFirewall's own order, at the panel
@@ -327,21 +330,23 @@ export function settingsTab(panel, params) {
       },
       // A card's review is its unsaved bar's Save; the two add forms keep
       // their own button.
-      review: (/** @type {string} */ family) =>
-        /** @type {HTMLElement | null} */ (
-          panel.querySelector(
-            {
-              raw: "#raw-editor .kp-unsaved__save",
-              "add-app": "#add-app-review",
-              "settings-ext": "#settings-ext-form .kp-unsaved__save",
-              apps: "#apps-form .kp-unsaved__save",
-              latch: "#latch-form .kp-unsaved__save",
-              tiles: "#tiles-form .kp-unsaved__save",
-              native: "#native-form .kp-unsaved__save",
-              "add-native": "#add-native-review",
-            }[family] ?? "#settings-form .kp-unsaved__save",
-          )
-        ),
+      review: (/** @type {string} */ family) => {
+        const sel =
+          {
+            raw: "#raw-editor .kp-unsaved__save",
+            "add-app": "#add-app-review",
+            "settings-ext": "#settings-ext-form .kp-unsaved__save",
+            apps: "#apps-form .kp-unsaved__save",
+            latch: "#latch-form .kp-unsaved__save",
+            tiles: "#tiles-form .kp-unsaved__save",
+            native: "#native-form .kp-unsaved__save",
+            "add-native": "#add-native-review",
+          }[family] ?? "#settings-form .kp-unsaved__save";
+        // The size form may stand in the hub's side drawer (outside `panel`).
+        return /** @type {HTMLElement | null} */ (
+          panel.querySelector(sel) ?? document.querySelector(sel)
+        );
+      },
       // feat-platform-10: a row op's target is "<list>:<n>" (or just
       // "<list>" for add) — each `rowTable` self-registers under
       // `row-table:<list>:<stack>` (see its own `register` call), so this

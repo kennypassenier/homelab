@@ -28,6 +28,7 @@
 
 import { act, catalogReady, onAct, send } from "../act.js";
 import { openAction } from "../actiondialog.js";
+import { runNow } from "../quickrun.js";
 import { onAnswered } from "../answer.js";
 import { mountWhenCheck } from "../whencheck.js";
 import {
@@ -41,6 +42,7 @@ import {
 } from "../dom.js";
 import { declare, drivable, viaForm } from "../drivable.js";
 import { driven } from "../drivehooks.js";
+import { nodeDrawer } from "../hubdrawer.js";
 import {
   checksEditTab,
   firewallTab,
@@ -202,8 +204,8 @@ const COMPARE = declare({
   opens: "run",
   row: "<stack>",
   at: at("overview"),
-  what: "compare this one stack with its files now (the Matches its files tile)",
-  shows: "on the Matches its files tile",
+  what: "compare this one stack with its files now (Is it healthy? card)",
+  shows: "on the Overview's Is it healthy? card",
 });
 const LOG_FILTER = declare({
   id: "stack-log-filter",
@@ -260,14 +262,14 @@ const FOLD = declare({
   id: "stack-fold",
   page: "stack",
   opens: "view",
-  row: "<stack>/<editor|firewall|danger|checks>",
+  row: "<stack>/<firewall|danger|checks>",
   at: (row) =>
     row
       ? row.endsWith("/checks")
         ? stackHref(row.split("/")[0])
         : `${stackHref(row.split("/")[0], "settings")}`
       : null,
-  what: "open or fold one of the hub's folded parts: the file editor, the firewall rules, the danger zone, the checks it is judged on",
+  what: "open or fold one of the hub's folded parts: the firewall rules, the danger zone, the checks it is judged on",
 });
 
 // Coordinator rule (Kenny, 2026-10-03): every clickable element the hub
@@ -281,10 +283,10 @@ const HEAD = declare({
   // redesign-openpoints-1: Back up and Deploy open their dialog, Update the
   // one Update flow (an address). redesign-final-42: each row says so.
   opens: "dialog",
-  rowOpens: { update: "view" },
+  rowOpens: { update: "view", backup: "run" },
   row: "<stack>/<backup|update|deploy>",
   at: at("overview"),
-  what: "the header's Back up, Update or Deploy (b, u, d): Back up and Deploy open that action's dialog, Update opens the stack's Update flow",
+  what: "the header's Back up, Update or Deploy (b, u, d): Back up runs at once and says so in a toast, Deploy opens that action's dialog, Update opens the stack's Update flow",
 });
 const MENU_ITEM = declare({
   id: "stack-more-item",
@@ -301,8 +303,9 @@ const FIX = declare({
   page: "stack",
   opens: "dialog",
   row: "<stack>/<problem>",
+  rowOpens: { "backup-missed": "run" },
   at: at("overview"),
-  what: "the fix of one row of the stack's Needs you band (deploy, backup, unpark, pin update, or a link to where it is fixed)",
+  what: "the fix of one row of the stack's Needs you band (deploy, backup (runs at once), unpark, pin update, or a link to where it is fixed)",
 });
 const PROBLEM_SEEN = declare({
   id: "stack-problem-seen",
@@ -386,9 +389,10 @@ const BACKUP_CARD = declare({
   id: "stack-backups-card",
   page: "stack",
   opens: "dialog",
+  rowOpens: { backup: "run" },
   row: "<stack>/<backup|restore>",
   at: at("backups"),
-  what: "the Backups card's Back up now or Restore",
+  what: "the Backups card's Back up now (runs at once, says so in a toast) or Restore (its dialog)",
 });
 const BACKUP_ROW = declare({
   id: "stack-backup-row",
@@ -429,7 +433,7 @@ const OPEN_EDITOR = declare({
   opens: "view",
   row: "<stack>/<files|size>",
   at: at("settings"),
-  what: "open the file editor: Files' Open the editor, Size and network's Edit",
+  what: "open or close the file editor (Files' Open the editor), or open Size and network's form in a side drawer (Edit)",
 });
 const DANGER_BTN = declare({
   id: "stack-danger",
@@ -528,10 +532,13 @@ export function mount(root, params) {
   drivable(updateBtn, HEAD, `${name}/update`);
   drivable(deployBtn, HEAD, `${name}/deploy`);
   for (const b of [backupBtn, updateBtn, deployBtn])
-    b.addEventListener(
-      "click",
-      () => void openAction(name, b.dataset.action ?? "", { openRollback }),
-    );
+    b.addEventListener("click", () => {
+      const action = b.dataset.action ?? "";
+      // ux-stackhub-4: Back up loses nothing, so it runs at once (Live view
+      // still plays the action's own form).
+      if (b === backupBtn && !driven()) void runNow(name, action);
+      else void openAction(name, action, { openRollback });
+    });
 
   // redesign-openpoints-3: the shared more menu (ui.js), grouped.
   const menu = moreMenu({
@@ -740,9 +747,9 @@ export function mount(root, params) {
   // service updates from its releases, so its button stays).
   const paintUpdate = () => {
     const none = S.newer === 0 && S.s?.native !== true;
+    const reason = "No newer version";
     updateBtn.toggleAttribute("disabled", none);
-    if (none)
-      updateBtn.setAttribute("data-kp-disabled-reason", "No newer version");
+    if (none) updateBtn.setAttribute("data-kp-disabled-reason", reason);
     else updateBtn.removeAttribute("data-kp-disabled-reason");
   };
   stops.push(attachDisabledReasons(header.el));
@@ -942,14 +949,17 @@ function actionButton(c, action, o) {
     o.label,
   );
   viaForm(drivable(b, o.drive[0], o.drive[1]), action);
-  b.addEventListener(
-    "click",
-    () =>
-      void openAction(c.name, b.dataset.action ?? action, {
+  b.addEventListener("click", () => {
+    const a = b.dataset.action ?? action;
+    // ux-stackhub-4: a whole-stack backup loses nothing: it runs at once.
+    if ((a === "backup" || a === "backup-native") && !o.preset && !driven())
+      void runNow(c.name, a);
+    else
+      void openAction(c.name, a, {
         openRollback,
         ...(o.preset ? { preset: o.preset } : {}),
-      }),
-  );
+      });
+  });
   return b;
 }
 
@@ -1016,14 +1026,14 @@ function overviewTab(panel, c) {
   for (const [key, t] of strip.tiles)
     if (t.el instanceof HTMLAnchorElement)
       drivable(t.el, KPI, `${name}/${key}`);
-  // The drift tile holds a button, so it is not a link itself.
-  const driftTile = strip.tiles.get("drift");
+  // ux-stackhub-6: Compare now is an action, not a figure; it sits with the
+  // checks (the "Matches its files" check is one of them), not in a tile.
   const compareBtn = drivable(
     h(
       "button",
       {
         type: "button",
-        class: "kp-button kp-button--sm sh-kpi__btn",
+        class: "kp-button kp-button--sm",
         title:
           "Check only this one stack against its files now (every stack at once: Deploy all changes on Stacks)",
       },
@@ -1036,24 +1046,6 @@ function overviewTab(panel, c) {
     compareBtn.setAttribute("aria-busy", "true");
     c.compare();
   });
-  // The drift tile holds the Compare button, so it is a plain tile (a
-  // button inside a link is invalid): its label, value and context move
-  // over, and the tile's own `set` keeps painting them.
-  const plain = h("div", {
-    class: "kp-kpi sh-kpi--plain",
-    "data-loading": "",
-  });
-  if (driftTile) {
-    plain.append(...driftTile.el.childNodes);
-    driftTile.el.replaceWith(plain);
-    // redesign-integrate-8: ui.js's tile draws its fourth row only for a
-    // spark or a meter, which this tile has neither of; the button went
-    // into a row that was never there, so Compare now was never drawn.
-    const act = h("span", { class: "sh-kpi__act" }, compareBtn);
-    const slot = plain.querySelector(".kp-kpi__spark, .kp-kpi__meter");
-    if (slot) slot.replaceWith(act);
-    else plain.append(act);
-  }
 
   const checksHost = h("div", { class: "sh-checks" });
   const checksStage = stage(checksHost);
@@ -1069,6 +1061,7 @@ function overviewTab(panel, c) {
     id: "healthy",
     title: "Is it healthy?",
     desc: "Every check the host runs on this stack, in one place — the answer to “why is it red?” when it is.",
+    tools: [compareBtn],
   });
   healthy.body.append(checksCount, checksStage);
   healthy.setFoot([
@@ -1238,13 +1231,7 @@ function overviewTab(panel, c) {
       });
       if (S.fleetRead) delete tile.el.dataset.loading;
     }
-    const dt = k.find((t) => t.key === "drift");
-    if (dt) {
-      if (S.driftRead) delete plain.dataset.loading;
-      plain.dataset.tone = dt.tone ?? "";
-      plain.title = dt.title ?? "";
-      compareBtn.removeAttribute("aria-busy");
-    }
+    if (S.driftRead) compareBtn.removeAttribute("aria-busy");
     if (S.fleetRead && !checkedAtS) checkedAtS = now;
     const probs = attentionItems({
       stack: name,
@@ -3133,7 +3120,7 @@ function settingsHub(panel, c) {
         type: "button",
         class: "kp-button kp-button--sm",
         title:
-          "Open the editor at the container's settings (a change is saved as a commit and needs a deploy)",
+          "Edit the container's cores, memory, disk and network in a side panel (a change is saved as a commit and needs a deploy)",
       },
       "Edit",
     ),
@@ -3153,38 +3140,36 @@ function settingsHub(panel, c) {
   const fileStage = stage(fileUl);
   setCardState(fileStage, "loading", { words: "Reading the stack's files" });
   const editorHost = h("div", { class: "sh-editor" });
-  const editor = /** @type {HTMLDetailsElement} */ (
-    h(
-      "details",
-      {
-        class: "sh-fold kp-accordion__item kp-accordion__item--bare",
-        open: want === "files" || drive ? true : null,
-      },
-      h(
-        "summary",
-        {
-          title:
-            "The settings form, the raw files, Add an app, storage, latch and tiles",
-        },
-        "The editor",
-      ),
-      editorHost,
-    )
+  // ux-stackhub-7: one control for the editor. Its button opens and closes
+  // the part; the part is mounted at once either way (Live view's edit
+  // forms reach their fields through the handle the editor registers).
+  const editor = h(
+    "div",
+    {
+      class: "sh-fold",
+      id: "stack-editor",
+      hidden: want === "files" || drive ? null : "",
+    },
+    editorHost,
   );
-  const editorSummary = /** @type {HTMLElement} */ (
-    editor.querySelector("summary")
-  );
-  drivable(editorSummary, FOLD, `${name}/editor`);
   const openEditor = h(
     "button",
     {
       type: "button",
       class: "kp-button kp-button--sm",
-      title: "Open the editor: edit, review the change, commit",
+      title:
+        "The settings form, the raw files, Add an app, storage, latch and tiles: edit, review the change, commit",
+      "aria-controls": "stack-editor",
+      "aria-expanded": editor.hidden ? "false" : "true",
     },
-    "Open the editor",
+    editor.hidden ? "Open the editor" : "Close the editor",
   );
   drivable(openEditor, OPEN_EDITOR, `${name}/files`);
+  const setEditor = (/** @type {boolean} */ on) => {
+    editor.hidden = !on;
+    openEditor.setAttribute("aria-expanded", String(on));
+    openEditor.textContent = on ? "Close the editor" : "Open the editor";
+  };
   const files = section({
     id: "files",
     title: "Files",
@@ -3193,19 +3178,61 @@ function settingsHub(panel, c) {
   });
   files.body.append(fileStage, editor);
   files.el.classList.add("sh-span-12");
+  // ux-stackhub-1: the size form opens in a side drawer beside the card
+  // (the page stays where it is); it is the editor's own settings card,
+  // moved there while the drawer is open.
+  const sizeCard = () =>
+    /** @type {HTMLElement | null} */ (
+      editorHost.querySelector("#settings-form")
+    );
+  /** @type {ReturnType<typeof nodeDrawer> | null} */
+  let sizeDrawer = null;
+  const paintEdit = () => {
+    const card = sizeCard();
+    editBtn.toggleAttribute("disabled", !card && sizeDrawer?.isOpen() !== true);
+    if (card || sizeDrawer?.isOpen())
+      editBtn.removeAttribute("data-kp-disabled-reason");
+    else
+      editBtn.setAttribute(
+        "data-kp-disabled-reason",
+        S.editError
+          ? "The stack's files do not read"
+          : "The stack's files are still being read",
+      );
+  };
   // Mounted at once (folded or not): Live view's edit forms reach their
   // fields through the handle the editor registers when it has read.
-  stops.push(settingsTab(editorHost, { name }));
-  const showEditor = () => {
-    editor.open = true;
-    queueMicrotask(() =>
-      (editorHost.querySelector("#settings") ?? editor).scrollIntoView({
-        block: "start",
-      }),
-    );
-  };
-  openEditor.addEventListener("click", showEditor);
-  editBtn.addEventListener("click", showEditor);
+  stops.push(
+    settingsTab(editorHost, {
+      name,
+      onRendered: () => {
+        // A commit draws the cards again: the old one in the drawer is stale.
+        sizeDrawer?.forget();
+        sizeDrawer = null;
+        queueMicrotask(paintEdit);
+      },
+    }),
+  );
+  stops.push(() => sizeDrawer?.forget());
+  openEditor.addEventListener("click", () =>
+    setEditor(editor.hasAttribute("hidden")),
+  );
+  editBtn.addEventListener("click", () => {
+    const card = sizeCard();
+    if (!card) return;
+    sizeDrawer ??= nodeDrawer({
+      node: card,
+      title: "Size and network",
+      desc: "What the container gets from the host. Changes are saved as a commit and need a deploy.",
+      onClose: () => {
+        sizeDrawer = null;
+        paintEdit();
+      },
+    });
+    sizeDrawer.open();
+    paintEdit();
+  });
+  paintEdit();
 
   const fwSummary = h("p", { class: "sh-fw-summary" }, "Reading the firewall…");
   const fwHost = h("div");
@@ -3394,12 +3421,13 @@ function settingsHub(panel, c) {
     const parts = {
       secrets: [secrets.el, null],
       size: [size.el, null],
-      files: [files.el, editor],
+      files: [files.el, null],
       firewall: [firewall.el, fwFold],
       danger: [danger, danger],
     };
     const p = parts[s];
     if (!p) return;
+    if (s === "files") setEditor(true);
     if (p[1]) p[1].open = true;
     queueMicrotask(() => p[0].scrollIntoView({ block: "start" }));
   };

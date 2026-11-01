@@ -118,14 +118,13 @@ test("secrets: a stack hub's Secrets lists exactly that stack's secrets beside i
     await page.setViewportSize({ width: 390, height: 844 });
     await page.waitForTimeout(300);
     const phone = await panes(page);
-    assert.ok(phone.detail && phone.drawer);
-    assert.ok(
-      phone.detail.y + phone.detail.h <= phone.drawer.y,
-      "the secrets above the drawer",
-    );
+    // ux-stackhub-1: below 90rem the change form is a side drawer, opened by
+    // Change a secret; the page makes no room for it while it is shut.
+    assert.ok(phone.detail);
+    await page.getByRole("button", { name: "Change a secret" }).first().click();
+    await page.waitForSelector("dialog.kp-drawer[open] #ch", { timeout: 5000 });
     assert.ok(phone.scrollW <= 390, `sideways scroll: ${phone.scrollW} px`);
-    for (const b of [phone.detail, phone.drawer])
-      assert.ok(b.x >= 0 && b.x + b.w <= 390, "a pane runs off the phone");
+    assert.ok(phone.detail.x >= 0 && phone.detail.x + phone.detail.w <= 390);
   } finally {
     await browser.close();
   }

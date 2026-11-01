@@ -196,19 +196,6 @@
   color: var(--muted-foreground);
 }
 
-/* ---------- KPI tile with a button (Matches its files) ---------- */
-.sh-kpi--plain {
-  grid-template-rows: auto auto auto 28px;
-}
-.sh-kpi__act {
-  display: flex;
-  align-items: end;
-}
-.sh-kpi__act .kp-button {
-  padding-block: 2px;
-  min-block-size: 0;
-}
-
 /* ---------- feeds: history, incidents, files ---------- */
 .sh-feed {
   list-style: none;
@@ -569,4 +556,25 @@
   min-block-size: 2.25em;
   margin: 0;
   color: var(--muted-foreground);
+}
+
+/* ---------- ux-stackhub-1: a hub edit in a side drawer ---------- */
+/* The size form is the editor's own settings card, moved into the drawer;
+   the drawer's head already says what it is. */
+.hub-drawer .edit-card {
+  border: 0;
+  box-shadow: none;
+  background: transparent;
+  padding: 0;
+  margin: 0;
+}
+.hub-drawer .edit-card__title {
+  display: none;
+}
+.hub-drawer .edit-card__head {
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-areas: "bar";
+}
+.hub-drawer .edit-card__desc {
+  display: none;
 }

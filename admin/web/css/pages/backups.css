@@ -128,6 +128,15 @@
   }
 }
 
+/* ux-small-3: the stack is chosen in ONE place, the chips above the table
+   (and the stack bar, which picks the same chip). The table's Filters panel
+   keeps the Stack field in the DOM, so the chips can set the table's filter
+   and read it back, but does not draw it: column 3 is js/backuprepos.js
+   COL.stack. */
+.bk-table .kp-datatable__filter[data-kp-filter-column="3"] {
+  display: none;
+}
+
 /* The repositories: the bar, the stack list, the selection and the table
    stack in one column and keep their widths. */
 .bk-repos__facets h3 {

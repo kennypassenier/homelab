@@ -2491,6 +2491,18 @@
       "twins": false
     },
     {
+      "id": "inbox-seen-undo",
+      "page": "needs-you",
+      "what": "take a single row's Mark seen back before its clock ends",
+      "opens": "run",
+      "row": null,
+      "href": "/inbox",
+      "was": [],
+      "shows": "for 6 seconds after a row's Mark seen",
+      "reach": [],
+      "twins": false
+    },
+    {
       "id": "inbox-snooze",
       "page": "needs-you",
       "what": "snooze a row: it leaves the list and the counter until the moment you pick",

@@ -26,6 +26,13 @@ import {
   shownField,
 } from "./actionforms.js";
 import {
+  leftOutText,
+  plainWhyNot,
+  runLabel,
+  selection,
+  tickEl,
+} from "./batchselect.js";
+import {
   badge,
   cliCommand,
   fieldEl,
@@ -1081,6 +1088,7 @@ export async function openBatch(action, stacks) {
       h(
         "li",
         { "data-stack": s, "data-loading": "" },
+        tickEl(s, { checked: true, disabled: true }),
         h("strong", { class: "batch-preview__name" }, s),
         h("span", {
           class: "kp-skeleton batch-preview__bar",
@@ -1100,12 +1108,36 @@ export async function openBatch(action, stacks) {
     },
     form.submit,
   );
+  // ux-inbox-5: only the ticked stacks run; one that cannot run is unticked.
+  const verb = entry.label;
+  const chosen = selection(form.stacks);
+  const blocked = new Set();
+  const leftOut = h("p", {
+    class: "measured batch-preview__left",
+    hidden: true,
+  });
+  /** The form as the ticked stacks make it. */
+  const liveForm = () => ({
+    ...form,
+    stacks: chosen.list(),
+    confirms: form.confirms.filter((c) => chosen.has(c.stack)),
+  });
   // fix-wipe-1: off until every stack's name is typed exactly.
   function syncRun() {
-    const wrong = batchConfirmErrors(form, values);
-    run.disabled = wrong.length > 0;
-    if (wrong.length) run.title = batchConfirmText(wrong[0]);
+    const wrong = batchConfirmErrors(liveForm(), values);
+    const n = chosen.count();
+    run.textContent = runLabel(verb, n);
+    run.disabled = wrong.length > 0 || n === 0;
+    if (n === 0) run.title = "No stack is ticked, so there is nothing to run.";
+    else if (wrong.length) run.title = batchConfirmText(wrong[0]);
     else run.removeAttribute("title");
+    const text = leftOutText(form.stacks.length, blocked.size);
+    leftOut.textContent = text;
+    leftOut.hidden = !text;
+    form.confirms.forEach((c, i) => {
+      const wrap = /** @type {HTMLElement | undefined} */ (confirmFields[i]);
+      if (wrap) wrap.hidden = !chosen.has(c.stack);
+    });
   }
   syncRun();
   const cancel = h(
@@ -1132,6 +1164,7 @@ export async function openBatch(action, stacks) {
       "Checked whole first, then run one by one in this order:",
     ),
     list,
+    leftOut,
     ...sharedFields,
     ...confirmFields,
     runError,
@@ -1209,24 +1242,16 @@ export async function openBatch(action, stacks) {
       const parts = /** @type {Node[]} */ ([
         h("strong", { class: "batch-preview__name" }, s),
       ]);
-      if (!r.ok)
-        parts.push(
-          h(
-            "span",
-            { class: "measured batch-preview__note" },
-            `no preview: ${r.error.why}`,
-          ),
-        );
+      /** @param {string} why */
+      const cannot = (why) => {
+        blocked.add(s);
+        chosen.set(s, false);
+        parts.push(h("span", { class: "measured batch-preview__note" }, why));
+      };
+      if (!r.ok) cannot(plainWhyNot(r.error.why, entry.label));
       else {
         if (r.body.cli) parts.push(cliCommand(r.body.cli, { wrap: "scroll" }));
-        else
-          parts.push(
-            h(
-              "span",
-              { class: "measured batch-preview__note" },
-              `no CLI line: ${r.body.cli_unavailable ?? "—"}`,
-            ),
-          );
+        else cannot(plainWhyNot(r.body.cli_unavailable, entry.label));
         if (r.body.guard) {
           guarded += 1;
           parts.push(
@@ -1243,9 +1268,18 @@ export async function openBatch(action, stacks) {
         }
       }
       li.removeAttribute("data-loading");
-      li.replaceChildren(...parts);
+      const tick = tickEl(s, {
+        checked: chosen.has(s),
+        disabled: blocked.has(s),
+      });
+      tick.addEventListener("change", () => {
+        chosen.set(s, tick.checked);
+        syncRun();
+      });
+      li.replaceChildren(tick, ...parts);
     }),
   );
+  syncRun();
   list.removeAttribute("aria-busy");
   list.removeAttribute("data-kp-state");
   const force = inputs.get("force");
@@ -1256,8 +1290,8 @@ export async function openBatch(action, stacks) {
   run.addEventListener("click", async () => {
     // Live view: the batch runs on the dashboard's server, once.
     if (driven()) return;
-    const wrong = batchConfirmErrors(form, values);
-    for (const c of form.confirms) {
+    const wrong = batchConfirmErrors(liveForm(), values);
+    for (const c of liveForm().confirms) {
       const input = inputs.get(`confirm:${c.stack}`);
       if (!input) continue;
       if (wrong.includes(c.stack)) showError(input, batchConfirmText(c.stack));
@@ -1271,7 +1305,7 @@ export async function openBatch(action, stacks) {
     const r = await send(
       "POST",
       "/data/actions/batch",
-      batchBody(form, values),
+      batchBody(liveForm(), values),
       form.title,
     );
     syncRun();

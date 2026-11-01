@@ -623,7 +623,14 @@ p:has(> .measured:only-child):first-child {
   list-style: none;
 }
 .batch-preview {
-  grid-template-columns: max-content minmax(0, 1fr) auto;
+  /* tick | stack | CLI line or reason | Copy (ux-inbox-5) */
+  grid-template-columns: auto max-content minmax(0, 1fr) auto;
+}
+.batch-preview__tick {
+  margin: 0;
+}
+.batch-preview__left {
+  margin-block: 0;
 }
 .batch-jobs {
   grid-template-columns:
@@ -642,7 +649,7 @@ p:has(> .measured:only-child):first-child {
   overflow-wrap: anywhere;
 }
 .batch-preview .cli-line {
-  grid-column: 2 / -1;
+  grid-column: 3 / -1;
   min-inline-size: 0;
 }
 .batch-preview__bar {
@@ -655,7 +662,7 @@ p:has(> .measured:only-child):first-child {
 }
 .batch-preview__note,
 .batch-preview__guard {
-  grid-column: 2 / -1;
+  grid-column: 3 / -1;
 }
 .batch-jobs__note {
   min-inline-size: 0;

@@ -59,6 +59,15 @@
 }
 
 /* An update row names each app with its jump; a chip is one app. */
+.ib-list > li > .ib-apps {
+  grid-column: 2 / -1;
+  min-inline-size: 0;
+}
+@container kp-action-list (max-width: 30rem) {
+  .ib-list > li > .ib-apps {
+    grid-column: 1;
+  }
+}
 .ib-apps {
   /* One row per app on two shared tracks: the name, then its jump, so every
      badge starts and ends on one edge. */
@@ -162,4 +171,14 @@
 }
 .ib-snooze__err:empty {
   display: none;
+}
+
+/* ux-inbox-3: a row marked seen keeps its slot, dimmed, until the Undo
+   window closes, so the list does not jump under the pointer. */
+.ib-list > li[data-ib-seen] {
+  opacity: 0.6;
+}
+.ib-seen-note {
+  font-size: var(--kp-text-sm);
+  color: var(--muted-foreground);
 }

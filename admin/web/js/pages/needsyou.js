@@ -49,6 +49,7 @@ import { mountFindings } from "../checkfindings.js";
 import { FINDINGS_SECTION } from "../findingsview.js";
 import { checkRefOf } from "../editforms.js";
 import { switchCheck } from "../editpanels.js";
+import { markSeenWithUndo } from "../inboxseen.js";
 import { mountBulk, mountQuestions, putState } from "../inboxcards.js";
 import { feedToday, feedUpdates } from "../inboxsources.js";
 import {
@@ -68,7 +69,6 @@ import {
   setCardState,
   attachRowKeys,
   removeRow,
-  setRowBusy,
   setKeys,
   setProblems,
   attachSegmented,
@@ -560,8 +560,8 @@ export function mount(root) {
               drivable(
                 rowButton({
                   role: "open",
-                  label: `Only ${stacks[0]}`,
-                  hint: `Update only ${stacks[0]}'s apps`,
+                  label: `Update ${stacks[0]} only`,
+                  hint: `Review and update only the apps of ${stacks[0]}; the other stacks wait`,
                   href: updateHref(stacks[0]),
                 }),
                 REVIEW,
@@ -679,7 +679,7 @@ export function mount(root) {
         SEEN,
         r.key,
       );
-      b.addEventListener("click", () => void markSeen(rowOf(b), b, r));
+      b.addEventListener("click", () => void markSeen(rowOf(b), r));
       out.push(b);
     }
     return out;
@@ -851,6 +851,8 @@ export function mount(root) {
         : []),
       meta,
     );
+    /** @type {HTMLElement | null} */
+    let appsEl = null;
     if (r.apps?.length) {
       const apps = h("div", { class: "ib-apps" });
       for (const a of r.apps)
@@ -871,7 +873,9 @@ export function mount(root) {
             }),
           ),
         );
-      main.append(apps);
+      // ux-inbox-4: the list sits under the row, across the buttons' columns
+      // too, not squeezed into the text column beside four button tracks.
+      appsEl = apps;
     }
     const problem = problemOf(r);
     if (problem) {
@@ -906,6 +910,7 @@ export function mount(root) {
       ),
       main,
       h("div", { class: "kp-row-actions" }, ...actsOf(r)),
+      ...(appsEl ? [appsEl] : []),
     );
   };
 
@@ -923,6 +928,8 @@ export function mount(root) {
   let retrying = false;
   let lastSig = "";
   let lastChips = "";
+  /** The unfiltered list's height [px], measured while no kind is on. */
+  let fullListHeight = 0;
 
   /**
    * A row's facts as one string: what decides whether its element is drawn
@@ -1059,6 +1066,12 @@ export function mount(root) {
           list.querySelector(`li[data-key="${CSS.escape(focusKey)}"]`)
         )?.focus();
     }
+    // ux-inbox-4: a kind filter hides rows but not their room, so the cards
+    // under the list stay where they are; the room is the unfiltered list's.
+    if (kinds.size === 0) {
+      list.style.minBlockSize = "";
+      fullListHeight = list.offsetHeight;
+    } else if (fullListHeight) list.style.minBlockSize = `${fullListHeight}px`;
     // A question's clock ticks in place.
     const now = Date.now() / 1000;
     for (const r of show) {
@@ -1098,31 +1111,19 @@ export function mount(root) {
 
   /**
    * @param {HTMLElement} row
-   * @param {HTMLElement} btn
    * @param {import("../inboxrows.js").Row} r
    */
-  const markSeen = (row, btn, r) =>
+  const markSeen = (row, r) =>
     holding(async () => {
-      if (row.getAttribute("aria-busy") === "true") return;
-      setRowBusy(row, true, btn);
+      if (row.dataset.ibSeen) return;
       const notice = Number(r.key.slice("notice:".length));
-      const res = await send(
-        "POST",
-        "/data/notifications/read",
-        { ids: r.ids ?? [notice], read: true },
-        "marking it seen",
-      );
-      if (!res.ok) {
-        setRowBusy(row, false);
-        row
-          .querySelector(".kp-action-list__main")
-          ?.append(refusalCallout(res.error));
-        return;
-      }
-      // The list is read again before the row folds away, so the redraw
-      // that follows finds it gone from both.
-      await loadNotices();
-      await takeOut(row);
+      await markSeenWithUndo({
+        row,
+        title: r.title,
+        ids: r.ids ?? [notice],
+        page: root,
+        takeOut,
+      });
     });
 
   // Enter on a row presses its main button.

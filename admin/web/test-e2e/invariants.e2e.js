@@ -3375,6 +3375,41 @@ test("invariants: the Host page's actions are grouped by intent as described til
 // Help and the first-use tour (redesign 3.71, approved by Kenny
 // 2026-10-03: demos flows/inbox.html, flows/update.html, flows/shell.js) ──
 
+test("invariants: ux-inbox: Mark seen waits for its Undo and Push the envs ticks only what can run", async () => {
+  const browser = await launch();
+  try {
+    const context = await browser.newContext({
+      viewport: { width: 1280, height: 1000 },
+    });
+    const page = await freshPage(context);
+    await page.goto(`${BASE}/needs-you`);
+    const fail = page.locator("#page .ib-list > li[data-kind=fail]");
+    await fail.waitFor({ timeout: 20000 });
+    // ux-inbox-3: a row's Mark seen keeps its slot until the window closes.
+    const seen = fail.locator('[data-drive="inbox-mark-seen"]');
+    await seen.click();
+    assert.equal(await fail.getAttribute("data-ib-seen"), "pending");
+    await page.locator('[data-drive="inbox-seen-undo"]').click();
+    await page.waitForFunction(
+      () => !document.querySelector("li[data-ib-seen]"),
+    );
+    // ux-inbox-5: the envs dialog counts only the stacks that can run.
+    await page.locator('[data-drive="inbox-push-envs"]').click();
+    const run = page.locator("#batch-run");
+    await run.waitFor({ timeout: 5000 });
+    await page.waitForFunction(
+      () => !document.querySelector(".batch-preview[aria-busy]"),
+    );
+    const ticks = await page.locator(".batch-preview__tick:checked").count();
+    const text = (await run.innerText()).trim();
+    assert.ok(text.endsWith(`${ticks} stacks`) || ticks === 1, text);
+    const dialogText = await page.locator("#batch-dialog").innerText();
+    assert.doesNotMatch(dialogText, /os error|\/tmp\/|no CLI line/);
+  } finally {
+    await browser.close();
+  }
+});
+
 test("invariants: every Inbox row says what and why and carries its fix, and a plain click on a kind shows only those", async () => {
   const browser = await launch();
   try {

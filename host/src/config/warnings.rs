@@ -21,12 +21,13 @@ pub(crate) fn warn_at_load(cfg: &Config) {
             w
         );
     }
+    warn_inert_fallback(cfg);
     // fix-126: said at every start until the route moves to TLS.
     for route in plaintext_bearer_routes(
         cfg.initial_settings.notify_webhook.as_deref(),
         cfg.notify_auth_bearer.as_deref(),
-        cfg.notify_fallback_webhook.as_deref(),
-        cfg.notify_fallback_auth_bearer.as_deref(),
+        None,
+        None,
     ) {
         tracing::warn!(
             "notification route {} sends its bearer token over plain HTTP — anything on that \
@@ -60,6 +61,32 @@ pub(crate) fn warn_at_load(cfg: &Config) {
                 tracing::error!("notify_tls_cert {} could not be read: {}", path, e);
             }
             Ok(Ok(_)) => {}
+        }
+    }
+}
+
+/// Decision kyu-notify (Kenny, "Eenvoudig"): the host sends one POST to kyu
+/// and kyu owns retries and the fallback to Home Assistant. The old
+/// `notify_fallback_*` keys still parse, so an existing host.toml loads, but
+/// nothing reads them; said at every start until they are removed.
+fn warn_inert_fallback(cfg: &Config) {
+    for (key, set) in [
+        (
+            "notify_fallback_webhook",
+            cfg.notify_fallback_webhook.is_some(),
+        ),
+        (
+            "notify_fallback_auth_bearer",
+            cfg.notify_fallback_auth_bearer.is_some(),
+        ),
+    ] {
+        if set {
+            tracing::warn!(
+                "{key} in host.toml is no longer used: the host sends only to kyu \
+                 (notify_webhook), and kyu decides about retries and the fallback to Home \
+                 Assistant (the subscription's max_attempts and backoff_ms in the kyu-runner \
+                 config). Remove the key; it is kept parseable so this file still loads"
+            );
         }
     }
 }

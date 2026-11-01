@@ -29,6 +29,7 @@ pub mod mock;
 pub mod names;
 pub mod native;
 pub mod notify;
+pub mod notify_kyu;
 pub mod oplock;
 pub mod ops;
 pub mod release_sig;

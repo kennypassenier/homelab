@@ -31,16 +31,12 @@ pub(crate) struct Config {
     /// staging, the drill always needs somewhere to restore to); an absent
     /// `host.toml` key falls back to `DEFAULT_DRILL_SCRATCH_DIR`.
     pub(crate) restore_drill_scratch_dir: String,
-    /// G16: the second route, tried when the first one does not answer 2xx.
-    ///
-    /// Y2 sends notifications through kyu so an HA outage cannot lose them.
-    /// Its one carved-out exception was "kyu itself is down" — which is
-    /// exactly what happens while the orchestrator is updating kyu, and the
-    /// message lost in that window is the one saying the update failed. Point
-    /// this straight at Home Assistant.
+    /// INERT since kyu-notify (Kenny, "Eenvoudig"): the host sends only to
+    /// kyu and kyu decides about retries and the fallback to Home
+    /// Assistant. The key stays parseable so an existing host.toml loads;
+    /// `warn_at_load` says it is ignored. (G16 used it as a second route.)
     pub(crate) notify_fallback_webhook: Option<String>,
-    /// Credential for that second route, when it needs one. The HA webhook
-    /// does not; something else might.
+    /// INERT, like the webhook above.
     pub(crate) notify_fallback_auth_bearer: Option<String>,
     /// fix-126 (TLS to the message hub, owner decision 2026-10-01): the
     /// LAN-only self-signed certificate (PEM) an `https://` route is pinned

@@ -45,8 +45,18 @@ webhook_url = "http://10.10.10.2:8123/api/webhook/REDACTED"
 # answers errors (not down, not up), each message burns roughly one attempt per
 # lease budget, so give them room. A policy write replaces every field: what
 # stands here is the whole policy.
+# kyu-notify (Kenny, "Eenvoudig"): the host sends one POST to kyu and kyu
+# owns the retries, so this route's policy carries the patience: 25 attempts,
+# and kyu's backoff is LINEAR (backoff_ms x attempt number), so a base of
+# 5 minutes waits 5, 10, 15 ... 120 minutes: about 25 hours before the last
+# attempt. A constant 5 minute pause is not expressible (the policy has only
+# lease_ms, max_attempts, backoff_ms and ttl_ms); ttl_ms is left unset, which
+# means "keep trying regardless of age". A deploy is Kenny's step: copy this
+# block to /appdata/kyu/kyu-runner-config/config.toml and restart kyu-runner
+# (the policy PUT happens at startup and replaces every field).
 [routes.policy]
 max_attempts = 25
+backoff_ms = 300000
 
 
 # ── Sonarr and Radarr: a download that is waiting for Kenny ───────────

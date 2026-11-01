@@ -2593,10 +2593,28 @@ snoozed, or with pushes off. The page shows when the last digest went out.
 How it travels:
 
 - The host writes every event to `<state_dir>/notices.jsonl` (0600, pruned
-  with the history's limits) and pushes only an urgent one to the
-  **webhook** set via `config/host.toml`/the admin dashboard (G8), with
-  `notify_auth_bearer`, then
-  `notify_fallback_webhook` when the first does not answer 2xx. The payload
+  with the history's limits) and pushes only an urgent one: **one POST** to
+  kyu, at the **webhook** set via `config/host.toml`/the admin dashboard
+  (G8), with `notify_auth_bearer`. The host keeps no queue and runs no
+  retry loop; kyu retries and falls back to Home Assistant (below). When
+  kyu does not accept the POST (non-2xx, timeout, connect error) the push
+  column of that notice says `failed: ...` and a second notice, **Notification
+  could not be delivered**, appears in the Inbox
+  (`core::notify_kyu::undelivered_notice`). It is not pushed itself.
+  A failure also sends `Kyu-Dedup-Key: <op>|<what>` and
+  `Kyu-Dedup-Window: 20h` (`core::notify_kyu::dedup_key`), so kyu answers a
+  repeat of the same failure inside 20 h with 200 and `Kyu-Duplicate: true`
+  (counted as delivered; the push column says so) instead of 201; a
+  success sends no key. This replaces the host's own 20 h damper. There is
+  no `priority` field: kyu has none. The dashboard's controls (snooze,
+  quiet, quiet hours, digest) are unchanged; the dashboard's own push is
+  also a single POST whose failure is shown on the notice.
+  `notify_fallback_webhook` and `notify_fallback_auth_bearer` are **inert**:
+  they still parse so an old host.toml loads, and the host says at every
+  start that they are ignored. kyu's retries come from the subscription's
+  policy in the kyu-runner config (`captured/messaging/kyu-runner/`):
+  `max_attempts = 25` with `backoff_ms = 300000`, a linear 5, 10, 15 ...
+  minute pause, about 25 hours of patience. The payload
   keeps its shape (`core/src/notify.rs`) and adds `click_url`:
 
   ```json

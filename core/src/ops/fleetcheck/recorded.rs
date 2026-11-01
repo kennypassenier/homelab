@@ -93,10 +93,11 @@ pub fn evaluate_notify(state: &HostState, now: u64) -> Vec<Finding> {
                 .unwrap_or_default(),
             format_args!(" — {}", last_ok)
         ),
-        remedy: "check the route in `notify_url` and `notify_fallback_webhook` in host.toml — \
+        remedy:
+            "check `notify_webhook` and `notify_auth_bearer` in host.toml and that kyu answers — \
                  while this stands, every warning this host produces is going nowhere, \
                  including this one"
-            .into(),
+                .into(),
     }]
 }
 

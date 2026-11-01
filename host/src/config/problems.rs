@@ -64,13 +64,10 @@ pub(crate) fn startup_problems(file: &FileConfig) -> Vec<String> {
     // is stepwise); the actual fingerprint-on-disk match is a boot-time
     // warning (`load_config_from`), not refused here, since it needs to
     // read the file.
-    let https_route = [
-        file.notify_webhook.as_deref(),
-        file.notify_fallback_webhook.as_deref(),
-    ]
-    .into_iter()
-    .flatten()
-    .any(|u| u.starts_with("https://"));
+    let https_route = file
+        .notify_webhook
+        .as_deref()
+        .is_some_and(|u| u.starts_with("https://"));
     if https_route && (file.notify_tls_cert.is_none() || file.notify_tls_fingerprint.is_none()) {
         out.push(
             "an https:// notify route needs notify_tls_cert and notify_tls_fingerprint — the \

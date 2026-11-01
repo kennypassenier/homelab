@@ -50,7 +50,7 @@ flowchart LR
     daemon --> pct --> ct
     daemon -->|"restic over rclone"| gdrive
     daemon -->|"webhook POST"| kyu --> ha
-    daemon -.->|"fallback webhook"| ha
+    daemon -.->|"fallback webhook, now kyu-only"| ha
     github -.->|"nightly native update"| daemon
 ```
 <sub>Source: `client/src/main.rs`, `client/src/spec.rs`, `client/src/release.rs`, `host/src/main.rs`, `core/src/ops/backup/`, `core/src/ops/native/`.</sub>

@@ -12,8 +12,6 @@ pub(crate) struct AppState {
     pub(crate) busy: Arc<std::sync::Mutex<Option<homelab_core::oplock::Holder>>>,
     /// G8: live mutable settings (scheduler hour, webhook, retention).
     pub(crate) settings: Arc<std::sync::RwLock<homelab_proto::HostConfigView>>,
-    /// H13: failure-repeat damping for F3 notifications.
-    pub(crate) damper: Arc<std::sync::Mutex<homelab_core::notify::NotifyDamper>>,
     /// T69: questions a step is waiting on, by id. The client's answer
     /// arrives as an ordinary RPC and is delivered through one of these.
     pub(crate) pending_asks: Arc<std::sync::Mutex<std::collections::HashMap<u64, PendingAsk>>>,
@@ -154,9 +152,6 @@ impl AppState {
             next_ask_id: Arc::new(std::sync::atomic::AtomicU64::new(1)),
             ui: Arc::new(ui_relay::UiRelay::default()),
             notice_seq: Arc::new(std::sync::Mutex::new(last_seq)),
-            damper: Arc::new(std::sync::Mutex::new(
-                homelab_core::notify::NotifyDamper::new(20 * 3600),
-            )),
             auth_failures: Arc::new(AuthFailures::default()),
             live_status: Arc::new(std::sync::RwLock::new(None)),
             env_sealed: Arc::new(std::sync::RwLock::new(Default::default())),

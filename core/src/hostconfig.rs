@@ -427,7 +427,7 @@ pub const KEYS: &[KeyInfo] = &[
         "notify_webhook",
         "Notifications",
         "Notification webhook",
-        "Where the host posts a notification after each operation; empty: off.",
+        "Where the host posts a notification after each operation: the kyu publish URL. One POST; kyu owns retries and the fallback to Home Assistant. Empty: off.",
         "off",
         Kind::Url,
         Access::Browser,
@@ -448,9 +448,9 @@ pub const KEYS: &[KeyInfo] = &[
         "notify_fallback_webhook",
         "Notifications",
         "Fallback webhook",
-        "The second route, tried when the first does not answer 2xx. A secret: \
-         its URL carries a Home Assistant webhook id, so it is changed over ssh only and \
-         never declared in the public repository.",
+        "No longer used (kyu-notify): the host sends only to kyu and kyu decides \
+         about the fallback to Home Assistant. Kept so an existing host.toml still loads; \
+         remove it. A secret: changed over ssh only.",
         "none",
         Kind::Url,
         Access::Secret,
@@ -460,7 +460,7 @@ pub const KEYS: &[KeyInfo] = &[
         "notify_fallback_auth_bearer",
         "Notifications",
         "Fallback token",
-        "The bearer token of the second route. A secret: changed over ssh only.",
+        "No longer used (kyu-notify), see the fallback webhook. A secret: changed over ssh only.",
         "none",
         Kind::Text,
         Access::Secret,

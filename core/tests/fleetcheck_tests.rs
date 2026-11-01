@@ -994,7 +994,7 @@ fn the_full_round_does_not_raise_the_manual_checks() {
 /// G16 · the notification path can be broken, and until now nothing said so.
 mod notification_health {
     use super::*;
-    use homelab_core::notify::{Delivery, route, verdict};
+    use homelab_core::notify::{Delivery, verdict};
     use homelab_core::ops::fleetcheck::{Severity, evaluate_notify};
 
     #[test]
@@ -1008,22 +1008,6 @@ mod notification_health {
         assert!(matches!(verdict(true, "500"), Delivery::Failed(_)));
         assert!(matches!(verdict(true, "000"), Delivery::Failed(_)));
         assert!(matches!(verdict(false, ""), Delivery::Failed(_)));
-    }
-
-    #[test]
-    fn the_fallback_is_tried_after_the_primary_and_never_twice() {
-        assert_eq!(route(Some("a"), Some("b")), vec!["a", "b"]);
-        assert_eq!(route(Some("a"), None), vec!["a"]);
-        assert_eq!(route(None, Some("b")), vec!["b"]);
-        assert!(
-            route(None, None).is_empty(),
-            "nothing configured, nothing sent"
-        );
-        assert_eq!(
-            route(Some("a"), Some("a")),
-            vec!["a"],
-            "the same url twice is one route, not a retry"
-        );
     }
 
     #[test]

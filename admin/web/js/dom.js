@@ -755,7 +755,7 @@ export function progressBar(label, pct = 0, cls = "") {
  * @param {{href: string, label: string, current: boolean}[]} tabs
  */
 export function tabRow(label, tabs) {
-  return h(
+  const list = h(
     "div",
     { class: "kp-tabs__list", role: "tablist", "aria-label": label },
     ...tabs.map((t) =>
@@ -772,6 +772,47 @@ export function tabRow(label, tabs) {
       ),
     ),
   );
+  roveTabs(list);
+  return list;
+}
+
+/**
+ * ux-stackhub-8: the tab keys. One tab is in the Tab order (the selected one,
+ * else the first); ← → move to the neighbour (round the ends), Home and End
+ * to the first and last. Moving only moves the focus: Enter opens the tab's
+ * address, as a link does.
+ * @param {HTMLElement} list a `role=tablist` of tab elements
+ */
+export function roveTabs(list) {
+  const tabs = () => [...list.querySelectorAll('[role="tab"]')];
+  const rest = (/** @type {Element | undefined} */ on) => {
+    for (const t of tabs()) t.setAttribute("tabindex", t === on ? "0" : "-1");
+  };
+  rest(
+    tabs().find((t) => t.getAttribute("aria-selected") === "true") ?? tabs()[0],
+  );
+  list.addEventListener("focusin", (e) => {
+    const t = tabs().find((x) => x === e.target);
+    if (t) rest(t);
+  });
+  list.addEventListener("keydown", (e) => {
+    const all = tabs();
+    const i = all.indexOf(/** @type {Element} */ (e.target));
+    if (i < 0 || e.altKey || e.ctrlKey || e.metaKey) return;
+    const to =
+      e.key === "ArrowRight"
+        ? all[(i + 1) % all.length]
+        : e.key === "ArrowLeft"
+          ? all[(i - 1 + all.length) % all.length]
+          : e.key === "Home"
+            ? all[0]
+            : e.key === "End"
+              ? all[all.length - 1]
+              : null;
+    if (!to) return;
+    e.preventDefault();
+    /** @type {HTMLElement} */ (to).focus();
+  });
 }
 
 /**

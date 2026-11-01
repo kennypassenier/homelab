@@ -47,6 +47,7 @@ import {
   onPageKey,
   unlessDialog,
 } from "../shortcuts.js";
+import { nodeDrawer } from "../hubdrawer.js";
 import { current, listen, subscribe } from "../store.js";
 import { esc } from "../settingsform.js";
 import { liveStatus, pageHeader, toast } from "../ui.js";
@@ -455,7 +456,12 @@ export function mount(root, opts = {}) {
           hideAllBtn,
           changeBtn,
         ),
-        h("div", { class: "sx-md sx-md--one" }, detailCard.el, drawerCard.el),
+        h(
+          "div",
+          { class: "sx-md sx-md--one" },
+          detailCard.el,
+          h("div", { class: "sx-slot" }, drawerCard.el),
+        ),
       ),
     );
   } else {
@@ -759,6 +765,32 @@ export function mount(root, opts = {}) {
   }).observe(detailCard.el, { childList: true, subtree: true });
 
   // ── the change drawer: paste → stage → write ─────────────────────────
+  // ux-stackhub-1: where the page is too narrow to hold the change form
+  // beside the keys (the CSS stacks them below 90rem), it opens in a side
+  // drawer, so Change… never scrolls the page away from the row pressed.
+  const narrow = matchMedia("(max-width: 90rem)");
+  const sideDrawer =
+    one == null
+      ? null
+      : nodeDrawer({
+          node: drawerCard.el,
+          title: "Change a secret",
+          desc: "",
+          onClose: () => {
+            if (S.change) closeChange();
+          },
+        });
+  stops.push(() => sideDrawer?.forget());
+  function syncDrawer() {
+    if (!sideDrawer) return;
+    if (!S.change) return sideDrawer.close();
+    if (!narrow.matches) return;
+    sideDrawer.open();
+    sideDrawer.setHead(
+      drawerCard.titleEl.textContent ?? "",
+      drawerCard.lede.textContent ?? "",
+    );
+  }
   /** @param {import("../secretsview.js").SecretRow} row */
   function openChange(row) {
     S.change = row;
@@ -798,6 +830,7 @@ export function mount(root, opts = {}) {
         "Pick Change… on a secret to stage a new value here. Nothing is written until you press Write.";
       drawer.innerHTML = steps(["pending", "pending", "pending"], "the app");
       void attachAll(drawer);
+      syncDrawer();
       return;
     }
     const row = S.change;
@@ -849,6 +882,7 @@ export function mount(root, opts = {}) {
       paintDrawer();
     });
     void attachAll(drawer);
+    syncDrawer();
   }
 
   /** Step 2: the value goes to the dashboard's memory; nothing is written. */

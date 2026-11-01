@@ -172,7 +172,13 @@ export function mount(root, ctx) {
       { key: "cpu", label: "Host CPU", href: "/host" },
       { key: "disk", label: "Root disk", href: "/host" },
     ],
-    { loading: !current().fleet, label: "The host at a glance" },
+    {
+      loading: !current().fleet,
+      label: "The host at a glance",
+      // ux-stackhub-12: two tiles to a row on a phone, so the list starts on
+      // the first screen instead of the third.
+      columns: "all 3 2 2",
+    },
   );
   strip.el.classList.add("sk-kpis");
   for (const [key, k] of strip.tiles)

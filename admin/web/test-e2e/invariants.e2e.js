@@ -3410,6 +3410,35 @@ test("invariants: ux-inbox: Mark seen waits for its Undo and Push the envs ticks
   }
 });
 
+test("invariants: ux-inbox-2: Snooze is a menu on the button and a choice leaves an Undo", async () => {
+  const browser = await launch();
+  try {
+    const context = await browser.newContext({
+      viewport: { width: 1280, height: 1000 },
+    });
+    const page = await freshPage(context);
+    await page.goto(`${BASE}/needs-you`);
+    const fail = page.locator("#page .ib-list > li[data-kind=fail]");
+    await fail.waitFor({ timeout: 20000 });
+    // ux-inbox-2: Snooze opens a menu, never a dialog; a choice leaves Undo.
+    await fail.locator('[data-drive="inbox-snooze"]').click();
+    await page
+      .locator('[data-drive="inbox-snooze-for"][data-drive-row="1h"]')
+      .waitFor({ timeout: 5000 });
+    assert.equal(await page.locator("dialog[open]").count(), 0);
+    await page
+      .locator('[data-drive="inbox-snooze-for"][data-drive-row="1h"]')
+      .click();
+    const undo = page.locator(".kp-toast--undo button", { hasText: "Undo" });
+    await undo.waitFor({ timeout: 5000 });
+    await fail.waitFor({ state: "detached", timeout: 5000 });
+    await undo.click();
+    await fail.waitFor({ timeout: 5000 });
+  } finally {
+    await browser.close();
+  }
+});
+
 test("invariants: every Inbox row says what and why and carries its fix, and a plain click on a kind shows only those", async () => {
   const browser = await launch();
   try {

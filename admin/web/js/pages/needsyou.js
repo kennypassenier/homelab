@@ -49,6 +49,7 @@ import { mountFindings } from "../checkfindings.js";
 import { FINDINGS_SECTION } from "../findingsview.js";
 import { checkRefOf } from "../editforms.js";
 import { switchCheck } from "../editpanels.js";
+import { openSnoozeMenu } from "../inboxsnoozemenu.js";
 import { markSeenWithUndo } from "../inboxseen.js";
 import { mountBulk, mountQuestions, putState } from "../inboxcards.js";
 import { feedToday, feedUpdates } from "../inboxsources.js";
@@ -199,15 +200,15 @@ const SNOOZE_OPEN = declare({
   page: "needs-you",
   opens: "dialog",
   row: "<row key>",
-  what: "snooze a row: it leaves the list and the counter until the moment you pick",
+  what: "open a row's Snooze menu: it leaves the list and the counter until the moment you pick",
 });
 const SNOOZE_FOR = declare({
   id: "inbox-snooze-for",
   page: "needs-you",
   opens: "run",
-  row: "1h|4h|tonight|tomorrow|monday|pick",
-  what: "snooze the row for 1 hour, 4 hours, until tonight 18:00, tomorrow 07:00, Monday 07:00 or a date and time (at most 90 days); pick is the button of the date panel",
-  shows: "in the snooze dialog",
+  row: "1h|4h|tomorrow|pick-time|tonight|monday|pick",
+  what: "snooze the row for 1 hour, 4 hours or until tomorrow 07:00 (the Snooze menu's entries, with an Undo toast); pick-time opens the dialog; there tonight 18:00, Monday 07:00 or a date and time (at most 90 days), pick being the button of the date panel",
+  shows: "in the Snooze menu, and in the snooze dialog",
   reach: [{ do: "click", control: "inbox-snooze", row: "*" }],
 });
 const SNOOZE_REMIND = declare({
@@ -726,7 +727,15 @@ export function mount(root) {
       SNOOZE_OPEN,
       r.key,
     );
-    b.addEventListener("click", () => openSnooze(r));
+    b.addEventListener("click", () =>
+      openSnoozeMenu({
+        anchor: b,
+        row: r,
+        page: root,
+        openPicker: () => openSnooze(r),
+        mark: (part, key) => drivable(part, SNOOZE_FOR, key),
+      }),
+    );
     return [...out, b];
   };
 

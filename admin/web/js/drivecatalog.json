@@ -2505,7 +2505,7 @@
     {
       "id": "inbox-snooze",
       "page": "needs-you",
-      "what": "snooze a row: it leaves the list and the counter until the moment you pick",
+      "what": "open a row's Snooze menu: it leaves the list and the counter until the moment you pick",
       "opens": "dialog",
       "row": "<row key>",
       "href": "/inbox",
@@ -2529,12 +2529,12 @@
     {
       "id": "inbox-snooze-for",
       "page": "needs-you",
-      "what": "snooze the row for 1 hour, 4 hours, until tonight 18:00, tomorrow 07:00, Monday 07:00 or a date and time (at most 90 days); pick is the button of the date panel",
+      "what": "snooze the row for 1 hour, 4 hours or until tomorrow 07:00 (the Snooze menu's entries, with an Undo toast); pick-time opens the dialog; there tonight 18:00, Monday 07:00 or a date and time (at most 90 days), pick being the button of the date panel",
       "opens": "run",
-      "row": "1h|4h|tonight|tomorrow|monday|pick",
+      "row": "1h|4h|tomorrow|pick-time|tonight|monday|pick",
       "href": "/inbox",
       "was": [],
-      "shows": "in the snooze dialog",
+      "shows": "in the Snooze menu, and in the snooze dialog",
       "reach": [
         {
           "do": "click",

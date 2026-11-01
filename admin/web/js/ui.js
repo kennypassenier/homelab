@@ -1123,7 +1123,7 @@ export function toast(text, opts = {}) {
  * button's own click is kp's from then on.
  * @param {{anchor: HTMLElement, label: string, title: string,
  *   items: {name: string, label: string, hint: string, run: () => void,
- *   danger?: boolean}[], width?: number}} spec
+ *   danger?: boolean, mark?: (part: HTMLElement) => void}[], width?: number}} spec
  * @returns {{el: HTMLElement, close: () => void}}
  */
 export function rowMenu(spec) {
@@ -1159,8 +1159,11 @@ export function rowMenu(spec) {
     attachMenuButtons(wrap.parentElement ?? wrap, {
       decorate: (part, info) => {
         // The entry is the Live view control named for it (dialogControl).
-        if (info.kind === "menu-item" && info.value)
-          dialogControl(part, info.value);
+        if (info.kind !== "menu-item" || !info.value) return;
+        // `mark`: the entry is a declared control with a row (ux-inbox-2).
+        const entry = rowItems.get(wrap)?.get(info.value);
+        if (entry?.mark) entry.mark(part);
+        else dialogControl(part, info.value);
       },
     });
   } else wrap = /** @type {HTMLElement} */ (had);
@@ -1181,7 +1184,7 @@ export function rowMenu(spec) {
   return { el: wrap, close: () => closeMenu(wrap) };
 }
 
-/** The entries a row menu's wrapper runs, by their name. @type {WeakMap<HTMLElement, Map<string, {run: () => void}>>} */
+/** The entries a row menu's wrapper runs, by their name. @type {WeakMap<HTMLElement, Map<string, {run: () => void, mark?: (part: HTMLElement) => void}>>} */
 const rowItems = new WeakMap();
 
 /**

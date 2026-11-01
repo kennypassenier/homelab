@@ -1,0 +1,23 @@
+/* ux-small-4: the System rail's two lone glyphs ("S" and "»") carry words.
+   Folded, the rail is 4.5 rem wide: the title reads "System" in small caps
+   and the fold control shows its glyph above "Expand" (open: "Collapse"),
+   the words the kit gives the control as its name. */
+.app-rail__short {
+  font-size: 0.6875rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  text-decoration: none;
+  white-space: nowrap;
+  text-align: center;
+  color: inherit;
+}
+.app-rail__toggle {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.125rem;
+}
+.app-rail__toggle-text {
+  font-size: 0.6875rem;
+  line-height: 1;
+}

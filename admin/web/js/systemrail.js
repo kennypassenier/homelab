@@ -9,7 +9,7 @@
 // rail gives way to the tab bar's More sheet.
 
 import { SUB_PAGES, subPageAt } from "./areas.js";
-import { h } from "./dom.js";
+import { ensureStyle, h } from "./dom.js";
 import { attachSidenavs } from "/static/kp/dist/kp-themes.min.js";
 
 /** The icon of each page, drawn with the text colour (24 by 24, one stroke). */
@@ -85,6 +85,7 @@ function link(id, current, count = null) {
  * @returns {HTMLElement}
  */
 export function railEl(current) {
+  ensureStyle("/css/pages/rail.css");
   const group = h(
     "li",
     { class: "kp-sidenav__category", "data-kp-sidenav-expanded": "" },
@@ -134,13 +135,14 @@ export function railEl(current) {
           "System",
         ),
         h(
-          "span",
+          "a",
           {
-            class: "kp-sidenav__title",
+            class: "kp-sidenav__title app-rail__short",
+            href: "/system",
+            "aria-label": "System",
             "data-kp-sidenav-slim-show": "",
-            "aria-hidden": "true",
           },
-          "S",
+          "System",
         ),
       ),
       h(
@@ -164,25 +166,36 @@ export function railEl(current) {
             class: "kp-sidenav__link",
             "data-kp-sidenav-slim-toggle": "",
             "aria-controls": "system-rail",
+            "aria-label": "Expand the side navigation",
             title: "Open or fold the rail",
           },
           h(
             "span",
-            {
-              class: "kp-sidenav__icon",
-              "aria-hidden": "true",
-              "data-kp-sidenav-slim-hide": "",
-            },
-            "«",
+            { "data-kp-sidenav-slim-hide": "" },
+            h(
+              "span",
+              { class: "app-rail__toggle" },
+              h(
+                "span",
+                { class: "kp-sidenav__icon", "aria-hidden": "true" },
+                "«",
+              ),
+              h("span", { class: "app-rail__toggle-text" }, "Collapse"),
+            ),
           ),
           h(
             "span",
-            {
-              class: "kp-sidenav__icon",
-              "aria-hidden": "true",
-              "data-kp-sidenav-slim-show": "",
-            },
-            "»",
+            { "data-kp-sidenav-slim-show": "" },
+            h(
+              "span",
+              { class: "app-rail__toggle" },
+              h(
+                "span",
+                { class: "kp-sidenav__icon", "aria-hidden": "true" },
+                "»",
+              ),
+              h("span", { class: "app-rail__toggle-text" }, "Expand"),
+            ),
           ),
         ),
       ),

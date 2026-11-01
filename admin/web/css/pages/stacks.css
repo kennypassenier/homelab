@@ -580,3 +580,16 @@ main.shell.ap-page > [hidden] {
 .ap-hover__uptime .kp-uptime__track {
   column-gap: 1px;
 }
+
+/* ux-stackhub-10: fixed column tracks, so folding a group (which changes
+   what the widest cell of a column is) never moves the headers sideways. */
+.fl-table .kp-table {
+  table-layout: fixed;
+}
+.fl-table .kp-table th[data-kp-expand-column],
+.fl-table .kp-table th.select-col {
+  inline-size: 3rem;
+}
+.fl-table .kp-table th[data-kp-column-locked] {
+  inline-size: 22%;
+}

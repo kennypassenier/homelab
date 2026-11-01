@@ -190,3 +190,8 @@
   font-size: var(--kp-text-sm);
   color: var(--muted-foreground);
 }
+
+/* A kit button's own display wins over the hidden attribute. */
+#inbox-questions [hidden] {
+  display: none;
+}

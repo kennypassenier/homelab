@@ -1,4 +1,4 @@
-# C7 native service — habits on CT 122, modelled on stacks/kitchen/service.yml.
+# C7 native service — habits on CT 123, modelled on stacks/kitchen/service.yml.
 # Habits' own deploy/service.yml put its state in /var/lib/habits and its env
 # file in /etc/habits; here both live in the bind-mounted state directory
 # (HABITS_STATE_DIR is explicit in the unit), so the nightly backup reaches
@@ -6,8 +6,8 @@
 # directory and one --property=Environment= per Environment= line of the unit
 # (almanac fix-3: otherwise `update --check` looks at the compiled-in default).
 stack_name: habits
-vmid: 122
-hostname: 122-app-habits
+vmid: 123
+hostname: 123-app-habits
 unit: habits
 binary: /opt/habits/bin/habits
 env_file: /appdata/habits/habits-config/habits.env

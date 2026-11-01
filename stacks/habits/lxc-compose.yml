@@ -1,6 +1,6 @@
 # Stack intent (schema v2 — intent only, no machine-written state).
 #
-# CT 122 holds one native service: habits, Kenny's tasks, time tracking and
+# CT 123 holds one native service: habits, Kenny's tasks, time tracking and
 # focus app for the PC and the phone. It is a chassis-rs single binary run by
 # a systemd unit; `service.yml` beside this file describes the service, this
 # file describes the container around it. Modelled on CT 121 (kitchen), the
@@ -14,12 +14,12 @@
 #   3. the state comes back from the nightly backup of the bind mount below.
 
 stack_name: habits
-vmid: 122
-hostname: 122-app-habits
+vmid: 123
+hostname: 123-app-habits
 native_only: true
 
 network:
-  ip: 10.10.10.22/24
+  ip: 10.10.10.23/24
   gateway: 10.10.10.1
   bridge: vmbr0
   vlan: 10
@@ -63,12 +63,12 @@ apps: []
 natives: [habits]
 
 gateway_route:
-  filename: 122-app-habits.yml
+  filename: 123-app-habits.yml
 
 firewall:
   enabled: true
   comment: |-
-    CT 122 (habits), habits (native).
+    CT 123 (habits), habits (native).
     Modelled on kitchen's rules. In: Traefik on CT 104 (habits.kp-soft.dev),
     Prometheus on CT 113 (habits metrics, node exporter). Kenny's desktop is
     added by the renderer from host.toml `trusted_sources`. Out: Loki push

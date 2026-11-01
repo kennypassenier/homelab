@@ -1,4 +1,4 @@
-# Traefik route for Habits (CT 122).
+# Traefik route for Habits (CT 123).
 #
 # habits.kp-soft.dev: through the Cloudflare tunnel, behind the wildcard
 # Cloudflare Access policy like every kp-soft.dev name (same shape as
@@ -16,4 +16,4 @@ http:
     habits:
       loadBalancer:
         servers:
-          - url: "http://10.10.10.22:8080"
+          - url: "http://10.10.10.23:8080"

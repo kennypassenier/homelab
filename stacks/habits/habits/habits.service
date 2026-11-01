@@ -8,7 +8,7 @@
 # the binary's directory too, or self-update verifies, downloads and then
 # fails at the swap.
 #
-# Homelab layout (CT 122): the state root is the bind-mounted
+# Homelab layout (CT 123): the state root is the bind-mounted
 # /appdata/habits/habits-config (env file included), the binary lives in
 # /opt/habits/bin and must be owned by the habits user (a root-owned binary
 # stops the self-update at the swap — fix-12). `homelab install-native`

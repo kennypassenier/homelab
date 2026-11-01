@@ -1,4 +1,4 @@
-# Habits, a native chassis-rs service on CT 122. The container has no curl;
+# Habits, a native chassis-rs service on CT 123. The container has no curl;
 # wget is what is available there (same template as kitchen's CT 121).
 checks:
   - name: "habits is healthy"

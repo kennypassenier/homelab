@@ -145,7 +145,7 @@ firewall:
       note: JobTracker events (JOBTRACKER_ALMANAC_URL)
     - dir: in
       action: ACCEPT
-      source: 10.10.10.22
+      source: 10.10.10.23
       proto: tcp
       dport: "8080"
       note: Habits events (HABITS_ALMANAC_URL)

@@ -256,6 +256,9 @@ export function mount(root, ctx) {
           gridRow({
             label: "What it restores",
             control: facts,
+            // The list spans the control and the reading track instead of
+            // leaving the right half empty.
+            wide: true,
           }),
         ]),
       ),

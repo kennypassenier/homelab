@@ -7,7 +7,11 @@
 // one line.
 
 import { TOUR_NAME, startTour } from "./helptour.js";
-import { FOLLOW_KEY } from "./driveview.js";
+import {
+  FOLLOW_KEY,
+  FOLLOW_REQUEST_EVENT,
+  FOLLOW_STATE_EVENT,
+} from "./driveview.js";
 import { esc } from "./settingsform.js";
 import { offerUndo } from "./instantundo.js";
 import {
@@ -15,6 +19,7 @@ import {
   openConfirmation,
   REMEMBER_PREFIX,
   attachSegmented,
+  setSegmentedValues,
   THEMES,
   applyTheme,
   currentTheme,
@@ -149,9 +154,9 @@ export function mountThisBrowser(body) {
     ),
     row("Dark theme", "For a dark room, or a dark system.", themes(true)),
     row(
-      "Live view opens",
-      "Whether Live view follows Claude when this dashboard opens.",
-      `<div class="kp-segmented" data-kp-segmented="single" role="radiogroup" aria-label="Live view opens"><button type="button" class="kp-segmented__item" data-value="on" role="radio" aria-checked="${live === "on"}"><span class="kp-segmented__label">Following</span></button><button type="button" class="kp-segmented__item" data-value="off" role="radio" aria-checked="${live === "off"}"><span class="kp-segmented__label">Off</span></button></div>`,
+      "Live view",
+      "Whether this tab follows Claude's steps live. What you choose is also what new tabs start with.",
+      `<div class="kp-segmented" data-kp-segmented="single" role="radiogroup" aria-label="Live view in this tab"><button type="button" class="kp-segmented__item" data-value="on" role="radio" aria-checked="${live === "on"}"><span class="kp-segmented__label">Following</span></button><button type="button" class="kp-segmented__item" data-value="off" role="radio" aria-checked="${live === "off"}"><span class="kp-segmented__label">Off</span></button></div>`,
     ),
     row(
       "Follow my system",
@@ -207,24 +212,47 @@ export function mountThisBrowser(body) {
       }),
     );
   });
+  const liveGroup = /** @type {HTMLElement} */ (
+    body.querySelector('[aria-label="Live view in this tab"]')
+  );
+  /** Put the segmented control to what the tab does, without a change event. @param {boolean} on */
+  const showLive = (on) => setSegmentedValues(liveGroup, [on ? "on" : "off"]);
   body.addEventListener("kp-segmented-change", (e) => {
     const v = /** @type {CustomEvent} */ (e).detail?.value;
     if (v !== "on" && v !== "off") return;
-    const before = read(FOLLOW_KEY) === "on" ? "on" : "off";
     write(FOLLOW_KEY, v);
-    if (undoing || before === v) return;
-    offerUndo(
-      `Live view ${v === "on" ? "follows Claude" : "stays off"} when a tab opens.`,
-      () =>
-        quietly(() =>
-          /** @type {HTMLElement | null} */ (
-            body.querySelector(
-              `[aria-label="Live view opens"] [data-value="${before}"]`,
-            )
-          )?.click(),
-        ),
+    window.dispatchEvent(
+      new CustomEvent(FOLLOW_REQUEST_EVENT, { detail: { on: v === "on" } }),
     );
   });
+  // The tab answers (a Live view step, the "Live view" button, an Undo).
+  /** @type {boolean | null} */
+  let liveBefore = null;
+  const onState = (/** @type {Event} */ e) => {
+    const d = /** @type {CustomEvent} */ (e).detail;
+    if (d?.ask) return;
+    const on = !!d?.on;
+    if (liveBefore === on) return;
+    const was = liveBefore;
+    liveBefore = on;
+    showLive(on);
+    if (undoing || was === null) return;
+    offerUndo(
+      `Live view ${on ? "follows Claude in this tab" : "is off"}.`,
+      () =>
+        quietly(() => {
+          write(FOLLOW_KEY, on ? "off" : "on");
+          window.dispatchEvent(
+            new CustomEvent(FOLLOW_REQUEST_EVENT, { detail: { on: !on } }),
+          );
+        }),
+    );
+  };
+  window.addEventListener(FOLLOW_STATE_EVENT, onState);
+  stops.push(() => window.removeEventListener(FOLLOW_STATE_EVENT, onState));
+  window.dispatchEvent(
+    new CustomEvent(FOLLOW_STATE_EVENT, { detail: { ask: true } }),
+  );
   const followBox = /** @type {HTMLInputElement} */ (
     body.querySelector("#st-follow")
   );

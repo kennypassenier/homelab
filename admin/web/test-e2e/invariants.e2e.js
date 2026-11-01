@@ -160,6 +160,25 @@ async function freshPage(context) {
 }
 
 /**
+ * ux-hostsettings-3: turn this tab's Live view on. The switch is no longer
+ * drawn in the bar; the tab takes the same request Host settings sends.
+ * @param {import("playwright").Page} page
+ */
+async function liveViewOn(page) {
+  await page.evaluate(() =>
+    window.dispatchEvent(
+      new CustomEvent("homelab:follow-request", { detail: { on: true } }),
+    ),
+  );
+  await page.waitForFunction(
+    () =>
+      /** @type {HTMLInputElement | null} */ (
+        document.getElementById("live-view")
+      )?.checked,
+  );
+}
+
+/**
  * redesign-stackhub: open the stack hub header's More ▾ menu (where most
  * stack actions live since 3.71.0), when the page has one and it is shut.
  * @param {import("playwright").Page} page
@@ -222,7 +241,7 @@ test("invariants: Pause and Stop are visible in every Live view drive state", as
   try {
     const context = await browser.newContext();
     const page = await freshPage(context);
-    await page.check("#live-view");
+    await liveViewOn(page);
     await page.waitForTimeout(150);
     // Drive one step through the demo-host-only test endpoint
     // (admin/src/shell/drive.rs::demo_step, "never mounted beside a real
@@ -582,7 +601,7 @@ test("invariants: a version difference never blocks — Live view still drives a
   try {
     const context = await browser.newContext();
     const page = await freshPage(context);
-    await page.check("#live-view");
+    await liveViewOn(page);
     await page.waitForTimeout(150);
 
     // The tab reports an older dashboard's capabilities: it knows "host"
@@ -4540,7 +4559,7 @@ async function onSchedules(run) {
     await page.goto(`${BASE}/schedules`);
     const row = page.locator(`tr[data-id="${id}"]`);
     await row.waitFor({ timeout: 10000 });
-    await page.check("#live-view");
+    await liveViewOn(page);
     const step = (/** @type {any} */ s) =>
       page.evaluate(
         (body) =>
@@ -5033,7 +5052,7 @@ async function liveClicks(presses) {
     const restore = await noCountdown(page);
     await page.goto(`${BASE}/apps`, { waitUntil: "domcontentloaded" });
     await drawn(page);
-    await page.check("#live-view");
+    await liveViewOn(page);
     const { all } = await catalogOf(page);
     /** @type {Map<string, string>} */
     const landed = new Map();
@@ -6788,6 +6807,14 @@ test("invariants: redesign-config Settings edits a key where it stands, counts i
     const page = await freshPage(context);
     await page.goto(`${BASE}/settings`);
     const row = page.locator('.kp-formrow[data-key="backup_concurrency"]');
+    await row.waitFor({ state: "attached", timeout: 10000 });
+    // ux-hostsettings-12: the host.toml groups start folded shut.
+    assert.equal(
+      await page.locator("details.st-grp[open]").count(),
+      0,
+      "a host.toml group starts open",
+    );
+    await row.evaluate((el) => el.closest("details")?.setAttribute("open", ""));
     await row.waitFor({ timeout: 10000 });
     const save = page.locator(".kp-unsaved__save");
     await save.waitFor({ timeout: 10000 });
@@ -9746,9 +9773,10 @@ test("invariants: redesign-final-low-ping: the Host page's latency strip opens w
   }
 });
 
-// X7: the Live view switch sat in a row of its own above every page's
-// breadcrumb (two lines on a phone), in no demo; it lives in the bar.
-test("invariants: redesign-final-x7: the Live view switch is in the bar beside Help, and nothing stands between the bar and the breadcrumb", async () => {
+// X7 / ux-hostsettings-3: the Live view switch sat in a row of its own above
+// every page's breadcrumb, then in the bar; it now lives in Host settings >
+// This browser, and nothing stands between the bar and the breadcrumb.
+test("invariants: redesign-final-x7: the Live view switch is in Host settings, not in the bar, and nothing stands between the bar and the breadcrumb", async () => {
   const browser = await launch();
   try {
     for (const width of [1894, 390]) {
@@ -9759,7 +9787,7 @@ test("invariants: redesign-final-x7: the Live view switch is in the bar beside H
       await page.goto(`${BASE}/stacks`);
       await page.waitForTimeout(800);
       const f = await page.evaluate(() => {
-        const sw = document.getElementById("live-view");
+        const sw = document.querySelector("#bar .follow-switch");
         const bar = document.getElementById("bar");
         const crumbs = document.getElementById("crumbs");
         const wrap = bar?.closest(".kp-nav-wrap");
@@ -9784,15 +9812,31 @@ test("invariants: redesign-final-x7: the Live view switch is in the bar beside H
         )
           if (visible(n)) between.push(n.id || n.className);
         return {
-          inBar: !!sw && !!bar?.contains(sw),
+          drawn: !!sw && !(/** @type {HTMLElement} */ (sw).hidden),
           between,
         };
       });
-      assert.ok(f.inBar, `${width}: the Live view switch is not in the bar`);
+      assert.ok(!f.drawn, `${width}: the Live view switch is still in the bar`);
       assert.deepEqual(f.between, [], `${width}: rows above the breadcrumb`);
-      await page.check("#live-view");
-      assert.equal(await page.isChecked("#live-view"), true);
-      await page.uncheck("#live-view");
+      // The one control: Host settings > This browser.
+      await page.goto(`${BASE}/settings`);
+      const group = page.locator('[aria-label="Live view in this tab"]');
+      await group.waitFor({ timeout: 10000 });
+      await group.getByRole("radio", { name: "Following" }).click();
+      await page.waitForFunction(
+        () =>
+          /** @type {HTMLInputElement} */ (document.getElementById("live-view"))
+            .checked,
+      );
+      await group.getByRole("radio", { name: "Off" }).click();
+      await page.waitForFunction(
+        () =>
+          !(
+            /** @type {HTMLInputElement} */ (
+              document.getElementById("live-view")
+            ).checked
+          ),
+      );
       await context.close();
     }
   } finally {
@@ -9857,7 +9901,7 @@ test("invariants: live-cursor-scroll-1: Live view scrolls a below-the-fold targe
     const page = await freshPage(context);
     await page.waitForSelector('[data-drive="stacks-tick"]');
     await page.waitForTimeout(800);
-    await page.check("#live-view");
+    await liveViewOn(page);
     await page.waitForTimeout(500);
     const row = await page.evaluate(() => {
       const ticks = [

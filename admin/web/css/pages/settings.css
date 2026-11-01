@@ -391,6 +391,31 @@ details.st-grp[hidden] {
 .st-saveerr:empty {
   display: none;
 }
+/* ux-hostsettings-1: the host.toml block's own Save bar. The note takes the
+   free track, the bar its own; the refusal callout spans both below. On a
+   phone the two stack. */
+.st-hostbar {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--kp-space-sm) var(--kp-space-md);
+  margin-block-end: var(--kp-space-md);
+}
+.st-hostbar__note {
+  margin: 0;
+  color: var(--muted-foreground);
+}
+.st-hostbar > .st-saveerr {
+  grid-column: 1 / -1;
+}
+@media (max-width: 40rem) {
+  .st-hostbar {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .st-hostbar > .kp-unsaved {
+    justify-self: stretch;
+  }
+}
 
 /* Machine tokens: name and what it is for, the scope, Revoke; the columns
    stay at any width (the card is half the page). */

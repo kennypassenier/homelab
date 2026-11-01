@@ -215,23 +215,27 @@ main.shell.hk-page > [hidden] {
   box-shadow: inset 3px 0 0 var(--chart-1);
 }
 
-/* ---------- host actions: described tiles, grouped by intent ---------- */
+/* ---------- host actions: uniform tiles, grouped by intent ----------
+   ux-hostsettings-11: every action is a tile of one size on one grid (the
+   groups were three columns of different lengths, with descriptions of any
+   length); the group name is a heading over its tiles, and a long
+   description is cut at three lines (the tile's title carries the whole
+   sentence on hover). */
 .hk-act-groups {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 20px;
-}
-@media (max-width: 1199px) {
-  .hk-act-groups {
-    grid-template-columns: minmax(0, 1fr);
-  }
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--kp-space-lg, 1.5rem);
 }
 .hk-act-group {
   display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(15rem, 1fr));
+  grid-auto-rows: 1fr;
+  gap: var(--kp-space-sm, 0.5rem);
   align-content: start;
 }
 .hk-act-group h3 {
-  margin: 0 0 4px;
+  grid-column: 1 / -1;
+  margin: 0;
   font-size: var(--kp-text-xs);
   text-transform: uppercase;
   letter-spacing: 0.06em;
@@ -256,16 +260,18 @@ main.shell.hk-page > [hidden] {
   cursor: pointer;
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-rows: auto minmax(0, 1fr);
+  align-content: start;
   gap: 2px 12px;
   padding: 10px 12px;
+  min-block-size: 5.5rem;
   border-radius: var(--hk-r-sm);
-  border: 1px solid transparent;
+  border: 1px solid var(--hk-line);
   width: 100%;
 }
 .hk-act:hover,
 .hk-act:focus-visible {
   background: var(--hk-soft);
-  border-color: var(--hk-line);
 }
 .hk-act:focus-visible {
   outline: 2px solid var(--ring);
@@ -287,6 +293,11 @@ main.shell.hk-page > [hidden] {
   font-size: var(--kp-text-xs);
   color: var(--muted-foreground);
   line-height: 1.4;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  line-clamp: 3;
+  overflow: hidden;
 }
 .hk-act em {
   grid-column: 2;

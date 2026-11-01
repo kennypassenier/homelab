@@ -524,7 +524,9 @@ export function mountSignin(box, report) {
               "button",
               {
                 type: "button",
-                class: "kp-button kp-button--destructive kp-button--sm",
+                // ux-hostsettings-6: a quiet button per row; the red is the
+                // confirmation's, where the name is typed.
+                class: "kp-button kp-button--ghost kp-button--sm",
                 "data-token": v.name,
                 title: `Revoke ${v.name}'s token: that machine can no longer reach the host`,
               },

@@ -1,0 +1,99 @@
+/* ux-small-1 and ux-small-2: hit areas a thumb can use.
+   On a phone (the dashboard's phone breakpoint, 40 rem) every control the
+   dashboard draws is 44 px tall: the kit's own control height does the
+   buttons, fields, selects and segmented items; the few things the kit
+   sizes by hand (the small button, the icon button, the bar's search
+   trigger) and the text-like controls (permalink anchors, links in a
+   table, the brand) are lifted here. Kit-drawn grids keep their cells
+   (the Backups heat grid, the uptime strips, the Firewall matrix scroll
+   inside their own frame), and a form's check box keeps the kit's 1.15 rem
+   box (its label is the larger target).
+   The dialog's close "x" is 44 px on every width (--kp-dialog-close-size is
+   the room the title keeps free for it). */
+:root {
+  --kp-dialog-close-size: 2.75rem;
+}
+.kp-dialog__close {
+  inline-size: var(--kp-dialog-close-size);
+  block-size: var(--kp-dialog-close-size);
+  font-size: 1.5rem;
+}
+.kp-dialog__close svg {
+  inline-size: 1.5rem;
+  block-size: 1.5rem;
+}
+
+@media (max-width: 40rem) {
+  :root {
+    --kp-control-height: 2.75rem;
+    --kp-button-height-sm: 2.75rem;
+    --kp-touch-min: 2.75rem;
+  }
+  /* "body" lifts these over the page sheets, which load after this one. */
+  body .kp-button,
+  body .kp-button--sm,
+  body .kp-segmented__item,
+  body .kp-field__input,
+  body .kp-datatable__search,
+  body .kp-datatable__select,
+  body .kp-chart__source,
+  body .kp-time__toggle,
+  body .kp-tag__remove,
+  body [data-kp-theme-picker] button,
+  body summary,
+  body .kp-quantity__input {
+    min-block-size: var(--kp-touch-min);
+  }
+  body .kp-button,
+  body .kp-segmented__item,
+  body .kp-time__toggle,
+  body .kp-tag__remove,
+  body .kp-icon-button,
+  body .nx-icon-btn,
+  body .kp-nav > .kp-nav__search > .nx-search-trigger,
+  body .kp-nav__search-trigger.nx-search-trigger {
+    min-inline-size: var(--kp-touch-min);
+  }
+  body .kp-icon-button,
+  body .nx-icon-btn,
+  body .kp-nav > .kp-nav__search > .nx-search-trigger,
+  body .kp-nav__search-trigger.nx-search-trigger {
+    inline-size: var(--kp-touch-min);
+    block-size: var(--kp-touch-min);
+    min-block-size: var(--kp-touch-min);
+  }
+  /* Text-like controls inside a line keep their look and their line: the
+     box is 44 px and the margin gives the surplus back, so nothing moves. */
+  body .kp-anchor,
+  body .kp-kpi__link,
+  body .hk-link,
+  body .kp-nav__brand,
+  body .kp-breadcrumb a,
+  body .kp-version__to,
+  body .kp-table td > a {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-block-size: var(--kp-touch-min);
+    min-inline-size: var(--kp-touch-min);
+    margin-block: calc((1lh - var(--kp-touch-min)) / 2);
+  }
+  /* A permalink anchor sits after a heading's text: its 44 px box overlaps
+     the room around it, so the heading's line does not change. */
+  body .kp-anchor {
+    margin-inline: calc(0.4em - 0.75rem) -0.75rem;
+  }
+  /* Controls that stand in a list or a header take the room (a row is a
+     row: neighbours must not share a hit area). */
+  body .kp-contents__link,
+  body .fw-stackbtn,
+  body .bk-group__name,
+  body .fl-name,
+  body .kp-heat__label-button,
+  body .kp-bullets__link {
+    display: inline-flex;
+    align-items: center;
+    min-block-size: var(--kp-touch-min);
+    min-inline-size: var(--kp-touch-min);
+  }
+}

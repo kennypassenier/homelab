@@ -76,10 +76,14 @@ export const FOLLOW_KEY = "homelab.live-view";
 /**
  * Whether this tab follows, as remembered; off by default.
  * @param {{getItem: (k: string) => string | null} | null} storage
+ * @param {{getItem: (k: string) => string | null} | null} [fallback] what
+ *   This browser keeps for "Live view opens", for a tab never switched
  */
-export function readFollow(storage) {
+export function readFollow(storage, fallback = null) {
   try {
-    return storage?.getItem(FOLLOW_KEY) === "on";
+    return (
+      (storage?.getItem(FOLLOW_KEY) ?? fallback?.getItem(FOLLOW_KEY)) === "on"
+    );
   } catch {
     return false;
   }

@@ -23,7 +23,7 @@ import { sameName } from "./namekey.js";
  * same unit ladder `humanDuration` gives durations in.
  * @param {number} seconds
  */
-function agoWords(seconds) {
+export function agoWords(seconds) {
   const s = Math.max(0, Math.round(seconds));
   const m = Math.floor(s / 60);
   const h = Math.floor(s / 3600);

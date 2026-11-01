@@ -71,13 +71,22 @@ function storage() {
   }
 }
 
+/** localStorage: what This browser keeps as the default for new tabs. */
+function localStore() {
+  try {
+    return window.localStorage;
+  } catch {
+    return null;
+  }
+}
+
 /**
  * The toggle and the badge at the top of every page, and the replay.
  * @param {HTMLElement} region
  * @param {{navigate: (href: string) => void}} ctx
  */
 export function mountFollow(region, ctx) {
-  let following = readFollow(storage());
+  let following = readFollow(storage(), localStore());
   /** @type {import("./driveview.js").DriveState | null} */
   let state = null;
   /** @type {import("./driveview.js").Local} */

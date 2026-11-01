@@ -490,6 +490,10 @@ export function mount(root, opts = {}) {
     class: "kp-contents st-side",
     "data-kp-contents": "",
     "data-kp-contents-min": "1",
+    // A card counts as reached once its top is a little below the sticky
+    // bar, so a short card (Account) does not stay highlighted while the
+    // next one (This browser) is already in view.
+    "data-kp-contents-offset": "160",
     "aria-label": "Settings sections",
   });
   /** The sections the list names: this dashboard's cards, then host.toml's groups. */

@@ -30,6 +30,7 @@ import {
   whatWillHappen,
 } from "../restoreflow.js";
 import { current, rereadStore, subscribe } from "../store.js";
+import { agoWords } from "../snapshotpicker.js";
 import { openAction } from "../actiondialog.js";
 import { pageHeader } from "../ui.js";
 import { gridRow, formGrid, buttonGroup } from "../gridrow.js";
@@ -468,6 +469,7 @@ export function mount(root, ctx) {
   const back = /** @type {HTMLButtonElement} */ (
     wiz.querySelector("[data-kp-wizard-back]")
   );
+  back.hidden = true;
 
   root.replaceChildren(head.el, wiz);
 
@@ -610,7 +612,7 @@ export function mount(root, ctx) {
         h(
           "span",
           { class: "kp-field__option-hint" },
-          `${r.snapshots.length} ${r.snapshots.length === 1 ? "snapshot" : "snapshots"}, newest ${Math.max(0, Math.round((now - newest) / 3600))} h ago`,
+          `${r.snapshots.length} ${r.snapshots.length === 1 ? "snapshot" : "snapshots"}, newest ${agoWords(now - newest)}`,
         ),
       );
       drivable(label, APP, r.owner);
@@ -1073,7 +1075,8 @@ export function mount(root, ctx) {
   wiz.addEventListener(STEP_EVENT, (e) => {
     const d = /** @type {CustomEvent} */ (e).detail;
     next.hidden = d.step >= 2;
-    back.hidden = d.step === 3 && S.running;
+    // Step I has nothing to go back to (ux-hostsettings-9).
+    back.hidden = d.step === 0 || (d.step === 3 && S.running);
     if (d.step === 0) paintApps();
     if (d.step === 1) paintNights();
     if (d.step === 2) void checkStep();

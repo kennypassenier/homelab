@@ -74,12 +74,26 @@
 export const FOLLOW_KEY = "homelab.live-view";
 
 /**
- * Whether this tab follows, as remembered; off by default.
- * @param {{getItem: (k: string) => string | null} | null} storage
+ * ux-hostsettings-3: Live view's switch left the top bar. This one event is
+ * how the rest of the dashboard asks the tab to follow (or stop) and hears
+ * that it did: Host settings > This browser draws the control, `mountFollow`
+ * (drive.js) owns the state.
+ * `homelab:follow-request` {on} asks; `homelab:follow-state` {on} answers.
  */
-export function readFollow(storage) {
+export const FOLLOW_REQUEST_EVENT = "homelab:follow-request";
+export const FOLLOW_STATE_EVENT = "homelab:follow-state";
+
+/**
+ * Whether this tab follows, as remembered; off by default. A tab that was
+ * never switched answers with the browser's own choice (`fallback`, what
+ * This browser keeps for "Live view opens").
+ * @param {{getItem: (k: string) => string | null} | null} storage
+ * @param {{getItem: (k: string) => string | null} | null} [fallback]
+ */
+export function readFollow(storage, fallback = null) {
   try {
-    return storage?.getItem(FOLLOW_KEY) === "on";
+    const own = storage?.getItem(FOLLOW_KEY);
+    return (own ?? fallback?.getItem(FOLLOW_KEY)) === "on";
   } catch {
     return false;
   }

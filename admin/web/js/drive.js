@@ -40,6 +40,8 @@ import { takeStep, topDialog } from "./pagedrive.js";
 import { TAB } from "./tabname.js";
 import {
   FOLLOW_KEY,
+  FOLLOW_REQUEST_EVENT,
+  FOLLOW_STATE_EVENT,
   badgeText,
   isActive,
   localOf,
@@ -71,13 +73,23 @@ function storage() {
   }
 }
 
+/** localStorage: what This browser keeps as the default for new tabs. */
+function localStore() {
+  try {
+    return window.localStorage;
+  } catch {
+    return null;
+  }
+}
+
 /**
- * The toggle and the badge at the top of every page, and the replay.
+ * The badge at the top of every page, the (hidden) switch the rest of the
+ * dashboard drives by event, and the replay.
  * @param {HTMLElement} region
  * @param {{navigate: (href: string) => void}} ctx
  */
 export function mountFollow(region, ctx) {
-  let following = readFollow(storage());
+  let following = readFollow(storage(), localStore());
   /** @type {import("./driveview.js").DriveState | null} */
   let state = null;
   /** @type {import("./driveview.js").Local} */
@@ -129,7 +141,10 @@ export function mountFollow(region, ctx) {
   region.replaceChildren(
     h(
       "label",
-      { class: "kp-switch follow-switch" },
+      // ux-hostsettings-3: the switch is not drawn in the bar; Host settings >
+      // This browser is where a person turns Live view on or off. The input
+      // stays here as the tab's state, set by FOLLOW_REQUEST_EVENT.
+      { class: "kp-switch follow-switch", hidden: "" },
       toggle,
       h("span", { class: "kp-switch__state", "aria-hidden": "true" }),
       h("span", null, "Live view"),
@@ -472,10 +487,15 @@ export function mountFollow(region, ctx) {
     return true;
   };
 
+  const tellFollowing = () =>
+    window.dispatchEvent(
+      new CustomEvent(FOLLOW_STATE_EVENT, { detail: { on: following } }),
+    );
   /** @param {boolean} on */
   const setFollowing = (on) => {
     following = on;
     toggle.checked = on;
+    tellFollowing();
     try {
       storage()?.setItem(FOLLOW_KEY, on ? "on" : "off");
     } catch {
@@ -494,6 +514,15 @@ export function mountFollow(region, ctx) {
   };
   toggle.addEventListener("change", () => setFollowing(toggle.checked));
   watchBtn.addEventListener("click", () => setFollowing(true));
+  const onRequest = (/** @type {Event} */ e) => {
+    const on = !!(/** @type {CustomEvent} */ (e).detail?.on);
+    if (on !== following) setFollowing(on);
+  };
+  window.addEventListener(FOLLOW_REQUEST_EVENT, onRequest);
+  // A page that draws the control asks for the state when it mounts.
+  window.addEventListener(FOLLOW_STATE_EVENT, (e) => {
+    if (/** @type {CustomEvent} */ (e).detail?.ask) tellFollowing();
+  });
 
   listen("drive", (/** @type {import("./driveview.js").DriveEvent} */ ev) => {
     // fix-185 (`homelab ui reload`): every tab takes the dashboard's

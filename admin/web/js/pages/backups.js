@@ -1529,9 +1529,11 @@ export function mount(root) {
         );
       else if (r.status === "failed")
         act = drivable(
-          button("Retry", {
+          // ux-hostsettings-8: the button names what it does; "Retry" read
+          // as a second name for "Back up <stack> now".
+          button("Read again", {
             cls: "kp-button--sm kp-button--secondary",
-            title: `Read ${g.stack}'s repositories again`,
+            title: `Read ${g.stack}'s repositories again (this does not run a backup)`,
             onClick: (e) => {
               e.stopPropagation();
               void retryOne(g.stack);

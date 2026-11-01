@@ -1274,6 +1274,9 @@ div.row-buttons {
   gap: var(--kp-space-sm);
   min-inline-size: 0;
 }
+.follow-switch[hidden] {
+  display: none;
+}
 .follow--bar .follow-hint {
   position: absolute;
   inline-size: 1px;

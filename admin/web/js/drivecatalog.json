@@ -4019,6 +4019,18 @@
       "twins": false
     },
     {
+      "id": "settings-instant-undo",
+      "page": "settings",
+      "what": "take back the choice just made in This browser or Account",
+      "opens": "run",
+      "row": null,
+      "href": "/settings",
+      "was": [],
+      "shows": "for a few seconds after such a choice",
+      "reach": [],
+      "twins": false
+    },
+    {
       "id": "settings-nav",
       "page": "settings",
       "what": "jump to a section from the side list",

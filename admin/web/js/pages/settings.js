@@ -305,10 +305,24 @@ export function mount(root, opts = {}) {
   });
   const head = pageHeader({
     title: "Host settings",
-    desc: "How this homelab is set up: the working copy it applies from, who can sign in, and every key of the host's host.toml. Edit a key where it stands; nothing is written until you save.",
+    desc: "How this homelab is set up: the working copy it applies from, who can sign in, what only this browser decides, and every key of the host's host.toml. This browser and Account save the moment you change them; host.toml keys wait for Save.",
     titleMeta: [h("span", { class: "cf-live" }, ago)],
-    actions: [barSlot],
   });
+  // The Save bar belongs to the host.toml block alone (ux-hostsettings-1):
+  // it stands in that card, and the kit docks it at the screen's foot once
+  // the card's top has scrolled away.
+  const errBox = h("div", { class: "st-saveerr" });
+  const hostBar = h(
+    "div",
+    { class: "st-hostbar" },
+    h(
+      "p",
+      { class: "st-hostbar__note" },
+      "Changes to these keys are written to host.toml only when you press Save.",
+    ),
+    barSlot,
+    errBox,
+  );
 
   // ── the search ────────────────────────────────────────────────────────
   const found = h("span", { class: "cf-count" });
@@ -385,7 +399,8 @@ export function mount(root, opts = {}) {
   const browserCard = dataCard({
     id: "browser",
     title: "This browser",
-    desc: "Choices that belong to this device and never reach the host: the theme, what Live view opens in, the tour, and a way to forget it all.",
+    desc: "Choices that belong to this device and never reach the host: the theme, what Live view opens in, the tour, and a way to forget it all. Each choice applies the moment you make it, with an Undo.",
+    tools: [chip("Saves at once")],
     data: [],
     state: "static",
   });
@@ -395,7 +410,8 @@ export function mount(root, opts = {}) {
   const accountCard = dataCard({
     id: "account",
     title: "Account",
-    desc: "Choices that follow you to every device you sign in on: calm mode.",
+    desc: "Choices that follow you to every device you sign in on: calm mode. A choice applies the moment you make it, with an Undo.",
+    tools: [chip("Saves at once")],
     data: [],
     state: "static",
   });
@@ -481,15 +497,20 @@ export function mount(root, opts = {}) {
     id: "host-settings",
     title: "Host configuration",
     desc: "Every key of host.toml. Checked with the host's own start-up validation before anything is written.",
-    tools: [showSeg.el, foldAll],
+    tools: [chip("Waits for Save", { tone: "warn" }), showSeg.el, foldAll],
     data: [groupBox],
   });
 
   // ── side list with scroll-spy (kp-themes 11.2.0's "On this page") ──────
+  hsCard.card.querySelector(".kp-lede")?.after(hostBar);
   const side = h("nav", {
     class: "kp-contents st-side",
     "data-kp-contents": "",
     "data-kp-contents-min": "1",
+    // ux-hostsettings-5: a card counts as reached once its top is a little
+    // below the sticky bar, so a short card (Account) does not stay
+    // highlighted while the next one (This browser) is already in view.
+    "data-kp-contents-offset": "160",
     "aria-label": "Settings sections",
   });
   /** The sections the list names: this dashboard's cards, then host.toml's groups. */
@@ -568,7 +589,7 @@ export function mount(root, opts = {}) {
   /** @type {HTMLElement | null} */
   let saveBtn = null;
   const attachBar = async () => {
-    const off = attachAll(head.el);
+    const off = attachAll(hostBar);
     await off.ready;
     detachBar = off;
     const bar = unsaved(barSlot);
@@ -642,6 +663,8 @@ export function mount(root, opts = {}) {
     )) {
       const r = /** @type {HTMLElement} */ (row.closest("[data-key]"));
       const on = r.hasAttribute("data-kp-changed");
+      // A staged key is never left inside a folded group (groups start shut).
+      if (on) r.closest("details")?.setAttribute("open", "");
       /** @type {HTMLElement} */ (row).hidden = !on;
       if (!on) typed.delete(r.getAttribute("data-key") ?? "");
     }
@@ -722,8 +745,6 @@ export function mount(root, opts = {}) {
     "kp-unsaved-save",
     (e) => void onSave(/** @type {CustomEvent} */ (e)),
   );
-  const errBox = h("div", { class: "st-saveerr" });
-  head.el.after(errBox);
 
   /** host.toml was written: say so, and read it again.
    * @param {any} answer */
@@ -772,12 +793,12 @@ export function mount(root, opts = {}) {
     const gs = groupsOf(pg.fields);
     const term = "garuda";
     groupBox.innerHTML = gs
-      .map((g, i) => {
+      .map((g) => {
         const fs = pg.fields.filter((f) => f.group === g);
         const rows = fs
           .map((f) => rowHtml(f, { path: pg.path, term, howOpen: false }))
           .join("");
-        return `<details class="st-grp kp-accordion__item" id="${slug(g)}" data-group="${slug(g)}" data-kp-remember="st-group-${slug(g)}"${i < 2 ? " open" : ""}><summary class="kp-accordion__summary st-grp__sum" data-st-sum="${slug(g)}"><h3 class="st-grp__title" id="h-${slug(g)}">${escHtml(g)}</h3><span class="kp-badge st-grp__count" data-st-count="${slug(g)}">${fs.length} keys</span></summary><div class="kp-accordion__body"><div class="kp-formgrid st-keylist" data-kp-formgrid-label="wide" data-kp-formgrid-lines="lines">${rows}</div></div></details>`;
+        return `<details class="st-grp kp-accordion__item" id="${slug(g)}" data-group="${slug(g)}" data-kp-remember="st-group-${slug(g)}"><summary class="kp-accordion__summary st-grp__sum" data-st-sum="${slug(g)}"><h3 class="st-grp__title" id="h-${slug(g)}">${escHtml(g)}</h3><span class="kp-badge st-grp__count" data-st-count="${slug(g)}">${fs.length} keys</span></summary><div class="kp-accordion__body"><div class="kp-formgrid st-keylist" data-kp-formgrid-label="wide" data-kp-formgrid-lines="lines">${rows}</div></div></details>`;
       })
       .join("");
     // Live view reaches each group's summary and each how-to.

@@ -980,7 +980,7 @@ export function mount(root, ctx) {
                 type: "button",
                 class: `hk-act${a.destructive ? " hk-act--destructive" : ""}`,
                 "data-action": a.action,
-                title: `${a.label}: opens a dialog that says what will happen, then starts it`,
+                title: `${a.label}: ${actionBlurb(a.what)} Opens a dialog that says what will happen, then starts it.`,
                 onclick: () =>
                   void openAction(catalog.host_target, a.action, {
                     openRollback,

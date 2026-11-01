@@ -7,13 +7,19 @@
 // one line.
 
 import { TOUR_NAME, startTour } from "./helptour.js";
-import { FOLLOW_KEY } from "./driveview.js";
+import {
+  FOLLOW_KEY,
+  FOLLOW_REQUEST_EVENT,
+  FOLLOW_STATE_EVENT,
+} from "./driveview.js";
 import { esc } from "./settingsform.js";
+import { offerUndo } from "./instantundo.js";
 import {
   attachCalm,
   openConfirmation,
   REMEMBER_PREFIX,
   attachSegmented,
+  setSegmentedValues,
   THEMES,
   applyTheme,
   currentTheme,
@@ -21,7 +27,6 @@ import {
   attachThemePickers,
   themeOptionsMarkup,
   forgetTour,
-  toast,
 } from "/static/kp/dist/kp-themes.min.js";
 
 /** Where "follow my system" and the two themes it picks between are kept. */
@@ -111,7 +116,20 @@ export function mountAccount(body) {
     "Turns movement and effects off; loading keeps breathing slowly. Follows you to every device you sign in on.",
     `<label class="kp-switch"><input class="kp-switch__input" type="checkbox" role="switch" id="st-calm" data-kp-calm-switch /><span>Calm</span></label>`,
   )}</div>`;
-  return attachCalm(body);
+  const stop = attachCalm(body);
+  const box = /** @type {HTMLInputElement | null} */ (
+    body.querySelector("#st-calm")
+  );
+  let undoing = false;
+  box?.addEventListener("change", () => {
+    if (undoing) return;
+    offerUndo(`Calm mode is ${box.checked ? "on" : "off"}.`, () => {
+      undoing = true;
+      box.click();
+      undoing = false;
+    });
+  });
+  return stop;
 }
 
 /**
@@ -136,9 +154,9 @@ export function mountThisBrowser(body) {
     ),
     row("Dark theme", "For a dark room, or a dark system.", themes(true)),
     row(
-      "Live view opens",
-      "Whether Live view follows Claude when this dashboard opens.",
-      `<div class="kp-segmented" data-kp-segmented role="radiogroup" aria-label="Live view opens"><button type="button" role="radio" aria-checked="${live === "on"}" data-kp-value="on">Following</button><button type="button" role="radio" aria-checked="${live === "off"}" data-kp-value="off">Off</button></div>`,
+      "Live view",
+      "Whether this tab follows Claude's steps live. What you choose is also what new tabs start with.",
+      `<div class="kp-segmented" data-kp-segmented="single" role="radiogroup" aria-label="Live view in this tab"><button type="button" class="kp-segmented__item" data-value="on" role="radio" aria-checked="${live === "on"}"><span class="kp-segmented__label">Following</span></button><button type="button" class="kp-segmented__item" data-value="off" role="radio" aria-checked="${live === "off"}"><span class="kp-segmented__label">Off</span></button></div>`,
     ),
     row(
       "Follow my system",
@@ -162,17 +180,79 @@ export function mountThisBrowser(body) {
     ),
   ].join("")}</div>`;
   const stops = [attachThemePickers(body), attachSegmented(body)];
+  /** True while an Undo presses a control back, so that press is not offered an Undo again. */
+  let undoing = false;
+  /** @param {() => void} f */
+  const quietly = (f) => {
+    undoing = true;
+    try {
+      f();
+    } finally {
+      undoing = false;
+    }
+  };
+  /** The theme worn before the last pick. */
+  let worn = currentTheme();
   body.addEventListener(PICK_EVENT, (e) => {
     const theme = /** @type {CustomEvent} */ (e).detail?.theme;
     const kind = /** @type {HTMLElement} */ (e.target)
       .closest("[data-st-kind]")
       ?.getAttribute("data-st-kind");
-    if (theme && kind) write(kind === "dark" ? DARK_PICK : LIGHT_PICK, theme);
+    if (!theme || !kind) return;
+    const before = worn;
+    worn = theme;
+    write(kind === "dark" ? DARK_PICK : LIGHT_PICK, theme);
+    if (undoing || before === theme) return;
+    offerUndo(`Theme changed to ${theme}.`, () =>
+      quietly(() => {
+        worn = before;
+        body
+          .querySelector(`[data-kp-theme="${CSS.escape(before)}"]`)
+          ?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      }),
+    );
   });
+  const liveGroup = /** @type {HTMLElement} */ (
+    body.querySelector('[aria-label="Live view in this tab"]')
+  );
+  /** Put the segmented control to what the tab does, without a change event. @param {boolean} on */
+  const showLive = (on) => setSegmentedValues(liveGroup, [on ? "on" : "off"]);
   body.addEventListener("kp-segmented-change", (e) => {
     const v = /** @type {CustomEvent} */ (e).detail?.value;
-    if (v === "on" || v === "off") write(FOLLOW_KEY, v);
+    if (v !== "on" && v !== "off") return;
+    write(FOLLOW_KEY, v);
+    window.dispatchEvent(
+      new CustomEvent(FOLLOW_REQUEST_EVENT, { detail: { on: v === "on" } }),
+    );
   });
+  // The tab answers (a Live view step, the "Live view" button, an Undo).
+  /** @type {boolean | null} */
+  let liveBefore = null;
+  const onState = (/** @type {Event} */ e) => {
+    const d = /** @type {CustomEvent} */ (e).detail;
+    if (d?.ask) return;
+    const on = !!d?.on;
+    if (liveBefore === on) return;
+    const was = liveBefore;
+    liveBefore = on;
+    showLive(on);
+    if (undoing || was === null) return;
+    offerUndo(
+      `Live view ${on ? "follows Claude in this tab" : "is off"}.`,
+      () =>
+        quietly(() => {
+          write(FOLLOW_KEY, on ? "off" : "on");
+          window.dispatchEvent(
+            new CustomEvent(FOLLOW_REQUEST_EVENT, { detail: { on: !on } }),
+          );
+        }),
+    );
+  };
+  window.addEventListener(FOLLOW_STATE_EVENT, onState);
+  stops.push(() => window.removeEventListener(FOLLOW_STATE_EVENT, onState));
+  window.dispatchEvent(
+    new CustomEvent(FOLLOW_STATE_EVENT, { detail: { ask: true } }),
+  );
   const followBox = /** @type {HTMLInputElement} */ (
     body.querySelector("#st-follow")
   );
@@ -188,6 +268,10 @@ export function mountThisBrowser(body) {
     }
     stopFollow();
     stopFollow = startFollowingSystem();
+    if (undoing) return;
+    offerUndo(`Follow my system is ${followBox.checked ? "on" : "off"}.`, () =>
+      quietly(() => followBox.click()),
+    );
   });
   let stopFollow = startFollowingSystem();
   body.querySelector("#st-tour")?.addEventListener("click", () => {
@@ -205,9 +289,15 @@ export function mountThisBrowser(body) {
       ],
       acceptLabel: "Forget them",
       onAccept: () => {
-        for (const k of rememberedKeys()) write(k, null);
+        // What is forgotten is held here for the Undo window.
+        const kept = rememberedKeys().map(
+          (k) => /** @type {[string, string | null]} */ ([k, read(k)]),
+        );
+        for (const [k] of kept) write(k, null);
         forgetTour(TOUR_NAME);
-        toast("This browser forgot what it remembered.", { ms: 4000 });
+        offerUndo("This browser forgot what it remembered.", () => {
+          for (const [k, v] of kept) write(k, v);
+        });
       },
     });
   });

@@ -43,8 +43,8 @@ import { setParams } from "../urlstate.js";
 import { facetGroup } from "../logfacets.js";
 import { gridRow, formGrid } from "../gridrow.js";
 import { formatClock, formatDateTime } from "../format.js";
-import { sourceColour } from "../logcolour.js";
 import {
+  sourceColour,
   LOGVIEWER_EVENT,
   LOGVIEWER_RETRY_EVENT,
   appendLogLines,

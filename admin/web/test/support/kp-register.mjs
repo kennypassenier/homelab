@@ -88,6 +88,7 @@ function exportedNames(file, seen = new Set()) {
 function nameIndex() {
   const types = fileURLToPath(new URL("../../types/kp", import.meta.url));
   const index = new Map();
+  const declared = new Map();
   // `auto.js` re-exports what the others define and starts the page on
   // load, so it is read last: a name goes to the module that defines it.
   const byName = (a, b) =>
@@ -101,11 +102,30 @@ function nameIndex() {
     // `attachAll` below instead, and never attaches a page.
     if (!existsSync(file) || file.endsWith("/auto.js")) continue;
     for (const n of exportedNames(file)) if (!index.has(n)) index.set(n, file);
+    for (const n of exportedNames(file)) {
+      const owners = (declared.get(n) ?? []).concat(f.slice(0, -5));
+      declared.set(n, owners);
+    }
+  }
+  // The bundle gives a name two modules export a flat alias under the
+  // module's prefix (`setProgress` of progressbar is `progressbarSetProgress`).
+  for (const [n, mods] of declared) {
+    if (mods.length < 2) continue;
+    for (const mod of mods) {
+      const alias = /^[A-Z0-9_]+$/.test(n)
+        ? `${mod.replace(/-/g, "_").toUpperCase()}_${n}`
+        : mod.replace(/-([a-z])/g, (_, c) => c.toUpperCase()) +
+          n.charAt(0).toUpperCase() +
+          n.slice(1);
+      aliasOf.set(alias, n);
+      index.set(alias, join(root, "js", `${mod}.js`));
+    }
   }
   return index;
 }
 
 let index;
+const aliasOf = new Map();
 const barrels = new Map();
 
 /** The names `parent` imports from the bundle, or null when it imports it whole (`* as`, dynamic). */
@@ -161,7 +181,7 @@ function bundleBarrel(parent) {
   lines.push(
     ...[...byFile].map(
       ([f, ns]) =>
-        `export { ${ns.join(", ")} } from ${JSON.stringify(pathToFileURL(f).href)};`,
+        `export { ${ns.map((n) => (aliasOf.has(n) ? `${aliasOf.get(n)} as ${n}` : n)).join(", ")} } from ${JSON.stringify(pathToFileURL(f).href)};`,
     ),
   );
   const dir = join(tmpdir(), "homelab-kp-barrel");

@@ -139,3 +139,6 @@ export * from "./kp/weekdays";
 export * from "./kp/week";
 export * from "./kp/wheel";
 export * from "./kp/wizard";
+// The bundle's flat aliases for names two modules export (kp-themes 12.1.0).
+export { setProgress as progressbarSetProgress } from "./kp/progressbar";
+export { OPEN_EVENT as PALETTE_OPEN_EVENT } from "./kp/palette";

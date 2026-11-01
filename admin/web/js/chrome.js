@@ -56,6 +56,7 @@ import {
 } from "./shortcuts.js";
 import { current, listen, subscribe } from "./store.js";
 import {
+  PALETTE_OPEN_EVENT,
   RUN_EVENT,
   attachPalettes,
   palette,
@@ -77,13 +78,6 @@ import {
   registerShortcuts,
 } from "/static/kp/dist/kp-themes.min.js";
 import { settleStoredTheme } from "./themesettle.js";
-
-/**
- * The event kp's command palette fires when it opens. The bundle does not
- * export `OPEN_EVENT` (the palette, date picker and combobox each export one
- * and a shared name is dropped), so the palette's own value is kept here.
- */
-const PALETTE_OPEN_EVENT = "kp-palette-open";
 
 /**
  * @typedef {{navigate: (href: string) => void,

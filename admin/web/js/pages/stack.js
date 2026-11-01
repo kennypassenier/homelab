@@ -101,6 +101,7 @@ import {
   FEED_RETRY_EVENT,
   attachFeeds,
   setFeed,
+  sourceColour,
 } from "/static/kp/dist/kp-themes.min.js";
 import { resourcesTab } from "../hubresources.js";
 import {
@@ -144,7 +145,6 @@ import {
 import { stackEntries, stackIncidents } from "../stacktabs.js";
 import { current, retryStream, subscribe } from "../store.js";
 import { setParams } from "../urlstate.js";
-import { sourceColour } from "../logcolour.js";
 import { facetGroup } from "../logfacets.js";
 import { formGrid, gridRow } from "../gridrow.js";
 import { GROUP_STACK, unlessDialog } from "../shortcuts.js";

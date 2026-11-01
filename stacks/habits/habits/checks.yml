@@ -1,0 +1,10 @@
+# Habits, a native chassis-rs service on CT 122. The container has no curl;
+# wget is what is available there (same template as kitchen's CT 121).
+checks:
+  - name: "habits is healthy"
+    command: "wget -q -O - -T 10 http://127.0.0.1:8080/healthz"
+    expect: must_match
+    layer: application
+    blind_spot: >-
+      The service answering about itself. Whether tasks can be read and
+      written depends on the state directory, which /healthz does not prove.

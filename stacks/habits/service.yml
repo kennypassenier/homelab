@@ -1,0 +1,36 @@
+# C7 native service — habits on CT 122, modelled on stacks/kitchen/service.yml.
+# Habits' own deploy/service.yml put its state in /var/lib/habits and its env
+# file in /etc/habits; here both live in the bind-mounted state directory
+# (HABITS_STATE_DIR is explicit in the unit), so the nightly backup reaches
+# them. update_cmd must reproduce the unit: same user, env file, working
+# directory and one --property=Environment= per Environment= line of the unit
+# (almanac fix-3: otherwise `update --check` looks at the compiled-in default).
+stack_name: habits
+vmid: 122
+hostname: 122-app-habits
+unit: habits
+binary: /opt/habits/bin/habits
+env_file: /appdata/habits/habits-config/habits.env
+# First install on a fresh container: if the env file is missing or empty the
+# host runs this under a terminal and writes the KEY=value lines it prints
+# (HABITS_TOKEN, HABITS_SECRET_KEY) to the env file, 0600, owned by the unit's user.
+first_secret_cmd: /opt/habits/bin/habits gen-secret
+data_dirs:
+  - /appdata/habits/habits-config
+update_cmd: >-
+  systemd-run --wait --pipe --collect --uid=habits --gid=habits
+  --property=EnvironmentFile=/appdata/habits/habits-config/habits.env
+  --property=WorkingDirectory=/appdata/habits/habits-config
+  --property=Environment=HABITS_STATE_DIR=/appdata/habits/habits-config
+  --property=Environment=HABITS_TIMEOUT_STOP_SECS=60
+  --property=Environment=HABITS_TRUSTED_PROXIES=10.10.10.4
+  --property=Environment=HABITS_TRUSTED_ADMINS=10.10.10.10
+  /opt/habits/bin/habits update
+release_repo: kennypassenier/habits
+release_asset: habits
+# The chassis kit's backup-pause socket (RuntimeDirectory=habits in the unit),
+# falling back to a stop.
+backup_pause: chassis
+# Not auto: a new version of a database-backed app is installed on request
+# until it has run here for a while (kitchen and admin do the same).
+update_policy: manual

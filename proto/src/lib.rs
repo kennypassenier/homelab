@@ -757,7 +757,26 @@ pub enum Command {
         secret: SecretRef,
         content: String,
     },
+    /// key-move: the dashboard's edit, committed and pushed by the HOST from
+    /// its own clone of the stacks repository (`[stack_commits]` in
+    /// host.toml), so the deploy key lives on the host alone. `base` is the
+    /// commit the dashboard planned on: the remote branch must still be
+    /// exactly there, or the request is refused and the dashboard plans
+    /// again. Each file carries its whole new text, or none to delete it.
+    /// `push: false` is a dry run: the commit is made and undone on the host,
+    /// and nothing leaves it. Never a force-push. Answer: `StackCommitDone`
+    /// as JSON.
+    CommitStackFiles {
+        message: String,
+        base: String,
+        files: Vec<StackFileChange>,
+        push: bool,
+    },
 }
+
+// key-move: the request's file shape and the answer are domain types of
+// `homelab_core::ops::stackcommit`, re-exported here for the wire.
+pub use homelab_core::ops::stackcommit::{StackCommitDone, StackFileChange};
 
 // feat-secrets-1/2: `SecretRef` is a domain type (core has no I/O of its
 // own but every other wire type that is also domain-shaped lives there —
@@ -1024,7 +1043,8 @@ impl Command {
             | RestoreNative { .. }
             | ToolUpdate { .. }
             | ToolRollback { .. }
-            | RevealSecret { .. } => Scope::Operate,
+            | RevealSecret { .. }
+            | CommitStackFiles { .. } => Scope::Operate,
             DestroyStack { .. }
             | SelfUpdateHost { .. }
             | RestartHost
@@ -1123,6 +1143,7 @@ impl Command {
             RestoreNative { .. } => "restore_native",
             RevealSecret { .. } => "reveal_secret",
             SetSecret { .. } => "set_secret",
+            CommitStackFiles { .. } => "commit_stack_files",
         }
     }
 

@@ -105,6 +105,7 @@ mod rpc;
 mod scheduler;
 mod secrets;
 mod sink;
+mod stack_commit;
 mod startup;
 mod state;
 mod supervise;

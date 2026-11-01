@@ -74,6 +74,7 @@ pub mod secrets;
 pub mod selfupdate;
 pub mod settings;
 pub mod snapshot_cache;
+pub mod stackcommit;
 pub mod template;
 pub mod tiles;
 pub mod today;

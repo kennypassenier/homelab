@@ -89,6 +89,9 @@ pub(crate) struct FileConfig {
     pub(crate) tools:
         Option<std::collections::BTreeMap<String, homelab_core::tools::spec::ToolSpec>>,
     pub(crate) mirror_remote: Option<String>,
+    /// key-move: the host commits and pushes the dashboard's stack edits
+    /// with this key; absent = the host refuses `CommitStackFiles`.
+    pub(crate) stack_commits: Option<homelab_core::ops::stackcommit::StackCommitSettings>,
     pub(crate) no_touch: Option<Vec<u16>>,
     /// fix-120 (api-token-is-root, 2026-09-27): vmids a deploy may make a
     /// privileged container. Absent = the ones the fleet runs today

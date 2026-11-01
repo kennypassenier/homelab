@@ -12,6 +12,7 @@ mod questions;
 mod reads;
 mod refusals;
 mod session;
+mod stack_commit;
 mod supervision;
 mod support;
 mod tokens;

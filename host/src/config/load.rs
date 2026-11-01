@@ -25,6 +25,7 @@ pub(crate) fn load_config_from(path: String) -> Config {
         .ok()
         .or(file.state_dir)
         .unwrap_or_else(|| "/var/lib/homelab".into());
+    let stack_commits = file.stack_commits.as_ref().map(|t| t.resolve(&state_dir));
     let cfg = Config {
         token,
         tokens,
@@ -66,6 +67,7 @@ pub(crate) fn load_config_from(path: String) -> Config {
             })
             .collect(),
         mirror_remote: file.mirror_remote,
+        stack_commits,
         safety,
         zfs_jobs: file.zfs_jobs.unwrap_or_default(),
         watched_backups: file.watched_backups.unwrap_or_default(),

@@ -360,6 +360,9 @@ fn cli_line_bare(command: &Command, force: bool) -> Option<String> {
         | ReadSnapshotFile { .. }
         | RevealSecret { .. }
         | SetSecret { .. }
+        // key-move: the dashboard's own edit transaction sends it; on a
+        // workstation `git commit` + `git push` is the same step.
+        | CommitStackFiles { .. }
         // redesign-stackhub-2: the stack hub's "Push the env…"; the CLI
         // seals an env the way it always did, with a deploy.
         | SealEnv { .. } => return None,

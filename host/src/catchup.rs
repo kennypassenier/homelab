@@ -43,9 +43,14 @@ pub(crate) fn runs_beside_the_queue(command: &Rpc) -> bool {
     // in the queue it would hold up every deploy and refresh the TUI sends
     // after opening. It changes nothing, and the TUI recognises its reply by
     // shape rather than by order.
+    // key-move: a dashboard commit touches no container and holds its own
+    // lock; behind a long deploy it would outlive the dashboard's wait.
     matches!(
         command,
-        Rpc::Answer { .. } | Rpc::AnswerOpen { .. } | Rpc::Today { .. }
+        Rpc::Answer { .. }
+            | Rpc::AnswerOpen { .. }
+            | Rpc::Today { .. }
+            | Rpc::CommitStackFiles { .. }
     )
 }
 

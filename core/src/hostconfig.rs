@@ -400,6 +400,18 @@ pub const KEYS: &[KeyInfo] = &[
         Access::Browser,
         Apply::Restart,
     ),
+    // key-move: the host commits the dashboard's edits with the deploy
+    // key this table names. A credential path: ssh only.
+    k(
+        "stack_commits",
+        "Access to the host",
+        "Stack commits",
+        "The [stack_commits] table: the host commits and pushes the dashboard's stack edits with the deploy key it names (key, plus optional remote, branch, known_hosts, dir, author, roots, max_bytes, timeout_s). Absent: the host refuses them. Names a credential: ssh only.",
+        "off",
+        Kind::Table,
+        Access::SshOnly,
+        Apply::Restart,
+    ),
     // fix-113 ADDENDUM (owner + chassis-rs, 2026-10-01): where a
     // `backup_pause: chassis` native backup stages its local copy.
     k(

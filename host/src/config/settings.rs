@@ -71,6 +71,11 @@ pub(crate) struct Config {
     /// The managed tools, each with its table name filled in.
     pub(crate) tools: Vec<homelab_core::tools::spec::ToolSpec>,
     pub(crate) mirror_remote: Option<String>,
+    /// key-move: `[stack_commits]` resolved. None: the table is absent (the
+    /// feature is off); `Some(Err)`: it is set but cannot run, and every
+    /// request is refused with that reason.
+    pub(crate) stack_commits:
+        Option<Result<homelab_core::ops::stackcommit::StackCommitConfig, String>>,
     /// H1 (hardening): safety values configurable via host.toml so M5 can
     /// migrate the gateway / adjust the no-touch list without a release.
     /// Hardcoded DEFAULT_NO_TOUCH remains the default.

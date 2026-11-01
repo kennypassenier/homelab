@@ -7,6 +7,14 @@ use crate::{orphan_watchers, plaintext_bearer_routes};
 /// writer, a bearer over plain HTTP, a notification certificate that does not
 /// match its pinned fingerprint.
 pub(crate) fn warn_at_load(cfg: &Config) {
+    // key-move: a [stack_commits] table that cannot run refuses every
+    // dashboard commit; said at start, not only at the first refusal.
+    if let Some(Err(why)) = &cfg.stack_commits {
+        tracing::warn!(
+            "[stack_commits] cannot run, every dashboard commit is refused: {}",
+            why
+        );
+    }
     // F259: a watcher whose path no writer targets watches nothing — it
     // reports "holds no files at all" forever while looking like a working
     // check. Said out loud at load, where every other config fault is said.

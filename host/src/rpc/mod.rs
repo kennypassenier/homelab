@@ -14,6 +14,7 @@ mod questions;
 mod restores;
 mod secrets;
 mod snapshots;
+mod stack_commit;
 mod stacks;
 mod system;
 mod tokens;
@@ -224,6 +225,12 @@ pub(crate) async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse
             secret,
             content,
         } => secrets::set_secret(state, req.id, stack, secret, content).await,
+        Rpc::CommitStackFiles {
+            message,
+            base,
+            files,
+            push,
+        } => stack_commit::commit_stack_files(state, req.id, message, base, files, push).await,
         Rpc::GetConfig => config::get_config(state, req.id).await,
         Rpc::SetConfig(view) => config::set_config(state, req.id, view).await,
         Rpc::GetHostConfig => config::get_host_config(state, req.id).await,

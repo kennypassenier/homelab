@@ -1443,6 +1443,12 @@ const CLI_ONLY: &[(&str, &str)] = &[
          the host; the TUI never shows a secret's plaintext",
     ),
     (
+        "CommitStackFiles",
+        "key-move: the dashboard's edit transaction asks the host to commit and \
+         push its edit; the TUI edits no stack files (a workstation commits \
+         with git itself)",
+    ),
+    (
         "SetSecret",
         "the dashboard's secrets page writes a changed value; the TUI has no \
          secrets screen to write one from",

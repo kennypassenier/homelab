@@ -19,9 +19,11 @@
 //! | `HOMELAB_ADMIN_ALERTS_TOKEN` | none: the Alertmanager hook refuses every call | the bearer Alertmanager sends to `/hooks/alertmanager` (a secret: admin.env) |
 //! | `HOMELAB_ADMIN_PUBLIC_URL` | none: a push carries no link | the dashboard's public address, which a push links to (`click_url`); chassis reads the same key for passkeys |
 //! | `HOMELAB_ADMIN_ACTION_TIMEOUT_S` | 21600 | the longest one action is waited for |
-//! | `HOMELAB_ADMIN_GIT_REMOTE` | `git@github.com:kennypassenier/homelab.git` | where the working copy is cloned from and pushed to (arch-edit-txn); a local path works too (tests) |
+//! | `HOMELAB_ADMIN_GIT_REMOTE` | `git@github.com:kennypassenier/homelab.git`; with `COMMIT_VIA=host` `https://github.com/kennypassenier/homelab.git` | where the working copy is cloned from and pushed to (arch-edit-txn); a local path works too (tests); https (never with a user or token in it) only with `COMMIT_VIA=host`, where the working copy only reads |
 //! | `HOMELAB_ADMIN_GIT_BRANCH` | `main` | the branch it follows and pushes |
-//! | `HOMELAB_ADMIN_GIT_KEY` | `<data dir>/deploy_key` | the deploy key's private half (arch-push-credential); written at start from `HOMELAB_ADMIN_DEPLOY_KEY_B64` when missing |
+//! | `HOMELAB_ADMIN_COMMIT_VIA` | `dashboard` | key-move: who commits and pushes an edit — `dashboard` (this working copy, with the deploy key below) or `host` (the host, with its own key; `core::commit_via`) |
+//! | `HOMELAB_ADMIN_HOST_COMMIT_TIMEOUT_S` | 180 | key-move: how long an edit waits for the host's commit and push (`COMMIT_VIA=host`) |
+//! | `HOMELAB_ADMIN_GIT_KEY` | `<data dir>/deploy_key` | the deploy key's private half (arch-push-credential); written at start from `HOMELAB_ADMIN_DEPLOY_KEY_B64` when missing; not used once `COMMIT_VIA=host` and the remote is https |
 //! | `HOMELAB_ADMIN_DEPLOY_KEY_B64` | none | the deploy key file, base64, from latch (a secret: admin.env); written to `HOMELAB_ADMIN_GIT_KEY` with mode 0600 when that file is missing, never logged |
 //! | `HOMELAB_ADMIN_GIT_KNOWN_HOSTS` | `<data dir>/known_hosts` | the remote's ssh host keys; ssh refuses a host not in it; GitHub's pinned keys are written there when it is missing |
 //! | `HOMELAB_ADMIN_GIT_AUTHOR` | `homelab-admin <homelab-admin@users.noreply.github.com>` | the author and committer of the dashboard's commits |
@@ -91,6 +93,10 @@ pub struct ActConfig {
     pub live_max_pause_s: u64,
     /// arch-edit-txn: the working copy's remote, branch and credential.
     pub git: GitConfig,
+    /// key-move: who commits and pushes an edit.
+    pub commit_via: crate::core::commit_via::CommitVia,
+    /// key-move: how long an edit waits for the host's commit, in seconds.
+    pub host_commit_timeout_s: u64,
     /// Decision "23 constants": jobs kept for `GET /data/actions/jobs`.
     pub keep_jobs: usize,
     /// History read for a job's expected duration, in seconds.
@@ -184,6 +190,27 @@ pub fn remote_problem(r: &str) -> Option<String> {
     None
 }
 
+/// key-move: the default remote for who commits: the ssh remote when the
+/// dashboard pushes, anonymous https when the host does.
+pub fn default_remote(via: crate::core::commit_via::CommitVia) -> &'static str {
+    match via {
+        crate::core::commit_via::CommitVia::Dashboard => DEFAULT_REMOTE,
+        crate::core::commit_via::CommitVia::Host => crate::core::commit_via::HOST_MODE_REMOTE,
+    }
+}
+
+/// [`remote_problem`], except that with `COMMIT_VIA=host` the working copy
+/// only reads, so https without a credential is allowed too.
+pub fn remote_problem_for(r: &str, via: crate::core::commit_via::CommitVia) -> Option<String> {
+    let https = r.starts_with("https://") || r.starts_with("http://");
+    match via {
+        crate::core::commit_via::CommitVia::Host if https => {
+            crate::core::commit_via::https_problem(r)
+        }
+        _ => remote_problem(r),
+    }
+}
+
 pub const DEFAULT_DATA_DIR: &str = "/appdata/admin/admin-config";
 
 fn number(
@@ -250,7 +277,22 @@ pub fn from_env(lookup: &dyn Fn(&str) -> Option<String>) -> Result<ActConfig, St
                 .into(),
         );
     }
+    let commit_via = crate::core::commit_via::CommitVia::parse(
+        lookup(crate::core::commit_via::VIA_ENV).as_deref(),
+    )
+    .unwrap_or_else(|e| {
+        why.push(e);
+        Default::default()
+    });
     let cfg = ActConfig {
+        commit_via,
+        host_commit_timeout_s: number(
+            lookup,
+            "HOST_COMMIT_TIMEOUT_S",
+            crate::core::commit_via::DEFAULT_HOST_COMMIT_TIMEOUT_S,
+            10,
+            &mut why,
+        ),
         data_dir: data_dir.clone(),
         repo,
         notify_url,
@@ -375,9 +417,9 @@ pub fn from_env(lookup: &dyn Fn(&str) -> Option<String>) -> Result<ActConfig, St
             &mut why,
         ),
         git: {
-            let remote =
-                non_empty("HOMELAB_ADMIN_GIT_REMOTE").unwrap_or_else(|| DEFAULT_REMOTE.into());
-            if let Some(p) = remote_problem(&remote) {
+            let remote = non_empty("HOMELAB_ADMIN_GIT_REMOTE")
+                .unwrap_or_else(|| default_remote(commit_via).into());
+            if let Some(p) = remote_problem_for(&remote, commit_via) {
                 why.push(p);
             }
             let branch = non_empty("HOMELAB_ADMIN_GIT_BRANCH").unwrap_or_else(|| "main".into());

@@ -3439,6 +3439,30 @@ test("invariants: ux-inbox-2: Snooze is a menu on the button and a choice leaves
   }
 });
 
+test("invariants: ux-inbox-1: with no question waiting the Questions card is one short line", async () => {
+  const browser = await launch();
+  try {
+    const context = await browser.newContext({
+      viewport: { width: 1280, height: 1000 },
+    });
+    const page = await freshPage(context);
+    await page.goto(`${BASE}/needs-you`);
+    await page.locator("#inbox-questions[data-ib-idle]").waitFor({
+      timeout: 20000,
+    });
+    const h = await page
+      .locator("#inbox-questions")
+      .evaluate((e) => e.getBoundingClientRect().height);
+    assert.ok(h < 180, `the empty Questions card is ${h} px high`);
+    assert.equal(
+      await page.locator("#inbox-questions button:visible").count(),
+      0,
+    );
+  } finally {
+    await browser.close();
+  }
+});
+
 test("invariants: every Inbox row says what and why and carries its fix, and a plain click on a kind shows only those", async () => {
   const browser = await launch();
   try {

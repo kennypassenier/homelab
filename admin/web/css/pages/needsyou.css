@@ -28,7 +28,15 @@
 /* Each card holds the height of its content so loading, empty and failed
    fill the same footprint (UI principles section 6). */
 #inbox-questions {
-  --kp-card-stage-min: 12rem;
+  /* ux-inbox-1: loading and empty are one small line, not a 12 rem card. */
+  --kp-card-stage-min: 3rem;
+}
+#inbox-questions[data-ib-idle] > .kp-card__body {
+  display: none;
+}
+.ib-q-idle {
+  margin: 0;
+  color: var(--muted-foreground);
 }
 .inbox-card {
   --kp-card-stage-min: 22rem;

@@ -156,6 +156,14 @@ export function mountQuestions(page) {
     "aria-label": "Questions from the host",
   });
   const count = h("b", { class: "ib-qcount", "aria-live": "polite" });
+  // ux-inbox-1: with no question waiting the card is one line, not a
+  // full empty state; its description and Leave all stopped come back with
+  // the first question.
+  const idle = h(
+    "p",
+    { class: "ib-q-idle", hidden: true },
+    "No question from the host. When an operation on pve stops and asks, its question appears here with the time the host still waits.",
+  );
   const all = drivable(
     h(
       "button",
@@ -174,7 +182,7 @@ export function mountQuestions(page) {
     desc: "When an operation on pve stops and waits for you, the card says what each answer would set in motion and how long the host still waits; if nobody answers, the safe answer happens.",
     id: "inbox-questions",
     actions: [count, all],
-    body: [box],
+    body: [idle, box],
   });
   attachCardStates(el);
   attachQuestions(box);
@@ -202,10 +210,9 @@ export function mountQuestions(page) {
   const readout = () => {
     const open = openCards().length;
     count.textContent = plural(open, "question") + " waiting";
-    all.toggleAttribute("disabled", open === 0);
-    if (open === 0)
-      all.setAttribute("data-kp-disabled-reason", "No question is waiting");
-    else all.removeAttribute("data-kp-disabled-reason");
+    // Leave all stopped only exists while a question waits; with none it
+    // would be a disabled button that answers nothing.
+    all.hidden = open === 0;
     const read = current().asksRead;
     if (cards.size === 0 && read !== "ready") {
       putState(
@@ -220,16 +227,9 @@ export function mountQuestions(page) {
       );
       return;
     }
-    putState(
-      el,
-      cards.size === 0 ? "empty" : "ready",
-      cards.size === 0
-        ? {
-            title: "No question from the host",
-            text: "When an operation on pve stops and asks, its question appears here with the time the host still waits.",
-          }
-        : undefined,
-    );
+    putState(el, "ready");
+    idle.hidden = cards.size !== 0;
+    el.toggleAttribute("data-ib-idle", cards.size === 0);
   };
 
   const paint = () => {

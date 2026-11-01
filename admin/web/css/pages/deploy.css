@@ -1,0 +1,20 @@
+/* ux-deploypage: Deploy all changes as a page of its own. The plan keeps
+   apply.css; this only lays the page out: header, plan, command, one column
+   on the page grid. kp-themes tokens only. */
+.dp-page {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--kp-space-lg, 1rem);
+  align-content: start;
+}
+.dp-hint {
+  margin: 0;
+  color: var(--muted-foreground);
+  font-size: var(--kp-text-sm);
+}
+.dp-plan {
+  min-inline-size: 0;
+}
+.dp-cli {
+  min-inline-size: 0;
+}

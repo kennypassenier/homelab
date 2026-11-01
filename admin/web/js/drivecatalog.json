@@ -1276,156 +1276,111 @@
     },
     {
       "id": "deploy-all-apply",
-      "page": "overview",
+      "page": "deploy",
       "what": "apply the ticked deploys: one confirmed batch, each stack backed up first unless skipped",
       "opens": "dialog",
       "row": null,
-      "href": "/stacks",
+      "href": "/stacks/deploy",
       "was": [],
-      "shows": "in the Deploy all changes panel, while stacks are ticked",
-      "reach": [
-        {
-          "do": "click",
-          "control": "stacks-deploy-all"
-        }
-      ],
+      "shows": "on the Deploy all changes page, while stacks are ticked",
+      "reach": [],
       "twins": false
     },
     {
       "id": "deploy-all-destroy",
-      "page": "overview",
+      "page": "deploy",
       "what": "apply the ticked destroy on its own: the stack's name is typed, then the apply dialog confirms once more",
       "opens": "dialog",
       "row": null,
-      "href": "/stacks",
+      "href": "/stacks/deploy",
       "was": [],
-      "shows": "in the Deploy all changes panel, while only a destroy is ticked",
-      "reach": [
-        {
-          "do": "click",
-          "control": "stacks-deploy-all"
-        }
-      ],
+      "shows": "on the Deploy all changes page, while only a destroy is ticked",
+      "reach": [],
       "twins": false
     },
     {
       "id": "deploy-all-diff",
-      "page": "overview",
+      "page": "deploy",
       "what": "open or close the exact lines applying one stack changes",
       "opens": "view",
       "row": "<stack>",
-      "href": "/stacks",
+      "href": "/stacks/deploy",
       "was": [],
-      "shows": "in the Deploy all changes panel",
-      "reach": [
-        {
-          "do": "click",
-          "control": "stacks-deploy-all"
-        }
-      ],
+      "shows": "on the Deploy all changes page",
+      "reach": [],
       "twins": false
     },
     {
       "id": "deploy-all-pick",
-      "page": "overview",
+      "page": "deploy",
       "what": "include or leave out one stack of the batch (a destroy is armed by ticking it)",
       "opens": "view",
       "selects": true,
       "row": "<stack>",
-      "href": "/stacks",
+      "href": "/stacks/deploy",
       "was": [],
-      "shows": "in the Deploy all changes panel",
-      "reach": [
-        {
-          "do": "click",
-          "control": "stacks-deploy-all"
-        }
-      ],
+      "shows": "on the Deploy all changes page",
+      "reach": [],
       "twins": false
     },
     {
       "id": "deploy-all-pick-all",
-      "page": "overview",
+      "page": "deploy",
       "what": "tick every stack that can be applied",
       "opens": "view",
       "row": null,
-      "href": "/stacks",
+      "href": "/stacks/deploy",
       "was": [],
-      "shows": "in the Deploy all changes panel",
-      "reach": [
-        {
-          "do": "click",
-          "control": "stacks-deploy-all"
-        }
-      ],
+      "shows": "on the Deploy all changes page",
+      "reach": [],
       "twins": false
     },
     {
       "id": "deploy-all-plan-again",
-      "page": "overview",
+      "page": "deploy",
       "what": "read the plan of every stack again from the host and the working copy",
       "opens": "run",
       "row": null,
-      "href": "/stacks",
+      "href": "/stacks/deploy",
       "was": [],
-      "shows": "in the Deploy all changes panel",
-      "reach": [
-        {
-          "do": "click",
-          "control": "stacks-deploy-all"
-        }
-      ],
+      "shows": "on the Deploy all changes page",
+      "reach": [],
       "twins": false
     },
     {
       "id": "deploy-all-skip-backups",
-      "page": "overview",
+      "page": "deploy",
       "what": "choose, in the sentence under the table, whether the deploys back each stack up first or skip the backups (back up first is the default)",
       "opens": "view",
       "row": "back-up-first|skip",
-      "href": "/stacks",
+      "href": "/stacks/deploy",
       "was": [],
-      "shows": "in the Deploy all changes panel, once the plan is read",
-      "reach": [
-        {
-          "do": "click",
-          "control": "stacks-deploy-all"
-        }
-      ],
+      "shows": "on the Deploy all changes page, once the plan is read",
+      "reach": [],
       "twins": false
     },
     {
       "id": "deploy-all-stack-file",
-      "page": "overview",
+      "page": "deploy",
       "what": "open the stack file of a stack that cannot be planned (its Settings)",
       "opens": "view",
       "row": "<stack>",
-      "href": "/stacks",
+      "href": "/stacks/deploy",
       "was": [],
-      "shows": "in the Deploy all changes panel",
-      "reach": [
-        {
-          "do": "click",
-          "control": "stacks-deploy-all"
-        }
-      ],
+      "shows": "on the Deploy all changes page",
+      "reach": [],
       "twins": false
     },
     {
       "id": "deploy-all-untick",
-      "page": "overview",
+      "page": "deploy",
       "what": "untick every ticked stack of the plan",
       "opens": "view",
       "row": null,
-      "href": "/stacks",
+      "href": "/stacks/deploy",
       "was": [],
-      "shows": "in the Deploy all changes panel, while a stack is ticked",
-      "reach": [
-        {
-          "do": "click",
-          "control": "stacks-deploy-all"
-        }
-      ],
+      "shows": "on the Deploy all changes page, while a stack is ticked",
+      "reach": [],
       "twins": false
     },
     {
@@ -4606,8 +4561,8 @@
     {
       "id": "stacks-deploy-all",
       "page": "overview",
-      "what": "open Deploy all changes: compare every stack with its files, read the plan, then deploy",
-      "opens": "dialog",
+      "what": "open the Deploy all changes page (/stacks/deploy): compare every stack with its files, read the plan, then deploy",
+      "opens": "view",
       "row": null,
       "href": "/stacks",
       "was": [],
@@ -5409,7 +5364,7 @@
   "fields": [
     {
       "id": "apply-skip-backups",
-      "page": "apply",
+      "page": "deploy",
       "what": "whether to back up the stacks first or skip the backups",
       "was": [],
       "row": null
@@ -5713,6 +5668,7 @@
     "settings",
     "shell",
     "stacks",
+    "stacks/deploy",
     "start",
     "status",
     "storage",
@@ -5726,7 +5682,7 @@
   "redirects": {
     "needs-you": "/inbox",
     "overview": "/stacks",
-    "apply": "/stacks?deploy-all=1",
+    "apply": "/stacks/deploy",
     "health": "/inbox",
     "jobs": "/activity?view=running",
     "log": "/activity?view=host-log",

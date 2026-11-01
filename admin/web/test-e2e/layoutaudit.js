@@ -694,6 +694,9 @@ export function pageChecks() {
           n.textContent ?? "",
         );
       if (!m) continue;
+      // ux-deploypage: a file's lines in a diff are code to read, not a
+      // reference to follow (the Deploy all changes page shows them).
+      if (n.parentElement?.closest(".kp-diffview, pre")) continue;
       const a = n.parentElement?.closest("a[href]");
       if (!a || !/^https?:\/\//.test(a.getAttribute("href") ?? ""))
         out.links.push(`"${m[0]}" is shown as text, not as a working link`);

@@ -130,6 +130,12 @@ async fn main() -> std::process::ExitCode {
                 .group("Inbox")
                 .hidden(),
         )
+        // ux-deploypage: Deploy all changes is a page of its own, under Stacks.
+        .page(
+            Page::new("deploy", "Deploy all changes", "/stacks/deploy")
+                .group("Stacks")
+                .hidden(),
+        )
         // redesign-final-h3: the Restore flow's own address, under Backups.
         .page(
             Page::new("restore", "Restore", "/backups/restore")

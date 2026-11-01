@@ -32,7 +32,7 @@ const PAGES = {
   firewall: { href: "/firewall", label: "Firewall" },
   settings: { href: "/settings", label: "Host settings" },
   console: { href: "/console", label: "the Console" },
-  deployall: { href: "/stacks?deploy-all=1", label: "Deploy all changes" },
+  deployall: { href: "/stacks/deploy", label: "Deploy all changes" },
 };
 
 /** @type {Record<string, string>} second key after "g" → page */

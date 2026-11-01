@@ -291,7 +291,7 @@ export const editCommands =
         hint: "every stack against the repository: see the plan first",
         words: "apply repository fleet plan",
         featured: true,
-        href: "/stacks?deploy-all=1",
+        href: "/stacks/deploy",
       },
       {
         // redesign-flows-1: the one Update flow over every app with a

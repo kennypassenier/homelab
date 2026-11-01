@@ -1165,7 +1165,7 @@ test("invariants: a stack whose firewall the host enforces is shown as enforced 
   }
 });
 
-test("invariants: Deploy all changes reads its plan only once its panel is opened, and shows a loading state first", async () => {
+test("invariants: Deploy all changes reads its plan only once its page is opened, and shows a loading state first", async () => {
   const browser = await launch();
   try {
     const context = await browser.newContext();
@@ -1181,8 +1181,8 @@ test("invariants: Deploy all changes reads its plan only once its panel is opene
       await new Promise((r) => setTimeout(r, 1200));
       await route.continue();
     });
-    // redesign-stacks (3.71.0): the old Apply section is the Stacks
-    // header's "Deploy all changes" side panel (FLOWS.md task 13).
+    // ux-deploypage: the Stacks header's "Deploy all changes" opens the
+    // page /stacks/deploy (FLOWS.md task 13; it was a dialog).
     await page.goto(`${BASE}/stacks`);
     await page.waitForSelector("#deploy-all", { timeout: 5000 });
     await page.waitForTimeout(500);
@@ -1192,51 +1192,56 @@ test("invariants: Deploy all changes reads its plan only once its panel is opene
       "the plan was read before Deploy all changes was ever opened",
     );
     await page.click("#deploy-all");
+    await page.waitForURL("**/stacks/deploy", { timeout: 5000 });
     // Right after opening, before the delayed plan has answered: the
     // table's own loading state (its busy card) must already be on screen.
     await page
-      .locator('dialog[open] #ap-plan[aria-busy="true"]')
+      .locator('.dp-page #ap-plan[aria-busy="true"]')
       .waitFor({ state: "attached", timeout: 1000 });
     assert.ok(
       planRequests.length > 0,
-      "opening the panel never triggered the plan read",
+      "opening the page never triggered the plan read",
     );
     // Once the delayed read lands, the loading state is gone and the real
     // plan is drawn, with the one button that opens the apply dialog.
-    await page.waitForSelector('dialog[open] #ap-plan[aria-busy="true"]', {
+    await page.waitForSelector('.dp-page #ap-plan[aria-busy="true"]', {
       state: "detached",
       timeout: 5000,
     });
     assert.ok(
-      await page.locator("dialog[open] #apply-open").isVisible(),
-      "the panel has no button that opens the deploy dialog",
+      await page.locator(".dp-page #apply-open").isVisible(),
+      "the page has no button that opens the deploy dialog",
     );
   } finally {
     await browser.close();
   }
 });
 
-test("invariants: /apply lands on Stacks with Deploy all changes open", async () => {
+test("invariants: /apply and /stacks?deploy-all=1 land on the Deploy all changes page in one hop, and Back leaves it (ux-deploypage)", async () => {
   const browser = await launch();
   try {
     const context = await browser.newContext();
     const page = await freshPage(context);
-    // feat-shell-1: Overview is Stacks since 3.71.0 and its Apply section
-    // is "Deploy all changes" (`?deploy-all=1`), the approved redirect;
-    // redesign-stacks: it opens as the Stacks page's side panel.
+    // ux-deploypage (Kenny, 2026-11-01): Deploy all changes is the page
+    // /stacks/deploy, not a dialog; both old addresses are sent on.
     await page.goto(`${BASE}/apply`);
-    await page.waitForURL("**/stacks?deploy-all=1", { timeout: 5000 });
-    const title = page.locator("dialog[open] .kp-dialog__title");
+    await page.waitForURL("**/stacks/deploy", { timeout: 5000 });
+    const title = page.locator(".dp-page h1");
     await title.waitFor({ timeout: 5000 });
     assert.equal(
       (await title.innerText()).trim(),
       "Deploy all changes",
-      "/apply did not land with Deploy all changes open",
+      "/apply did not land on the Deploy all changes page",
+    );
+    assert.equal(
+      await page.locator("dialog[open]").count(),
+      0,
+      "Deploy all changes still opens as a dialog",
     );
     // redesign-flows-5 (review item 5): one heading, Deploy all changes,
     // with one sentence; the old sub-headings are not stacked under it.
     const subs = await page
-      .locator("dialog[open] h3")
+      .locator(".dp-page h2, .dp-page h3")
       .evaluateAll((l) => l.map((x) => x.textContent ?? ""));
     assert.ok(
       !subs.some((t) =>
@@ -1244,11 +1249,22 @@ test("invariants: /apply lands on Stacks with Deploy all changes open", async ()
       ),
       `the old sub-headings are still stacked under the heading: ${subs.join(" | ")}`,
     );
-    // Closing the panel takes `deploy-all=1` out of the address again.
-    await page.keyboard.press("Escape");
-    await page.waitForFunction(() => !location.search.includes("deploy-all"), {
-      timeout: 3000,
-    });
+    // The same command for a workstation stays on the page.
+    assert.match(
+      await page.locator(".dp-page .cli-line").innerText(),
+      /homelab apply/,
+      "the page lost its command line",
+    );
+    // The dialog's old address goes on in one hop.
+    await page.goto(`${BASE}/stacks?deploy-all=1`);
+    await page.waitForURL("**/stacks/deploy", { timeout: 5000 });
+    // The way in is Stacks' button; the browser's Back returns to Stacks.
+    await page.goto(`${BASE}/stacks`);
+    await page.click("#deploy-all");
+    await page.waitForURL("**/stacks/deploy", { timeout: 5000 });
+    await page.goBack();
+    await page.waitForURL("**/stacks", { timeout: 5000 });
+    await page.locator("#deploy-all").waitFor({ timeout: 5000 });
   } finally {
     await browser.close();
   }
@@ -4132,8 +4148,9 @@ test("invariants: Deploy all changes marks its steps, lists every stack of the p
       viewport: { width: 1600, height: 1000 },
     });
     const page = await freshPage(context);
-    await page.goto(`${BASE}/stacks?deploy-all=1`);
-    // Both demos put the live status beside the title.
+    // Both demos put the live status beside the title (Stacks' header).
+    await page.goto(`${BASE}/stacks`);
+    await page.locator(".sk-page .nx-head").waitFor({ timeout: 10000 });
     assert.equal(
       await page
         .locator(".sk-page .nx-head .kp-page-header__line > h1 + .nx-live")
@@ -4141,7 +4158,8 @@ test("invariants: Deploy all changes marks its steps, lists every stack of the p
       1,
       "the header's 'updated' is not beside the title",
     );
-    const panel = page.locator("dialog[open]");
+    await page.goto(`${BASE}/stacks/deploy`);
+    const panel = page.locator(".dp-page");
     await panel
       .locator("#ap-plan tbody tr[data-kp-row-key]")
       .first()
@@ -4166,7 +4184,7 @@ test("invariants: Deploy all changes marks its steps, lists every stack of the p
     );
     const text = await panel.innerText();
     assert.doesNotMatch(text, /\(s\)/, "bracketed plurals");
-    assert.doesNotMatch(text, / :: |\/tmp\//, "raw error text in the panel");
+    assert.doesNotMatch(text, / :: |\/tmp\//, "raw error text on the page");
     // The demo's alpha-demo declares no apps, so it cannot be planned:
     // its row opens to what is wrong and its fix.
     const row = panel
@@ -4200,7 +4218,7 @@ test("invariants: Deploy all changes marks its steps, lists every stack of the p
         }),
       }),
     );
-    await page.goto(`${BASE}/stacks?deploy-all=1`);
+    await page.goto(`${BASE}/stacks/deploy`);
     const rows = page.locator("#ap-plan tbody tr[data-kp-row-key]");
     await rows.first().waitFor({ timeout: 10000 });
     assert.equal(await rows.count(), 5, "not a row per stack of the plan");
@@ -8177,7 +8195,7 @@ test("invariants: Deploy all changes keeps a stack's diff inside its table (feat
       viewport: { width: 1894, height: 1100 },
     });
     const page = await freshPage(context);
-    await page.goto(`${BASE}/stacks?deploy-all=1`);
+    await page.goto(`${BASE}/stacks/deploy`);
     const more = page.locator("#ap-plan [data-drive=deploy-all-diff]");
     await more.first().waitFor({ timeout: 20000 });
     await more.first().click();
@@ -8230,7 +8248,7 @@ test("invariants: Deploy all changes deploys the ticked subset and destroys only
         }),
       }),
     );
-    await page.goto(`${BASE}/stacks?deploy-all=1`);
+    await page.goto(`${BASE}/stacks/deploy`);
     await page.locator("#apply-open").waitFor({ timeout: 10000 });
     await page.getByLabel("Select alpha").uncheck();
     await page.locator("#apply-open").click();
@@ -8332,7 +8350,7 @@ test("invariants: Deploy all changes marks Compare done only once the compare ra
     await page.route("**/data/apply/plan", (route) => {
       heldPlan.push(route);
     });
-    await page.goto(`${BASE}/stacks?deploy-all=1`);
+    await page.goto(`${BASE}/stacks/deploy`);
     const compare = page.locator(".ap-steps li[data-step=compare]");
     await compare.waitFor({ timeout: 10000 });
     await page.waitForTimeout(500);
@@ -8623,7 +8641,7 @@ const AUDIT_PAGES = [
   "/apps",
   "/inbox",
   "/stacks",
-  "/stacks?deploy-all=1",
+  "/stacks/deploy",
   "/activity",
   "/activity?view=host-log",
   "/activity?view=planned",
@@ -8823,8 +8841,7 @@ async function genWalk(entry) {
         for (const k of Object.keys(mine))
           for (const f of r[k] ?? []) mine[k].push(`${where} @${width}: ${f}`);
       };
-      // The last open dialog, marked for the audit (a page that opens one by
-      // its address, as Deploy all changes does, is audited with it).
+      // The last open dialog, marked for the audit.
       const markDialog = () =>
         page.evaluate(() => {
           const ds = [...document.querySelectorAll("dialog[open]")];

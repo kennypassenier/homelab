@@ -48,6 +48,7 @@ export const RETIRED_STACK_TABS = /** @type {const} */ (["checks", "firewall"]);
  *   {page: "fleetview"} | {page: "firewall"} | {page: "settings"} |
  *   {page: "presets"} | {page: "notifications"} | {page: "shell"} |
  *   {page: "update"} | {page: "restore"} | {page: "storage"} |
+ *   {page: "deploy"} |
  *   {page: "stack", name: string, tab: StackTab} |
  *   {page: "retired", from: string, name?: string} |
  *   {page: "notfound", path: string}} Route
@@ -68,6 +69,11 @@ export const CURRENT_PATHS = {
   // "needs-you", which every Live view control names).
   inbox: "needs-you",
   stacks: "overview",
+  // ux-deploypage (Kenny, 2026-11-01: "Volledige pagina"): Deploy all
+  // changes is a page of its own, reviewed and run here; `/apply` and
+  // `/stacks?deploy-all=1` are sent on. (The route table reads this before
+  // a stack's name, so a stack called "deploy" cannot be told from it.)
+  "stacks/deploy": "deploy",
   activity: "activity",
   backups: "backups",
   system: "system",
@@ -89,6 +95,9 @@ export const CURRENT_PATHS = {
   storage: "storage",
 };
 
+/** The Deploy all changes page (ux-deploypage). */
+export const DEPLOY_PATH = "/stacks/deploy";
+
 /**
  * Every retired address and its new home (FLOWS.md §2.1 plus every older
  * alias): a function of the query string the old link carried. `ctx.stacks`
@@ -102,9 +111,9 @@ const REDIRECTS = {
   overview: (s) => {
     const p = new URLSearchParams(s);
     if (p.get("section") !== "apply") return `/stacks${s}`;
-    return `/stacks${setParams(s, { section: null, "deploy-all": "1" })}`;
+    return `${DEPLOY_PATH}${setParams(s, { section: null })}`;
   },
-  apply: (s) => `/stacks${setParams(s, { "deploy-all": "1" })}`,
+  apply: (s) => `${DEPLOY_PATH}${s}`,
   health: (s) => {
     const block = new URLSearchParams(s).get("block");
     // checks-notice-link-1: the nightly check's notice linked here; the
@@ -214,6 +223,7 @@ const FALLBACK_TITLE = /** @type {Record<string, string>} */ ({
   update: "Update apps",
   restore: "Restore",
   storage: "Storage",
+  deploy: "Deploy all changes",
 });
 
 /**
@@ -244,6 +254,9 @@ export const VIEWS = {
  */
 export function redirectFor(r, search, ctx = {}) {
   const c = { stacks: ctx.stacks ?? [] };
+  // ux-deploypage: the Stacks page's old "Deploy all changes" dialog address.
+  if (r.page === "overview" && new URLSearchParams(search).has("deploy-all"))
+    return `${DEPLOY_PATH}${setParams(search, { "deploy-all": null })}`;
   if (r.page === "retired") {
     if (r.name != null) {
       // A merged stack tab (FLOWS.md §1.3).

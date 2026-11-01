@@ -88,9 +88,9 @@ test("feat-shell-1: every old address redirects to its new home in one hop, its 
   const cases = [
     ["/overview", "/stacks"],
     ["/overview?fleet.q=media", "/stacks?fleet.q=media"],
-    ["/overview?section=apply", "/stacks?deploy-all=1"],
-    ["/apply", "/stacks?deploy-all=1"],
-    ["/apply?fleet.q=media", "/stacks?fleet.q=media&deploy-all=1"],
+    ["/overview?section=apply", "/stacks/deploy"],
+    ["/apply", "/stacks/deploy"],
+    ["/apply?fleet.q=media", "/stacks/deploy?fleet.q=media"],
     ["/health", "/inbox"],
     ["/health?block=doctor", "/inbox?kind=doctor"],
     ["/jobs?job=3", "/activity?job=3&view=running"],
@@ -147,7 +147,14 @@ test("feat-shell-1: every address the router knows is drivable, retired ones inc
     const r = route(`/${k}`);
     assert.notEqual(r.page, "notfound", k);
   }
-  for (const k of ["overview", "apply", "health", "fleetview", "shell"])
+  for (const k of [
+    "overview",
+    "apply",
+    "stacks/deploy",
+    "health",
+    "fleetview",
+    "shell",
+  ])
     assert.ok(DRIVABLE_PATHS.includes(k), k);
   for (const k of [
     "",
@@ -267,5 +274,32 @@ test("feat-shell-1: the server registers exactly the six areas, in areas.js's or
   assert.deepEqual(
     shown,
     AREAS.map((a) => ({ id: a.id, label: a.label, href: a.href })),
+  );
+});
+
+test("ux-deploypage: Deploy all changes has its own address; the dialog's address redirects to it in one hop", () => {
+  assert.deepEqual(route("/stacks/deploy"), { page: "deploy" });
+  assert.equal(pageHref("deploy"), "/stacks/deploy");
+  assert.equal(redirectFor(route("/stacks/deploy"), ""), null);
+  // `/stacks?deploy-all=1` was the dialog; the rest of its query is kept.
+  assert.equal(
+    redirectFor(route("/stacks"), "?deploy-all=1"),
+    "/stacks/deploy",
+  );
+  assert.equal(
+    redirectFor(route("/stacks"), "?fleet.q=media&deploy-all=1"),
+    "/stacks/deploy?fleet.q=media",
+  );
+  // A target is never itself redirected (one hop).
+  for (const from of ["/apply", "/overview?section=apply"]) {
+    const [path, q = ""] = from.split("?");
+    const to = /** @type {string} */ (
+      redirectFor(route(path), q ? `?${q}` : "")
+    );
+    assert.equal(redirectFor(route(to.split("?")[0]), ""), null, from);
+  }
+  assert.equal(
+    pageTitle(route("/stacks/deploy")),
+    "Homelab · Deploy all changes",
   );
 });

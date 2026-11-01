@@ -72,6 +72,7 @@ import { mount as storagePage } from "./pages/storage.js";
 import { mount as homePage } from "./pages/home.js";
 import { mount as inboxPage } from "./pages/needsyou.js";
 import { mount as updatePage } from "./pages/update.js";
+import { mount as deployPage } from "./pages/deploy.js";
 import { scopeOf } from "./updateflow.js";
 import { mount as systemPage } from "./pages/system.js";
 import { mount as metricsPage } from "./pages/metrics.js";
@@ -340,6 +341,9 @@ function render() {
       break;
     case "update":
       cleanup = updatePage(page, scopeOf(location.search) ?? { all: true });
+      break;
+    case "deploy":
+      cleanup = deployPage(page, { navigate });
       break;
     case "overview":
       cleanup = overview(page, { navigate });

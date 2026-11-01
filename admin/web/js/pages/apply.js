@@ -13,8 +13,8 @@
 // steps (Compare, Review, Apply, Destroy) and "Plan again" keep their places
 // above the table. Pure half: js/applyplan.js, js/applytable.js.
 //
-// `mount` paints only the section's body (the caller, Stacks' "Deploy all
-// changes", owns its heading and one-line description) and starts loading
+// `mount` paints only the plan's body (the caller, the Deploy all changes
+// page at /stacks/deploy, owns its heading and one-line description) and starts loading
 // the table's own way before the plan has been read.
 
 import { act, onAct } from "../act.js";
@@ -53,85 +53,76 @@ import {
 
 const SKIP_FIELD = declareField({
   id: "apply-skip-backups",
-  page: "apply",
+  page: "deploy",
   what: "whether to back up the stacks first or skip the backups",
 });
 const READ = declare({
   id: "deploy-all-plan-again",
-  page: "overview",
+  page: "deploy",
   opens: "run",
   what: "read the plan of every stack again from the host and the working copy",
-  shows: "in the Deploy all changes panel",
-  reach: [{ do: "click", control: "stacks-deploy-all" }],
+  shows: "on the Deploy all changes page",
 });
 const PICK = declare({
   id: "deploy-all-pick",
-  page: "overview",
+  page: "deploy",
   opens: "view",
   row: "<stack>",
   what: "include or leave out one stack of the batch (a destroy is armed by ticking it)",
   selects: true,
-  shows: "in the Deploy all changes panel",
-  reach: [{ do: "click", control: "stacks-deploy-all" }],
+  shows: "on the Deploy all changes page",
 });
 const PICK_ALL = declare({
   id: "deploy-all-pick-all",
-  page: "overview",
+  page: "deploy",
   opens: "view",
   what: "tick every stack that can be applied",
-  shows: "in the Deploy all changes panel",
-  reach: [{ do: "click", control: "stacks-deploy-all" }],
+  shows: "on the Deploy all changes page",
 });
 const DIFF = declare({
   id: "deploy-all-diff",
-  page: "overview",
+  page: "deploy",
   opens: "view",
   row: "<stack>",
   what: "open or close the exact lines applying one stack changes",
-  shows: "in the Deploy all changes panel",
-  reach: [{ do: "click", control: "stacks-deploy-all" }],
+  shows: "on the Deploy all changes page",
 });
 const FILE = declare({
   id: "deploy-all-stack-file",
-  page: "overview",
+  page: "deploy",
   opens: "view",
   row: "<stack>",
   what: "open the stack file of a stack that cannot be planned (its Settings)",
-  shows: "in the Deploy all changes panel",
-  reach: [{ do: "click", control: "stacks-deploy-all" }],
+  shows: "on the Deploy all changes page",
 });
 const UNTICK = declare({
   id: "deploy-all-untick",
-  page: "overview",
+  page: "deploy",
   opens: "view",
   what: "untick every ticked stack of the plan",
-  shows: "in the Deploy all changes panel, while a stack is ticked",
-  reach: [{ do: "click", control: "stacks-deploy-all" }],
+  shows: "on the Deploy all changes page, while a stack is ticked",
 });
 const SKIP = declare({
   id: "deploy-all-skip-backups",
-  page: "overview",
+  page: "deploy",
   opens: "view",
   row: "back-up-first|skip",
   what: "choose, in the sentence under the table, whether the deploys back each stack up first or skip the backups (back up first is the default)",
-  shows: "in the Deploy all changes panel, once the plan is read",
-  reach: [{ do: "click", control: "stacks-deploy-all" }],
+  shows: "on the Deploy all changes page, once the plan is read",
 });
 const APPLY = declare({
   id: "deploy-all-apply",
-  page: "overview",
+  page: "deploy",
   opens: "dialog",
   what: "apply the ticked deploys: one confirmed batch, each stack backed up first unless skipped",
-  shows: "in the Deploy all changes panel, while stacks are ticked",
-  reach: [{ do: "click", control: "stacks-deploy-all" }],
+  shows: "on the Deploy all changes page, while stacks are ticked",
 });
 const DESTROY = declare({
   id: "deploy-all-destroy",
-  page: "overview",
+  page: "deploy",
   opens: "dialog",
   what: "apply the ticked destroy on its own: the stack's name is typed, then the apply dialog confirms once more",
-  shows: "in the Deploy all changes panel, while only a destroy is ticked",
-  reach: [{ do: "click", control: "stacks-deploy-all" }],
+  shows: "on the Deploy all changes page, while only a destroy is ticked",
 });
 
 /**

@@ -5,7 +5,8 @@
 // fleet as a kp datatable grouped by state, or as kp entity cards; one
 // selection bar for Deploy, Back up now and Update…; see fleetlist.js),
 // "Which stacks use the most" and "Every stack, every night" (fleetglance.js).
-// Deploy all changes and New stack open side panels.
+// New stack opens a side panel; Deploy all changes is its own page
+// (pages/deploy.js, /stacks/deploy).
 //
 // Data: the fleet store (live), /data/fleet-trend (the host CPU line),
 // /data/drift (which stacks differ from their files, the count on Deploy all
@@ -23,7 +24,7 @@ import { inboxNow, onInbox } from "../inboxlist.js";
 import { countSplit } from "../inboxrows.js";
 import { capacityRows } from "../mapview.js";
 import { openNewStack } from "../newstack.js";
-import { stackHref } from "../router.js";
+import { DEPLOY_PATH, stackHref } from "../router.js";
 import { current, subscribe } from "../store.js";
 import {
   deployCount,
@@ -31,11 +32,8 @@ import {
   newerByStack,
   stackRows,
 } from "../stacksview.js";
-import { openDialog } from "../actui.js";
 import { drawer, ensureStyle, kpiStrip, pageHeader } from "../ui.js";
-import { setParams } from "../urlstate.js";
 import { REFRESH_MS, changeGate } from "../quiet.js";
-import { mount as mountPlan } from "./apply.js";
 
 /** @typedef {{navigate: (href: string) => void}} Ctx */
 
@@ -70,8 +68,8 @@ const tileKpi = ({ meter, dot, tone, ...t }) => ({
 const DEPLOY_ALL = declare({
   id: "stacks-deploy-all",
   page: "overview",
-  opens: "dialog",
-  what: "open Deploy all changes: compare every stack with its files, read the plan, then deploy",
+  opens: "view",
+  what: "open the Deploy all changes page (/stacks/deploy): compare every stack with its files, read the plan, then deploy",
 });
 const NEW_STACK = declare({
   id: "stacks-new",
@@ -106,13 +104,10 @@ export function mount(root, ctx) {
   const abort = new AbortController();
   /** @type {(() => void)[]} */
   const stops = [];
-  const q0 = new URLSearchParams(location.search);
 
   // ── state ────────────────────────────────────────────────────────────
   /** @type {any} */
   let drift = null;
-  /** @type {number | null} what the plan itself counted, once read */
-  let planCount = null;
   /** @type {any} */
   let calendar = null;
   /** @type {Map<string, number>} */
@@ -261,14 +256,14 @@ export function mount(root, ctx) {
     list.set({ rows, calendar });
     glance.set({ rows, calendar, fleet: "ready" });
     repaintHost();
-    const n = planCount ?? deployCount(drift);
+    const n = deployCount(drift);
     deployBadge.hidden = n == null || n === 0;
     deployBadge.textContent = n == null ? "" : String(n);
     deployAll.title =
       n == null
-        ? "Make every stack match its files in one confirmed batch (not compared yet: the panel compares first)"
+        ? "Make every stack match its files in one confirmed batch (not compared yet: the page compares first)"
         : n === 0
-          ? "Every stack matched its files at the last comparison; open to compare again"
+          ? "Every stack matched its files at the last comparison; open the page to compare again"
           : `${n} ${n === 1 ? "stack differs" : "stacks differ"} from ${n === 1 ? "its" : "their"} files (new and removed ones included); deploy them in one confirmed batch, each backed up first`;
   };
 
@@ -277,102 +272,8 @@ export function mount(root, ctx) {
   let panel = null;
 
   /** Deploy all changes: compare, read the plan, deploy (FLOWS.md task 13). */
-  const openDeployAll = () => {
-    panel?.close();
-    const compareNote = h("p", { class: "sk-hint", "aria-live": "polite" });
-    const compareBtn = dialogControl(
-      h(
-        "button",
-        {
-          type: "button",
-          class: "kp-button kp-button--sm",
-          id: "drift-compare",
-          title:
-            "Check every stack against its files again now and mark the ones that differ in the list",
-        },
-        "Compare again",
-      ),
-      "compare-now",
-    );
-    /** @type {{pending: number, broken: number} | null} */
-    let planRead = null;
-    // redesign-flows-4/5: the plan's own steps (apply.js) carry the
-    // compare as step 1, done once a compare has run.
-    /** @type {Set<() => void>} */
-    const compareSubs = new Set();
-    const compare = {
-      button: h("div", { class: "ap-compare" }, compareBtn, compareNote),
-      at: () =>
-        planRead != null || deployCount(drift) != null
-          ? (drift?.measured_at ?? Date.now() / 1000)
-          : null,
-      /** @param {() => void} f */
-      onChange: (f) => {
-        compareSubs.add(f);
-        return () => compareSubs.delete(f);
-      },
-    };
-    const paintCompare = () => {
-      const n = planRead ? planRead.pending : deployCount(drift);
-      const stacks = (/** @type {number} */ k) =>
-        `${k} ${k === 1 ? "stack" : "stacks"}`;
-      compareNote.textContent =
-        n == null
-          ? "Comparing every stack with its files…"
-          : n === 0
-            ? "Every stack matches its files."
-            : `${stacks(n)} ${n === 1 ? "differs" : "differ"} from ${n === 1 ? "its" : "their"} files, new and removed ones included · marked in the list.`;
-      compareSubs.forEach((f) => f());
-    };
-    paintCompare();
-    compareBtn.addEventListener("click", () => {
-      compareBtn.disabled = true;
-      compareNote.textContent = "Comparing every stack with its files…";
-      void readDrift(true)
-        .catch(unlessAborted)
-        .finally(() => {
-          compareBtn.disabled = false;
-          paintCompare();
-        });
-    });
-    const planBody = h("div", { class: "sk-plan", id: "apply-section" });
-    let stopPlan = () => {};
-    // deploy-all-dialog-1 (Kenny, 2026-10-22: "ipv een normale dialoog"):
-    // Deploy all changes is a normal centred dialog like every other
-    // action, not the panel on the right. It stays wide: the plan's steps,
-    // tiles and columns are the approved apply.html at its size.
-    const dlg = openDialog({
-      title: "Deploy all changes",
-      description:
-        "Make every stack match its files in the repository, in one confirmed batch. Each stack is backed up before it changes.",
-      body: [planBody],
-      id: "deploy-all-dialog",
-      wide: true,
-    });
-    panel = { close: dlg.close };
-    void dlg.closed.then(() => {
-      stopPlan();
-      if (panel?.close === dlg.close) panel = null;
-      const s = setParams(location.search, { "deploy-all": null });
-      if (s !== location.search)
-        history.replaceState(history.state, "", location.pathname + s);
-    });
-    stopPlan = mountPlan(planBody, {
-      compare,
-      // The plan's own count is the exact one: it goes on the header
-      // button and into the compare line, and the list's flags follow.
-      onRead: (read) => {
-        planRead = read;
-        planCount = read.pending;
-        paintCompare();
-        recompute();
-        void readDrift(false).catch(unlessAborted);
-      },
-    });
-    const s = setParams(location.search, { "deploy-all": "1" });
-    if (s !== location.search)
-      history.replaceState(history.state, "", location.pathname + s);
-  };
+  /** Deploy all changes is a page of its own (ux-deploypage). */
+  const openDeployAll = () => ctx.navigate(DEPLOY_PATH);
 
   /** New stack: the three routes, each ending on the same review. */
   const openNew = () => {
@@ -558,9 +459,6 @@ export function mount(root, ctx) {
   stops.push(subscribe(recompute));
   stops.push(onInbox(repaintHost));
   recompute();
-  // `/stacks?deploy-all=1` (Deploy all changes, `g d`, the old `/apply`)
-  // opens its panel at once.
-  if (q0.get("deploy-all") === "1") openDeployAll();
 
   return () => {
     abort.abort();

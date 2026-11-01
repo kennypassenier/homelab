@@ -203,6 +203,7 @@ const AREA_OF_PAGE = /** @type {Record<string, string>} */ ({
   "needs-you": "needs-you",
   overview: "overview",
   stack: "overview",
+  deploy: "overview",
   activity: "activity",
   backups: "backups",
   system: "system",
@@ -282,6 +283,11 @@ export function crumbs(r, pathname, search, opts = {}) {
       { label: "Restore" },
     ];
   }
+  if (r.page === "deploy")
+    return [
+      { label: area.label, href: area.href },
+      { label: "Deploy all changes" },
+    ];
   if (r.page === "stack") {
     const hub = `/stacks/${encodeURIComponent(r.name)}`;
     if (r.tab === "overview")

@@ -4122,6 +4122,89 @@ test("invariants: Stacks has the host strip, Deploy all changes and New stack; N
   }
 });
 
+test("invariants: the Stacks list starts under its toolbar: View and Group by in the table's toolbar, Deploy asks in the selection bar, no reserved row (ux-stacknew-1)", async () => {
+  const browser = await launch();
+  try {
+    for (const [width, height, maxStart] of [
+      [1280, 900, 520],
+      [390, 844, 1000],
+    ]) {
+      const context = await browser.newContext({ viewport: { width, height } });
+      const page = await freshPage(context);
+      await page.goto(`${BASE}/stacks`);
+      await page.locator("#fl-body tbody tr[data-kp-row-key]").first().waitFor({
+        timeout: 10000,
+      });
+      const at = await page.evaluate(() => {
+        const tb = document.querySelector("#fl-body .kp-datatable__bar");
+        const grab = (/** @type {string} */ id) =>
+          !!tb?.querySelector(`[data-drive="${id}"]`);
+        return {
+          view: grab("stacks-view"),
+          group: grab("stacks-group"),
+          asksInToolbar: grab("stacks-deploy-asks"),
+          asksInBar: !!document.querySelector(
+            '#fl-bar [data-drive="stacks-deploy-asks"]',
+          ),
+          first: document.querySelector("#fl-body")?.getBoundingClientRect()
+            .top,
+          bar: getComputedStyle(
+            document.querySelector("#fl-bar") ?? document.body,
+          ).position,
+          labels: [...document.querySelectorAll(".fl-ctl__label")].length,
+        };
+      });
+      assert.ok(
+        at.view && at.group,
+        `${width}px: View and Group are not in the table's toolbar`,
+      );
+      assert.ok(
+        !at.asksInToolbar && at.asksInBar,
+        `${width}px: Deploy asks is not in the selection bar`,
+      );
+      assert.equal(
+        at.bar,
+        "fixed",
+        `${width}px: the selection bar keeps a row of its own`,
+      );
+      assert.equal(at.labels, 0, `${width}px: the old label rows are back`);
+      assert.ok(
+        (at.first ?? 9999) < maxStart,
+        `${width}px: the list starts at ${at.first}px, below ${maxStart}`,
+      );
+      // Ticking a stack floats the bar at the bottom without moving the list.
+      await page.locator("#fl-body input[data-kp-select-row]").first().check();
+      await page.waitForFunction(
+        () =>
+          document
+            .querySelector("#fl-bar")
+            ?.getAttribute("data-kp-selection-state") !== "empty",
+      );
+      const after = await page.evaluate(
+        () =>
+          document
+            .querySelector("#fl-body tbody tr[data-kp-row-key]")
+            ?.getBoundingClientRect().top,
+      );
+      assert.ok(
+        Math.abs((after ?? 0) - (at.first ?? 0)) <= 1,
+        `${width}px: ticking moved the list from ${at.first} to ${after}`,
+      );
+      // Cards: View stays reachable and the Show row has no label above it.
+      await page.goto(`${BASE}/stacks?view=cards`);
+      await page
+        .locator('.fl-cardbar [data-drive="stacks-view"]')
+        .first()
+        .waitFor({
+          timeout: 8000,
+        });
+      await context.close();
+    }
+  } finally {
+    await browser.close();
+  }
+});
+
 test("invariants: Deploy all changes marks its steps, lists every stack of the plan as a table row with its action and says what Apply will do, and shows a stack that cannot be planned with its fix (feat-kp11demo-13)", async () => {
   // feat-kpadopt-2 (Kenny's prune choice of 2026-10-22): the demo plan's
   // steps and its broken stack first, then a fixed plan with every kind of

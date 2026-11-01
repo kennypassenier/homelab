@@ -911,6 +911,20 @@ key. GitHub's published ssh host keys are pinned in the dashboard and written
 to `HOMELAB_ADMIN_GIT_KNOWN_HOSTS` when that file is missing (they are never
 fetched with `ssh-keyscan`).
 
+**Commits by the host (key-move).** With `HOMELAB_ADMIN_COMMIT_VIA=host` the
+dashboard holds no deploy key: an edit is validated in the working copy as
+before, then sent to the host (`CommitStackFiles`), which commits and pushes
+it from its own clone with the key the ssh-only `[stack_commits]` table in
+host.toml names (`key = "/etc/homelab/deploy_key"`; optional `remote`,
+`branch`, `known_hosts`, `dir`, `author`, `roots`, `max_bytes`,
+`timeout_s`). The working copy then fetches the host's commit and reads the
+public repository over https. The host refuses a path outside `stacks/`,
+`presets/` and `config/host.toml`, a secret's file, a path through a symlink,
+a dirty clone and a base the remote has moved past, and never force-pushes;
+every request leaves one line in audit.log. The status panel says "pushed by
+the host". Unset (`dashboard`), the dashboard pushes itself as described
+above.
+
 **The demo host.** The simulated host the browser tests use
 (`HOMELAB_ADMIN_DEMO_HOST=1`) exists only in a build with
 `--features demo-host`; `make release` builds without it, and a release

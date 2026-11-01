@@ -28,9 +28,10 @@ const FIXES = {
   web: "Check the stack's gateway route and the app's own logs.",
   disk: "Free space in the stack's volume, or give it more under Settings ▸ Size and network.",
   backup:
-    "Back up now, then check that the backup target has room; the nightly round tries again tonight.",
-  env: "Push the env… from the More menu so the host's vault holds a copy of each secret file.",
-  drift: "Deploy makes the container match its files again.",
+    "Press Back up now in What needs you; then check that the backup target has room. The nightly round tries again tonight.",
+  env: "Press Push the env in What needs you, so the host's vault holds a copy of each secret file.",
+  drift:
+    "Press Deploy in What needs you; it makes the container match its files again.",
 };
 
 /**

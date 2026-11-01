@@ -78,6 +78,7 @@ import {
   UPTIME_PICK_EVENT,
   setUptime,
   attachDataTables,
+  attachDisabledReasons,
   setIdmark,
   FACET_EVENT,
   attachFacets,
@@ -446,7 +447,10 @@ const DANGER_BTN = declare({
  * @typedef {{s: import("../fleet.js").Stack | null, inFleet: boolean,
  *   fleetRead: boolean, drift: import("../stackhub.js").Drift | null,
  *   driftRead: boolean, edit: any | null, editError: string | null,
- *   catalog: import("../actionforms.js").Catalog | null}} Shared
+ *   catalog: import("../actionforms.js").Catalog | null,
+ *   newer: number | null}} Shared
+ * `newer`: how many images of this stack have a newer version (null until
+ * the fleet check was read)
  */
 
 /**
@@ -473,6 +477,7 @@ export function mount(root, params) {
     edit: null,
     editError: null,
     catalog: null,
+    newer: null,
   };
   /** Tell the open tab the shared readings changed. */
   const bus = new EventTarget();
@@ -650,15 +655,14 @@ export function mount(root, params) {
     })),
   );
   tabs.classList.add("sh-tabs");
-  tabs
-    .querySelectorAll("a.kp-tab")
-    .forEach((a, i) =>
-      drivable(
-        /** @type {HTMLElement} */ (a),
-        TAB,
-        `${name}/${STACK_TABS[i].tab}`,
-      ),
+  tabs.querySelectorAll("a.kp-tab").forEach((a, i) => {
+    a.setAttribute("aria-controls", "stack-panel");
+    drivable(
+      /** @type {HTMLElement} */ (a),
+      TAB,
+      `${name}/${STACK_TABS[i].tab}`,
     );
+  });
   /** The tab count of one tab (kp setTabCount: exact digits, nothing before it is counted). */
   const tabCount = (
     /** @type {string} */ tab,
@@ -731,6 +735,17 @@ export function mount(root, params) {
   };
 
   // ── shared readings ───────────────────────────────────────────────────
+  // ux-stackhub-5: Update is held back, with its reason, while the fleet
+  // check knows of no newer version of any image of this stack (a native
+  // service updates from its releases, so its button stays).
+  const paintUpdate = () => {
+    const none = S.newer === 0 && S.s?.native !== true;
+    updateBtn.toggleAttribute("disabled", none);
+    if (none)
+      updateBtn.setAttribute("data-kp-disabled-reason", "No newer version");
+    else updateBtn.removeAttribute("data-kp-disabled-reason");
+  };
+  stops.push(attachDisabledReasons(header.el));
   const paintHead = () => {
     const f = current().fleet;
     S.fleetRead = f != null;
@@ -745,6 +760,7 @@ export function mount(root, params) {
     const acts = headerActions(S.s?.native ?? null);
     bindAction(backupBtn, acts.backup);
     bindAction(updateBtn, acts.update);
+    paintUpdate();
     const n = S.s?.apps_total ?? S.edit?.manifest?.apps?.length ?? null;
     tabCount("apps", n, { unit: "app,apps" });
     paintCounts();
@@ -793,6 +809,16 @@ export function mount(root, params) {
     paintHead();
   };
   void readEdit().catch(() => {});
+  void (async () => {
+    const r = await slowRead(
+      "/data/stale-images",
+      "stale images",
+      abort.signal,
+    );
+    if (abort.signal.aborted) return;
+    S.newer = r.ok ? staleFor(name, r.body.images ?? []).length : null;
+    paintHead();
+  })().catch(() => {});
   paintHead();
 
   // ── keys: b u d . (kp's engine: not while typing, not over a dialog, the

@@ -56,14 +56,14 @@ const VIEW = declare({
   page: "overview",
   opens: "view",
   row: "cards|table",
-  what: "show the stacks as cards or as a table",
+  what: "show the stacks as cards or as a table (in the table's own toolbar)",
 });
 const GROUP = declare({
   id: "stacks-group",
   page: "overview",
   opens: "view",
   row: "state|none",
-  what: "group the table's rows by state (needs attention, running, parked) or not at all",
+  what: "group the table's rows by state (needs attention, running, parked) or not at all (in the table's own toolbar)",
   shows: "in the table view",
   reach: [{ do: "click", control: "stacks-view", row: "table" }],
 });
@@ -82,6 +82,8 @@ const ASKS = declare({
   opens: "view",
   row: "undo|confirm",
   what: "choose how a batch Deploy asks for safety: ten seconds to undo it, or a dialog that asks first",
+  shows: "in the selection bar, while a stack is ticked",
+  reach: [{ do: "click", control: "stacks-tick", row: "*" }],
 });
 const CLEAR = declare({
   id: "stacks-untick",
@@ -285,7 +287,7 @@ export function fleetList(ctx) {
     items: [
       {
         value: "state",
-        label: "State",
+        label: "By state",
         hint: "Needs attention first, then running, then parked (folded)",
       },
       {
@@ -350,24 +352,22 @@ export function fleetList(ctx) {
     },
     mark: (b, v) => void drivable(b, ASKS, v),
   });
-  /** @param {string} label @param {HTMLElement} control @param {string} id */
-  const ctlRow = (label, control, id) =>
-    h(
-      "div",
-      { class: "fl-ctl__row", id },
-      h("b", { class: "fl-ctl__label" }, label),
-      h("div", { class: "fl-ctl__control" }, control),
-    );
-  const groupRow = ctlRow("Group by", groups.el, "fl-row-group");
-  const showRow = ctlRow("Show", shows.el, "fl-row-show");
-  const controls = h(
+  // ux-stacknew-1 (Kenny, 2026-11-01): View and Group by live in the table's
+  // own toolbar (the cards' toolbar when the cards are shown), Deploy asks in
+  // the selection bar beside the batch Deploy it governs. One toolbar holds
+  // them; paint() moves it to whichever view is on screen.
+  const tools = h(
     "div",
-    { class: "fl-ctl" },
-    ctlRow("View", views.el, "fl-row-view"),
-    groupRow,
-    showRow,
-    ctlRow("Deploy asks", safety.el, "fl-row-asks"),
+    {
+      class: "fl-tools",
+      role: "group",
+      "aria-label": "How the stacks are shown",
+    },
+    views.el,
+    groups.el,
+    shows.el,
   );
+  const cardBar = h("div", { class: "fl-cardbar" });
 
   // ── the selection bar: one for the table and the cards ───────────────
   const bar = h(
@@ -376,7 +376,7 @@ export function fleetList(ctx) {
       class: "kp-selection fl-bar",
       "data-kp-selection": "",
       "data-kp-selection-for": "fl-body",
-      "data-kp-placement": "sticky-top",
+      "data-kp-placement": "floating-bottom",
       "data-kp-undo-ms": String(UNDO_MS),
       id: "fl-bar",
       "aria-label": "Selected stacks",
@@ -401,6 +401,12 @@ export function fleetList(ctx) {
         "Update",
         "kp-button",
         "Update the ticked stacks in the Update flow: see what changes, then back up, update and verify",
+      ),
+      h(
+        "div",
+        { class: "fl-asks" },
+        h("span", { class: "fl-asks__label" }, "Deploy asks"),
+        safety.el,
       ),
     ),
   );
@@ -494,6 +500,9 @@ export function fleetList(ctx) {
   });
 
   const body = h("div", { class: "fl-body", id: "fl-body" }, block.wrap, grid);
+  // The bar stays OUTSIDE the element it watches (#fl-body): kp's selection
+  // redraws its own count, and inside its target that redraw feeds itself.
+  const listBox = h("div", { class: "fl-list" }, bar, cardBar, body);
   const errs = h("div", { class: "fl-errors", "aria-live": "polite" });
   errs.hidden = true;
   const foot = keyRow([
@@ -507,7 +516,7 @@ export function fleetList(ctx) {
     title: "All stacks",
     desc: "Every stack the host runs, live. Open a stack for its hub, tick several to act on them at once.",
     id: "stack-list",
-    body: [controls, errs, bar, body, toastBed],
+    body: [errs, listBox, toastBed],
     foot: ["Read from the host, live · CPU is the last reading", foot],
   });
   card.el.classList.add("fl-card");
@@ -922,6 +931,17 @@ export function fleetList(ctx) {
     else ticked.delete(key);
   });
 
+  /**
+   * The toolbar goes where the shown view's own toolbar is: the table's, or
+   * the cards' (the table's is hidden with the table).
+   * @param {boolean} tableOn
+   */
+  function placeTools(tableOn) {
+    const host = tableOn
+      ? block.wrap.querySelector(".kp-datatable__bar")
+      : cardBar;
+    if (host && tools.parentElement !== host) host.append(tools);
+  }
   /** @param {boolean} [force] */
   function paint(force = false) {
     const tableOn = view === "table";
@@ -937,8 +957,10 @@ export function fleetList(ctx) {
     }
     block.wrap.hidden = !tableOn;
     grid.hidden = tableOn;
-    groupRow.hidden = !tableOn;
-    showRow.hidden = tableOn;
+    groups.el.hidden = !tableOn;
+    shows.el.hidden = tableOn;
+    cardBar.hidden = tableOn;
+    placeTools(tableOn);
     views.set(view);
     groups.set(group);
     shows.set(show);

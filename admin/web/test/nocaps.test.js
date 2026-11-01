@@ -29,6 +29,7 @@ const CONTROLS = new Set([
   ".rs-order > li", // one step of the restore order
   ".follow--bar .follow-badge", // a badge
   ".nx-pill", // a pill
+  ".fl-table .kp-datatable__search", // the Stacks table's search field, so the toolbar fits one row
 ]);
 
 test("width-fill-check-1: the app's css caps a width only on a control", () => {

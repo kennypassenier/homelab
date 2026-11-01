@@ -4125,14 +4125,187 @@ test("invariants: Stacks has the host strip, Deploy all changes and New stack; N
       1,
       "the panel's ✕ is not the dialogs' close button",
     );
+    // ux-stacknew-2: the choice is made in the panel, the wizard runs on a
+    // page of its own (never a dialog), one address per route.
     await page.click('dialog[open] [data-drive="new-empty"]');
-    const wiz = page.locator("dialog#new-stack-dialog[open]");
+    await page.waitForURL("**/stacks/new/empty", { timeout: 5000 });
+    const wiz = page.locator("#page .ns-wizard");
     await wiz.waitFor({ timeout: 5000 });
+    // The panel closes with its own short animation; no dialog stays open.
+    await page
+      .waitForFunction(() => !document.querySelector("dialog[open]"), null, {
+        timeout: 4000,
+      })
+      .catch(() => {
+        throw new Error("the New stack wizard still opens in a dialog");
+      });
     assert.equal(
       await wiz.locator('[data-step="preset"]').count(),
       0,
       "the Empty route still asks for a preset",
     );
+  } finally {
+    await browser.close();
+  }
+});
+
+test("invariants: New stack's three routes run their wizard on a page of their own, share one review, and the browser's Back leaves them (ux-stacknew-2)", async () => {
+  const browser = await launch();
+  try {
+    const context = await browser.newContext({
+      viewport: { width: 1280, height: 900 },
+    });
+    const page = await freshPage(context);
+    await page.goto(`${BASE}/stacks`);
+    await page.locator("#new-stack").waitFor({ timeout: 8000 });
+    const routes = [
+      ["new-stack", "/stacks/new/preset"],
+      ["import", "/stacks/new/bundle"],
+      ["new-empty", "/stacks/new/empty"],
+    ];
+    for (const [name, path] of routes) {
+      await page.goto(`${BASE}/stacks`);
+      await page.click("#new-stack");
+      await page.click(`dialog[open] [data-drive="${name}"]`);
+      await page.waitForURL(`**${path}`, { timeout: 5000 });
+      const wiz = page.locator("#page .ns-wizard");
+      await wiz.waitFor({ timeout: 8000 });
+      await page
+        .waitForFunction(() => !document.querySelector("dialog[open]"), null, {
+          timeout: 4000,
+        })
+        .catch(() => {
+          throw new Error(`${path} opened a dialog`);
+        });
+      // One review for all three: the plan, then the commit fields.
+      assert.equal(
+        await wiz.locator(".plan-box").count(),
+        1,
+        `${path} has no shared review`,
+      );
+      assert.equal(await wiz.locator(".commit-box").count(), 1);
+      const over = await page.evaluate(
+        () => document.documentElement.scrollWidth - innerWidth,
+      );
+      assert.ok(over <= 1, `${path} scrolls ${over}px sideways`);
+      await page.goBack();
+      await page.waitForURL("**/stacks", { timeout: 5000 });
+      await page.locator("#new-stack").waitFor({ timeout: 5000 });
+      assert.equal(
+        await page.locator(".ns-wizard").count(),
+        0,
+        "Back did not leave the wizard page",
+      );
+    }
+  } finally {
+    await browser.close();
+  }
+});
+
+test("invariants: a preset runs to its review on the New stack page and the review names the new stack (ux-stacknew-2)", async () => {
+  const browser = await launch();
+  try {
+    const context = await browser.newContext({
+      viewport: { width: 1280, height: 900 },
+    });
+    const page = await freshPage(context);
+    // name, size, data, tile, plan
+    await page.goto(`${BASE}/stacks/new/preset`);
+    await page.locator("#new-name").waitFor({ state: "attached" });
+    await page.click("#new-next");
+    await page.fill("#new-name", "ux-new-demo");
+    for (let i = 0; i < 4; i += 1) await page.click("#new-next");
+    await page.locator(".commit-box .kp-field").first().waitFor({
+      timeout: 10000,
+    });
+    assert.match(
+      await page.locator(".ns-wizard .plan-box").innerText(),
+      /ux-new-demo/,
+      "the review does not name the new stack",
+    );
+  } finally {
+    await browser.close();
+  }
+});
+
+test("invariants: the Stacks list starts under its toolbar: View and Group by in the table's toolbar, Deploy asks in the selection bar, no reserved row (ux-stacknew-1)", async () => {
+  const browser = await launch();
+  try {
+    for (const [width, height, maxStart] of [
+      [1280, 900, 520],
+      [390, 844, 1000],
+    ]) {
+      const context = await browser.newContext({ viewport: { width, height } });
+      const page = await freshPage(context);
+      await page.goto(`${BASE}/stacks`);
+      await page.locator("#fl-body tbody tr[data-kp-row-key]").first().waitFor({
+        timeout: 10000,
+      });
+      const at = await page.evaluate(() => {
+        const tb = document.querySelector("#fl-body .kp-datatable__bar");
+        const grab = (/** @type {string} */ id) =>
+          !!tb?.querySelector(`[data-drive="${id}"]`);
+        return {
+          view: grab("stacks-view"),
+          group: grab("stacks-group"),
+          asksInToolbar: grab("stacks-deploy-asks"),
+          asksInBar: !!document.querySelector(
+            '#fl-bar [data-drive="stacks-deploy-asks"]',
+          ),
+          first:
+            (document.querySelector("#fl-body")?.getBoundingClientRect().top ??
+              0) + scrollY,
+          bar: getComputedStyle(
+            document.querySelector("#fl-bar") ?? document.body,
+          ).position,
+          labels: [...document.querySelectorAll(".fl-ctl__label")].length,
+        };
+      });
+      assert.ok(
+        at.view && at.group,
+        `${width}px: View and Group are not in the table's toolbar`,
+      );
+      assert.ok(
+        !at.asksInToolbar && at.asksInBar,
+        `${width}px: Deploy asks is not in the selection bar`,
+      );
+      assert.equal(
+        at.bar,
+        "fixed",
+        `${width}px: the selection bar keeps a row of its own`,
+      );
+      assert.equal(at.labels, 0, `${width}px: the old label rows are back`);
+      assert.ok(
+        (at.first ?? 9999) < maxStart,
+        `${width}px: the list starts at ${at.first}px, below ${maxStart}`,
+      );
+      // Ticking a stack floats the bar at the bottom without moving the list.
+      await page.locator("#fl-body input[data-kp-select-row]").first().check();
+      await page.waitForFunction(
+        () =>
+          document
+            .querySelector("#fl-bar")
+            ?.getAttribute("data-kp-selection-state") !== "empty",
+      );
+      const after = await page.evaluate(
+        () =>
+          (document.querySelector("#fl-body")?.getBoundingClientRect().top ??
+            0) + scrollY,
+      );
+      assert.ok(
+        Math.abs((after ?? 0) - (at.first ?? 0)) <= 1,
+        `${width}px: ticking moved the list from ${at.first} to ${after}`,
+      );
+      // Cards: View stays reachable and the Show row has no label above it.
+      await page.goto(`${BASE}/stacks?view=cards`);
+      await page
+        .locator('.fl-cardbar [data-drive="stacks-view"]')
+        .first()
+        .waitFor({
+          timeout: 8000,
+        });
+      await context.close();
+    }
   } finally {
     await browser.close();
   }
@@ -7090,8 +7263,10 @@ test("invariants: redesign-config Presets is a gallery: one card per preset, the
     await page
       .locator(`[data-drive="presets-use"][data-drive-row="${name}"]`)
       .click();
-    const wizard = page.locator("dialog#new-stack-dialog[open]");
+    // ux-stacknew-2: the wizard is a page; the preset rides in the address.
+    const wizard = page.locator("#page .ns-wizard");
     await wizard.waitFor({ timeout: 5000 });
+    assert.match(page.url(), /\/stacks\/new\/preset\?preset=/);
     assert.equal(
       await wizard.locator("select").first().inputValue(),
       name,

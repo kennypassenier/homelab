@@ -4578,8 +4578,14 @@
       "row": "undo|confirm",
       "href": "/stacks",
       "was": [],
-      "shows": null,
-      "reach": [],
+      "shows": "in the selection bar, while a stack is ticked",
+      "reach": [
+        {
+          "do": "click",
+          "control": "stacks-tick",
+          "row": "*"
+        }
+      ],
       "twins": false
     },
     {
@@ -4597,7 +4603,7 @@
     {
       "id": "stacks-group",
       "page": "overview",
-      "what": "group the table's rows by state (needs attention, running, parked) or not at all",
+      "what": "group the table's rows by state (needs attention, running, parked) or not at all (in the table's own toolbar)",
       "opens": "view",
       "row": "state|none",
       "href": "/stacks",
@@ -4874,7 +4880,7 @@
     {
       "id": "stacks-view",
       "page": "overview",
-      "what": "show the stacks as cards or as a table",
+      "what": "show the stacks as cards or as a table (in the table's own toolbar)",
       "opens": "view",
       "row": "cards|table",
       "href": "/stacks",
@@ -5669,6 +5675,9 @@
     "shell",
     "stacks",
     "stacks/deploy",
+    "stacks/new/bundle",
+    "stacks/new/empty",
+    "stacks/new/preset",
     "start",
     "status",
     "storage",

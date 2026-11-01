@@ -321,43 +321,15 @@ main.shell.ap-page > [hidden] {
 .fl-card .nx-card__body > [hidden] {
   display: none;
 }
-.fl-ctl {
-  /* The control rows side by side on shared tracks: one equal column each,
-     the label over its control, every control as wide as its column, so the
-     segments of all three start and end on the same edges. */
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr));
-  gap: var(--kp-space-sm, 0.5rem) var(--kp-space-lg, 1rem);
-  align-items: end;
-}
-.fl-ctl__row {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr);
-  gap: var(--kp-space-xs, 0.25rem);
-  align-items: end;
-}
-.fl-ctl__row[hidden] {
-  display: none;
-}
-.fl-ctl__label {
-  font-weight: 600;
-  font-size: var(--kp-text-sm);
-  white-space: nowrap;
-}
-.fl-ctl__control {
+/* ux-stacknew-1 (Kenny, 2026-11-01: "Werkbalk plus selectiebalk"): View and
+   Group by sit in the table's own toolbar (the cards' toolbar over the
+   cards), Deploy asks in the selection bar. The selection bar floats at the
+   bottom of the screen while stacks are ticked (kp's `floating-bottom`
+   placement) and keeps no row in the page, so the list starts where the
+   toolbar ends and ticking never moves it. */
+.fl-list {
+  display: block;
   min-inline-size: 0;
-}
-.fl-ctl__control > .kp-segmented {
-  display: grid;
-  grid-auto-flow: column;
-  grid-auto-columns: minmax(0, 1fr);
-  inline-size: 100%;
-}
-.fl-bar {
-  margin: 0;
-}
-.fl-toasts {
-  min-block-size: 0;
 }
 .fl-body {
   display: grid;
@@ -367,6 +339,45 @@ main.shell.ap-page > [hidden] {
 }
 .fl-body > [hidden] {
   display: none;
+}
+.fl-tools {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--kp-space-sm, 0.5rem);
+  margin-inline-start: auto;
+  min-inline-size: 0;
+}
+.fl-tools > [hidden] {
+  display: none;
+}
+.fl-cardbar {
+  display: flex;
+  align-items: center;
+  padding-block-end: var(--kp-space-sm, 0.5rem);
+}
+.fl-cardbar[hidden] {
+  display: none;
+}
+.fl-table .kp-datatable__bar:first-of-type {
+  align-items: center;
+}
+.fl-table .kp-datatable__search {
+  max-inline-size: 16rem;
+}
+.fl-asks {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--kp-space-xs, 0.25rem);
+  min-inline-size: 0;
+}
+.fl-asks__label {
+  font-size: var(--kp-text-sm);
+  font-weight: 600;
+  white-space: nowrap;
+}
+.fl-toasts {
+  min-block-size: 0;
 }
 .fl-name {
   display: inline-grid;

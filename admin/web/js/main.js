@@ -62,6 +62,7 @@ import { mount as firewall } from "./pages/firewall.js";
 import { mount as host } from "./pages/host.js";
 import { mount as notifications } from "./pages/notifications.js";
 import { mount as restorePage } from "./pages/restore.js";
+import { mount as newStackPage } from "./pages/newstack.js";
 import { mount as retired } from "./pages/retired.js";
 import { mount as settings } from "./pages/settings.js";
 import { mount as overview } from "./pages/overview.js";
@@ -338,6 +339,9 @@ function render() {
       break;
     case "restore":
       cleanup = restorePage(page, { navigate });
+      break;
+    case "newstack":
+      cleanup = newStackPage(page, { navigate });
       break;
     case "update":
       cleanup = updatePage(page, scopeOf(location.search) ?? { all: true });

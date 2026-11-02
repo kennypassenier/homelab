@@ -296,3 +296,13 @@ fn commit_rpc(path: &str) -> RpcRequest {
         },
     }
 }
+
+#[test]
+pub(crate) fn key_move_a_path_with_pattern_characters_is_a_name_not_a_glob() {
+    let w = World::new("glob", None);
+    let req = w.request(vec![("stacks/media/a[b]*.yml", Some("x: 1\n"))], true);
+    let done = commit(&w.cfg, &req).expect("a literal name commits");
+    assert!(done.pushed);
+    let files = git(&w.bare, &["ls-tree", "-r", "--name-only", "main"]);
+    assert!(files.contains("stacks/media/a[b]*.yml"), "{files}");
+}

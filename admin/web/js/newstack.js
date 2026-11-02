@@ -8,7 +8,7 @@
 // can be followed by the first deploy of exactly that commit.
 
 import { send } from "./act.js";
-import { refusalAlarm } from "./actui.js";
+import { declare } from "./drivable.js";
 import {
   PLAN,
   checkNewStep,
@@ -23,10 +23,19 @@ import { register } from "./drivehooks.js";
 import { fetchJson, h } from "./dom.js";
 import { reviewPart } from "./newreview.js";
 import { wizardShell } from "./newwizard.js";
+import { failBox } from "./ui.js";
 import {
   STEP_EVENT,
   BEFORE_STEP_EVENT,
 } from "/static/kp/dist/kp-themes.min.js";
+
+const TRY_AGAIN = declare({
+  id: "new-stack-try-again",
+  page: "newstack",
+  opens: "view",
+  what: "read the presets again",
+  shows: "after the presets could not be read",
+});
 
 /** The page of one kind of new stack. @param {"preset" | "bundle" | "empty"} kind */
 export const newStackHref = (kind, preset = "") =>
@@ -56,26 +65,43 @@ export async function openNewStack(navigate, opts = {}) {
  */
 export async function mountPresetWizard(holder, o) {
   const { empty } = o;
+  let stop = () => {};
+  let gone = false;
+  /** Show why the wizard cannot start, with Try again (re-runs the read). */
+  const fail = (
+    /** @type {{what: string, why: string, fix?: string | null}} */ err,
+  ) => {
+    holder.replaceChildren(
+      failBox(err, {
+        run: () => {
+          holder.replaceChildren();
+          holder.setAttribute("aria-busy", "true");
+          void mountPresetWizard(holder, o).then((s) => {
+            holder.removeAttribute("aria-busy");
+            if (gone) s();
+            else stop = s;
+          });
+        },
+        drive: { id: TRY_AGAIN },
+      }),
+    );
+    return () => {
+      gone = true;
+      stop();
+    };
+  };
   const r = await fetchJson("/data/presets", "the presets");
-  if (!r.ok) {
-    await refusalAlarm(r.error, 0);
-    return () => {};
-  }
+  if (!r.ok) return fail(r.error);
   /** @type {import("./editforms.js").Preset[]} */
   const presets = r.body.presets ?? [];
-  if (!presets.length && !empty) {
-    await refusalAlarm(
-      {
-        what: "a new stack",
-        why: r.body.sync_error
-          ? `the working copy is not there: ${r.body.sync_error}`
-          : "the repository holds no presets",
-        fix: "the settings page shows the working copy's state",
-      },
-      409,
-    );
-    return () => {};
-  }
+  if (!presets.length && !empty)
+    return fail({
+      what: "a new stack",
+      why: r.body.sync_error
+        ? `the working copy is not there: ${r.body.sync_error}`
+        : "the repository holds no presets",
+      fix: "the settings page shows the working copy's state",
+    });
   const taken = {
     names: /** @type {string[]} */ (r.body.taken?.names ?? []),
     vmids: /** @type {number[]} */ (r.body.taken?.vmids ?? []),

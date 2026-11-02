@@ -9,6 +9,7 @@
 
 import { openAction, openBatch, reopenBatch } from "./actiondialog.js";
 import { send } from "./act.js";
+import { notify } from "./actui.js";
 import {
   LIVE,
   fetchJson,
@@ -940,8 +941,23 @@ export function fleetList(ctx) {
     const host = tableOn
       ? block.wrap.querySelector(".kp-datatable__bar")
       : cardBar;
-    if (host && tools.parentElement !== host) host.append(tools);
+    if (host) {
+      if (tools.parentElement !== host) host.append(tools);
+      return;
+    }
+    // The table's bar is not drawn yet (or never will be): keep the tools
+    // reachable in the cards' bar, say so once, and let the next paint retry.
+    cardBar.hidden = false;
+    if (tools.parentElement !== cardBar) cardBar.append(tools);
+    if (!barWarned) {
+      barWarned = true;
+      notify(
+        "The fleet table's toolbar is missing; showing the tools above the list.",
+        "error",
+      );
+    }
   }
+  let barWarned = false;
   /** @param {boolean} [force] */
   function paint(force = false) {
     const tableOn = view === "table";

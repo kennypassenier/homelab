@@ -13,7 +13,7 @@ import {
   FOLLOW_STATE_EVENT,
 } from "./driveview.js";
 import { esc } from "./settingsform.js";
-import { offerUndo } from "./instantundo.js";
+import { dismissUndos, offerUndo } from "./instantundo.js";
 import {
   attachCalm,
   openConfirmation,
@@ -129,7 +129,10 @@ export function mountAccount(body) {
       undoing = false;
     });
   });
-  return stop;
+  return () => {
+    stop();
+    dismissUndos();
+  };
 }
 
 /**
@@ -303,6 +306,7 @@ export function mountThisBrowser(body) {
   });
   return () => {
     stopFollow();
+    dismissUndos();
     for (const s of stops) s();
   };
 }

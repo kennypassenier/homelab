@@ -41,6 +41,8 @@
   body .kp-tag__remove,
   body [data-kp-theme-picker] button,
   body summary,
+  body button.kp-sidenav__link,
+  body .kp-sidenav__category-toggle,
   body .kp-quantity__input {
     min-block-size: var(--kp-touch-min);
   }

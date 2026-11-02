@@ -3041,6 +3041,18 @@
       "twins": false
     },
     {
+      "id": "new-stack-try-again",
+      "page": "newstack",
+      "what": "read the presets again",
+      "opens": "view",
+      "row": null,
+      "href": "/stacks/new/preset",
+      "was": [],
+      "shows": "after the presets could not be read",
+      "reach": [],
+      "twins": false
+    },
+    {
       "id": "pause-schedule-until",
       "page": "schedules",
       "what": "pause the schedule whose form is open until tomorrow 09:00, Monday 09:00, next week or a date and time (at most 30 days); its runs before then are skipped; pick is the button of the date panel",

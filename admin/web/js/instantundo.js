@@ -17,15 +17,37 @@ const UNDO = declare({
 /** How long the Undo is offered, in milliseconds. */
 export const INSTANT_UNDO_MS = 6000;
 
+/** The Undo toasts still on screen, so leaving the page can close them. */
+const open = new Set();
+
 /**
- * Say what changed and offer Undo.
+ * Close every Undo toast now. A page calls this from its stop: an Undo that
+ * outlives its page would reverse a choice through controls that are gone.
+ */
+export function dismissUndos() {
+  for (const close of [...open]) close();
+  open.clear();
+}
+
+/**
+ * Say what changed and offer Undo. The toast closes when its page stops
+ * (`dismissUndos`).
  * @param {string} text what changed, in a sentence
  * @param {() => void} undo puts the choice back
  * @returns {() => void} closes the toast now
  */
 export function offerUndo(text, undo) {
-  return toast(text, {
+  /** @type {() => void} */
+  let close = () => {};
+  const run = () => {
+    open.delete(close);
+    undo();
+  };
+  close = toast(text, {
     ms: INSTANT_UNDO_MS,
-    action: { label: "Undo", run: undo, drive: { id: UNDO } },
+    action: { label: "Undo", run, drive: { id: UNDO } },
   });
+  open.add(close);
+  setTimeout(() => open.delete(close), INSTANT_UNDO_MS + 1000);
+  return close;
 }

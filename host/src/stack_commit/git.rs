@@ -40,6 +40,9 @@ impl<'a> Git<'a> {
             .env_remove("GIT_WORK_TREE")
             .env("GIT_TERMINAL_PROMPT", "0")
             .env("LC_ALL", "C")
+            // A request path is a name, never a pattern: `a[b].yml` or `*`
+            // must not match other files in `add` or `clean`.
+            .env("GIT_LITERAL_PATHSPECS", "1")
             .env("GIT_AUTHOR_NAME", &self.cfg.author_name)
             .env("GIT_AUTHOR_EMAIL", &self.cfg.author_email)
             .env("GIT_COMMITTER_NAME", &self.cfg.author_name)

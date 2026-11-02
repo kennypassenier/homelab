@@ -73,6 +73,9 @@ pub fn remote_problem(r: &str) -> Option<String> {
     if r.trim().is_empty() {
         return Some("stack_commits.remote is empty".into());
     }
+    if r.starts_with('-') {
+        return Some("stack_commits.remote must not start with `-`".into());
+    }
     if r.starts_with("http://") || r.starts_with("https://") {
         return Some(
             "stack_commits.remote must be an ssh remote (git@github.com:owner/repo.git): \

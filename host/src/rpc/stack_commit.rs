@@ -93,10 +93,21 @@ fn audit(
         ts,
         by.unwrap_or("-"),
         push,
-        paths.join(","),
+        escaped_paths(paths),
         outcome
     );
     if let Err(e) = append_audit(&format!("{}/audit.log", state.config.state_dir), &line) {
         tracing::warn!("audit.log: could not record the stack commit :: {}", e);
     }
+}
+
+/// The paths as one audit field. A refused request may carry any text, so
+/// each path is escaped (`{:?}`): a newline in a path cannot start a forged
+/// audit line.
+fn escaped_paths(paths: &[String]) -> String {
+    paths
+        .iter()
+        .map(|p| format!("{p:?}"))
+        .collect::<Vec<_>>()
+        .join(",")
 }

@@ -103,7 +103,10 @@ pub(crate) async fn kyu_notify_an_unconfigured_host_stays_quiet_and_says_so_in_t
     let notices = failed_backup_notices("unset", "").await;
     assert_eq!(notices.len(), 1, "{notices:?}");
     let push = notices[0]["push"].as_str().unwrap();
-    assert!(push.contains("not configured"), "{push}");
+    assert!(
+        push.contains("no notification route is configured"),
+        "{push}"
+    );
 }
 
 #[tokio::test]

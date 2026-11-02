@@ -19,7 +19,9 @@ async function login(context) {
   await page.goto(`${BASE}/login`);
   await page.fill("#token", TOKEN);
   await Promise.all([
-    page.waitForURL("**/overview", { timeout: 5000 }).catch(() => {}),
+    page.waitForURL((u) => !u.pathname.startsWith("/login"), {
+      timeout: 10000,
+    }),
     page.click("button[type=submit]"),
   ]);
   return page;

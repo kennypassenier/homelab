@@ -89,8 +89,8 @@ impl homelab_core::ask::Asker for LiveAsker<'_> {
 }
 
 /// fix-240: the notice for a question that is waiting, urgent so it is
-/// pushed. Its op names the question (`question-<op>-<id>`): the 20 h
-/// damper judges by op and text, and a second question about the same
+/// pushed. Its op names the question (`question-<op>-<id>`): kyu's
+/// 20 h dedup (`Kyu-Dedup-Key`) judges by op and text, and a second question about the same
 /// reading is a second thing a person must answer, not a repeat.
 pub(crate) async fn publish_question_notice(
     state: &AppState,

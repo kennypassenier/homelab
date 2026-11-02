@@ -63,16 +63,18 @@ pub fn curl_args_kyu(
     let Some(key) = dedup else {
         return args;
     };
-    // The last three arguments are `-d <payload> <url>`; headers go before.
-    let at = args.len() - 3;
-    let headers = [
+    // `curl_args_pinned` ends with `-d <payload> <url>`; the dedup headers go
+    // right before that tail. Found by the `-d` marker, not by a count.
+    let at = args.iter().rposition(|a| a == "-d").unwrap_or(args.len());
+    let mut out: Vec<String> = args.drain(..at).collect();
+    out.extend([
         "-H".to_string(),
         format!("Kyu-Dedup-Key: {}", key),
         "-H".to_string(),
         format!("Kyu-Dedup-Window: {}", DEDUP_WINDOW),
-    ];
-    args.splice(at..at, headers);
-    args
+    ]);
+    out.extend(args);
+    out
 }
 
 /// Whether curl's `-w` output says kyu answered `Kyu-Duplicate: true`
@@ -93,27 +95,39 @@ pub fn sent_text(curl_out: &str) -> &'static str {
     }
 }
 
+/// The label of the undelivered notice for one destination (`route` is
+/// [`crate::notify::route_for_log`]): the key the host collapses on.
+pub fn undelivered_label(route: &str) -> String {
+    format!("notification:{}", route)
+}
+
+const UNDELIVERED_TITLE: &str = "Notification could not be delivered";
+
 /// The notice the host writes when kyu did not accept a push: the failure
 /// is not queued and not retried here, so the Inbox is where it is seen.
 /// Not urgent: pushing "the push failed" through the route that just
-/// failed would only fail again.
-pub fn undelivered_notice(seq: u64, at: u64, failed: &HostNotice, why: &str) -> HostNotice {
+/// failed would only fail again. One per destination: see
+/// [`fold_undelivered`].
+pub fn undelivered_notice(
+    seq: u64,
+    at: u64,
+    failed: &HostNotice,
+    why: &str,
+    route: &str,
+) -> HostNotice {
     HostNotice {
         seq,
         at,
         since: at,
         op: "notify".into(),
-        label: "notification".into(),
+        label: undelivered_label(route),
         ok: false,
         deferred: false,
         stack: None,
-        title: "Notification could not be delivered".into(),
-        what: format!(
-            "kyu did not accept the push for \"{}\": {}",
-            failed.title, why
-        ),
+        title: UNDELIVERED_TITLE.into(),
+        what: undelivered_what(1, &failed.title, why),
         consequence: "Nobody was pushed about it. The host keeps no queue and does not retry; \
-                      this notice and the one it names are all that is left."
+                      this notice and the ones it counts are all that is left."
             .into(),
         remedy: "Check that kyu answers (its dashboard, CT 109) and that notify_webhook and \
                  notify_auth_bearer in host.toml are right."
@@ -126,5 +140,38 @@ pub fn undelivered_notice(seq: u64, at: u64, failed: &HostNotice, why: &str) -> 
         req: None,
         by: None,
         findings: Vec::new(),
+    }
+}
+
+fn undelivered_what(count: u64, latest_title: &str, why: &str) -> String {
+    let noun = if count == 1 { "push" } else { "pushes" };
+    format!(
+        "kyu did not accept {} {} (latest: \"{}\"): {}",
+        count, noun, latest_title, why
+    )
+}
+
+/// Whether `n` is the open undelivered notice of destination `route`.
+pub fn is_undelivered_for(n: &HostNotice, route: &str) -> bool {
+    n.op == "notify" && n.title == UNDELIVERED_TITLE && n.label == undelivered_label(route)
+}
+
+/// How many pushes an undelivered notice counts (1 when unreadable).
+pub fn undelivered_count(n: &HostNotice) -> u64 {
+    n.what
+        .strip_prefix("kyu did not accept ")
+        .and_then(|r| r.split_whitespace().next())
+        .and_then(|c| c.parse().ok())
+        .unwrap_or(1)
+}
+
+/// The previous open undelivered notice and the new one as ONE notice: the
+/// new one's seq and time (so the dashboard cursor sees it as news again),
+/// the previous `since`, and the count raised by one.
+pub fn fold_undelivered(prev: &HostNotice, new: HostNotice, why: &str, latest: &str) -> HostNotice {
+    HostNotice {
+        since: prev.since,
+        what: undelivered_what(undelivered_count(prev) + 1, latest, why),
+        ..new
     }
 }

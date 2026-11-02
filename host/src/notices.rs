@@ -73,8 +73,13 @@ async fn push_urgent(
 pub(crate) async fn publish_notice(state: &AppState, exec: &RealExecutor, f: NoticeFacts) -> bool {
     let now = unix_now();
     let mut failure = None;
+    let route = notify_route(state);
     let push = if !f.urgency.urgent {
         "centre only".to_string()
+    } else if route.is_none() {
+        // An unconfigured host stays quiet: nothing was attempted, so
+        // nothing "could not be delivered".
+        "not pushed: no notification route is configured (notify_webhook)".to_string()
     } else {
         match push_urgent(state, exec, &f).await {
             Ok(text) => text,
@@ -85,7 +90,7 @@ pub(crate) async fn publish_notice(state: &AppState, exec: &RealExecutor, f: Not
             }
         }
     };
-    let pushed_out = f.urgency.urgent && failure.is_none();
+    let pushed_out = f.urgency.urgent && route.is_some() && failure.is_none();
     let seq = next_notice_seq(state);
     let notice = homelab_core::notify::HostNotice {
         seq,
@@ -110,16 +115,62 @@ pub(crate) async fn publish_notice(state: &AppState, exec: &RealExecutor, f: Not
         findings: f.findings,
     };
     record_notice(state, &notice);
-    if let Some(why) = failure {
+    if let (Some(why), Some(route)) = (failure, route) {
         let lost = homelab_core::notify_kyu::undelivered_notice(
             next_notice_seq(state),
             now,
             &notice,
             &why,
+            &homelab_core::notify::route_for_log(&route),
         );
-        record_notice(state, &lost);
+        record_undelivered(state, lost, &why);
     }
     pushed_out
+}
+
+/// The configured push route, if any.
+fn notify_route(state: &AppState) -> Option<String> {
+    state
+        .settings
+        .read()
+        .unwrap_or_else(PoisonError::into_inner)
+        .notify_webhook
+        .clone()
+}
+
+/// Write an undelivered notice, collapsing it into the one already open for
+/// the same destination (count and last-seen move, no second line), so kyu
+/// being down cannot grow the file by one notice per push.
+fn record_undelivered(state: &AppState, lost: homelab_core::notify::HostNotice, why: &str) {
+    let path = notices_path(&state.config.state_dir);
+    let text = std::fs::read_to_string(&path).unwrap_or_default();
+    let all = homelab_core::notify::parse_notices(&text);
+    let route = lost.label.strip_prefix("notification:").unwrap_or("");
+    let Some(prev) = all
+        .iter()
+        .rev()
+        .find(|n| homelab_core::notify_kyu::is_undelivered_for(n, route))
+    else {
+        record_notice(state, &lost);
+        return;
+    };
+    let latest = lost.what.split('"').nth(1).unwrap_or("").to_string();
+    let folded = homelab_core::notify_kyu::fold_undelivered(prev, lost, why, &latest);
+    let prev_seq = prev.seq;
+    let mut kept: String = all
+        .iter()
+        .filter(|n| n.seq != prev_seq)
+        .filter_map(|n| serde_json::to_string(n).ok())
+        .map(|l| l + "\n")
+        .collect();
+    match serde_json::to_string(&folded) {
+        Ok(l) => kept.push_str(&(l + "\n")),
+        Err(e) => return tracing::warn!("notices.jsonl :: {}", e),
+    }
+    let tmp = format!("{}.tmp", path);
+    if let Err(e) = std::fs::write(&tmp, kept).and_then(|_| std::fs::rename(&tmp, &path)) {
+        tracing::warn!("notices.jsonl :: {}", e);
+    }
 }
 
 /// Append one notice (0600) and prune the file by the history's limits.

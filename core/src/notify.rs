@@ -518,7 +518,7 @@ pub fn urgency(e: &Event) -> Urgency {
 /// an alert's own `Urgency::why`), unabridged.
 ///
 /// `sent`/`failed` are the two outcomes a push attempt itself can have;
-/// `why` is the routing reason (`Urgency::why`, or the damper's own line)
+/// `why` is the routing reason (`Urgency::why`)
 /// when neither is true.
 pub fn push_status_short(sent: bool, failed: bool, why: &str) -> &'static str {
     if sent {

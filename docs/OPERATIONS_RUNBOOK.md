@@ -241,9 +241,11 @@ flowchart TD
 
 <sub>Source: `host/src/tests/tokens.rs::fix_120_issue_token_adds_one_entry_hashed_not_plain` (`nightly_plan`), `:2257-2695` (`scheduler_loop`), `core/src/ops/backup/night.rs::NightBackup`.</sub>
 
-**Where results go.** Each operation posts to `notify_webhook` and falls
-back to `notify_fallback_webhook` (`host/src/tests/doctor.rs::fix_130_the_new_doctor_probes_read_the_machine`). An
-identical failure repeated inside 20 hours is damped; a success always goes
+**Where results go.** Each urgent operation posts once to `notify_webhook` (kyu); the host
+has no fallback route and no retry, kyu owns both
+(`host/src/tests/notify_kyu.rs`). A failed push adds the Inbox notice
+"Notification could not be delivered". An identical failure repeated inside
+20 hours is damped by kyu (`Kyu-Dedup-Key`); a success always goes
 out (`host/src/tests/refusals.rs::fix_55_an_unparseable_frame_is_logged_without_its_body`, `:2847-2855`, `core/src/notify.rs:45-57`). A failed operation writes an
 incident bundle under `/var/lib/homelab/incidents`
 (`host/src/tests/support.rs::serve_state_on_loopback`), listed by `homelab incidents`
@@ -257,7 +259,7 @@ on :8443 with a self-signed certificate and forwards to the hub's own
 renews itself within 30 days of expiry) into `/appdata/kyu/kyu-config/tls`, which the
 normal per-stack backup covers like any other kyu mount.
 
-- *A sender* (the host's `notify_webhook`/`notify_fallback_webhook`, or the
+- *A sender* (the host's `notify_webhook`, or the
   dashboard's `HOMELAB_ADMIN_NOTIFY_URL`) switches to `https://10.10.10.9:8443/…`
   only once it also has the certificate pinned: copy
   `/appdata/kyu/kyu-config/tls/hub.pem` to the sending machine, read its fingerprint

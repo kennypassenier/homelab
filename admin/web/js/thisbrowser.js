@@ -114,7 +114,7 @@ export function mountAccount(body) {
   body.innerHTML = `<div class="kp-formgrid st-lines" data-kp-formgrid-label="wide" data-kp-formgrid-lines="lines">${row(
     "Calm mode",
     "Turns movement and effects off; loading keeps breathing slowly. Follows you to every device you sign in on.",
-    `<label class="kp-switch"><input class="kp-switch__input" type="checkbox" role="switch" id="st-calm" data-kp-calm-switch /><span>Calm</span></label>`,
+    `<label class="kp-switch"><input class="kp-switch__input" type="checkbox" role="switch" id="st-calm" aria-label="Calm mode" data-kp-calm-switch /><span>Calm</span></label>`,
   )}</div>`;
   const stop = attachCalm(body);
   const box = /** @type {HTMLInputElement | null} */ (
@@ -147,8 +147,9 @@ export function mountThisBrowser(body) {
     /** @type {string} */ id,
     /** @type {boolean} */ on,
     /** @type {string} */ word,
+    /** @type {string} */ name,
   ) =>
-    `<label class="kp-switch"><input class="kp-switch__input" type="checkbox" role="switch" id="${id}"${on ? " checked" : ""} /><span>${word}</span></label>`;
+    `<label class="kp-switch"><input class="kp-switch__input" type="checkbox" role="switch" id="${id}" aria-label="${esc(name)}"${on ? " checked" : ""} /><span>${word}</span></label>`;
   body.innerHTML = `<div class="kp-formgrid st-lines" data-kp-formgrid-label="wide" data-kp-formgrid-lines="lines">${[
     row(
       "Light theme",
@@ -164,7 +165,7 @@ export function mountThisBrowser(body) {
     row(
       "Follow my system",
       "Uses the light theme by day and the dark one by night, as the system decides.",
-      sw("st-follow", follow, follow ? "Following" : "Off"),
+      sw("st-follow", follow, follow ? "Following" : "Off", "Follow my system"),
     ),
   ].join(
     "",

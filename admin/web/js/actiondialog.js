@@ -1114,6 +1114,7 @@ export async function openBatch(action, stacks) {
   const blocked = new Set();
   const leftOut = h("p", {
     class: "measured batch-preview__left",
+    role: "status",
     hidden: true,
   });
   /** The form as the ticked stacks make it. */

@@ -727,6 +727,9 @@ export function mount(root) {
       SNOOZE_OPEN,
       r.key,
     );
+    // Every row has a "Snooze": the name says which row, and that a menu opens.
+    b.setAttribute("aria-label", `Snooze ${r.title}`);
+    b.setAttribute("aria-haspopup", "menu");
     b.addEventListener("click", () =>
       openSnoozeMenu({
         anchor: b,

@@ -894,10 +894,10 @@ Assistant belong to kyu (`host/src/notify_send.rs::notify_raw`,
 
 | Symptom | Cause | First action | Source |
 |---|---|---|---|
-| `homelab check` reports `no route accepted the last notification` | every route failed on the last attempt; the reason is kept in state | the finding quotes the reason; check the webhook targets in host.toml | `core/src/ops/fleetcheck/recorded.rs::evaluate_notify`, `host/src/tests/doctor.rs::fix_131_incident_show_reads_one_bundle_and_nothing_else` |
+| `homelab check` reports `no route accepted the last notification` | the one kyu route (`notify_webhook`) failed on the last attempt; the reason is kept in state | the finding quotes the reason; check `notify_webhook` in host.toml and that kyu answers | `core/src/ops/fleetcheck/recorded.rs::evaluate_notify`, `host/src/tests/doctor.rs::fix_131_incident_show_reads_one_bundle_and_nothing_else` |
 | the same failure did not notify a second time | kyu drops an identical failure of the same operation for 20 hours (`Kyu-Dedup-Key`); a changed error text passes; successes always pass | expected. kyu holds the key, so a host restart does not reset it; the push column says `sent: kyu already holds ...` | `core/src/notify_kyu.rs::dedup_key`, `host/src/tests/notify_kyu.rs` |
-| `cannot write the header file <path>: <e>` as the recorded reason | a route that needs a bearer token was skipped because its header file could not be written under `secrets/` | check that the state directory's `secrets/` is writable by the daemon | `host/src/tests/doctor.rs::fix_130_the_new_doctor_probes_read_the_machine` |
-| no notifications at all, and no failure recorded | no webhook is configured: with neither route set nothing is sent and nothing is recorded | `homelab config` shows the webhook setting | `host/src/tests/doctor.rs::fix_130_the_new_doctor_probes_read_the_machine` |
+| `cannot write the header file <path>: <e>` as the recorded reason | the push was skipped because its header file could not be written under `secrets/` | check that the state directory's `secrets/` is writable by the daemon | `host/src/tests/doctor.rs::fix_130_the_new_doctor_probes_read_the_machine` |
+| no notifications at all, and no failure recorded | `notify_webhook` is not configured: nothing is sent, no undelivered notice is written, and an urgent notice's push column says the route is not configured | `homelab config` shows the webhook setting | `host/src/tests/doctor.rs::fix_130_the_new_doctor_probes_read_the_machine` |
 
 `homelab config` prints the webhook URL in full (`client/src/commands/new_stack.rs::cmd_new`).
 That URL carries the webhook id; keep the output out of anything shared.

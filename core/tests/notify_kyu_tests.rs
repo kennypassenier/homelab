@@ -8,7 +8,8 @@ use std::process::Command;
 
 use homelab_core::notify::{Delivery, HostNotice, verdict};
 use homelab_core::notify_kyu::{
-    DEDUP_KEY_MAX, curl_args_kyu, dedup_key, sent_text, undelivered_notice, was_duplicate,
+    DEDUP_KEY_MAX, curl_args_kyu, dedup_key, fold_undelivered, is_undelivered_for, sent_text,
+    undelivered_count, undelivered_notice, was_duplicate,
 };
 
 /// Answers one request with `reply` (a full HTTP response) and hands the
@@ -108,7 +109,7 @@ fn kyu_notify_an_undelivered_push_becomes_a_quiet_notice_naming_the_cause() {
         "page": "/stacks/media", "urgent": true, "routed": "x", "push": "failed: HTTP 500"
     }))
     .unwrap();
-    let n = undelivered_notice(2, 11, &failed, "HTTP 500");
+    let n = undelivered_notice(2, 11, &failed, "HTTP 500", "kyu:80");
     assert_eq!(n.title, "Notification could not be delivered");
     assert!(n.what.contains("Backup failed") && n.what.contains("HTTP 500"));
     assert!(
@@ -116,4 +117,34 @@ fn kyu_notify_an_undelivered_push_becomes_a_quiet_notice_naming_the_cause() {
         "must not push through the route that just failed"
     );
     assert_eq!(n.seq, 2);
+}
+
+#[test]
+fn kyu_notify_the_dedup_headers_sit_right_before_the_payload_and_url() {
+    let args = curl_args_kyu("{\"a\":1}", "http://k/t", Some("/h"), None, Some("k1"));
+    let d = args.iter().rposition(|a| a == "-d").unwrap();
+    assert_eq!(&args[d + 1..], ["{\"a\":1}", "http://k/t"]);
+    assert_eq!(
+        &args[d - 4..d],
+        ["-H", "Kyu-Dedup-Key: k1", "-H", "Kyu-Dedup-Window: 20h"]
+    );
+    assert_eq!(args.iter().filter(|a| *a == "Kyu-Dedup-Key: k1").count(), 1);
+}
+
+#[test]
+fn kyu_notify_repeated_undelivered_notices_fold_into_one_with_a_count() {
+    let failed: HostNotice = serde_json::from_value(serde_json::json!({
+        "seq": 1, "at": 10, "since": 10, "op": "backup", "label": "backup", "ok": false,
+        "title": "Backup failed", "what": "w", "consequence": "c", "remedy": "r",
+        "page": "/p", "urgent": true, "routed": "x", "push": "failed: HTTP 500"
+    }))
+    .unwrap();
+    let first = undelivered_notice(2, 11, &failed, "HTTP 500", "kyu:80");
+    assert!(is_undelivered_for(&first, "kyu:80") && !is_undelivered_for(&first, "other:80"));
+    assert_eq!(undelivered_count(&first), 1);
+    let again = undelivered_notice(5, 50, &failed, "HTTP 503", "kyu:80");
+    let folded = fold_undelivered(&first, again, "HTTP 503", "Backup failed");
+    assert_eq!((folded.seq, folded.at, folded.since), (5, 50, 11));
+    assert_eq!(undelivered_count(&folded), 2);
+    assert!(folded.what.contains("2 pushes") && folded.what.contains("HTTP 503"));
 }

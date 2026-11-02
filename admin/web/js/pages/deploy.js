@@ -107,6 +107,7 @@ export function mount(root, _ctx) {
     paint();
   };
   button.addEventListener("click", () => {
+    const hadFocus = document.activeElement === button;
     button.disabled = true;
     failed = null;
     note.textContent = compareWords(null);
@@ -114,6 +115,8 @@ export function mount(root, _ctx) {
       .catch(() => {})
       .finally(() => {
         button.disabled = false;
+        // A disabled button drops the focus to the page: give it back.
+        if (hadFocus) button.focus();
         paint();
       });
   });

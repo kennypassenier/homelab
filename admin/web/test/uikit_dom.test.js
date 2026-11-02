@@ -360,7 +360,7 @@ test("redesign-kit-10: one toggle group, one rule: drive is required, every valu
   }
   assert.match(
     read("js/pages/host.js"),
-    /keys: "Escape"[\s\S]{0,160}gFilter\.reset\(\)/,
+    /keys: "Escape"[\s\S]{0,160}guests\.resetFilter\(\)/,
     "Esc on Host resets the container filter",
   );
 });

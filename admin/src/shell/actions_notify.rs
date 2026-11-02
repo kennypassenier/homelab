@@ -2,7 +2,7 @@
 //! The list lives in the app database (`shell::store`, `notice_store`); until
 //! 4.0.0 it was `notifications.json` (arch-state). Every notice is stored,
 //! published to open pages as the SSE event `notification`, and pushed
-//! through kyu when `core::notify::route` says so.
+//! through kyu when `notify::route` (admin core) says so.
 //! The push goes through [`Pusher`], so tests use a double and never reach
 //! kyu.
 

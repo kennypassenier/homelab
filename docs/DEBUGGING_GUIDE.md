@@ -213,10 +213,9 @@ sequenceDiagram
     R->>J: step "-" "failed" or "deferred" (finish_err)
     R-->>H: OperationReport, ok false, what/why/remedy
     H->>N: notify(label, report)
-    Note over N: a repeat of the same failure<br/>inside the damper window is dropped
-    N->>W: POST to the primary route
-    opt primary did not answer 2xx
-        N->>W: POST to the fallback route
+    N->>W: ONE POST to kyu, with Kyu-Dedup-Key<br/>(kyu drops a repeat inside 20 h)
+    opt kyu did not accept it
+        N->>N: second notice: Notification could not be delivered
     end
     N->>N: record the outcome in state.json
     alt report is deferred
@@ -470,10 +469,9 @@ reaches curl through a mode-600 header file,
 | `scheduler: backup for <stack> stood aside` | info | a nightly backup deferred | `host/src/tests/config.rs::misplaced_keys_are_reported_not_swallowed` |
 | `fleet check: repo and reality agree` | info | the nightly check found nothing alarming | `host/src/tests/config_save.rs::feat_settings_1_a_change_is_checked_like_a_start` |
 | `fleet check: <b> broken · <d> drift · ...` | warn | the nightly check found something; it also went out as a notification | `host/src/tests/config_save.rs::feat_settings_1_a_change_is_checked_like_a_start` |
-| `notification route <scheme>://<host:port>/<path withheld> failed: <why>` | warn | one webhook route did not answer 2xx; the path (a Home Assistant webhook id) is withheld since fix-123, the full URL is `notify_webhook` or `notify_fallback_webhook` in `host.toml` | `host/src/main.rs`, `notify_raw` |
+| `notification route <scheme>://<host:port>/<path withheld> failed: <why>` | warn | the kyu route did not answer 2xx; the path is withheld since fix-123, the full URL is `notify_webhook` in `host.toml` | `host/src/main.rs`, `notify_raw` |
 | `a client lagged: <n> message(s) to it dropped` | warn | a connected client read slower than the host wrote; it was told so and sent every open question again (fix-127) | `host/src/main.rs`, `serve_ws` |
 | `401 on <path> from <address>: missing or wrong bearer token (<n> refused since this daemon started)` | warn | a connection without the right token; `homelab doctor` counts them under `refused connections` (fix-120) | `host/src/main.rs`, `log_refused` |
-| `notification took the fallback route: the primary said <why>` | warn | primary failed, fallback delivered | `host/src/tests/doctor.rs::fix_131_incident_show_reads_one_bundle_and_nothing_else` |
 | `mirror push failed (will retry): <e>` | warn | the intent repo did not reach its mirror; retried every tick | `host/src/tests/support.rs::config_from_text`, `2250` |
 | `A6 exec vmid=<n> cmd=<cmd>` | info | a `homelab exec` ran | `host/src/tests/history.rs::redesign_371_a_reveal_is_audited_in_history_without_the_value` |
 
@@ -889,14 +887,15 @@ old (`host/src/tests/config.rs::a_typo_is_reported`, `1941-1943`). Parked stacks
 
 Each notification is one JSON body with `source`, `op`, `label`, `ok`,
 `error` and `version` (`core/src/notify.rs:15-25`). Only an HTTP 2xx counts
-as delivered (`core/src/notify.rs:149-159`). The primary route is tried
-first, the fallback only when it fails (`core/src/notify.rs:174-185`,
-`host/src/tests/doctor.rs::fix_130_the_new_doctor_probes_read_the_machine`).
+as delivered (`core/src/notify.rs:149-159`). The host makes one POST to
+`notify_webhook` (kyu) and nothing more; retries and the fallback to Home
+Assistant belong to kyu (`host/src/notify_send.rs::notify_raw`,
+`core/src/notify_kyu.rs`).
 
 | Symptom | Cause | First action | Source |
 |---|---|---|---|
 | `homelab check` reports `no route accepted the last notification` | every route failed on the last attempt; the reason is kept in state | the finding quotes the reason; check the webhook targets in host.toml | `core/src/ops/fleetcheck/recorded.rs::evaluate_notify`, `host/src/tests/doctor.rs::fix_131_incident_show_reads_one_bundle_and_nothing_else` |
-| the same failure did not notify a second time | identical failures of the same operation are suppressed for 20 hours; a changed error text passes; successes always pass | expected. The counter lives in memory, so a daemon restart resets it | `host/src/tests/refusals.rs::fix_141_the_hello_names_the_build`, `core/src/notify.rs:27-58` |
+| the same failure did not notify a second time | kyu drops an identical failure of the same operation for 20 hours (`Kyu-Dedup-Key`); a changed error text passes; successes always pass | expected. kyu holds the key, so a host restart does not reset it; the push column says `sent: kyu already holds ...` | `core/src/notify_kyu.rs::dedup_key`, `host/src/tests/notify_kyu.rs` |
 | `cannot write the header file <path>: <e>` as the recorded reason | a route that needs a bearer token was skipped because its header file could not be written under `secrets/` | check that the state directory's `secrets/` is writable by the daemon | `host/src/tests/doctor.rs::fix_130_the_new_doctor_probes_read_the_machine` |
 | no notifications at all, and no failure recorded | no webhook is configured: with neither route set nothing is sent and nothing is recorded | `homelab config` shows the webhook setting | `host/src/tests/doctor.rs::fix_130_the_new_doctor_probes_read_the_machine` |
 

@@ -139,7 +139,7 @@ pub(crate) async fn record_device_backup(state: &AppState, device: &str) {
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_secs())
         .unwrap_or(0);
-    let fed = homelab_core::ops::watched::record_device_backup(
+    let fed = match homelab_core::ops::watched::record_device_backup(
         &RealExecutor,
         &state.config.state_dir,
         &watchers,
@@ -147,7 +147,16 @@ pub(crate) async fn record_device_backup(state: &AppState, device: &str) {
         device,
         now,
     )
-    .await;
+    .await
+    {
+        Ok(fed) => fed,
+        Err(e) => {
+            tracing::warn!(
+                "device backup {device}: the watched-backup record was not updated :: {e}"
+            );
+            return;
+        }
+    };
     if !fed.is_empty() {
         info!(
             "device backup {} recorded for watcher(s) {}",

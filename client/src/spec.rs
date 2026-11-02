@@ -2058,8 +2058,8 @@ pub fn generate_runbook(stacks_dir: &Path, out_path: &str) -> Result<usize, Stri
          in `~/.config/homelab/env`.\n\
          - **The state directory** holds `state.json` (what is deployed where), `repo/` (a git \
          history of every file each deploy sent), `secrets/` (the vault, below), \
-         `tls-cert.pem` and `tls-key.pem` (the daemon's certificate), `journal.jsonl` and \
-         `incidents/` (operation records) and `restic-cache/`.\n\
+         `tls-cert.pem` and `tls-key.pem` (the daemon's certificate), `homelab-host.db` (the host's \
+         journal, notices and incident reports) and `incidents/` (operation records) and `restic-cache/`.\n\
          - **The vault** `{vault}`: `restic.pw` (the one password for every repository), \
          `<stack>/<app>.env` for each compose app that has an `.env`, and \
          `<stack>/<dir>/<file>` for each env or credential file a native unit reads, where \
@@ -2258,7 +2258,7 @@ pub fn generate_runbook(stacks_dir: &Path, out_path: &str) -> Result<usize, Stri
          passthrough), the swappiness drop-in and rclone's own configuration:\n\n```sh\n\
          {extras}\
          ```\n\n\
-         Not in it: the `homelab-host` program and its unit file (Layer 1), `journal.jsonl`, \
+         Not in it: the `homelab-host` program and its unit file (Layer 1), `homelab-host.db`, \
          `incidents/` and `restic-cache/`.\n\n\
          **The password is inside the thing it opens.** `restic.pw` is in this repository, \
          and the same password opens every repository, so an offline copy of it is the one \

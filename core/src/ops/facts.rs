@@ -316,10 +316,18 @@ pub async fn gather_live_facts_with(
     // recorded (ops::watched) and lists only a watcher with no record; the
     // nightly round lists them all and records what it saw.
     let watched_fut = async {
+        let mut notes: Notes = Vec::new();
         let records = if inp.watched_backups.is_empty() {
             Default::default()
         } else {
-            crate::ops::watched::load(exec, &inp.state_dir).await
+            crate::ops::watched::load(exec, &inp.state_dir)
+                .await
+                .unwrap_or_else(|e| {
+                    notes.push(format!(
+                        "watched backups: the record could not be read :: {e}"
+                    ));
+                    Default::default()
+                })
         };
         let answers: Vec<(
             WatchedBackupFact,
@@ -363,10 +371,12 @@ pub async fn gather_live_facts_with(
             }
             facts.push(fact);
         }
-        if changed {
-            crate::ops::watched::save(exec, &inp.state_dir, &records).await;
+        if changed && let Err(e) = crate::ops::watched::save(exec, &inp.state_dir, &records).await {
+            notes.push(format!(
+                "watched backups: the answers could not be recorded :: {e}"
+            ));
         }
-        facts
+        (facts, notes)
     };
 
     // The stacks the host has recorded — read once, used twice below.
@@ -378,7 +388,7 @@ pub async fn gather_live_facts_with(
     };
     // Three independent reads, overlapped; polled in the order they used to
     // run, so a scripted executor sees the same sequence.
-    let (watched, host_memory, snapshot) = futures_util::join!(
+    let ((watched, watched_notes), host_memory, snapshot) = futures_util::join!(
         watched_fut,
         // F184: the host's own numbers, so a per-container remedy cannot
         // advise memory the machine does not have.
@@ -386,6 +396,7 @@ pub async fn gather_live_facts_with(
         snapshot_fut
     );
 
+    notes.extend(watched_notes);
     let mut facts = LiveFacts {
         stack_files: stack_files.to_vec(),
         watched_backups: watched,

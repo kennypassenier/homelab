@@ -1,29 +1,21 @@
-//! The file-backed journal of operation records (B5).
+//! The database-backed journal of operation records (B5).
 
 use crate::*;
 
-/// B5/AR13: append-only JSONL journal; "running" records land before a step
-/// executes, so an interrupted operation is visible after restart.
-pub(crate) struct FileJournal {
-    pub(crate) path: String,
+/// B5/AR13: append-only journal in the host database; "running" records land
+/// (committed, `synchronous=FULL`) before a step executes, so an interrupted
+/// operation is visible after restart.
+pub(crate) struct DbJournal {
+    pub(crate) state_dir: String,
 }
 
-impl Journal for FileJournal {
+impl Journal for DbJournal {
     fn record(&self, op: &str, step: &str, status: &str) {
-        let ts = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_secs())
-            .unwrap_or(0);
-        let line = serde_json::json!({"ts": ts, "op": op, "step": step, "status": status});
-        if let Some(parent) = std::path::Path::new(&self.path).parent() {
-            let _ = std::fs::create_dir_all(parent);
-        }
-        if let Ok(mut f) = std::fs::OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(&self.path)
-        {
-            let _ = writeln!(f, "{}", line);
+        let written = hostdb::for_dir(&self.state_dir)
+            .and_then(|db| hostdb::journal::record(&db, hostdb::now_s(), op, step, status));
+        if let Err(e) = written {
+            // The `Journal` trait cannot fail an operation; the loss is said.
+            tracing::error!("journal: could not record {op} / {step} / {status} :: {e}");
         }
     }
 }

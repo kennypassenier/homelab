@@ -6,6 +6,7 @@ mod config;
 mod config_save;
 mod doctor;
 mod history;
+mod hostdb;
 mod night;
 mod notices;
 mod notify_kyu;

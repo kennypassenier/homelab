@@ -196,6 +196,12 @@ pub trait Executor: Send + Sync {
 
     /// Sleep — routed through the trait so tests run instantly.
     async fn sleep_ms(&self, ms: u64);
+
+    /// host-db-1: the host's record store (watched-backup answers, incident
+    /// data, journal tail). An executor without one answers [`NoRecords`].
+    fn records(&self) -> &dyn crate::records::RecordStore {
+        &crate::records::NoRecords
+    }
 }
 
 /// The lines of `stdout` that `on_line` did not consume, newline-ended.
@@ -490,6 +496,9 @@ impl Executor for TracingExecutor<'_> {
     }
     async fn sleep_ms(&self, ms: u64) {
         self.inner.sleep_ms(ms).await
+    }
+    fn records(&self) -> &dyn crate::records::RecordStore {
+        self.inner.records()
     }
 }
 

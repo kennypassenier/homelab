@@ -80,7 +80,7 @@ flowchart TB
 - **Operations are journaled.** Each operation is a sequence of named steps,
   and a journal record is written before each step runs
   (`core/src/runner.rs`). At start-up the daemon reads
-  `/var/lib/homelab/journal.jsonl` and names any operation a previous run left
+  `/var/lib/homelab/homelab-host.db` (table `journal`) and names any operation a previous run left
   unfinished.
 - **The client checks the daemon's version before it sends anything.** A
   command that changes something is refused when the daemon is older than the

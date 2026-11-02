@@ -58,7 +58,7 @@ pub(crate) struct AppState {
     /// feat-platform-10: `homelab ui` steps, handed to the dashboard.
     pub(crate) ui: Arc<ui_relay::UiRelay>,
     /// Decision notify-routing: the newest notice's `seq`, read back from
-    /// notices.jsonl at start so it only grows.
+    /// the host database at start so it only grows.
     pub(crate) notice_seq: Arc<std::sync::Mutex<u64>>,
     /// fix-120: the `[[tokens]]` list in force right now. Starts as
     /// `config.tokens` (what host.toml said at start) and is overwritten in
@@ -128,15 +128,14 @@ pub(crate) fn scheduler_is_alive(now: u64, heartbeat: u64, stale_after_s: u64) -
 
 impl AppState {
     pub(crate) fn new(config: Config, log_tx: broadcast::Sender<ServerMsg>) -> Self {
-        let last_seq = std::fs::read_to_string(notices_path(&config.state_dir))
-            .map(|t| {
-                homelab_core::notify::parse_notices(&t)
-                    .iter()
-                    .map(|n| n.seq)
-                    .max()
-                    .unwrap_or(0)
-            })
-            .unwrap_or(0);
+        let last_seq = hostdb::for_dir(&config.state_dir)
+            .and_then(|db| hostdb::notices::last_seq(&db))
+            .unwrap_or_else(|e| {
+                tracing::error!(
+                    "notices: the newest sequence number is unknown, starting from the clock :: {e}"
+                );
+                0
+            });
         AppState {
             started_at: std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)

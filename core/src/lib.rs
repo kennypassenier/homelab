@@ -32,6 +32,7 @@ pub mod notify;
 pub mod notify_kyu;
 pub mod oplock;
 pub mod ops;
+pub mod records;
 pub mod release_sig;
 pub mod retention;
 pub mod routes;

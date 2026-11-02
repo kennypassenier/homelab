@@ -464,9 +464,10 @@ Drawn from `core/src/safety.rs` (`check_deploy_target`) and `core/src/ops/mod.rs
 What is built: the first failing step ends the operation
 (`core/src/runner.rs:100-104`, `core/src/ops/deploy/mod.rs`), and every
 failed operation leaves an **incident bundle** under
-`/var/lib/homelab/incidents/<unix-time>-<op>/` holding `report.json`,
-`events.jsonl`, `commands.sh` (the commands it ran, as a script),
-`state-at-failure.json`, `journal-tail.jsonl` and `versions.txt`
+`/var/lib/homelab/incidents/<unix-time>-<op>/` holding `commands.sh` (the
+commands it ran, as a script), `state-at-failure.json`, `journal-tail.jsonl`
+and `versions.txt`; the bundle's `report.json` and `events.jsonl` are rows of
+the host database (`homelab incidents show <name>` prints them)
 (`core/src/incidents.rs:55-110`, `host/src/tests/support.rs::serve_state_on_loopback`). A deploy that
 fails after the machine was touched records the stack with the step where it
 stopped, and logs `recorded as incomplete at step` (`core/src/ops/deploy/incomplete.rs::mark_incomplete`).
@@ -1298,7 +1299,7 @@ would act on.
 Every step of every operation writes `running` before it starts and `done`
 or `failed` after it, and the operation ends with `complete`, `failed` or
 `deferred` (`core/src/runner.rs:81-104,159-189`), in
-`/var/lib/homelab/journal.jsonl` (`host/src/tests/config.rs::gap_26_journal_max_bytes_defaults_and_follows_host_toml`). At start the
+the host database, `/var/lib/homelab/homelab-host.db`, table `journal` (`host/src/tests/config.rs::gap_26_journal_max_bytes_defaults_and_follows_host_toml`). At start the
 daemon logs every operation the journal shows as unfinished, as
 `interrupted operation '<op>' at step '<step>' — re-running it is safe (idempotent)`
 (`host/src/tests/refusals.rs::fix_55_an_unparseable_frame_is_logged_without_its_body`), and the doctor lists them
@@ -2606,7 +2607,7 @@ snoozed, or with pushes off. The page shows when the last digest went out.
 
 How it travels:
 
-- The host writes every event to `<state_dir>/notices.jsonl` (0600, pruned
+- The host writes every event to the host database `<state_dir>/homelab-host.db`, table `notices` (0600, pruned
   with the history's limits) and pushes only an urgent one: **one POST** to
   kyu, at the **webhook** set via `config/host.toml`/the admin dashboard
   (G8), with `notify_auth_bearer`. The host keeps no queue and runs no
@@ -3687,7 +3688,7 @@ place to look.
 | registry pull-through cache (CT 117) | 168h proxy ttl (age) + nightly `registry garbage-collect` (frees what ttl expired) | ttl: `stacks/registry/registry/*.yml` (`proxy.ttl`, already declared); GC: `stacks/registry/rootfs/` (a stack-declared systemd timer, `registry-gc.timer`/`.service`) |
 | homelab daemon's own `push-staging-*` files | swept at daemon start and after every operation, 1h grace | `core/src/ops/util.rs` (`stale_push_staging`), called from `host/src/main.rs` (`cleanup_push_staging`) |
 | incident bundles | age + count (`incident_bundle_max_age_days`/`_count`) | `host.toml`, unchanged by this round |
-| journal.jsonl (daemon's own) | size (`journal_max_bytes`) | `host.toml`, unchanged by this round |
+| journal table of `homelab-host.db` (daemon's own) | size (`journal_max_bytes`) | `host.toml`, unchanged by this round |
 | dashboard notification store | since 4.0.0 no count or age cap: the notices live in the dashboard's sqlite file and stay until the Storage page deletes them (preview, typed confirmation); `notify_keep` (500) only sizes one list; the file's budget (50 MB, warning at 40 MB, changeable on `/storage`) warns and never deletes | env var on CT 120, `HOMELAB_ADMIN_NOTIFY_KEEP` — `admin/src/core/actions_config.rs`; `HOMELAB_ADMIN_NOTIFY_MAX_AGE_DAYS` is retired |
 | kyu's own backup-file retention | count (`KYU_BACKUP_KEEP`, default 7) | `stacks/kyu/rootfs/usr/local/bin/kyu-backup` — already had a default |
 | kyu's own message-store retention | kyu's own concern, outside this repository | not declared here; flagged to the kyu project (disk-audit) |

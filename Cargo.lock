@@ -1377,6 +1377,7 @@ dependencies = [
  "homelab-proto",
  "libc",
  "rcgen",
+ "rusqlite",
  "serde",
  "serde_json",
  "sha2",

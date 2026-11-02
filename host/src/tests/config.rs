@@ -231,13 +231,14 @@ pub(crate) fn gap_26_compact_journal_file_uses_the_configured_limit() {
     let dir = std::env::temp_dir().join(format!("homelab-gap26-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
-    let line = "{\"op\":\"deploy\",\"at\":1,\"running\":false}\n";
-    let content = line.repeat(2000); // well under JOURNAL_MAX_BYTES, well over 64 KiB
+    let db = hostdb::for_dir(&dir.to_string_lossy()).unwrap();
+    for i in 0..2000 {
+        hostdb::journal::record(&db, i, "deploy", "step", "ok").unwrap();
+    }
+    let content = hostdb::journal::text(&db).unwrap(); // under JOURNAL_MAX_BYTES, over 64 KiB
     assert!(content.len() < homelab_core::incidents::JOURNAL_MAX_BYTES);
-    let path = dir.join("journal.jsonl");
-    std::fs::write(&path, &content).unwrap();
     compact_journal_file(&dir.to_string_lossy(), 65536);
-    let cut = std::fs::read_to_string(&path).unwrap();
+    let cut = hostdb::journal::text(&db).unwrap();
     let _ = std::fs::remove_dir_all(&dir);
     assert!(
         cut.len() < content.len(),

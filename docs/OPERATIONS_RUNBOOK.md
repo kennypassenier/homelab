@@ -131,7 +131,7 @@ In the TUI the question takes the keyboard: `a` allows, `s` stops
 (`client/src/tui/model.rs:624-633`).
 
 **Abort-safety.** Each procedure marks its point of no return. The host
-journals every step to `/var/lib/homelab/journal.jsonl` before it runs; an
+journals every step to the host database (`/var/lib/homelab/homelab-host.db`, table `journal`; it was `journal.jsonl` before host-db-1) before it runs; an
 operation cut off half way is logged at the next start with
 `"re-running it is safe (idempotent)"` (`host/src/tests/supervision.rs::fix_52_sigterm_waits_for_the_running_operation_then_exits_zero`,
 `:1812-1823`) and shown by `homelab doctor` under "interrupted operations"
@@ -1696,3 +1696,24 @@ Found while writing this runbook. Each line says what to believe.
 | `stacks/almanac/lxc-compose.yml` | fixed in v3.58.4 (gap-28) | points at op-11; `homelab restore` refuses a native stack |
 | Doc comment in `core/src/ops/native/backup.rs` | fixed in v3.58.4 | says `<unit>-config` |
 | Manual checks after a deploy | "Questions that disappeared from the stack files are dropped" (`core/src/ops/manualchecks.rs:48-49`) | only while the stack still has a `manual:` line; with none left the deploy skips the registration and the old questions stay until destroy or forget (`core/src/ops/deploy/logshipper.rs::restart_alloy`) |
+
+## Update notes: the host database (host-db-1)
+
+The first start of a host with `homelab-host.db` moves the old files into it
+and leaves these behind in `/var/lib/homelab`:
+
+- `journal.jsonl.pre-db-backup`, `notices.jsonl.pre-db-backup`,
+  `watched-backups.json.pre-db-backup`, and `report.json.pre-db-backup` /
+  `events.jsonl.pre-db-backup` in each incident bundle: exact copies taken
+  before anything was imported (never overwritten if one exists).
+- The same names ending `.migrated`: the old file, renamed after the import
+  committed. A file still named `journal.jsonl` (no suffix) means the import
+  has not finished; the next start tries again, and nothing is imported twice.
+- Lines that could not be read (a torn last line) are skipped, logged at
+  warn level, and remain in the `.pre-db-backup` copy.
+
+Both kinds of file are safe to delete once `homelab doctor`, `homelab incidents`
+and the Inbox look right; nothing deletes them on its own (the incident ones go
+with their bundle when it is pruned). Rolling back to an older host leaves the
+database unread: the older host starts from the `.migrated` files renamed back.
+The database is not in the host-meta backup (like the journal before it).

@@ -89,6 +89,7 @@ mod gather_disk;
 mod gather_pools;
 mod gather_snapshots;
 mod gather_today;
+mod hostdb;
 mod http;
 mod incidents;
 mod journal;
@@ -135,6 +136,12 @@ async fn main() {
         &config.log_level,
         config.log_ring_max_bytes,
     );
+
+    if let Err(e) = startup::open_host_db(&config) {
+        error!("{e}");
+        eprintln!("homelab-host: {e}");
+        std::process::exit(1);
+    }
 
     let (log_tx, _) = broadcast::channel(4096);
     let state = AppState::new(config.clone(), log_tx).with_log_filter(log_filter);

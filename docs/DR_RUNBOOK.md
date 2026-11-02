@@ -242,7 +242,7 @@ and, each only when it was present on the host (`HOST_META_EXTRAS` in core/src/o
 /root/.config/rclone/rclone.conf
 ```
 
-Not in it: the `homelab-host` program and its unit file (Layer 1), `journal.jsonl`, `incidents/` and `restic-cache/`.
+Not in it: the `homelab-host` program and its unit file (Layer 1), `homelab-host.db` (journal, notices, watched-backup answers, incident reports), `incidents/` and `restic-cache/`.
 
 **The password is inside the thing it opens.** `restic.pw` is in this repository, and the same password opens every repository, so an offline copy of it is the one thing this whole runbook cannot do without. The code keeps no second copy. The offline copy is in Kenny's Bitwarden: the one statement in this document that no code can confirm.
 

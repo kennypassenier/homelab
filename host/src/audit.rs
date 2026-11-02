@@ -20,7 +20,7 @@ pub(crate) fn append_audit(path: &str, line: &str) -> std::io::Result<()> {
 }
 
 /// fix-125: at start, take group and world access off the daemon's private
-/// records that already exist: audit.log, journal.jsonl and the incident
+/// records that already exist: audit.log, the host database and the incident
 /// bundles (0700 directories, 0600 files, the replay scripts 0700). Before
 /// fix-125 all of them were created readable by every account on pve, and a
 /// new mode for new files leaves the old ones as they were. Best effort: a
@@ -40,7 +40,13 @@ pub(crate) fn tighten_private_paths(state_dir: &str) {
     };
     let base = std::path::Path::new(state_dir);
     set(&base.join("audit.log"), 0o600);
-    set(&base.join("journal.jsonl"), 0o600);
+    for f in [
+        crate::hostdb::DB_FILE,
+        "homelab-host.db-wal",
+        "homelab-host.db-shm",
+    ] {
+        set(&base.join(f), 0o600);
+    }
     let incidents = base.join("incidents");
     set(&incidents, 0o700);
     for bundle in std::fs::read_dir(&incidents)

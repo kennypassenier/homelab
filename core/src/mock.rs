@@ -63,11 +63,19 @@ pub struct MockExecutor {
     container_running: Mutex<std::collections::BTreeSet<String>>,
     /// Paths whose read fails for a reason other than absence (EACCES, EIO).
     read_errors: Mutex<HashMap<String, String>>,
+    /// host-db-1: what the host's record store holds (watched answers,
+    /// incident data, journal lines).
+    records: crate::records::MemRecords,
 }
 
 impl MockExecutor {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// The in-memory record store this mock answers `records()` with.
+    pub fn mem_records(&self) -> &crate::records::MemRecords {
+        &self.records
     }
 
     /// A mock that fails the test, when it is dropped, if any scripted rule
@@ -474,4 +482,7 @@ impl Executor for MockExecutor {
     }
 
     async fn sleep_ms(&self, _ms: u64) {}
+    fn records(&self) -> &dyn crate::records::RecordStore {
+        &self.records
+    }
 }

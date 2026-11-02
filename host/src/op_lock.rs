@@ -152,8 +152,8 @@ where
         by: requested_by(),
     };
     let sink = homelab_core::incidents::RecordingSink::new(&broadcast);
-    let journal = FileJournal {
-        path: format!("{}/journal.jsonl", state.config.state_dir),
+    let journal = DbJournal {
+        state_dir: state.config.state_dir.clone(),
     };
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)

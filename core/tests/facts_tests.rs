@@ -553,7 +553,7 @@ async fn fix_142_the_intent_copy_is_read_file_by_file() {
 /// reads the watched backups the host recorded and asks rclone nothing.
 #[tokio::test]
 async fn speed_a_check_with_recorded_backups_asks_no_remote() {
-    use homelab_core::ops::watched::{WATCHED_BACKUPS_FILE, WatchedRecord, WatchedRecords};
+    use homelab_core::ops::watched::{WatchedRecord, WatchedRecords};
     let exec = MockExecutor::new();
     let mut rec = WatchedRecords::new();
     rec.insert(
@@ -565,10 +565,7 @@ async fn speed_a_check_with_recorded_backups_asks_no_remote() {
             source: "nightly".into(),
         },
     );
-    exec.seed_file(
-        &format!("/var/lib/homelab/{}", WATCHED_BACKUPS_FILE),
-        &serde_json::to_string(&rec).unwrap(),
-    );
+    exec.mem_records().seed_watched(&rec);
     let mut inp = inputs();
     inp.watched_fresh = false;
     inp.watched_backups = vec![WatchedBackupSpec {
@@ -605,7 +602,7 @@ async fn speed_a_check_with_recorded_backups_asks_no_remote() {
 /// another path): asked once, recorded, and the next check asks nothing.
 #[tokio::test]
 async fn speed_a_check_without_a_record_asks_once_and_records_it() {
-    use homelab_core::ops::watched::{WATCHED_BACKUPS_FILE, WatchedRecord, WatchedRecords, load};
+    use homelab_core::ops::watched::{WatchedRecord, WatchedRecords, load};
     let exec = MockExecutor::new();
     exec.respond_always(
         "rclone lsjson --files-only 'gdrive:ok'",
@@ -626,10 +623,7 @@ async fn speed_a_check_without_a_record_asks_once_and_records_it() {
             source: "nightly".into(),
         },
     );
-    exec.seed_file(
-        &format!("/var/lib/homelab/{}", WATCHED_BACKUPS_FILE),
-        &serde_json::to_string(&rec).unwrap(),
-    );
+    exec.mem_records().seed_watched(&rec);
     let mut inp = inputs();
     inp.watched_fresh = false;
     inp.watched_backups = vec![WatchedBackupSpec {
@@ -640,7 +634,7 @@ async fn speed_a_check_without_a_record_asks_once_and_records_it() {
     let (facts, _) = gather_live_facts(&exec, &inp, &[]).await;
     assert_eq!(facts.watched_backups[0].newest_age_s, Some(3600));
     assert_eq!(exec.calls_containing("rclone lsjson").len(), 1);
-    let saved = load(&exec, "/var/lib/homelab").await;
+    let saved = load(&exec, "/var/lib/homelab").await.unwrap();
     assert_eq!(saved["opnsense"].rclone_path, "gdrive:ok");
     assert_eq!(saved["opnsense"].newest_unix, Some(1_789_700_400));
 
@@ -657,7 +651,7 @@ async fn speed_a_check_without_a_record_asks_once_and_records_it() {
 /// listing that fails is reported that night and never recorded.
 #[tokio::test]
 async fn speed_the_nightly_round_lists_and_records_but_not_a_failure() {
-    use homelab_core::ops::watched::{WATCHED_BACKUPS_FILE, WatchedRecord, WatchedRecords, load};
+    use homelab_core::ops::watched::{WatchedRecord, WatchedRecords, load};
     let exec = MockExecutor::new();
     exec.respond_always(
         "rclone lsjson --files-only 'gdrive:ok'",
@@ -688,10 +682,7 @@ async fn speed_the_nightly_round_lists_and_records_but_not_a_failure() {
             source: "nightly".into(),
         },
     );
-    exec.seed_file(
-        &format!("/var/lib/homelab/{}", WATCHED_BACKUPS_FILE),
-        &serde_json::to_string(&rec).unwrap(),
-    );
+    exec.mem_records().seed_watched(&rec);
     let mut inp = inputs();
     inp.watched_fresh = true;
     inp.watched_backups = vec![
@@ -710,7 +701,7 @@ async fn speed_the_nightly_round_lists_and_records_but_not_a_failure() {
     assert_eq!(exec.calls_containing("rclone lsjson").len(), 2);
     assert_eq!(facts.watched_backups[0].newest_age_s, Some(3600));
     assert!(facts.watched_backups[1].error.is_some());
-    let saved = load(&exec, "/var/lib/homelab").await;
+    let saved = load(&exec, "/var/lib/homelab").await.unwrap();
     assert_eq!(saved["opnsense"].newest_unix, Some(1_789_700_400));
     assert_eq!(saved["opnsense"].source, "nightly");
     assert_eq!(
@@ -755,9 +746,10 @@ async fn speed_a_device_backup_records_its_watchers() {
         "opnsense",
         1_789_704_000,
     )
-    .await;
+    .await
+    .unwrap();
     assert_eq!(fed, vec!["router".to_string()]);
-    let saved = load(&exec, "/var/lib/homelab").await;
+    let saved = load(&exec, "/var/lib/homelab").await.unwrap();
     assert_eq!(saved["router"].newest_unix, Some(1_789_704_000));
     assert!(!saved.contains_key("other"));
     assert!(

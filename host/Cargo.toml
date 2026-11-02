@@ -24,6 +24,10 @@ sha2.workspace = true
 base64.workspace = true
 # fix-53: killpg, to end a timed-out command's whole process group.
 libc = "0.2"
+# host-db-1: the host's own records (journal, notices, watched backups, incidents)
+# in one sqlite file. `bundled` compiles sqlite from source, so the static musl
+# build needs no system library; 0.40 is the version chassis (the dashboard) uses.
+rusqlite = { version = "0.40", features = ["bundled"] }
 
 [dev-dependencies]
 # The host's tests drive core with the MockExecutor (test-support feature).

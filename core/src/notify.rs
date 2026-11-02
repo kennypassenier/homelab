@@ -946,7 +946,7 @@ pub fn push_payload(
     v.to_string()
 }
 
-/// One notice as the host keeps it in `<state_dir>/notices.jsonl` and hands
+/// One notice as the host keeps it in the host database (`<state_dir>/homelab-host.db`, table `notices`) and hands
 /// it to the dashboard (`Command::Notices`). The host writes every event
 /// here, urgent or not; the push is decided beside it.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]

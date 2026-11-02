@@ -55,8 +55,9 @@ pub fn commands_script(events: &[PipelineEvent]) -> String {
 /// private rather than the default mode. Story: `docs/deployment/REGISTER.md`.
 pub const PRIVATE: u32 = 0o600;
 
-/// Write a bundle under `<state_dir>/incidents/<ts>-<op>/`. Returns the
-/// bundle directory path.
+/// Write a bundle: `report.json` and `events.jsonl` go to the host's record
+/// store under the bundle's name (host-db-1), the rest into the directory
+/// `<state_dir>/incidents/<ts>-<op>/`. Returns the bundle directory path.
 pub async fn write_bundle(
     exec: &dyn Executor,
     state_dir: &str,
@@ -66,16 +67,11 @@ pub async fn write_bundle(
     versions: &str,
 ) -> Result<String, CoreError> {
     // redesign-final: the op's key, so the dashboard can always open it.
-    let dir = format!(
-        "{}/incidents/{}",
-        state_dir,
-        crate::names::incident_name(ts_unix, &report.op)
-    );
+    let name = crate::names::incident_name(ts_unix, &report.op);
+    let dir = format!("{}/incidents/{}", state_dir, name);
 
     let report_json =
         serde_json::to_string_pretty(report).map_err(|e| CoreError::State(e.to_string()))?;
-    exec.write_file(&format!("{}/report.json", dir), &report_json, PRIVATE)
-        .await?;
 
     let mut events_jsonl = String::new();
     for ev in events {
@@ -83,8 +79,8 @@ pub async fn write_bundle(
             .push_str(&serde_json::to_string(ev).map_err(|e| CoreError::State(e.to_string()))?);
         events_jsonl.push('\n');
     }
-    exec.write_file(&format!("{}/events.jsonl", dir), &events_jsonl, PRIVATE)
-        .await?;
+    exec.records()
+        .incident_save(state_dir, &name, &report_json, &events_jsonl)?;
 
     exec.write_file(
         &format!("{}/commands.sh", dir),
@@ -97,21 +93,14 @@ pub async fn write_bundle(
         exec.write_file(&format!("{}/state-at-failure.json", dir), &state, PRIVATE)
             .await?;
     }
-    if let Ok(journal) = exec
-        .read_file(&format!("{}/journal.jsonl", state_dir))
-        .await
-    {
-        let tail: String = journal
-            .lines()
-            .rev()
-            .take(200)
-            .collect::<Vec<_>>()
-            .into_iter()
-            .rev()
-            .collect::<Vec<_>>()
-            .join("\n");
-        exec.write_file(&format!("{}/journal-tail.jsonl", dir), &tail, PRIVATE)
-            .await?;
+    let tail = exec.records().journal_tail(state_dir, 200)?;
+    if !tail.is_empty() {
+        exec.write_file(
+            &format!("{}/journal-tail.jsonl", dir),
+            &tail.join("\n"),
+            PRIVATE,
+        )
+        .await?;
     }
     exec.write_file(&format!("{}/versions.txt", dir), versions, PRIVATE)
         .await?;
@@ -187,7 +176,24 @@ pub fn compact_journal(content: &str, max_bytes: usize) -> Option<String> {
         return None;
     }
     let lines: Vec<&str> = content.lines().collect();
-    let interrupted: Vec<String> = interrupted_ops(content)
+    let keep = journal_keep(&lines, max_bytes)?;
+    let mut out = String::new();
+    for i in keep {
+        out.push_str(lines[i]);
+        out.push('\n');
+    }
+    Some(out)
+}
+
+/// The indices of the `lines` a compaction keeps (ascending), or None when
+/// they total no more than `max_bytes` (a newline counted per line). The
+/// rule is [`compact_journal`]'s; the host's database cuts its rows by it.
+pub fn journal_keep(lines: &[&str], max_bytes: usize) -> Option<Vec<usize>> {
+    if lines.iter().map(|l| l.len() + 1).sum::<usize>() <= max_bytes {
+        return None;
+    }
+    let content: String = lines.iter().map(|l| format!("{l}\n")).collect();
+    let interrupted: Vec<String> = interrupted_ops(&content)
         .into_iter()
         .map(|(op, _)| op)
         .collect();
@@ -213,12 +219,7 @@ pub fn compact_journal(content: &str, max_bytes: usize) -> Option<String> {
     keep_idx.retain(|i| *i < start);
     keep_idx.sort_unstable();
     keep_idx.extend(start..lines.len());
-    let mut out = String::new();
-    for i in keep_idx {
-        out.push_str(lines[i]);
-        out.push('\n');
-    }
-    Some(out)
+    Some(keep_idx)
 }
 
 // ── Interrupted-operation detection (AR13) ──────────────────────────────────

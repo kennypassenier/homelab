@@ -39,6 +39,13 @@ fn now_unix() -> u64 {
     unix_now()
 }
 
+/// host-db-1: open the host database (schema, one-time import of the old
+/// files) before anything else needs it. A host that cannot keep its records
+/// does not start: the message names the file, and the old files are intact.
+pub(crate) fn open_host_db(config: &Config) -> Result<(), String> {
+    hostdb::for_dir(&config.state_dir).map(|_| ())
+}
+
 /// What the previous run left behind, dealt with before anything runs.
 pub(crate) fn housekeeping(config: &Config) {
     // fix-125: records written before the private modes existed.
@@ -59,15 +66,19 @@ pub(crate) fn housekeeping(config: &Config) {
 /// AR13: surface any operation the previous run left mid-flight.
 pub(crate) fn interrupted_operations(config: &Config) -> Vec<String> {
     let mut interrupted: Vec<String> = Vec::new();
-    if let Ok(journal) = std::fs::read_to_string(format!("{}/journal.jsonl", config.state_dir)) {
-        for (op, step) in homelab_core::incidents::interrupted_ops(&journal) {
-            tracing::warn!(
-                "interrupted operation '{}' at step '{}' — re-running it is safe (idempotent)",
-                op,
-                step
-            );
-            interrupted.push(format!("{} @ {}", op, step));
+    let found = hostdb::for_dir(&config.state_dir).and_then(|db| hostdb::journal::interrupted(&db));
+    match found {
+        Ok(ops) => {
+            for (op, step) in ops {
+                tracing::warn!(
+                    "interrupted operation '{}' at step '{}' — re-running it is safe (idempotent)",
+                    op,
+                    step
+                );
+                interrupted.push(format!("{} @ {}", op, step));
+            }
         }
+        Err(e) => tracing::error!("journal: could not look for interrupted operations :: {e}"),
     }
     interrupted
 }

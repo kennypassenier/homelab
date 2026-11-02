@@ -3,8 +3,9 @@
 //!
 //! `homelab check` used to list every watched backup on Google Drive each
 //! time it ran: the first check stage took 10.4 s on pve, nearly all of it
-//! rclone. The host now keeps what it learned instead, in a file beside
-//! `state.json` so it survives a restart:
+//! rclone. The host now keeps what it learned instead, in its database
+//! (`watched_backups`, host-db-1; it was `watched-backups.json`), so it
+//! survives a restart:
 //!
 //! - the nightly round lists every watched backup and records the answer;
 //! - every device backup this suite makes records "newest = now" for each
@@ -21,10 +22,8 @@ use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
+use crate::error::CoreError;
 use crate::executor::Executor;
-
-/// The file, in the host's state directory.
-pub const WATCHED_BACKUPS_FILE: &str = "watched-backups.json";
 
 /// What was last learned about one watched backup.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -42,26 +41,21 @@ pub struct WatchedRecord {
 /// Keyed by watcher name.
 pub type WatchedRecords = BTreeMap<String, WatchedRecord>;
 
-fn path(state_dir: &str) -> String {
-    format!("{}/{}", state_dir, WATCHED_BACKUPS_FILE)
+/// The recorded answers. Err when the store cannot be read: the caller says
+/// so and carries on with an empty record, which only means the next check
+/// asks once.
+pub async fn load(exec: &dyn Executor, state_dir: &str) -> Result<WatchedRecords, CoreError> {
+    exec.records().watched_load(state_dir)
 }
 
-/// The recorded answers; a missing or unreadable file is an empty record,
-/// which only means the next check asks once.
-pub async fn load(exec: &dyn Executor, state_dir: &str) -> WatchedRecords {
-    exec.read_file(&path(state_dir))
-        .await
-        .ok()
-        .and_then(|raw| serde_json::from_str(&raw).ok())
-        .unwrap_or_default()
-}
-
-/// Write the records back. Best effort: a failed write costs one listing on
-/// the next check, nothing more.
-pub async fn save(exec: &dyn Executor, state_dir: &str, records: &WatchedRecords) {
-    if let Ok(raw) = serde_json::to_string_pretty(records) {
-        let _ = exec.write_file(&path(state_dir), &raw, 0o644).await;
-    }
+/// Record the answers. A failed write costs one listing on the next check,
+/// nothing more, but the caller is told.
+pub async fn save(
+    exec: &dyn Executor,
+    state_dir: &str,
+    records: &WatchedRecords,
+) -> Result<(), CoreError> {
+    exec.records().watched_save(state_dir, records)
 }
 
 /// The recorded answer for this watcher, if it is about the same path.
@@ -100,15 +94,15 @@ pub async fn record_device_backup(
     restic_base: &str,
     device: &str,
     now: u64,
-) -> Vec<String> {
+) -> Result<Vec<String>, CoreError> {
     let fed: Vec<&(String, String)> = watchers
         .iter()
         .filter(|(_, p)| feeds(p, restic_base, device))
         .collect();
     if fed.is_empty() {
-        return Vec::new();
+        return Ok(Vec::new());
     }
-    let mut records = load(exec, state_dir).await;
+    let mut records = load(exec, state_dir).await?;
     for (name, p) in &fed {
         records.insert(
             name.clone(),
@@ -120,6 +114,6 @@ pub async fn record_device_backup(
             },
         );
     }
-    save(exec, state_dir, &records).await;
-    fed.into_iter().map(|(n, _)| n.clone()).collect()
+    save(exec, state_dir, &records).await?;
+    Ok(fed.into_iter().map(|(n, _)| n.clone()).collect())
 }

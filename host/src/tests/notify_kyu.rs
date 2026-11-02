@@ -61,10 +61,12 @@ async fn failed_backup_notices(tag: &str, webhook: &str) -> Vec<serde_json::Valu
         None,
     )
     .await;
-    let text = std::fs::read_to_string(notices_path(&state.config.state_dir)).unwrap();
+    let all = hostdb::for_dir(&state.config.state_dir)
+        .and_then(|db| hostdb::notices::all(&db))
+        .unwrap();
     let _ = std::fs::remove_dir_all(&dir);
-    text.lines()
-        .map(|l| serde_json::from_str(l).unwrap())
+    all.iter()
+        .map(|n| serde_json::to_value(n).unwrap())
         .collect()
 }
 
@@ -138,7 +140,13 @@ pub(crate) async fn kyu_notify_a_dead_kyu_keeps_one_undelivered_notice_with_a_co
         )
         .await;
     }
-    let text = std::fs::read_to_string(notices_path(&state.config.state_dir)).unwrap();
+    let all = hostdb::for_dir(&state.config.state_dir)
+        .and_then(|db| hostdb::notices::all(&db))
+        .unwrap();
+    let text: String = all
+        .iter()
+        .map(|n| serde_json::to_string(n).unwrap() + "\n")
+        .collect();
     let _ = std::fs::remove_dir_all(&dir);
     let lost: Vec<_> = text
         .lines()

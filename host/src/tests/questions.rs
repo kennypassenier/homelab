@@ -187,9 +187,11 @@ pub(crate) async fn fix_240_an_unanswered_question_is_a_notice_and_still_fails()
         "{}",
         outcome.message
     );
-    let notices = std::fs::read_to_string(dir.join("notices.jsonl")).unwrap_or_default();
+    let all = hostdb::for_dir(&dir.to_string_lossy())
+        .and_then(|db| hostdb::notices::all(&db))
+        .unwrap();
+    let notices = format!("{all:?}");
     let _ = std::fs::remove_dir_all(&dir);
-    let all = homelab_core::notify::parse_notices(&notices);
     let n = all
         .iter()
         .find(|n| n.op.contains("deploy-gateway"))

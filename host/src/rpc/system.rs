@@ -34,15 +34,21 @@ pub(crate) async fn notices(
     after: u64,
     limit: usize,
 ) -> RpcResponse {
-    let text = std::fs::read_to_string(notices_path(&state.config.state_dir)).unwrap_or_default();
-    let all = homelab_core::notify::parse_notices(&text);
-    let last_seq = all.iter().map(|n| n.seq).max().unwrap_or(0);
-    let notices = homelab_core::notify::notices_after(all, after, limit.min(1000));
-    RpcResponse {
-        id: req_id,
-        ok: true,
-        message: serde_json::json!({ "notices": notices, "last_seq": last_seq }).to_string(),
-        deferred: None,
+    let read = hostdb::for_dir(&state.config.state_dir)
+        .and_then(|db| hostdb::notices::after(&db, after, limit.min(1000)));
+    match read {
+        Ok((notices, last_seq)) => RpcResponse {
+            id: req_id,
+            ok: true,
+            message: serde_json::json!({ "notices": notices, "last_seq": last_seq }).to_string(),
+            deferred: None,
+        },
+        Err(e) => RpcResponse {
+            id: req_id,
+            ok: false,
+            message: format!("the notices could not be read :: {e}"),
+            deferred: None,
+        },
     }
 }
 
@@ -156,17 +162,17 @@ pub(crate) async fn incident_show(state: &AppState, req_id: u64, name: String) -
 
 /// `Incidents`.
 pub(crate) async fn incidents(state: &AppState, req_id: u64, json: bool) -> RpcResponse {
-    let dir = format!("{}/incidents", state.config.state_dir);
-    let list = std::fs::read_dir(&dir)
-        .map(|rd| {
-            let mut names: Vec<String> = rd
-                .flatten()
-                .map(|e| e.file_name().to_string_lossy().to_string())
-                .collect();
-            names.sort();
-            names
-        })
-        .unwrap_or_default();
+    let list = match incident_names(&state.config.state_dir) {
+        Ok(list) => list,
+        Err(e) => {
+            return RpcResponse {
+                id: req_id,
+                ok: false,
+                message: format!("the incidents could not be listed :: {e}"),
+                deferred: None,
+            };
+        }
+    };
     RpcResponse {
         id: req_id,
         ok: true,

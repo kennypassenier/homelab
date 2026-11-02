@@ -818,7 +818,7 @@ pub const KEYS: &[KeyInfo] = &[
         "journal_max_bytes",
         "Thresholds and limits",
         "Journal max size",
-        "journal.jsonl is cut back to half of this many bytes once it grows past it; the last line of any still-running operation is kept, so the interrupted-operation report reads the same after the cut.",
+        "the journal (a table in homelab-host.db) is cut back to half of this many bytes once it grows past it; the last line of any still-running operation is kept, so the interrupted-operation report reads the same after the cut.",
         "4194304 (4 MiB)",
         Kind::Int {
             min: 65_536,

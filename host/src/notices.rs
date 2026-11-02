@@ -1,4 +1,4 @@
-//! Notices for the dashboard: where they are kept, publishing and recording one, and the audit file helpers.
+//! Notices for the dashboard: publishing and recording one (in the host database), and the audit file helpers.
 
 use crate::*;
 
@@ -17,11 +17,6 @@ pub(crate) struct NoticeFacts {
     pub(crate) by: Option<String>,
     /// The nightly check's findings (empty for everything else).
     pub(crate) findings: Vec<homelab_core::ops::fleetcheck::Finding>,
-}
-
-/// Where the host keeps its notices for the dashboard (0600, one line each).
-pub(crate) fn notices_path(state_dir: &str) -> String {
-    format!("{}/notices.jsonl", state_dir)
 }
 
 /// The next notice sequence number (grows across restarts).
@@ -139,12 +134,14 @@ fn notify_route(state: &AppState) -> Option<String> {
 }
 
 /// Write an undelivered notice, collapsing it into the one already open for
-/// the same destination (count and last-seen move, no second line), so kyu
-/// being down cannot grow the file by one notice per push.
+/// the same destination (count and last-seen move, no second row), so kyu
+/// being down cannot grow the table by one notice per push.
 fn record_undelivered(state: &AppState, lost: homelab_core::notify::HostNotice, why: &str) {
-    let path = notices_path(&state.config.state_dir);
-    let text = std::fs::read_to_string(&path).unwrap_or_default();
-    let all = homelab_core::notify::parse_notices(&text);
+    let dir = &state.config.state_dir;
+    let all = match hostdb::for_dir(dir).and_then(|db| hostdb::notices::all(&db)) {
+        Ok(all) => all,
+        Err(e) => return tracing::warn!("notices: could not read the open ones :: {e}"),
+    };
     let route = lost.label.strip_prefix("notification:").unwrap_or("");
     let Some(prev) = all
         .iter()
@@ -156,54 +153,28 @@ fn record_undelivered(state: &AppState, lost: homelab_core::notify::HostNotice, 
     };
     let latest = lost.what.split('"').nth(1).unwrap_or("").to_string();
     let folded = homelab_core::notify_kyu::fold_undelivered(prev, lost, why, &latest);
-    let prev_seq = prev.seq;
-    let mut kept: String = all
-        .iter()
-        .filter(|n| n.seq != prev_seq)
-        .filter_map(|n| serde_json::to_string(n).ok())
-        .map(|l| l + "\n")
-        .collect();
-    match serde_json::to_string(&folded) {
-        Ok(l) => kept.push_str(&(l + "\n")),
-        Err(e) => return tracing::warn!("notices.jsonl :: {}", e),
-    }
-    let tmp = format!("{}.tmp", path);
-    if let Err(e) = std::fs::write(&tmp, kept).and_then(|_| std::fs::rename(&tmp, &path)) {
-        tracing::warn!("notices.jsonl :: {}", e);
+    let swapped =
+        hostdb::for_dir(dir).and_then(|db| hostdb::notices::replace(&db, prev.seq, &folded));
+    if let Err(e) = swapped {
+        tracing::warn!("notices: could not fold the undelivered notice :: {e}");
     }
 }
 
-/// Append one notice (0600) and prune the file by the history's limits.
-/// Best effort, like the history: a notice must never fail its operation.
+/// Add one notice and cut the table by the history's limits. Best effort,
+/// like the history: a notice must never fail its operation, but a loss is
+/// logged.
 pub(crate) fn record_notice(state: &AppState, n: &homelab_core::notify::HostNotice) {
-    let path = notices_path(&state.config.state_dir);
-    let line = match serde_json::to_string(n) {
-        Ok(l) => l + "\n",
-        Err(e) => {
-            tracing::warn!("notices.jsonl :: {}", e);
-            return;
-        }
-    };
-    if let Err(e) = append_audit(&path, &line) {
-        tracing::warn!("notices.jsonl :: {}", e);
-        return;
-    }
-    let big = std::fs::metadata(&path)
-        .map(|m| m.len() as usize > state.config.history_max_bytes)
-        .unwrap_or(false);
-    if big
-        && let Ok(text) = std::fs::read_to_string(&path)
-        && let Some(kept) = homelab_core::notify::prune_notices(
-            &text,
+    let written = hostdb::for_dir(&state.config.state_dir).and_then(|db| {
+        hostdb::notices::append(
+            &db,
+            n,
             unix_now(),
             state.config.history_max_age_s,
-            state.config.history_max_bytes / 2,
+            state.config.history_max_bytes,
         )
-    {
-        let tmp = format!("{}.tmp", path);
-        if std::fs::write(&tmp, kept).is_ok() {
-            let _ = std::fs::rename(&tmp, &path);
-        }
+    });
+    if let Err(e) = written {
+        tracing::warn!("notices: could not record a notice :: {e}");
     }
 }
 

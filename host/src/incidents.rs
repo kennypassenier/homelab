@@ -15,9 +15,16 @@ pub(crate) fn staged_binaries_dir(state_dir: &str, stack: &str) -> String {
     format!("{}/staged/{}", state_dir, stack)
 }
 
+/// Every incident bundle name, sorted: the rows of the host database and
+/// the bundle directories (host-db-1).
+pub(crate) fn incident_names(state_dir: &str) -> Result<Vec<String>, String> {
+    hostdb::for_dir(state_dir).and_then(|db| hostdb::incidents::names(&db))
+}
+
 /// fix-131 (expert panel, orchestrator-logs-only-on-pve, 2026-09-27):
 /// remove the bundles older than `BUNDLE_MAX_AGE_DAYS` and those beyond the
-/// newest `BUNDLE_MAX_COUNT`; returns how many went. Nothing pruned them.
+/// newest `BUNDLE_MAX_COUNT` (row and directory); returns how many went.
+/// Nothing pruned them.
 pub(crate) fn prune_incidents(
     state_dir: &str,
     now: u64,
@@ -25,17 +32,23 @@ pub(crate) fn prune_incidents(
     max_count: usize,
 ) -> usize {
     use homelab_core::incidents::bundles_to_prune;
-    let dir = format!("{}/incidents", state_dir);
-    let names: Vec<String> = std::fs::read_dir(&dir)
-        .into_iter()
-        .flatten()
-        .flatten()
-        .filter(|e| e.path().is_dir())
-        .map(|e| e.file_name().to_string_lossy().into_owned())
-        .collect();
+    let db = match hostdb::for_dir(state_dir) {
+        Ok(db) => db,
+        Err(e) => {
+            tracing::warn!("incidents: could not prune :: {e}");
+            return 0;
+        }
+    };
+    let names = match hostdb::incidents::names(&db) {
+        Ok(n) => n,
+        Err(e) => {
+            tracing::warn!("incidents: could not list the bundles to prune :: {e}");
+            return 0;
+        }
+    };
     let mut removed = 0;
     for name in bundles_to_prune(&names, now, max_age_days, max_count) {
-        match std::fs::remove_dir_all(format!("{}/{}", dir, name)) {
+        match hostdb::incidents::remove(&db, &name) {
             Ok(()) => removed += 1,
             Err(e) => tracing::warn!("incidents: could not remove {} :: {}", name, e),
         }
@@ -91,44 +104,19 @@ pub(crate) fn cleanup_push_staging(state_dir: &str, now: u64) -> usize {
     removed
 }
 
-/// fix-131: cut journal.jsonl back when it has outgrown its limit
-/// (`incidents::compact_journal`), written whole through a temp file.
-/// Called only while nothing writes the journal: at start, and under the
-/// operation lock.
-///
-/// gap-26: the caller passes `config.journal_max_bytes` (see REGISTER.md).
+/// fix-131: cut the journal table back when it has outgrown its limit
+/// (`incidents::journal_keep`), in one transaction, so it is safe at any
+/// time (it used to need a moment when nothing wrote the file). The caller
+/// passes `config.journal_max_bytes` (gap-26, see REGISTER.md).
 pub(crate) fn compact_journal_file(state_dir: &str, max_bytes: u64) {
-    let path = format!("{}/journal.jsonl", state_dir);
-    let Ok(content) = std::fs::read_to_string(&path) else {
-        return;
-    };
-    let Some(cut) = homelab_core::incidents::compact_journal(&content, max_bytes as usize) else {
-        return;
-    };
-    let tmp = format!("{}.compact.tmp", path);
-    let written = (|| -> std::io::Result<()> {
-        use std::io::Write as _;
-        use std::os::unix::fs::OpenOptionsExt as _;
-        let _ = std::fs::remove_file(&tmp);
-        let mut f = std::fs::OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .mode(0o600)
-            .open(&tmp)?;
-        f.write_all(cut.as_bytes())?;
-        f.sync_all()?;
-        std::fs::rename(&tmp, &path)
-    })();
-    match written {
-        Ok(()) => info!(
-            "journal.jsonl: cut from {} to {} bytes, interrupted operations kept",
-            content.len(),
-            cut.len()
+    let cut = hostdb::for_dir(state_dir).and_then(|db| hostdb::journal::compact(&db, max_bytes));
+    match cut {
+        Ok(Some((before, after))) => info!(
+            "journal: cut from {} to {} bytes, interrupted operations kept",
+            before, after
         ),
-        Err(e) => {
-            let _ = std::fs::remove_file(&tmp);
-            tracing::warn!("journal.jsonl: could not compact :: {}", e);
-        }
+        Ok(None) => {}
+        Err(e) => tracing::warn!("journal: could not compact :: {}", e),
     }
 }
 
@@ -151,7 +139,8 @@ pub(crate) fn incident_text(state_dir: &str, name: &str) -> Result<String, Strin
         ));
     }
     let dir = format!("{}/incidents/{}", state_dir, name);
-    if !std::path::Path::new(&dir).is_dir() {
+    let stored = hostdb::for_dir(state_dir).and_then(|db| hostdb::incidents::get(&db, name))?;
+    if stored.is_none() && !std::path::Path::new(&dir).is_dir() {
         return Err(format!(
             "no bundle named {} :: `homelab incidents` lists the ones kept (bundles older than {} \
              days are removed)",
@@ -160,9 +149,11 @@ pub(crate) fn incident_text(state_dir: &str, name: &str) -> Result<String, Strin
         ));
     }
     let read = |f: &str| std::fs::read_to_string(format!("{}/{}", dir, f)).unwrap_or_default();
+    let (report_text, events_text) = stored.unwrap_or_default();
     let mask = homelab_core::executor::mask_secrets;
     let mut out = format!("incident {}\n", name);
-    if let Ok(report) = serde_json::from_str::<serde_json::Value>(&read("report.json")) {
+    if let Ok(report) = serde_json::from_str::<serde_json::Value>(&report_text.unwrap_or_default())
+    {
         let s = |v: &serde_json::Value| v.as_str().unwrap_or("").to_string();
         out.push_str(&format!("  operation: {}\n", s(&report["op"])));
         let err = &report["error"];
@@ -177,7 +168,8 @@ pub(crate) fn incident_text(state_dir: &str, name: &str) -> Result<String, Strin
         "  versions: {}\n",
         versions.split_whitespace().collect::<Vec<_>>().join(" ")
     ));
-    let lines: Vec<String> = read("events.jsonl")
+    let lines: Vec<String> = events_text
+        .unwrap_or_default()
         .lines()
         .filter_map(|l| serde_json::from_str::<PipelineEvent>(l).ok())
         .filter_map(|e| match e {
@@ -195,8 +187,11 @@ pub(crate) fn incident_text(state_dir: &str, name: &str) -> Result<String, Strin
         out.push_str(&format!("  {}\n", l));
     }
     out.push_str(&format!(
-        "the whole bundle, root only on the host: {} (commands.sh replays what ran)\n",
-        dir
+        "the rest of the bundle, root only on the host: {} (commands.sh replays what ran); the \
+         report and the transcript are in {}/{}\n",
+        dir,
+        state_dir,
+        hostdb::DB_FILE
     ));
     Ok(out)
 }

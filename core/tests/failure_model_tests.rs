@@ -122,8 +122,10 @@ async fn ar14_failed_deploy_writes_replayable_bundle() {
     .expect("bundle written");
 
     // The bundle carries report, events, versions and a replay script.
-    assert!(exec.file(&format!("{}/report.json", dir)).is_some());
-    assert!(exec.file(&format!("{}/events.jsonl", dir)).is_some());
+    // (report and events go to the host's record store, host-db-1.)
+    let name = dir.rsplit('/').next().unwrap();
+    let (report_json, events_jsonl) = exec.mem_records().incident(name).expect("stored");
+    assert!(report_json.contains("\"ok\": false") && !events_jsonl.is_empty());
     assert!(exec.file(&format!("{}/versions.txt", dir)).is_some());
     let script = exec.file(&format!("{}/commands.sh", dir)).expect("script");
     assert!(script.starts_with("#!/bin/sh"));
@@ -140,7 +142,7 @@ async fn ar14_failed_deploy_writes_replayable_bundle() {
 async fn fix_125_an_incident_bundle_is_readable_by_root_only() {
     let exec = MockExecutor::new();
     exec.seed_file("/var/lib/homelab/state.json", "{}");
-    exec.seed_file("/var/lib/homelab/journal.jsonl", "{}\n");
+    exec.mem_records().seed_journal("{}");
     let report = homelab_core::runner::OperationReport {
         op: "deploy-x".into(),
         ok: false,
@@ -152,9 +154,8 @@ async fn fix_125_an_incident_bundle_is_readable_by_root_only() {
     let dir = incidents::write_bundle(&exec, "/var/lib/homelab", 1, &report, &[], "host=x\n")
         .await
         .expect("bundle written");
+    assert!(exec.mem_records().incident("1-deploy-x").is_some());
     for f in [
-        "report.json",
-        "events.jsonl",
         "state-at-failure.json",
         "journal-tail.jsonl",
         "versions.txt",

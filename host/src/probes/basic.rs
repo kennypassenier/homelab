@@ -146,14 +146,13 @@ async fn mirror_behind(
 
 /// Operations the previous run left half done.
 fn interrupted_ops(state_dir: &str) -> Vec<String> {
-    std::fs::read_to_string(format!("{state_dir}/journal.jsonl"))
-        .map(|j| {
-            homelab_core::incidents::interrupted_ops(&j)
-                .into_iter()
-                .map(|(op, _)| op)
-                .collect()
+    crate::hostdb::for_dir(state_dir)
+        .and_then(|db| crate::hostdb::journal::interrupted(&db))
+        .map(|ops| ops.into_iter().map(|(op, _)| op).collect())
+        .unwrap_or_else(|e| {
+            tracing::warn!("doctor: the journal could not be read :: {e}");
+            Vec::new()
         })
-        .unwrap_or_default()
 }
 
 /// The daemon's own units, held against the copies this binary carries.

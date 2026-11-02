@@ -55,16 +55,10 @@ pub(crate) async fn gather_today(
     live.live_host_config = live_host_config_table(
         &std::fs::read_to_string(&state.config.config_path).unwrap_or_default(),
     );
-    let incidents: Vec<String> = std::fs::read_dir(format!("{}/incidents", state.config.state_dir))
-        .map(|rd| {
-            let mut names: Vec<String> = rd
-                .flatten()
-                .map(|e| e.file_name().to_string_lossy().to_string())
-                .collect();
-            names.sort();
-            names
-        })
-        .unwrap_or_default();
+    let incidents: Vec<String> = incident_names(&state.config.state_dir).unwrap_or_else(|e| {
+        tracing::warn!("today: the incidents could not be listed :: {e}");
+        Vec::new()
+    });
     match homelab_core::state::StateStore::new(exec, &state.config.state_dir)
         .load()
         .await
@@ -86,9 +80,12 @@ pub(crate) async fn gather_today(
                 homelab_core::ops::today::assemble(&checks, &findings, &incidents, &snapshot, now);
             // fix-step-plan-nested: step-counter faults, journalled by the
             // runner instead of failing the op.
-            let journal =
-                std::fs::read_to_string(format!("{}/journal.jsonl", state.config.state_dir))
-                    .unwrap_or_default();
+            let journal = hostdb::for_dir(&state.config.state_dir)
+                .and_then(|db| hostdb::journal::text(&db))
+                .unwrap_or_else(|e| {
+                    tracing::warn!("today: the journal could not be read :: {e}");
+                    String::new()
+                });
             homelab_core::ops::today::add_plan_violations(
                 &mut t,
                 &homelab_core::ops::today::plan_violations(&journal, now),

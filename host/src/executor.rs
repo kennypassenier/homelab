@@ -280,6 +280,11 @@ impl Executor for RealExecutor {
     async fn sleep_ms(&self, ms: u64) {
         tokio::time::sleep(Duration::from_millis(ms)).await;
     }
+
+    /// host-db-1: the database in the state directory.
+    fn records(&self) -> &dyn homelab_core::records::RecordStore {
+        &crate::hostdb::HostRecords
+    }
 }
 
 // ── Sink + journal adapters ─────────────────────────────────────────────────

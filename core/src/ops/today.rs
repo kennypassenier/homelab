@@ -107,7 +107,7 @@ pub fn open_incidents(names: &[String], state: &HostState, now: u64) -> Vec<Stri
 }
 
 /// fix-step-plan-nested: the plan violations the operation journal
-/// (`journal.jsonl`, one JSON object per line) recorded within
+/// (the `journal` table, rendered as one JSON object per line) recorded within
 /// [`PLAN_VIOLATION_WINDOW_S`] of `now`, oldest first. Lines that do not
 /// parse are skipped: the journal is read, never judged, here.
 pub fn plan_violations(journal: &str, now: u64) -> Vec<String> {

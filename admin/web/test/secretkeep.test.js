@@ -26,7 +26,7 @@ const unsavedSource = readFileSync(
   "utf8",
 );
 const settingsSource = readFileSync(
-  new URL("../js/pages/settings.js", import.meta.url),
+  new URL("../js/pages/settings/header.js", import.meta.url),
   "utf8",
 );
 

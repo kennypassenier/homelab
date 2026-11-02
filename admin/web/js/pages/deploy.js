@@ -72,8 +72,13 @@ export function mount(root, _ctx) {
   /** @type {Set<() => void>} */
   const subs = new Set();
   const count = () => (planRead ? planRead.pending : deployCount(drift));
+  /** @type {string | null} */
+  let failed = null;
   const paint = () => {
-    note.textContent = compareWords(count());
+    note.textContent =
+      failed != null && count() == null
+        ? `The comparison with the files failed: ${failed}`
+        : compareWords(count());
     subs.forEach((f) => f());
   };
   const compare = {
@@ -97,10 +102,13 @@ export function mount(root, _ctx) {
       abort.signal,
     );
     if (r.ok) drift = r.body;
+    // A failed read must not leave "Comparing…" standing for ever.
+    failed = r.ok ? null : r.error.why;
     paint();
   };
   button.addEventListener("click", () => {
     button.disabled = true;
+    failed = null;
     note.textContent = compareWords(null);
     void readDrift(true)
       .catch(() => {})

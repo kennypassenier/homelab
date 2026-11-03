@@ -1151,7 +1151,6 @@ export function rowMenu(spec) {
     had?.setAttribute("data-kp-arrive", "none");
     anchor.replaceWith(wrap);
     wrap.append(anchor, menu);
-    if (focused) anchor.focus({ preventScroll: true });
     wrap.addEventListener(MENU_SELECT_EVENT, (e) => {
       const value = /** @type {CustomEvent<{value: string}>} */ (e).detail
         .value;
@@ -1167,6 +1166,10 @@ export function rowMenu(spec) {
         else dialogControl(part, info.value);
       },
     });
+    // After the wiring: giving the button its focus back fires a focusin that
+    // a page-level menu listener would answer by wiring this menu without
+    // our `decorate`, and its entries would carry no Live view control.
+    if (focused) anchor.focus({ preventScroll: true });
   } else wrap = /** @type {HTMLElement} */ (had);
   wrap.querySelector("[role=menu]")?.setAttribute("aria-label", spec.label);
   rowItems.set(wrap, new Map(spec.items.map((it) => [it.name, it])));

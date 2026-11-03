@@ -1274,7 +1274,16 @@ eachSlice(
   "invariants: every data-loading page shows a loading indicator before its data (or error) arrives",
   DRIVABLE_PATHS.filter(
     (p) =>
-      !["apply", "shell", "log", "passkeys", "system", "console"].includes(p),
+      ![
+        "apply",
+        "shell",
+        "log",
+        "passkeys",
+        "system",
+        "console",
+        // The bundle route is a form that reads no data: nothing to wait for.
+        "stacks/new/bundle",
+      ].includes(p),
   ),
   10,
   async (part) => {
@@ -7083,6 +7092,23 @@ test("invariants: redesign-config Firewall pins a square with its story and trac
   }
 });
 
+/**
+ * Open the host.toml group that holds a key, the way a person does: with
+ * the group's own toggle (settings-group); a group already open stays.
+ * @param {import("playwright").Page} page
+ * @param {string} key
+ */
+async function openGroupOf(page, key) {
+  const row = page.locator(`.kp-formrow[data-key="${key}"]`);
+  await row.waitFor({ state: "attached", timeout: 10000 });
+  if (await row.isVisible()) return;
+  const slug = await row.evaluate((el) => el.closest("details")?.dataset.group);
+  await page
+    .locator(`[data-drive="settings-group"][data-drive-row="${slug}"]`)
+    .click();
+  await row.waitFor({ timeout: 10000 });
+}
+
 test("invariants: redesign-config Settings edits a key where it stands, counts it in the Save bar, keeps it across a look at another page, and Discard can be undone", async () => {
   const browser = await launch();
   try {
@@ -7132,9 +7158,13 @@ test("invariants: redesign-config Settings edits a key where it stands, counts i
       .first()
       .waitFor({ timeout: 10000 });
     await page.goBack();
-    await page
-      .locator('.kp-formrow[data-key="backup_concurrency"][data-kp-changed]')
-      .waitFor({ timeout: 10000 });
+    // Groups start folded on every visit: open the group again first.
+    const changed = page.locator(
+      '.kp-formrow[data-key="backup_concurrency"][data-kp-changed]',
+    );
+    await changed.waitFor({ state: "attached", timeout: 10000 });
+    await openGroupOf(page, "backup_concurrency");
+    await changed.waitFor({ timeout: 10000 });
     await page.locator(".kp-unsaved__discard").click();
     assert.ok(await page.locator(".kp-unsaved__save").isDisabled());
     await page.locator(".kp-toast button", { hasText: "Undo" }).click();
@@ -7142,6 +7172,7 @@ test("invariants: redesign-config Settings edits a key where it stands, counts i
       .locator('.kp-formrow[data-key="backup_concurrency"][data-kp-changed]')
       .waitFor({ timeout: 5000 });
     // Keys the dashboard must never change offer the ssh way instead.
+    await openGroupOf(page, "listen");
     await page
       .locator('[data-drive="settings-how-to"][data-drive-row="listen"]')
       .click();
@@ -7333,9 +7364,14 @@ test("invariants: redesign-config pages show their skeleton from the first frame
         }
         release();
         await page.unroute("**/data/**");
-        await page.locator(`#page ${filled[path]}`).first().waitFor({
-          timeout: 10000,
-        });
+        // Settings groups start folded: its rows are attached, not shown.
+        await page
+          .locator(`#page ${filled[path]}`)
+          .first()
+          .waitFor({
+            state: path === "settings" ? "attached" : "visible",
+            timeout: 10000,
+          });
         const over = await page.evaluate(
           () => document.documentElement.scrollWidth - innerWidth,
         );
@@ -7614,7 +7650,7 @@ test("invariants: redesign-config review one failed read is one alert with one T
     await page
       .locator(".kp-formrow[data-key]")
       .first()
-      .waitFor({ timeout: 10000 });
+      .waitFor({ state: "attached", timeout: 10000 });
     await alert.waitFor({ state: "detached", timeout: 5000 });
 
     // Fetch now while the remote is slow: it says so, then comes back.
@@ -7749,14 +7785,15 @@ test("invariants: stack hub — the header keeps Back up · Update · Deploy (pr
     await page
       .locator(".sh-head .nx-menu")
       .waitFor({ state: "hidden", timeout: 3000 });
-    // `b` opens the Back up dialog, as the button does.
+    // `b` backs up at once, as the button does (ux-stackhub-4: Back up
+    // loses nothing, so no dialog); the toast says it started or finished.
     await page.keyboard.press("b");
-    const dialog = page.locator("dialog#action-dialog[open]");
-    await dialog.waitFor({ timeout: 5000 });
-    assert.match(
-      (await dialog.locator(".kp-dialog__title").textContent()) ?? "",
-      /Back up/,
-    );
+    await page
+      .locator(".kp-toast")
+      .filter({ hasText: /Backing up gateway|gateway backed up/ })
+      .first()
+      .waitFor({ timeout: 5000 });
+    assert.equal(await page.locator("dialog#action-dialog[open]").count(), 0);
   } finally {
     await browser.close();
   }
@@ -7816,7 +7853,9 @@ test("invariants: stack hub — seven tabs; Overview has five KPI tiles, Is it h
       "Errors in logs · 1 h",
       "Matches its files",
     ]);
-    assert.equal(r.links, 4, "every tile but the drift one links into its tab");
+    // The drift tile holds Compare now (redesign-integrate-8): it links
+    // into Settings like the others.
+    assert.equal(r.links, 5, "every tile links into its tab");
     for (const k of [
       "online",
       "apps",
@@ -8066,7 +8105,9 @@ eachSlice(
                   const r = b.getBoundingClientRect();
                   const c = card.getBoundingClientRect();
                   if (r.right > c.right + 1 || r.left < c.left - 1)
-                    out.push(`"${b.textContent?.trim()}" past its card`);
+                    out.push(
+                      `"${b.textContent?.trim() || `${b.className} ${b.getAttribute("aria-label") ?? ""} in ${card.className}`}" past its card (${Math.round(r.left)}..${Math.round(r.right)} of ${Math.round(c.left)}..${Math.round(c.right)})`,
+                    );
                 }
                 if (w === 390) {
                   const lefts = new Set(
@@ -8120,10 +8161,12 @@ test("invariants: stack hub review — Update and the u key open the stack's Upd
       viewport: { width: 1894, height: 1000 },
     });
     const page = await freshPage(context);
+    // Update is held back (No newer version) on a stack with no newer image
+    // (ux-stackhub-5): admin is one of the demo fleet's stale ones.
     for (const how of ["button", "key"]) {
-      await page.goto(`${BASE}/stacks/gateway`);
+      await page.goto(`${BASE}/stacks/admin`);
       const btn = page.locator(
-        '[data-drive="stack-head"][data-drive-row="gateway/update"]',
+        '[data-drive="stack-head"][data-drive-row="admin/update"]',
       );
       await btn.waitFor({ timeout: 10000 });
       if (how === "button") await btn.click();
@@ -8134,12 +8177,12 @@ test("invariants: stack hub review — Update and the u key open the stack's Upd
           .click({ position: { x: 5, y: 500 }, timeout: 5000 });
         await page.keyboard.press("u");
       }
-      await page.waitForURL("**/update?stack=gateway**", { timeout: 5000 });
+      await page.waitForURL("**/update?stack=admin**", { timeout: 5000 });
       await page.locator("#page ol.uf-steps").waitFor({ timeout: 10000 });
       assert.match(
         await page.locator("#page h1").innerText(),
-        /Update gateway/,
-        `${how}: not gateway's Update flow`,
+        /Update admin/,
+        `${how}: not admin's Update flow`,
       );
     }
   } finally {

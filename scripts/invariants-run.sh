@@ -280,6 +280,25 @@ cd admin/web
 # for Firefox build 1543 while this machine holds 1538, so every whole-screen case
 # failed at launch inside a release run. Unless a Firefox is named, use the newest
 # one Playwright has downloaded; the harness passes it as the executable.
+# firefox-pin-1 (2026-11-03): the same mismatch struck a second time - the
+# installed Playwright (1.64.1) wanted Firefox build 1555 while only 1538 was
+# on disk, and the old Firefox failed every `page.route` with a protocol
+# error that looked like a product bug (42 cases). The Firefox build
+# Playwright itself names is used when it is on disk; when it is not, the run
+# stops here with the one command that fixes it instead of picking an older
+# build.
+if [ -z "${INVARIANTS_FIREFOX:-}" ]; then
+  wanted="$(node -e "console.log(require('playwright').firefox.executablePath())" 2>/dev/null || true)"
+  if [ -n "$wanted" ]; then
+    if [ -x "$wanted" ]; then
+      export INVARIANTS_FIREFOX="$wanted"
+    else
+      echo "invariants: Playwright wants Firefox at $wanted, which is not installed." >&2
+      echo "invariants: run \`npx playwright install firefox\` in admin/web, or set INVARIANTS_FIREFOX to a matching build." >&2
+      exit 2
+    fi
+  fi
+fi
 if [ -z "${INVARIANTS_FIREFOX:-}" ]; then
   newest="$(ls -d "$HOME"/.cache/ms-playwright/firefox-*/firefox/firefox 2>/dev/null | sort -V | tail -1 || true)"
   [ -n "$newest" ] && export INVARIANTS_FIREFOX="$newest"

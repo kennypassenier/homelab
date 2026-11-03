@@ -20,6 +20,10 @@ import { textOf } from "./rowtext.js";
 
 /** @param {import("./ctx.js").Ctx} ctx */
 async function attachBar(ctx) {
+  // Marked only now: a bar attached while the groups are not drawn yet
+  // finds nothing to restore, and its first paint (no changes) empties the
+  // tab's kept changes before the groups can take them back.
+  ctx.barSlot.setAttribute("data-kp-unsaved", "");
   const off = attachAll(ctx.hostBar);
   await off.ready;
   ctx.detachBar = off;

@@ -106,7 +106,12 @@ export async function send(method, url, body, what = url) {
   } catch {
     return { ok: false, status: 0, error: routeError(what, 0, null) };
   }
-  if (r.redirected && new URL(r.url).pathname === "/login") {
+  // chassis-rs 4.2.0: a script call without a session gets 401, a page load
+  // keeps the redirect to /login.
+  if (
+    r.status === 401 ||
+    (r.redirected && new URL(r.url).pathname === "/login")
+  ) {
     location.assign("/login");
     return { ok: false, status: 401, error: routeError(what, 401, null) };
   }

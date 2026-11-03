@@ -8,7 +8,7 @@ use crate::*;
 use homelab_core::ops::stackcommit::{StackCommitConfig, StackCommitSettings, StackFileChange};
 use std::path::{Path, PathBuf};
 
-fn git(dir: &Path, args: &[&str]) -> String {
+pub(super) fn git(dir: &Path, args: &[&str]) -> String {
     let out = std::process::Command::new("git")
         .arg("-C")
         .arg(dir)
@@ -32,14 +32,14 @@ fn git(dir: &Path, args: &[&str]) -> String {
 
 /// A bare "GitHub" seeded with one stack file (and, when asked, a symlink
 /// pointing out of the tree), and the host's settings for it.
-struct World {
-    root: PathBuf,
-    bare: PathBuf,
-    cfg: StackCommitConfig,
+pub(super) struct World {
+    pub(super) root: PathBuf,
+    pub(super) bare: PathBuf,
+    pub(super) cfg: StackCommitConfig,
 }
 
 impl World {
-    fn new(tag: &str, symlink_to: Option<&Path>) -> World {
+    pub(super) fn new(tag: &str, symlink_to: Option<&Path>) -> World {
         let root =
             std::env::temp_dir().join(format!("homelab-keymove-{}-{tag}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
@@ -86,11 +86,11 @@ impl World {
         World { root, bare, cfg }
     }
 
-    fn remote_head(&self) -> String {
+    pub(super) fn remote_head(&self) -> String {
         git(&self.bare, &["rev-parse", "main"])
     }
 
-    fn request(&self, files: Vec<(&str, Option<&str>)>, push: bool) -> Request {
+    pub(super) fn request(&self, files: Vec<(&str, Option<&str>)>, push: bool) -> Request {
         Request {
             message: "edit media [key-move]\n".into(),
             base: self.remote_head(),
@@ -280,7 +280,7 @@ pub(crate) async fn key_move_the_rpc_refuses_when_off_and_guards_paths_with_an_a
     );
 }
 
-const TOKEN: &str = "token = \"0123456789abcdef0123\"\n";
+pub(super) const TOKEN: &str = "token = \"0123456789abcdef0123\"\n";
 
 fn commit_rpc(path: &str) -> RpcRequest {
     RpcRequest {

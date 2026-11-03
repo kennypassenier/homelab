@@ -20,7 +20,7 @@ pub(crate) struct NoticeFacts {
 }
 
 /// The next notice sequence number (grows across restarts).
-fn next_notice_seq(state: &AppState) -> u64 {
+pub(crate) fn next_notice_seq(state: &AppState) -> u64 {
     let now_ms = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_millis() as u64)

@@ -8121,9 +8121,9 @@ test("invariants: stack hub review — Update and the u key open the stack's Upd
     });
     const page = await freshPage(context);
     for (const how of ["button", "key"]) {
-      await page.goto(`${BASE}/stacks/gateway`);
+      await page.goto(`${BASE}/stacks/kp-soft`);
       const btn = page.locator(
-        '[data-drive="stack-head"][data-drive-row="gateway/update"]',
+        '[data-drive="stack-head"][data-drive-row="kp-soft/update"]',
       );
       await btn.waitFor({ timeout: 10000 });
       if (how === "button") await btn.click();
@@ -8134,14 +8134,42 @@ test("invariants: stack hub review — Update and the u key open the stack's Upd
           .click({ position: { x: 5, y: 500 }, timeout: 5000 });
         await page.keyboard.press("u");
       }
-      await page.waitForURL("**/update?stack=gateway**", { timeout: 5000 });
+      await page.waitForURL("**/update?stack=kp-soft**", { timeout: 5000 });
       await page.locator("#page ol.uf-steps").waitFor({ timeout: 10000 });
       assert.match(
         await page.locator("#page h1").innerText(),
-        /Update gateway/,
-        `${how}: not gateway's Update flow`,
+        /Update kp-soft/,
+        `${how}: not kp-soft's Update flow`,
       );
     }
+  } finally {
+    await browser.close();
+  }
+});
+
+// ux-stackhub-5 (docs/INVARIANTS.md row 176): the demo's gateway has no
+// newer image, so its hub Update is held back with the reason in words.
+test("invariants: stack hub review — Update is disabled with 'No newer version' on a stack with no newer image", async () => {
+  const browser = await launch();
+  try {
+    const context = await browser.newContext({
+      viewport: { width: 1894, height: 1000 },
+    });
+    const page = await freshPage(context);
+    await page.goto(`${BASE}/stacks/gateway`);
+    const btn = page.locator(
+      '[data-drive="stack-head"][data-drive-row="gateway/update"]',
+    );
+    await btn.waitFor({ timeout: 10000 });
+    await page.waitForFunction(
+      () =>
+        document
+          .querySelector('[data-drive-row="gateway/update"]')
+          ?.getAttribute("data-kp-disabled-reason") === "No newer version",
+      null,
+      { timeout: 10000 },
+    );
+    assert.equal(await btn.isDisabled(), true, "Update is not disabled");
   } finally {
     await browser.close();
   }
@@ -8876,7 +8904,11 @@ const AUDIT_DIALOGS = [
  * @param {import("playwright").Page} page
  */
 async function openRunningDrawer(page) {
-  await page.locator("dialog[open] #act-run").click();
+  // ux-stackhub-4: a stack's Back up runs at once (no confirm dialog); an
+  // older path that still shows the confirm is pressed on.
+  const confirm = page.locator("dialog[open] #act-run");
+  if ((await confirm.count()) > 0) await confirm.click();
+  await page.locator("#running-pill").waitFor({ timeout: 5000 });
   await page.waitForTimeout(300);
   await page.evaluate(() =>
     document
@@ -9099,8 +9131,14 @@ async function genWalk(entry) {
           continue;
         }
         await btn.first().click();
-        const dlg = page.locator("dialog[open]").last();
-        await dlg.waitFor({ timeout: 5000 }).catch(() => {});
+        // A `then` step owns the wait: a click that opens no dialog (Back up
+        // runs at once) must not spend 5 s here while the job it started ends.
+        if (!d.then)
+          await page
+            .locator("dialog[open]")
+            .last()
+            .waitFor({ timeout: 5000 })
+            .catch(() => {});
         if (d.then) await d.then(page);
         await page.waitForTimeout(700);
         await markDialog();
@@ -9265,7 +9303,6 @@ test("invariants: redesign-final-c2: the running pill's drawer is named after it
       .filter({ hasText: /^Back up/ })
       .first()
       .click();
-    await page.locator("dialog[open]").last().waitFor();
     await openRunningDrawer(page);
     const d = page.locator("dialog.job-drawer[open]");
     await d.waitFor({ timeout: 5000 });
@@ -10151,9 +10188,13 @@ test("invariants: redesign-final-m2: Back up says in plain words what will happe
     });
     const page = await freshPage(context);
     await page.goto(`${BASE}/stacks/kp-soft/overview`);
-    await page
-      .locator('[data-drive="stack-head"][data-drive-row="kp-soft/backup"]')
-      .click();
+    // ux-stackhub-4: the hub's Back up runs at once, so a click opens no
+    // dialog; the confirm is the action's own form, opened as Live view does.
+    await page.waitForTimeout(800);
+    await page.evaluate(async () => {
+      const m = await import("/js/actiondialog.js");
+      void m.openAction("kp-soft", "backup", {});
+    });
     const d = page.locator("dialog#action-dialog[open]");
     await d.waitFor({ timeout: 5000 });
     await page.waitForTimeout(1200);

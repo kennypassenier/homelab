@@ -255,8 +255,7 @@ pub fn raw_path_problem(path: &str, texts: &StackTexts) -> Option<String> {
     {
         return Some(format!("{path:?} is not a path inside the stack"));
     }
-    let name = path.rsplit('/').next().unwrap_or(path);
-    if name == ".env" || name.ends_with(".env") || name.starts_with(".env") {
+    if homelab_core::names::is_secret_env_path(path) {
         return Some(format!(
             "{path} holds secrets; secrets are changed through latch, never in the repository"
         ));

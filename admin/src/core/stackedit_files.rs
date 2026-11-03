@@ -51,8 +51,7 @@ fn plain_path(path: &str) -> bool {
 }
 
 fn is_secret(path: &str) -> bool {
-    let name = path.rsplit('/').next().unwrap_or(path);
-    name == ".env" || name.ends_with(".env") || name.starts_with(".env")
+    homelab_core::names::is_secret_env_path(path)
 }
 
 /// A path the editor may create: inside the stack, not already there, not

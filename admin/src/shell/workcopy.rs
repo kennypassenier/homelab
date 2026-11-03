@@ -1163,7 +1163,7 @@ fn shell_quote(s: &str) -> String {
 }
 
 fn is_secret_name(name: &str) -> bool {
-    name == ".env" || name.ends_with(".env") || name.starts_with(".env")
+    homelab_core::names::is_secret_env_name(name)
 }
 
 /// Every text file under `dir` (relative paths), secrets and large or

@@ -55,8 +55,7 @@ pub fn repo_drift_stacks_in_rendered_text(rendered: &str) -> Vec<String> {
 /// the dashboard, fetching `GetApplied`) checks this before ever putting
 /// that content in a diff — never content for a secret, only "changed".
 pub fn is_secret_path(path: &str) -> bool {
-    let name = path.rsplit('/').next().unwrap_or(path);
-    name == ".env" || name.starts_with(".env.")
+    crate::names::is_secret_env_path(path)
 }
 
 /// fix-219: how much of one file's diff a drift finding shows inline, before

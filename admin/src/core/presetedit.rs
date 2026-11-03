@@ -58,8 +58,7 @@ fn valid_file_path(path: &str) -> Result<String, Refusal> {
             "use a plain relative path, e.g. myapp/docker-compose.yml",
         ));
     }
-    let name = path.rsplit('/').next().unwrap_or(path);
-    if name == ".env" || name.ends_with(".env") || name.starts_with(".env") {
+    if homelab_core::names::is_secret_env_path(path) {
         return Err(refusal(
             format!(
                 "{path} would hold secrets; a preset ships no secret, only the shape of the app"

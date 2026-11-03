@@ -37,7 +37,7 @@ pub fn path_problem(path: &str) -> Option<String> {
 /// public, so the host never commits one, whatever the request says. The
 /// same rule the dashboard's editor uses to leave such files out.
 pub fn is_secret_name(name: &str) -> bool {
-    name == ".env" || name.ends_with(".env") || name.starts_with(".env")
+    crate::names::is_secret_env_name(name)
 }
 
 /// Whether `path` lies under one of `roots`: a root ending in `/` is a

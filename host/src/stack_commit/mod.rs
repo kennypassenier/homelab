@@ -14,6 +14,7 @@
 
 mod files;
 mod git;
+pub(crate) mod notice;
 
 use std::collections::BTreeSet;
 use std::sync::{Mutex, PoisonError};
@@ -22,6 +23,7 @@ use homelab_core::ops::stackcommit::guard::staged_outside;
 use homelab_core::ops::stackcommit::{StackCommitConfig, StackCommitDone, StackFileChange};
 
 use git::Git;
+use notice::Unpushed;
 
 #[cfg(test)]
 pub(crate) use files::credentials_ready;
@@ -62,11 +64,31 @@ pub(crate) fn claim(dir: &str) -> Result<Claim, String> {
 
 /// The transaction (module doc). Blocking: run it on a blocking thread.
 /// The error is `why :: what to do`, the host's refusal style.
+#[cfg(test)]
 pub(crate) fn commit(cfg: &StackCommitConfig, req: &Request) -> Result<StackCommitDone, String> {
+    commit_noticing(cfg, req).0
+}
+
+/// [`commit`], plus the unpushed commit when that is why it refused (the
+/// caller records the Inbox notice, see `notice.rs`).
+pub(crate) fn commit_noticing(
+    cfg: &StackCommitConfig,
+    req: &Request,
+) -> (Result<StackCommitDone, String>, Option<Unpushed>) {
+    let mut found = None;
+    let result = transaction(cfg, req, &mut found);
+    (result, found)
+}
+
+fn transaction(
+    cfg: &StackCommitConfig,
+    req: &Request,
+    found: &mut Option<Unpushed>,
+) -> Result<StackCommitDone, String> {
     let _held = claim(&cfg.dir)?;
     files::credentials_ready(cfg)?;
     let git = Git::new(cfg);
-    prepare(&git, cfg, &req.base)?;
+    prepare(&git, cfg, &req.base, found)?;
     let head = match apply(&git, req) {
         Ok(h) => h,
         Err(e) => {
@@ -78,7 +100,12 @@ pub(crate) fn commit(cfg: &StackCommitConfig, req: &Request) -> Result<StackComm
 }
 
 /// Clone when missing, then bring the clone to exactly `base`.
-fn prepare(git: &Git, cfg: &StackCommitConfig, base: &str) -> Result<(), String> {
+fn prepare(
+    git: &Git,
+    cfg: &StackCommitConfig,
+    base: &str,
+    found: &mut Option<Unpushed>,
+) -> Result<(), String> {
     ensure_clone(git, cfg)?;
     let dirty = git.run(&["status", "--porcelain", "--untracked-files=all"])?;
     if !dirty.trim().is_empty() {
@@ -93,11 +120,16 @@ fn prepare(git: &Git, cfg: &StackCommitConfig, base: &str) -> Result<(), String>
     let origin = format!("origin/{}", cfg.branch);
     let ahead = git.run(&["rev-list", "--count", &format!("{origin}..HEAD")])?;
     if ahead.trim() != "0" {
-        return Err(format!(
-            "the host's clone holds {} commit(s) the remote lacks :: look at {} by hand",
-            ahead.trim(),
-            cfg.dir
-        ));
+        let (hash, subject) = latest_local(git)?;
+        let unpushed = Unpushed {
+            hash,
+            subject,
+            dir: cfg.dir.clone(),
+            branch: cfg.branch.clone(),
+        };
+        let refusal = unpushed.refusal(ahead.trim());
+        *found = Some(unpushed);
+        return Err(refusal);
     }
     git.run(&["merge", "--quiet", "--ff-only", &origin])
         .map_err(|e| format!("{e} :: look at {} by hand", cfg.dir))?;
@@ -112,6 +144,13 @@ fn prepare(git: &Git, cfg: &StackCommitConfig, base: &str) -> Result<(), String>
         ));
     }
     Ok(())
+}
+
+/// The clone's HEAD hash and subject (what the unpushed notice names).
+fn latest_local(git: &Git) -> Result<(String, String), String> {
+    let hash = git.rev("HEAD")?;
+    let subject = git.run(&["log", "-1", "--format=%s"])?;
+    Ok((hash, subject.trim().to_string()))
 }
 
 fn ensure_clone(git: &Git, cfg: &StackCommitConfig) -> Result<(), String> {

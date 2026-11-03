@@ -52,9 +52,19 @@ pub(crate) async fn commit_stack_files(
             files,
             push,
         };
-        tokio::task::spawn_blocking(move || crate::stack_commit::commit(&cfg, &request))
-            .await
-            .unwrap_or_else(|e| Err(format!("the commit thread failed: {e} :: report this")))
+        let ran = tokio::task::spawn_blocking(move || {
+            crate::stack_commit::commit_noticing(&cfg, &request)
+        })
+        .await;
+        match ran {
+            Ok((result, unpushed)) => {
+                if let Some(found) = unpushed {
+                    crate::stack_commit::notice::record(state, &found);
+                }
+                result
+            }
+            Err(e) => Err(format!("the commit thread failed: {e} :: report this")),
+        }
     } else {
         Err(format!("{} :: nothing was written", problems.join("; ")))
     };

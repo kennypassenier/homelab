@@ -923,7 +923,7 @@ public repository over https. The host refuses a path outside `stacks/`,
 `presets/` and `config/host.toml`, a secret's file, a path through a symlink,
 a dirty clone and a base the remote has moved past, and never force-pushes;
 every request leaves one line in audit.log. The status panel says "pushed by
-the host". Unset (`dashboard`), the dashboard pushes itself as described
+the host". If the host stopped between its commit and its push, the clone holds a commit the remote lacks: the host keeps refusing edits (it never pushes or resets by itself) and leaves one quiet notice in the Inbox with the commit's hash and subject. As root on the host, in the clone directory (`<state_dir>/stack-commits/repo`), choose: `git push origin HEAD:refs/heads/<branch>` to keep it, or `git reset --hard origin/<branch>` to drop it. Unset (`dashboard`), the dashboard pushes itself as described
 above.
 
 **The demo host.** The simulated host the browser tests use

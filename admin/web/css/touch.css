@@ -64,8 +64,10 @@
     block-size: var(--kp-touch-min);
     min-block-size: var(--kp-touch-min);
   }
-  /* Text-like controls inside a line keep their look and their line: the
-     box is 44 px and the margin gives the surplus back, so nothing moves. */
+  /* Text-like controls keep their look. A link standing alone in a table
+     cell, a version jump or a breadcrumb link takes its real 44 px (the row
+     grows): a box pulled back with a negative margin pokes out of a cell
+     whose padding is smaller than the surplus and into the next row. */
   body .kp-anchor,
   body .kp-kpi__link,
   body .hk-link,
@@ -78,6 +80,10 @@
     justify-content: center;
     min-block-size: var(--kp-touch-min);
     min-inline-size: var(--kp-touch-min);
+  }
+  body .kp-anchor,
+  body .kp-kpi__link,
+  body .kp-nav__brand {
     margin-block: calc((1lh - var(--kp-touch-min)) / 2);
   }
   /* A permalink anchor sits after a heading's text: its 44 px box overlaps

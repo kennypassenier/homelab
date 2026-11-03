@@ -1080,7 +1080,7 @@ pub async fn run_demo(
                         // host answers (empty, or plainly made up and said so).
                         Command::Today { .. } => serde_json::json!({ "items": [{
                             "level": "Attention", "source": "check",
-                            "what": "demo host: one made-up item so the list has a row",
+                            "what": "demo host: one invented item so the list has a row",
                             "remedy": "nothing; this is the demo host",
                         }], "unread": [] }).to_string(),
                         // fix-231: the stale-image rows the Fleet view

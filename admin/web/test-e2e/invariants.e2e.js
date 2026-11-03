@@ -3033,6 +3033,16 @@ test("invariants: the Host page lays out Containers across the top, then two col
         .locator(".hx-kpi:not([data-loading])")
         .first()
         .waitFor({ timeout: 10000 });
+      // The kit draws each tile's trend (and its "yesterday" axis word)
+      // after the figures arrive: read the text once every tile has it.
+      await page.waitForFunction(
+        () =>
+          [...document.querySelectorAll(".hx-kpi")].every((k) =>
+            /yesterday/.test(k.textContent ?? ""),
+          ),
+        null,
+        { timeout: 10000 },
+      );
       const r = await page.evaluate(() => {
         const box = (/** @type {string} */ sel) =>
           document.querySelector(sel)?.getBoundingClientRect() ?? null;

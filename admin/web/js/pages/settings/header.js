@@ -68,7 +68,6 @@ export function buildHeader() {
   const barSlot = h("div", {
     class: "kp-unsaved st-unsaved",
     id: "settings-unsaved",
-    "data-kp-unsaved": "",
     "data-kp-unsaved-for": "#st-groups",
     "data-kp-name": "settings",
     "data-kp-keep": "session",

@@ -66,7 +66,7 @@ pub async fn orphan_files_keeping(
         .lines()
         .map(str::trim)
         .filter(|l| !l.is_empty())
-        .filter(|l| !l.ends_with(".env"))
+        .filter(|l| !crate::names::is_secret_env_path(l))
         .filter(|l| !sent.contains(*l))
         .filter(|l| !kept(l))
         .map(str::to_string)

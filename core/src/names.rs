@@ -31,6 +31,20 @@ pub fn incident_name(ts_unix: u64, op: &str) -> String {
     format!("{ts_unix}-{}", name_key(op))
 }
 
+/// Whether a file name (last path component, no directories) is a secret env
+/// file that is never shown, diffed or committed: `.env`, `.env.*`, `*.env`
+/// and `*.env.*` (`app.env.local`, `prod.env`, `.env.production`). A leading
+/// `.env` prefix stays secret too (`.envrc`), as the old per-crate copies
+/// treated it. `environment.md`, `envoy.conf` and `service.yml` are not.
+pub fn is_secret_env_name(name: &str) -> bool {
+    name.starts_with(".env") || name.ends_with(".env") || name.contains(".env.")
+}
+
+/// [`is_secret_env_name`] for a path: judges the last component.
+pub fn is_secret_env_path(path: &str) -> bool {
+    is_secret_env_name(path.rsplit('/').next().unwrap_or(path))
+}
+
 #[cfg(test)]
 mod names_tests {
     use super::*;
@@ -70,5 +84,47 @@ mod names_tests {
             );
             assert!(!n.contains(".."), "{n:?}");
         }
+    }
+}
+
+#[cfg(test)]
+mod secret_env_tests {
+    use super::{is_secret_env_name, is_secret_env_path};
+
+    #[test]
+    fn names_table() {
+        let cases: [(&str, bool); 20] = [
+            (".env", true),
+            (".env.local", true),
+            (".env.production", true),
+            ("app.env", true),
+            ("prod.env", true),
+            ("app.env.local", true),
+            ("traefik.env.bak", true),
+            (".envrc", true),
+            ("service.yml", false),
+            ("environment.md", false),
+            ("envoy.conf", false),
+            ("env", false),
+            ("env.md", false),
+            ("docker-compose.yml", false),
+            ("myenv", false),
+            ("env-notes.md", false),
+            ("", false),
+            ("app.envx", false),
+            ("a.environment", false),
+            ("checks.yml", false),
+        ];
+        for (name, want) in cases {
+            assert_eq!(is_secret_env_name(name), want, "{name:?}");
+        }
+    }
+
+    #[test]
+    fn paths_judge_the_last_component() {
+        assert!(is_secret_env_path("stacks/media/app.env.local"));
+        assert!(is_secret_env_path(".env"));
+        assert!(!is_secret_env_path("stacks/.env/readme.md"));
+        assert!(!is_secret_env_path("admin/env-notes.md"));
     }
 }

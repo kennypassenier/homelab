@@ -77,11 +77,10 @@ fn bundle_files(req: &ImportReq) -> Result<Vec<(String, String)>, Refusal> {
                 "paste or upload the YAML an export wrote (Export bundle, or homelab export)",
             )
         })?;
-    if let Some((p, _)) = files.iter().find(|(p, _)| {
-        p.rsplit('/')
-            .next()
-            .is_some_and(|n| n == ".env" || n.ends_with(".env"))
-    }) {
+    if let Some((p, _)) = files
+        .iter()
+        .find(|(p, _)| homelab_core::names::is_secret_env_path(p))
+    {
         return Err(Refusal::new(
             what,
             format!("the bundle carries {p}, a secrets file"),

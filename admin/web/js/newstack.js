@@ -22,6 +22,7 @@ import { editField, markErrors } from "./editui.js";
 import { register } from "./drivehooks.js";
 import { fetchJson, h } from "./dom.js";
 import { reviewPart } from "./newreview.js";
+import { stage } from "./stage.js";
 import { wizardShell } from "./newwizard.js";
 import { failBox } from "./ui.js";
 import {
@@ -90,6 +91,10 @@ export async function mountPresetWizard(holder, o) {
       stop();
     };
   };
+  // The read has no answer yet: the package's busy plate, not a blank page.
+  holder.replaceChildren(
+    stage(h("p", { class: "measured" }, "Reading the presets…")),
+  );
   const r = await fetchJson("/data/presets", "the presets");
   if (!r.ok) return fail(r.error);
   /** @type {import("./editforms.js").Preset[]} */

@@ -45,6 +45,33 @@ export function sameShape(a, b) {
 }
 
 /**
+ * Copies `next`'s inline declarations onto `live` through the CSSOM: the
+ * dashboard's CSP (`style-src 'self'`, chassis-rs 4.6.0) refuses
+ * `setAttribute("style", ...)`, which an element kp-themes styled with
+ * `style.setProperty` would otherwise trigger on every redraw.
+ * @param {Element} live
+ * @param {Element} next
+ * @param {boolean} prune remove declarations `next` lacks
+ */
+function syncStyle(live, next, prune) {
+  const from = /** @type {HTMLElement} */ (next).style;
+  const to = /** @type {HTMLElement} */ (live).style;
+  if (!from || !to) return;
+  const kept = new Set();
+  for (let i = 0; i < from.length; i++) {
+    const p = from.item(i);
+    kept.add(p);
+    const v = from.getPropertyValue(p);
+    const pri = from.getPropertyPriority(p);
+    if (to.getPropertyValue(p) !== v || to.getPropertyPriority(p) !== pri)
+      to.setProperty(p, v, pri);
+  }
+  if (prune)
+    for (const p of [...Array(to.length).keys()].map((i) => to.item(i)))
+      if (!kept.has(p)) to.removeProperty(p);
+}
+
+/**
  * Make `live` look like `next`, changing only the difference. `next` is
  * built by the same code that built `live`; it is thrown away afterwards.
  * @param {Element} live
@@ -54,9 +81,11 @@ export function sameShape(a, b) {
  *   draws; wrong for one the data table decorates)
  */
 export function syncNode(live, next, opts = {}) {
-  for (const a of [...next.attributes])
-    if (live.getAttribute(a.name) !== a.value)
+  for (const a of [...next.attributes]) {
+    if (a.name === "style") syncStyle(live, next, opts.prune === true);
+    else if (live.getAttribute(a.name) !== a.value)
       live.setAttribute(a.name, a.value);
+  }
   if (opts.prune)
     for (const a of [...live.attributes])
       if (!next.hasAttribute(a.name)) live.removeAttribute(a.name);

@@ -29,6 +29,21 @@ import {
  */
 
 /**
+ * Applies `a: b; --c: d` declarations through the CSSOM. A `style` attribute
+ * is refused by the dashboard's CSP (`style-src 'self'`, chassis-rs 4.6.0);
+ * `style.setProperty` is not.
+ * @param {HTMLElement} e
+ * @param {string} css
+ */
+function applyStyle(e, css) {
+  for (const decl of css.split(";")) {
+    const at = decl.indexOf(":");
+    if (at < 1) continue;
+    e.style.setProperty(decl.slice(0, at).trim(), decl.slice(at + 1).trim());
+  }
+}
+
+/**
  * The one element factory: `class` sets the class name, an `on…`
  * attribute holding a function becomes a listener, a `null` / `false` /
  * `undefined` attribute is left out and `true` is an empty attribute;
@@ -45,6 +60,7 @@ export function h(tag, attrs, ...kids) {
     if (v == null || v === false) continue;
     if (typeof v === "function") e.addEventListener(k.slice(2), v);
     else if (k === "class") e.className = String(v);
+    else if (k === "style") applyStyle(e, String(v));
     else e.setAttribute(k, v === true ? "" : String(v));
   }
   /** @param {Child} c */

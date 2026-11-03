@@ -285,8 +285,7 @@ pub fn refusal_page(r: &Refusal) -> String {
          <title>{title} · homelab admin</title>\n\
          <link rel=\"stylesheet\" href=\"/static/kp/dist/kp-themes.css\">\n\
          <script type=\"module\" src=\"{REFUSAL_SCRIPT}\"></script>\n</head>\n\
-         <body>\n<main id=\"refusal\" data-code=\"{code}\" data-title=\"{title}\" data-detail=\"{detail}\" \
-         style=\"max-width:40rem;margin:4rem auto;padding-inline:16px\">\n\
+         <body>\n<main id=\"refusal\" data-code=\"{code}\" data-title=\"{title}\" data-detail=\"{detail}\">\n\
          <p>{code}</p>\n<h1>{title}</h1>\n<p>{detail}</p>\n</main>\n</body>\n</html>\n"
     )
 }

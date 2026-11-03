@@ -8,6 +8,11 @@ import { showAlarm } from "/static/kp/dist/kp-themes.min.js";
 
 const main = document.getElementById("refusal");
 if (main) {
+  // The page's CSP refuses a style attribute (chassis-rs 4.6.0), so the box
+  // is laid out here, through the CSSOM.
+  main.style.setProperty("max-width", "40rem");
+  main.style.setProperty("margin", "4rem auto");
+  main.style.setProperty("padding-inline", "16px");
   const { code = "", title = "Access refused", detail = "" } = main.dataset;
   void showAlarm({
     title,

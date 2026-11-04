@@ -95,3 +95,37 @@ export function shareText(share, window) {
     ? "no readings yet"
     : `${uptimePercent(share)} % over ${window}`;
 }
+
+/**
+ * The history a tile draws: its own probe's buckets, and where that probe
+ * measured nothing (it is younger than the strip) the buckets of its stack's
+ * container, the same fallback the tile's state word uses. Both answers were
+ * asked with the same edges, so a bucket lines up by its start. Without this
+ * a tile whose own key is a day old showed 89 days of "no reading" while its
+ * stack had months of cells.
+ * @param {Map<string, {periods?: Bucket[], uptime?: number | null}>} keys
+ * @param {{host: string, stack: string}} t
+ * @returns {{periods: Bucket[], uptime: number | null} | undefined}
+ */
+export function tileEntry(keys, t) {
+  const own = keys.get(`tile:${t.host}`);
+  const stack = keys.get(`stack:${t.stack}`);
+  if (!own || !stack) {
+    const only = own ?? stack;
+    return only
+      ? { periods: only.periods ?? [], uptime: only.uptime ?? null }
+      : undefined;
+  }
+  const byStart = new Map((stack.periods ?? []).map((b) => [b.start, b]));
+  const periods = (own.periods ?? []).map((b) =>
+    b.state === "none" ? (byStart.get(b.start) ?? b) : b,
+  );
+  let up = 0;
+  let total = 0;
+  for (const b of periods) {
+    const n = (b.up ?? 0) + (b.dep ?? 0) + (b.down ?? 0);
+    up += b.up ?? 0;
+    total += n;
+  }
+  return { periods, uptime: total > 0 ? up / total : null };
+}

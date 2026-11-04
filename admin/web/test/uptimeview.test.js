@@ -3,6 +3,7 @@ import { test } from "node:test";
 import {
   periodOf,
   shareText,
+  tileEntry,
   tileKey,
   uptimeQuery,
   zoneOffsetS,
@@ -43,4 +44,44 @@ test("a tile reads its own key, else its stack's", () => {
   keys.set("tile:a.x", 1);
   assert.equal(tileKey(keys, { host: "a.x", stack: "media" }), "tile:a.x");
   assert.equal(shareText(null, "90 days"), "no readings yet");
+});
+
+test("a young own key borrows its stack's older days, never the other way round", () => {
+  /**
+   * @param {number} start @param {number} up @param {number} [down]
+   * @returns {import("../js/uptimeview.js").Bucket}
+   */
+  const day = (start, up, down = 0) => ({
+    start,
+    state: up + down === 0 ? "none" : down ? "degraded" : "up",
+    uptime: up + down ? up / (up + down) : null,
+    up,
+    dep: 0,
+    down,
+  });
+  const keys = new Map([
+    ["tile:a.x", { periods: [day(0, 0), day(86400, 0), day(172800, 10)] }],
+    [
+      "stack:media",
+      { periods: [day(0, 8, 2), day(86400, 10), day(172800, 3, 7)] },
+    ],
+  ]);
+  const e = tileEntry(keys, { host: "a.x", stack: "media" });
+  assert.deepEqual(
+    e?.periods.map((p) => [p.start, p.up, p.down]),
+    [
+      [0, 8, 2],
+      [86400, 10, 0],
+      [172800, 10, 0],
+    ],
+  );
+  assert.equal(e?.uptime, 28 / 30);
+  assert.equal(
+    tileEntry(new Map([["tile:a.x", { periods: [day(0, 4)] }]]), {
+      host: "a.x",
+      stack: "none",
+    })?.periods.length,
+    1,
+  );
+  assert.equal(tileEntry(new Map(), { host: "a.x", stack: "m" }), undefined);
 });

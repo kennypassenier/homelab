@@ -33,9 +33,11 @@ test("ux-small-1: on a phone every button, chip, tab and segmented item is a 44 
     const context = await browser.newContext({
       viewport: { width: 390, height: 900 },
     });
-    const page = await login(context);
+    await login(context);
     const small = [];
-    for (const path of [
+    // The seven pages are read side by side: one after the other their
+    // 2.5 s settling waits alone took 17.5 s of the 20 s case deadline.
+    const paths = [
       "/backups",
       "/settings",
       "/charts",
@@ -43,25 +45,31 @@ test("ux-small-1: on a phone every button, chip, tab and segmented item is a 44 
       "/firewall",
       "/stacks",
       "/needs-you",
-    ]) {
-      await page.goto(`${BASE}${path}`);
-      await page.waitForTimeout(2500);
-      const found = await page.$$eval(CONTROLS, (els) =>
-        els
-          .filter((e) => {
-            const b = e.getBoundingClientRect();
-            const s = getComputedStyle(e);
-            return (
-              b.width > 0 &&
-              s.visibility !== "hidden" &&
-              !e.closest("[hidden], .kp-sr-only") &&
-              (b.height < 43.5 || b.width < 43.5)
-            );
-          })
-          .map((e) => `${e.className} ${e.textContent?.trim().slice(0, 20)}`),
-      );
-      for (const f of found) small.push(`${path}: ${f}`);
-    }
+    ];
+    const found = await Promise.all(
+      paths.map(async (path) => {
+        const page = await context.newPage();
+        await page.goto(`${BASE}${path}`);
+        await page.waitForTimeout(2500);
+        const hits = await page.$$eval(CONTROLS, (els) =>
+          els
+            .filter((e) => {
+              const b = e.getBoundingClientRect();
+              const s = getComputedStyle(e);
+              return (
+                b.width > 0 &&
+                s.visibility !== "hidden" &&
+                !e.closest("[hidden], .kp-sr-only") &&
+                (b.height < 43.5 || b.width < 43.5)
+              );
+            })
+            .map((e) => `${e.className} ${e.textContent?.trim().slice(0, 20)}`),
+        );
+        await page.close();
+        return hits.map((f) => `${path}: ${f}`);
+      }),
+    );
+    for (const hits of found) small.push(...hits);
     assert.deepEqual(small, [], "controls under 44 px on a phone");
     await context.close();
   } finally {

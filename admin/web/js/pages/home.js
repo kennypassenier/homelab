@@ -49,7 +49,7 @@ import {
   setUptime,
   attachMenuButtons,
 } from "/static/kp/dist/kp-themes.min.js";
-import { periodsOf, shareText, tileKey, uptimeQuery } from "../uptimeview.js";
+import { periodsOf, shareText, tileEntry, uptimeQuery } from "../uptimeview.js";
 
 /**
  * @typedef {{stack: string, host: string, url: string, name: string,
@@ -230,6 +230,9 @@ export function mount(root) {
   const verdictDot = h("span", { class: "ap-dot" });
   const verdictText = h("strong", null, "Reading the apps…");
   const verdictAgo = agoEl("checked", null, { live: true });
+  // The verdict line is a status region; kp-themes would silence a ticking
+  // line inside it (and warn), so only its state changes are announced.
+  verdictAgo.setAttribute("data-kp-ago-announce", "state");
   const verdict = h(
     "p",
     { class: "ap-verdict", role: "status" },
@@ -357,9 +360,7 @@ export function mount(root) {
       "data-kp-uptime-count": "90",
     });
     const entry =
-      uptimeHist instanceof Map
-        ? uptimeHist.get(tileKey(uptimeHist, t))
-        : undefined;
+      uptimeHist instanceof Map ? tileEntry(uptimeHist, t) : undefined;
     setUptime(strip, {
       label: "Answered, last 90 days",
       state:

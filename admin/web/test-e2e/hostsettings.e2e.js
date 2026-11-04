@@ -22,7 +22,7 @@ async function login(context) {
   return page;
 }
 
-test("ux-hostsettings: Host settings keeps instant choices and Save-gated keys apart, every instant choice offers Undo, host.toml groups start folded", async () => {
+test("ux-hostsettings: Host settings keeps instant choices and Save-gated keys apart, every instant choice offers Undo, host.toml groups start folded; Restore hides Back on step I and ages a snapshot in days; Host actions are tiles of one size", async () => {
   const browser = await launch();
   try {
     const context = await browser.newContext({
@@ -57,19 +57,6 @@ test("ux-hostsettings: Host settings keeps instant choices and Save-gated keys a
     assert.equal(await follow.isChecked(), false, "Undo did not put it back");
     // The Live view switch is not in the bar; Forget offers an Undo too.
     assert.equal(await page.locator("#bar .follow-switch:visible").count(), 0);
-    await context.close();
-  } finally {
-    await browser.close();
-  }
-});
-
-test("ux-hostsettings: Restore hides Back on step I and ages a snapshot in days; Host actions are tiles of one size", async () => {
-  const browser = await launch();
-  try {
-    const context = await browser.newContext({
-      viewport: { width: 1280, height: 900 },
-    });
-    const page = await login(context);
     await page.goto(`${BASE}/backups/restore`);
     await page.locator("[data-kp-wizard-next]").waitFor({ timeout: 10000 });
     assert.ok(

@@ -90,9 +90,9 @@ fn warn_inert_fallback(cfg: &Config) {
     ] {
         if set {
             tracing::warn!(
-                "{key} in host.toml is no longer used: the host sends only to kyu \
-                 (notify_webhook), and kyu decides about retries and the fallback to Home \
-                 Assistant (the subscription's max_attempts and backoff_ms in the kyu-runner \
+                "{key} in host.toml is no longer used: the host sends only to the notification hub \
+                 (notify_webhook), and the hub decides about retries and the fallback to Home \
+                 Assistant (the subscription's max_attempts and backoff_ms in the hub's runner \
                  config). Remove the key; it is kept parseable so this file still loads"
             );
         }

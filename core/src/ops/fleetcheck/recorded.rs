@@ -94,7 +94,7 @@ pub fn evaluate_notify(state: &HostState, now: u64) -> Vec<Finding> {
             format_args!(" — {}", last_ok)
         ),
         remedy:
-            "check `notify_webhook` and `notify_auth_bearer` in host.toml and that kyu answers — \
+            "check `notify_webhook` and `notify_auth_bearer` in host.toml and that the notification hub answers — \
                  while this stands, every warning this host produces is going nowhere, \
                  including this one"
                 .into(),

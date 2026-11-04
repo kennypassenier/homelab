@@ -439,7 +439,7 @@ pub const KEYS: &[KeyInfo] = &[
         "notify_webhook",
         "Notifications",
         "Notification webhook",
-        "Where the host posts a notification after each operation: the kyu publish URL. One POST; kyu owns retries and the fallback to Home Assistant. Empty: off.",
+        "Where the host posts a notification after each operation: the notification hub's publish URL. One POST; the hub owns retries and the fallback to Home Assistant. Empty: off.",
         "off",
         Kind::Url,
         Access::Browser,
@@ -460,7 +460,7 @@ pub const KEYS: &[KeyInfo] = &[
         "notify_fallback_webhook",
         "Notifications",
         "Fallback webhook",
-        "No longer used (kyu-notify): the host sends only to kyu and kyu decides \
+        "No longer used (hub-only notifications): the host sends only to the hub and the hub decides \
          about the fallback to Home Assistant. Kept so an existing host.toml still loads; \
          remove it. A secret: changed over ssh only.",
         "none",

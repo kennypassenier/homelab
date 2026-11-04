@@ -89,7 +89,7 @@ pub fn was_duplicate(curl_out: &str) -> bool {
 /// The push column text for a delivered push.
 pub fn sent_text(curl_out: &str) -> &'static str {
     if was_duplicate(curl_out) {
-        "sent: kyu already holds the same failure (within 20 h), not queued again"
+        "sent: the hub already holds the same failure (within 20 h), not queued again"
     } else {
         "sent"
     }
@@ -129,7 +129,7 @@ pub fn undelivered_notice(
         consequence: "Nobody was pushed about it. The host keeps no queue and does not retry; \
                       this notice and the ones it counts are all that is left."
             .into(),
-        remedy: "Check that kyu answers (its dashboard, CT 109) and that notify_webhook and \
+        remedy: "Check that the notification hub answers (its dashboard, CT 109) and that notify_webhook and \
                  notify_auth_bearer in host.toml are right."
             .into(),
         page: failed.page.clone(),
@@ -146,7 +146,7 @@ pub fn undelivered_notice(
 fn undelivered_what(count: u64, latest_title: &str, why: &str) -> String {
     let noun = if count == 1 { "push" } else { "pushes" };
     format!(
-        "kyu did not accept {} {} (latest: \"{}\"): {}",
+        "the hub did not accept {} {} (latest: \"{}\"): {}",
         count, noun, latest_title, why
     )
 }
@@ -159,7 +159,7 @@ pub fn is_undelivered_for(n: &HostNotice, route: &str) -> bool {
 /// How many pushes an undelivered notice counts (1 when unreadable).
 pub fn undelivered_count(n: &HostNotice) -> u64 {
     n.what
-        .strip_prefix("kyu did not accept ")
+        .strip_prefix("the hub did not accept ")
         .and_then(|r| r.split_whitespace().next())
         .and_then(|c| c.parse().ok())
         .unwrap_or(1)

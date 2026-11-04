@@ -3,7 +3,10 @@
 # nothing. Both of those cost a wrong conclusion once.
 checks:
   - name: "the runner is healthy"
-    command: "curl -s -m 10 http://10.10.10.9:8082/healthz"
+    # Compares only the verdict: the whole answer also names each subsystem, and
+    # those read "starting" for a moment after the restart a deploy causes, which
+    # a must_match against the earlier answer then called a change.
+    command: "curl -s -m 10 http://10.10.10.9:8082/healthz | grep -o '\"status\":\"ok\"'"
     expect: must_match
     layer: application
     blind_spot: >-

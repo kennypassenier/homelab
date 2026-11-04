@@ -3797,7 +3797,12 @@ test("invariants: ? opens Help with the six areas, the words and the keys, and i
         "Job",
         "Ctrl K",
       ])
-        assert.ok(text.includes(w), `${width}px: Help does not say ${w}`);
+        // kp-themes 12.7.0 draws a letter key lowercase in the sheet
+        // ("Ctrl k", kp-gaps/homelab.md 96): the words match case-blind.
+        assert.ok(
+          text.toLowerCase().includes(w.toLowerCase()),
+          `${width}px: Help does not say ${w}`,
+        );
       await help.getByText("Take the 1-minute tour").click();
       const tour = page.locator(".kp-tour");
       /** @type {string[]} */

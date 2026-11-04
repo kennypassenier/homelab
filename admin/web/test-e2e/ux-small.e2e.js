@@ -77,13 +77,14 @@ test("ux-small-1: on a phone every button, chip, tab and segmented item is a 44 
   }
 });
 
-test("ux-small-2: the dialog's close x is a 44 px target, Esc still closes it", async () => {
+test("ux-small-2/3/4: the dialog's close x is a 44 px target and Esc still closes it; Backups picks a stack in one place, the chips, and the table's own Filters panel does not offer it; the folded System rail names itself and its fold control in words", async () => {
   const browser = await launch();
   try {
     const context = await browser.newContext({
-      viewport: { width: 1280, height: 900 },
+      viewport: { width: 1280, height: 1000 },
     });
     const page = await login(context);
+    // ux-small-2: the dialog's close x.
     await page.goto(`${BASE}/backups`);
     await page.getByRole("button", { name: "Back up now" }).click();
     const close = page.locator("dialog[open] .kp-dialog__close");
@@ -92,19 +93,7 @@ test("ux-small-2: the dialog's close x is a 44 px target, Esc still closes it", 
     assert.ok(b && b.width >= 43.5 && b.height >= 43.5, JSON.stringify(b));
     await page.keyboard.press("Escape");
     await page.locator("dialog[open]").waitFor({ state: "detached" });
-    await context.close();
-  } finally {
-    await browser.close();
-  }
-});
-
-test("ux-small-3: Backups picks a stack in one place, the chips; the table's own Filters panel does not offer it", async () => {
-  const browser = await launch();
-  try {
-    const context = await browser.newContext({
-      viewport: { width: 1280, height: 1000 },
-    });
-    const page = await login(context);
+    // ux-small-3: the stack filter on Backups.
     await page.goto(`${BASE}/backups`);
     await page
       .locator(".bk-repos__facets .kp-facets__list li")
@@ -153,19 +142,7 @@ test("ux-small-3: Backups picks a stack in one place, the chips; the table's own
       );
     assert.deepEqual(ticked, ["admin"]);
     assert.match(await status(), /of 1 \(filtered from 7\)/);
-    await context.close();
-  } finally {
-    await browser.close();
-  }
-});
-
-test("ux-small-4: the folded System rail names itself and its fold control in words", async () => {
-  const browser = await launch();
-  try {
-    const context = await browser.newContext({
-      viewport: { width: 1280, height: 900 },
-    });
-    const page = await login(context);
+    // ux-small-4: the folded System rail.
     await page.goto(`${BASE}/host`);
     const rail = page.locator("#system-rail");
     await rail.waitFor({ timeout: 10000 });

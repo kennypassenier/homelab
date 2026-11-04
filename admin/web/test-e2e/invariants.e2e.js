@@ -8169,7 +8169,7 @@ eachSlice(
 // The hub's review asked for Update and its u key to open the Update;
 // since the 3.71.0 merge every person's Update is the one Update flow
 // (invariant 149), so both land on that stack's flow.
-test("invariants: stack hub review — Update and the u key open the stack's Update flow", async () => {
+test("invariants: stack hub review — Update and the u key open the stack's Update flow, and Update is disabled with 'No newer version' on a stack with no newer image", async () => {
   const browser = await launch();
   try {
     const context = await browser.newContext({
@@ -8200,25 +8200,13 @@ test("invariants: stack hub review — Update and the u key open the stack's Upd
         `${how}: not admin's Update flow`,
       );
     }
-  } finally {
-    await browser.close();
-  }
-});
-
-// ux-stackhub-5 (docs/INVARIANTS.md row 176): the demo's gateway has no
-// newer image, so its hub Update is held back with the reason in words.
-test("invariants: stack hub review — Update is disabled with 'No newer version' on a stack with no newer image", async () => {
-  const browser = await launch();
-  try {
-    const context = await browser.newContext({
-      viewport: { width: 1894, height: 1000 },
-    });
-    const page = await freshPage(context);
+    // ux-stackhub-5 (docs/INVARIANTS.md row 176): the demo's gateway has no
+    // newer image, so its hub Update is held back with the reason in words.
     await page.goto(`${BASE}/stacks/gateway`);
-    const btn = page.locator(
+    const held = page.locator(
       '[data-drive="stack-head"][data-drive-row="gateway/update"]',
     );
-    await btn.waitFor({ timeout: 10000 });
+    await held.waitFor({ timeout: 10000 });
     await page.waitForFunction(
       () =>
         document
@@ -8227,7 +8215,7 @@ test("invariants: stack hub review — Update is disabled with 'No newer version
       null,
       { timeout: 10000 },
     );
-    assert.equal(await btn.isDisabled(), true, "Update is not disabled");
+    assert.equal(await held.isDisabled(), true, "Update is not disabled");
   } finally {
     await browser.close();
   }

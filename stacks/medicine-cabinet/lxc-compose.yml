@@ -1,0 +1,128 @@
+# Stack intent (schema v2 — intent only, no machine-written state).
+#
+# CT 122 holds one native service: medicine-cabinet, Kenny's medicine cabinet
+# (medicines, schedules, stock, symptoms and reminders). It is a chassis-rs
+# single binary run by a systemd unit; `service.yml` beside this file
+# describes the service, this file describes the container around it.
+# Modelled on CT 121 (kitchen), the newest chassis-rs service with its state
+# bind-mounted from the host. Health data: the route is behind Cloudflare Access.
+#
+# Rebuilding it, in order:
+#   1. this manifest recreates the container (`homelab deploy`);
+#   2. the binary is installed the way C7 installs it (`homelab install-native`,
+#      release kennypassenier/medicine-cabinet);
+#   3. the state comes back from the nightly backup of the bind mount below.
+
+stack_name: medicine-cabinet
+vmid: 122
+hostname: 122-app-medicine-cabinet
+native_only: true
+
+network:
+  ip: 10.10.10.22/24
+  gateway: 10.10.10.1
+  bridge: vmbr0
+  vlan: 10
+
+# Same sizing as almanac (one small Rust binary). Medicine Cabinet ships no figure of
+# its own that asks for more; revisit after the first week of measurements.
+# swap_mb: 0 for the reason almanac documents (page cache evicting the program).
+resources:
+  cores: 1
+  memory_mb: 512
+  swap_mb: 0
+  disk_gb: 4
+  storage: local-lvm
+
+lxc:
+  template: clone:996
+  unprivileged: true
+  features: nesting=1
+  protection: true
+
+boot:
+  onboot: true
+  order: 50
+
+# Medicine Cabinet's state on the host, bind-mounted in, so destroying the container
+# costs nothing and the normal backup reaches it. Medicine Cabinet's own deploy files
+# use /var/lib/medicine-cabinet, but the unit sets MEDICINE_CABINET_STATE_DIR explicitly, so the
+# homelab layout (/appdata/<stack>/<stack>-config, like almanac and kyu) works
+# without a code change. The binary stays at /opt/medicine-cabinet/bin.
+storage:
+  - host_path: /appdata/medicine-cabinet/medicine-cabinet-config
+    mount_point: /appdata/medicine-cabinet/medicine-cabinet-config
+    # ASSUMPTION to verify on first deploy: the medicine-cabinet user is the third one
+    # created (Alloy takes 999 and 998 first), so uid 997 inside, 100997 mapped
+    # out of an unprivileged LXC — the same as CT 120 (admin). If
+    # `id medicine-cabinet` says otherwise, fix this line and re-deploy.
+    host_owner_uid: 100997
+    app: medicine-cabinet
+
+apps: []
+
+natives: [medicine-cabinet]
+
+# One route file: meds.kp-soft.dev (tunnel + Cloudflare Access).
+gateway_route:
+  filename: 122-app-medicine-cabinet.yml
+
+firewall:
+  enabled: true
+  comment: |-
+    CT 122 (medicine-cabinet), medicine-cabinet (native).
+    Modelled on almanac's rules. In: Traefik on CT 104,
+    Prometheus on CT 113 (medicine-cabinet metrics, node exporter). Kenny's desktop is
+    added by the renderer from host.toml `trusted_sources`. Out: Loki push
+    (Alloy), the kyu hub on CT 109 for reminders, and DNS; the internet stays open for GitHub release updates.
+  rules:
+    - comment: "pve's rescue address: never from a container"
+      dir: out
+      action: DROP
+      dest: 10.10.10.250
+    - comment: "the neighbours it uses"
+      dir: out
+      action: ACCEPT
+      dest: 10.10.10.13
+      proto: tcp
+      dport: "3100"
+      note: Loki push (Alloy)
+    - comment: "reminders go to the kyu hub"
+      dir: out
+      action: ACCEPT
+      dest: 10.10.10.9
+      proto: tcp
+      dport: "8080"
+      note: POST /t/<topic> on kyu (the kit's shared notification sender, MEDICINE_CABINET_NOTIFY_URL)
+    - comment: "calendar events go to Almanac"
+      dir: out
+      action: ACCEPT
+      dest: 10.10.10.12
+      proto: tcp
+      dport: "8080"
+      note: POST /v1/ingest/medicine-cabinet (expiry, course end, reorder dates)
+    - comment: "every other neighbour in VLAN 10 stays out of reach"
+      dir: out
+      action: DROP
+      dest: 10.10.10.0/24
+    - comment: "who may reach the container"
+      dir: in
+      action: ACCEPT
+      source: 10.10.10.13
+      proto: tcp
+      dport: "8080,9100"
+      note: Prometheus (medicine-cabinet metrics, node exporter)
+    - dir: in
+      action: ACCEPT
+      source: 10.10.10.4
+      proto: tcp
+      dport: "8080"
+      note: Traefik route meds.kp-soft.dev
+
+# This stack's tile on the dashboard's start page, keyed by the hostname it opens.
+tiles:
+  meds.kp-soft.dev:
+    name: "Medicine Cabinet"
+    group: "Own"
+    order: 304
+    description: "Medicines, schedules and stock"

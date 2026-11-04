@@ -1,0 +1,37 @@
+# C7 native service — medicine-cabinet on CT 122, modelled on stacks/almanac/service.yml.
+# Here the state and the env file live in the bind-mounted state directory
+# (MEDICINE_CABINET_STATE_DIR is explicit in the unit), so the nightly backup reaches
+# them. update_cmd must reproduce the unit: same user, env file, working
+# directory and one --property=Environment= per Environment= line of the unit
+# (almanac fix-3: otherwise `update --check` looks at the compiled-in default).
+stack_name: medicine-cabinet
+vmid: 122
+hostname: 122-app-medicine-cabinet
+unit: medicine-cabinet
+binary: /opt/medicine-cabinet/bin/medicine-cabinet
+env_file: /appdata/medicine-cabinet/medicine-cabinet-config/medicine-cabinet.env
+# First install on a fresh container: if the env file is missing or empty the
+# host runs this under a terminal and writes the KEY=value lines it prints
+# (MEDICINE_CABINET_TOKEN, MEDICINE_CABINET_SECRET_KEY) to the env file, 0600, owned by the unit's user.
+# After that, Kenny adds MEDICINE_CABINET_NOTIFY_TOKEN (a kyu client token issued for
+# medicine-cabinet) and, once Almanac has the source, MEDICINE_CABINET_ALMANAC_URL=http://10.10.10.12:8080
+# and MEDICINE_CABINET_ALMANAC_TOKEN to the same file.
+first_secret_cmd: /opt/medicine-cabinet/bin/medicine-cabinet gen-secret
+data_dirs:
+  - /appdata/medicine-cabinet/medicine-cabinet-config
+update_cmd: >-
+  systemd-run --wait --pipe --collect --uid=medicine-cabinet --gid=medicine-cabinet
+  --property=EnvironmentFile=/appdata/medicine-cabinet/medicine-cabinet-config/medicine-cabinet.env
+  --property=WorkingDirectory=/appdata/medicine-cabinet/medicine-cabinet-config
+  --property=Environment=MEDICINE_CABINET_STATE_DIR=/appdata/medicine-cabinet/medicine-cabinet-config
+  --property=Environment=MEDICINE_CABINET_TIMEOUT_STOP_SECS=60
+  --property=Environment=MEDICINE_CABINET_TRUSTED_PROXIES=10.10.10.4
+  --property=Environment=MEDICINE_CABINET_TRUSTED_ADMINS=10.10.10.10
+  --property=Environment=MEDICINE_CABINET_TIMEZONE=Europe/Brussels
+  --property=Environment=MEDICINE_CABINET_NOTIFY_URL=http://10.10.10.9:8080/t/medicine-cabinet.reminders
+  /opt/medicine-cabinet/bin/medicine-cabinet update
+release_repo: kennypassenier/medicine-cabinet
+release_asset: medicine-cabinet
+# Same quiesce as almanac: the chassis kit's backup-pause socket
+# (RuntimeDirectory=medicine-cabinet in the unit), falling back to a stop.
+backup_pause: chassis

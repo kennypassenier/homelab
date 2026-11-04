@@ -1,0 +1,19 @@
+# Traefik route for Medicine Cabinet (CT 122).
+#
+# meds.kp-soft.dev: through the Cloudflare tunnel, behind the wildcard
+# Cloudflare Access policy like every kp-soft.dev name (same shape as the
+# admin dashboard's route). No per-name tunnel entry or DNS record is written
+# here; the tunnel's ingress is a wildcard to http://traefik:80. The app holds
+# health data, so it must never get its own Access exception.
+http:
+  routers:
+    medicine-cabinet:
+      rule: "Host(`meds.kp-soft.dev`)"
+      entryPoints: [web]
+      service: medicine-cabinet
+
+  services:
+    medicine-cabinet:
+      loadBalancer:
+        servers:
+          - url: "http://10.10.10.22:8080"

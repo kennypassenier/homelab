@@ -226,6 +226,12 @@ firewall:
       note: Home Assistant rest_command.mailbox_publish
     - dir: in
       action: ACCEPT
+      source: 10.10.10.22
+      proto: tcp
+      dport: "8080"
+      note: medicine-cabinet reminders (POST /t/medicine-cabinet.reminders)
+    - dir: in
+      action: ACCEPT
       source: 10.10.10.250
       proto: tcp
       dport: "8080"

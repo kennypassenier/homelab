@@ -151,6 +151,12 @@ firewall:
       note: Habits events (HABITS_ALMANAC_URL)
     - dir: in
       action: ACCEPT
+      source: 10.10.10.22
+      proto: tcp
+      dport: "8080"
+      note: medicine-cabinet calendar events (source medicine-cabinet)
+    - dir: in
+      action: ACCEPT
       source: 10.10.10.10
       proto: tcp
       dport: "22,8080"

@@ -241,6 +241,12 @@ firewall:
       note: habits route
     - dir: out
       action: ACCEPT
+      dest: 10.10.10.22
+      proto: tcp
+      dport: "8080"
+      note: medicine-cabinet route
+    - dir: out
+      action: ACCEPT
       dest: 10.10.10.13
       proto: tcp
       dport: "3100,9090,9093"

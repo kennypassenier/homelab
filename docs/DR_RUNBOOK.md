@@ -30,7 +30,7 @@ flowchart TD
 
 - **The daemon.** `homelab-host`, a systemd service on the Proxmox host. Program `/usr/local/bin/homelab-host`; the one before the last self-update is kept at `/usr/local/bin/homelab-host.prev`. Configuration `/etc/homelab/host.toml` (the `HOMELAB_CONFIG` variable overrides the path). State directory `/var/lib/homelab` (the `state_dir` setting overrides it). Listens on port 8443 over TLS.
 - **Clients** reach the daemon at `pve:8443`. The address and the certificate pin are in `config/client.toml` in the repository; each machine's token is `HOMELAB_TOKEN` in `~/.config/homelab/env`.
-- **The state directory** holds `state.json` (what is deployed where), `repo/` (a git history of every file each deploy sent), `secrets/` (the vault, below), `tls-cert.pem` and `tls-key.pem` (the daemon's certificate), `journal.jsonl` and `incidents/` (operation records) and `restic-cache/`.
+- **The state directory** holds `state.json` (what is deployed where), `repo/` (a git history of every file each deploy sent), `secrets/` (the vault, below), `tls-cert.pem` and `tls-key.pem` (the daemon's certificate), `homelab-host.db` (the host's journal, notices and incident reports) and `incidents/` (operation records) and `restic-cache/`.
 - **The vault** `/var/lib/homelab/secrets`: `restic.pw` (the one password for every repository), `<stack>/<app>.env` for each compose app that has an `.env`, and `<stack>/<dir>/<file>` for each env or credential file a native unit reads, where `<dir>` is the directory that file sits in (two units may both read a `token.env`).
 - **Backups** are restic repositories behind `rclone:gdrive:homelab-backups`. The name is `<owner>-config`: one per owning app for a compose stack, one per unit for a native stack, `host-meta-config` for the daemon's own state, and `<name>-config` for each `[[device_backups]]` entry in `/etc/homelab/host.toml`. Every repository opens with the same password file `/var/lib/homelab/secrets/restic.pw`. (`BackupCfg::default()` in core/src/ops/backup/config.rs; `restic_base` and `restic_password_file` in `/etc/homelab/host.toml` override both.)
 - **A second copy** of every repository, when `second_copy_dataset` is set in `/etc/homelab/host.toml`: each night after the backups, `restic copy` writes `<owner>-config` into a local repository of the same name on that ZFS dataset (`HDD4TB/restic` mounts at `/HDD4TB/restic`), with the same password file and the same retention, and the ZFS replication carries it to its replica pool. When Google Drive is unreachable or damaged, use it in place of `rclone:gdrive:homelab-backups` in every command below: `RESTIC_REPOSITORY=/HDD4TB/restic/<owner>-config`. One repository per night is checked with `restic check` on both copies (core/src/ops/secondcopy.rs).
@@ -242,7 +242,7 @@ and, each only when it was present on the host (`HOST_META_EXTRAS` in core/src/o
 /root/.config/rclone/rclone.conf
 ```
 
-Not in it: the `homelab-host` program and its unit file (Layer 1), `homelab-host.db` (journal, notices, watched-backup answers, incident reports), `incidents/` and `restic-cache/`.
+Not in it: the `homelab-host` program and its unit file (Layer 1), `homelab-host.db`, `incidents/` and `restic-cache/`.
 
 **The password is inside the thing it opens.** `restic.pw` is in this repository, and the same password opens every repository, so an offline copy of it is the one thing this whole runbook cannot do without. The code keeps no second copy. The offline copy is in Kenny's Bitwarden: the one statement in this document that no code can confirm.
 
@@ -373,6 +373,18 @@ One section per directory under `stacks/`, read from its `lxc-compose.yml` and, 
   - **Cloudflare**, Zero Trust > Networks > Tunnels > the tunnel > Public hostnames: the origin the tunnel sends *.kp-soft.dev to (an address in this container); check it when Traefik moves (traffic from outside the house reaches Traefik through this tunnel)
   - **Cloudflare**, My Profile > API Tokens: a token with Zone:DNS:Edit and Zone:Zone:Read on kp-soft.dev only; its value is in latch as gateway/traefik/.env CF_DNS_API_TOKEN (Traefik proves it owns kp-soft.dev for the wildcard certificate (DNS-01))
 
+### habits (vmid 123)
+
+- Container: hostname `123-app-habits`, ip `CT 123 (habits)` on `vmbr0` VLAN 10, 1 core(s), 512 MiB RAM, 0 MiB swap, 4 GiB disk on `local-lvm`, unprivileged, template `clone:996`, boot order 50.
+- Runs no docker: native systemd services only.
+- Unit `habits`:
+  - program `/opt/habits/bin/habits`, from the GitHub release `kennypassenier/habits` (asset `habits`); update policy manual.
+  - unit file `stacks/habits/habits/habits.service` in the repository; the container's copy is `/etc/systemd/system/habits.service`.
+  - data: repository `rclone:gdrive:homelab-backups/habits-config`, archive `/habits-data.tar` holding a tar of `/appdata/habits/habits-config`.
+  - vault copy of habits (`/appdata/habits/habits-config/habits.env`): `/var/lib/homelab/secrets/habits/habits-config/habits.env`.
+  - re-register a running unit after the daemon lost its state (needs the daemon): `homelab adopt stacks/habits`. Adoption only records a service that is already active; it never starts one.
+- Rebuild: the native route in Layer 2, then this stack's data by Layer 4 (native services).
+
 ### kitchen (vmid 121)
 
 - Container: hostname `121-app-kitchen`, ip `CT 121 (kitchen)` on `vmbr0` VLAN 10, 1 core(s), 512 MiB RAM, 0 MiB swap, 4 GiB disk on `local-lvm`, unprivileged, template `clone:996`, boot order 50.
@@ -488,4 +500,4 @@ One section per directory under `stacks/`, read from its `lxc-compose.yml` and, 
 4. Put back the `homelab-host` program and its unit file, start it, and check the certificate fingerprint against the pin (Layer 1).
 5. Restore the guests this suite never touches (vmid 100, 101, 102, 103) from Proxmox's own backups: `qmrestore` for a VM, `pct restore` for a container.
 6. Rebuild the templates the stacks clone: `clone:995` (privileged), `clone:996` (unprivileged). `homelab template-build <vmid> <version>` builds an unprivileged one at that vmid, and `homelab template-build <vmid> <version> --privileged` a privileged one.
-7. Rebuild every stack (Layer 2; with the daemon, `homelab deploy stacks/<stack>`), in boot order: gateway (104), registry (117), syncthing (108), kyu (109), almanac (112), kitchen (121), metrics (113), admin (120), productivity (111), paperwork (114), kp-soft (116), downloader (105), media (106). A compose stack refills its empty data directories from restic while it deploys; a native stack's data comes back by Layer 4 afterwards.
+7. Rebuild every stack (Layer 2; with the daemon, `homelab deploy stacks/<stack>`), in boot order: gateway (104), registry (117), syncthing (108), kyu (109), almanac (112), kitchen (121), habits (123), metrics (113), admin (120), productivity (111), paperwork (114), kp-soft (116), downloader (105), media (106). A compose stack refills its empty data directories from restic while it deploys; a native stack's data comes back by Layer 4 afterwards.

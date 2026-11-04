@@ -249,7 +249,7 @@ pub(crate) async fn notify_routing_every_event_is_a_notice_and_only_urgent_pushe
         n[1]["push"]
             .as_str()
             .unwrap()
-            .starts_with("failed: no notification route"),
+            .starts_with("not pushed: no notification route"),
         "{}",
         n[1]
     );

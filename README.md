@@ -1,23 +1,25 @@
 # homelab
 
-A Rust orchestrator for a Proxmox homelab, built as two programs:
+A Rust orchestrator for a Proxmox homelab, built as three programs:
 
 - **`homelab`**, the client (crate `homelab-client`, in `client/`): a command
   line and a terminal interface, run on a workstation.
 - **`homelab-host`**, the daemon (crate `homelab-host`, in `host/`): runs on
   the Proxmox host, does the work, and runs a nightly schedule on its own.
+- **`homelab-admin`** (crate `homelab-admin`, in `admin/`): the browser
+  dashboard, a native chassis-rs service. It runs in its own container (the
+  `admin` stack, vmid 120) and talks to the daemon; it is released together
+  with the other two (`stacks/admin/service.yml`).
 
-They talk over one WebSocket connection, `wss://<host>/api/ws`, secured with
-TLS and a bearer token. The daemon acts on containers with Proxmox's own `pct`
-command; the workspace builds no program that runs inside a container. What
-the fleet should look like is written as plain files in this repository:
-stacks in `stacks/`, the app catalog in `presets/`.
+The client and the daemon talk over one WebSocket connection,
+`wss://<host>/api/ws`, secured with TLS and a bearer token. The daemon acts on
+containers with Proxmox's own `pct` command. What the fleet should look like
+is written as plain files in this repository: stacks in `stacks/`, the app
+catalog in `presets/`.
 
-`Cargo.toml` says version **3.58.10**. Which version the host runs is not
-something a file here can know: `homelab ping` asks the daemon and prints its
-answer. `homelab apply`, `homelab wipe` and the removals described under
-[Stack lifecycle](#stack-lifecycle) were committed after the v3.58.10 tag
-(commit `ad03664`); a host built before that does not have them.
+The version of all three programs is `[workspace.package] version` in
+`Cargo.toml`. Which version the host runs is not something a file here can
+know: `homelab ping` asks the daemon and prints its answer.
 
 ## Contents
 
@@ -82,12 +84,14 @@ flowchart TB
   (`core/src/runner.rs`). At start-up the daemon reads
   `/var/lib/homelab/homelab-host.db` (table `journal`) and names any operation a previous run left
   unfinished.
-- **The client checks the daemon's version before it sends anything.** A
-  command that changes something is refused when the daemon is older than the
-  client, because a daemon that predates a field silently ignores it
-  (`client/src/version.rs`). The message ends by naming the fix,
-  `homelab release-update`. Read-only commands (`ping`, `status`, `doctor`,
-  `incidents`) and the host update itself stay allowed.
+- **The client checks the daemon's version before it sends anything, and
+  informs more than it blocks.** A command that changes something is refused
+  only when the daemon is older than the release that can name an unknown
+  field itself (`UNKNOWN_FIELD_CHECK_SINCE` in `client/src/link.rs`); the
+  message ends by naming the fix, `homelab release-update`. Read-only
+  commands (`ping`, `status`, `doctor`, `incidents`) and the host update
+  itself stay allowed. A client older than the daemon is never refused; it
+  prints a notice that `homelab self-install` updates it.
 
 ## Getting started
 
@@ -134,8 +138,14 @@ validator the deploy uses. Real output from this tree (colours removed):
 
 ```
 $ homelab plan stacks/syncthing
+[digest] syncthing/syncthing:latest answered with no Docker-Content-Digest — left as a tag
 ✓ valid — syncthing would deploy vmid 108: 1 file(s), 0 env(s)
+  (per-file diff needs HOMELAB_TOKEN — validation above stands on its own)
 ```
+
+With a token set, `plan` also asks the host for a read-only per-file diff and
+prints it under the validation. The `[digest]` line comes from a registry
+lookup and depends on the network.
 
 And the preset catalog, read from `presets/` in the current directory:
 
@@ -174,10 +184,12 @@ host that serves a made-up fleet and plays a scripted deploy
 | 1 | `HOMELAB_HOST` already in the environment when the command starts | `HOMELAB_HOST=pve:8443 homelab ping` |
 | 2 | `host` in `config/client.toml`, searched upward from the current directory the way git finds its root | this repository's copy |
 | 3 | `HOMELAB_HOST` from `~/.config/homelab/env` or `./.env` | |
-| 4 | the built-in default, `pve:8443` | |
+| 4 | the built-in default, pve's management address on port 8443 (`DEFAULT_HOST` in `client/src/repo_config.rs`) | |
 
 A `config/client.toml` that exists but does not parse is an error, never a
-silent fall-through to the next source. Its only keys are `host` and `pin`.
+silent fall-through to the next source. Its only keys are `host`, `pin` and
+`edge_token_file` (the read-only Cloudflare token that `homelab check` compares
+the edge with; unset means the edge is not compared).
 
 **Certificate pin.** The daemon's certificate is self-signed; trust comes from
 its SHA-256 fingerprint. Since fix-149 the client is built with the fleet's
@@ -267,12 +279,17 @@ secrets on the workstation.
 | `homelab install-native stacks/<name>[/<unit>] [<tag> \| --file <path>]` | install a service's binary from its release, or from a local file |
 | `homelab backup-native <stack>` / `homelab update-native <stack>` | back up or update an adopted service |
 | `homelab release-update-native <stack>` | install the latest release of each service in the stack |
+| `homelab rollback-native <stack>[/<unit>]` | put a native service's previous binary back after a bad release; parks the stack's updates |
+| `homelab restore-native <stack>[/<unit>] [snapshot] [--source local\|remote] [--yes]` | restore a native service's data from a snapshot, `latest` unless named |
 
 ### Fleet and host
 
 | Command | What it does |
 |---|---|
+| `homelab today [stacks/]` | what needs you: doctor, fleet check, incidents and manual checks in one list |
 | `homelab status` / `homelab doctor` / `homelab incidents` | read-only: the fleet, the host's self-diagnosis, and the incident bundles failed operations left behind |
+| `homelab snapshots stacks/<name>` / `homelab verify-restore stacks/<name>` / `homelab snapshot-file stacks/<name> <snapshot> --app <app> <path>` | list a stack's backup snapshots; prove one restorable in the drill's scratch directory; print one file as a snapshot holds it |
+| `homelab answer [<operation>\|<stack>\|<question id>] allow\|stop` | answer a question a running operation is waiting on, from any terminal |
 | `homelab check [stacks/]` | compare the stack files with what runs; says so loudly when it found no stack files and checked only the host's half |
 | `homelab checks` / `homelab checks answer <id> ok\|nok [note]` | list, or answer, the checks only a person can do |
 | `homelab patch` | apt update and dist-upgrade every managed container, one at a time |
@@ -283,8 +300,13 @@ secrets on the workstation.
 | `homelab backup-host-meta` | snapshot the daemon's own state now (see [below](#what-the-daemon-cannot-start-without)) |
 | `homelab backup-devices` | fetch each configured device's own configuration now |
 | `homelab templates` / `homelab template-build [vmid] [ver] [--privileged] [--base <vztmpl>]` | list, or build, golden container templates |
-| `homelab release-update [tag]` | download the daemon's release through `gh`, verify its checksum, and ship it to the host |
+| `homelab release-update [tag]` | download the daemon's release through `gh`, verify its signature and checksum, and ship it to the host |
 | `homelab self-update <path>` | ship a locally built `homelab-host` binary to the host |
+| `homelab self-install [tag]` | replace this client with a release's, signature- and checksum-verified; needs no token |
+| `homelab host restart` | restart the daemon so settings saved to host.toml load; refused while a job runs |
+| `homelab tool status\|update <name>\|rollback <name>` | managed programs on the host (latch): installed against the newest signed release |
+| `homelab token issue <name> <read\|operate\|all>` / `list` / `revoke <name>` | per-machine tokens, so one can be revoked without touching the others |
+| `homelab ui <step>` | drive the open dashboard; see the USER_GUIDE |
 | `homelab testplan [out.md]` | regenerate `docs/deployment/TEST_PLAN.md` from the test suites |
 | `homelab tui` | the terminal interface |
 
@@ -351,11 +373,11 @@ All of these are code; the file named is where each one lives.
   in the transcript (`core/src/ops/destroy.rs`).
 - **Remote exec is off by default** and never allowed on a no-touch vmid.
 - **Release checks.** `release-update` accepts the daemon's release only when
-  its `SHA256SUMS` lists the downloaded binary. The daemon's releases carry no
-  signature; that gap is stated in `client/src/release.rs`. Native services
-  are stricter: their `SHA256SUMS` must carry a minisign signature from the
-  ecosystem release key (`core/src/release_sig.rs`), and an unsigned release
-  is refused.
+  its `SHA256SUMS` carries a minisign signature and lists the downloaded
+  binary (`stage_release` in `client/src/release.rs`); an unsigned release is
+  refused. Native services are held to the same rule: their `SHA256SUMS` must
+  carry a minisign signature from the ecosystem release key
+  (`core/src/release_sig.rs`).
 - **Message size.** One message is at most 256 MiB, and the client refuses a
   larger payload before sending it instead of letting the link reset
   (`MAX_WS_FRAME` in `client/src/version.rs`).
@@ -393,9 +415,10 @@ backup does not count as a failure.
 both end in the same host operation (`core/src/ops/selfupdate.rs`): the new
 binary must answer `--selfcheck`, the running one is kept as
 `/usr/local/bin/homelab-host.prev`, a rollback marker is armed, and the
-service restarts. The new binary clears the marker only after five seconds of
-serving; if it never gets there, systemd's `OnFailure=` script restores the
-previous binary.
+service restarts. The new binary clears the marker only when it has answered
+its first authenticated request (`accept_pending_update` in
+`host/src/http.rs`); if it never gets there, systemd's `OnFailure=` script
+restores the previous binary.
 
 The whole `homelab release-update` path, from the GitHub release to an
 accepted or rolled-back daemon:
@@ -411,7 +434,7 @@ sequenceDiagram
 
     C->>GH: latest release tag (gh release view)
     C->>GH: download homelab-host and SHA256SUMS
-    C->>C: check the SHA-256 and the size limit
+    C->>C: check the minisign signature, the SHA-256 and the size limit
     C->>H: SelfUpdateHost, binary over the WebSocket
     H->>H: selfcheck candidate (--selfcheck)
     H->>H: keep the running binary as homelab-host.prev
@@ -419,21 +442,21 @@ sequenceDiagram
     H->>SD: schedule a restart in 2 s
     H-->>C: operation report
     SD->>N: restart homelab-host
-    alt serves for 5 s
+    alt answers its first authenticated request
         N->>N: clear the marker: self-update accepted
-    else exits before that
+    else dies before that
         SD->>SD: OnFailure= script restores homelab-host.prev
     end
 ```
 
-<sub>Source: `client/src/release.rs:14-60`, `self_update` (`core/src/ops/selfupdate.rs:51-125`), marker clearing (`host/src/main.rs:1882-1891`); the `OnFailure=` unit lives on the host, not in this repository.</sub>
+<sub>Source: `client/src/release.rs:14-60`, `self_update` (`core/src/ops/selfupdate.rs:51-125`), marker clearing (`accept_pending_update` in `host/src/http.rs`); the `OnFailure=` unit lives on the host, not in this repository.</sub>
 
 ## What the daemon cannot start without
 
 | Item | Loaded from | If it is gone | Copies the code keeps |
 |---|---|---|---|
 | API token | host.toml `token` or `HOMELAB_TOKEN` | the daemon exits at start | host.toml is in every host-meta snapshot; the client holds the same value in `~/.config/homelab/env` or `./.env` |
-| TLS certificate and key | `/var/lib/homelab/tls-cert.pem`, `tls-key.pem` | the daemon makes a new pair at start without a warning, so the fingerprint changes and every pinned client refuses it | in every host-meta snapshot |
+| TLS certificate and key | `/var/lib/homelab/tls-cert.pem`, `tls-key.pem` | the daemon makes a new pair at start (with a warning only when one file of an old pair was left behind), so the fingerprint changes and every pinned client refuses it | in every host-meta snapshot |
 | restic password | `/var/lib/homelab/secrets/restic.pw` | no backup or restore can run | inside the host-meta snapshot, which is encrypted with this same password, so a copy kept off the host is the only way back |
 
 The host-meta snapshot (`backup_host_meta` in `core/src/ops/backup/host_meta.rs`) holds
@@ -456,8 +479,9 @@ restic restore latest --target / \
 systemctl restart homelab-host
 ```
 
-The daemon only generates a pair when either file is missing
-(`host/src/tls.rs`), so after the restore it serves the old certificate again.
+The daemon only generates a pair when the pair is not whole (a file missing,
+or a file that is not a certificate or a private key; `pair_is_whole` in
+`host/src/tls.rs`), so after the restore it serves the old certificate again.
 The full recovery procedures, including the restic password, are in
 [docs/OPERATIONS_RUNBOOK.md](docs/OPERATIONS_RUNBOOK.md) and
 [docs/DR_RUNBOOK.md](docs/DR_RUNBOOK.md).
@@ -498,6 +522,7 @@ core/         domain logic; every side effect through the Executor trait
 proto/        wire types for the client-daemon connection
 host/         the daemon: config, TLS, WebSocket server, nightly schedule
 client/       the homelab CLI and TUI
+admin/        homelab-admin, the browser dashboard (native service, vmid 120)
 tui-preview/  a standalone TUI mockup on simulated data (see its README)
 stacks/       stack definitions (app .env files are not committed)
 presets/      the app catalog
@@ -532,13 +557,16 @@ homelab release-update       # afterwards: roll the published release out to the
 ```
 
 `make release` refuses a dirty tree, a branch other than `main` and an
-existing tag, then runs `cargo deny` (advisories), gitleaks (the whole
-history) and the MSRV check. `DRY=1` stops there, before the gate runs.
-Otherwise it runs the full gate, tags, builds `homelab-host`, `homelab`,
-`homelab-admin` and `SHA256SUMS` in `rust:1-bookworm` on this machine,
-pushes and publishes the GitHub Release. GitHub Actions runs nothing for
-this repository (Kenny, 2026-09-29); `make check` gives the verdict CI used
-to give. The toolchain is pinned in
+existing tag, runs the register and host-drift checks, then `cargo deny`
+(advisories), gitleaks (the whole history) and the MSRV check. `DRY=1` stops
+there, before the gate runs. Otherwise it runs the full gate, tags, builds
+`homelab-host`, `homelab`, `homelab-admin` and `SHA256SUMS` in a
+`rust:*-bookworm` docker image on this machine (`DEBIAN_IMAGE` in the
+`Makefile`), pushes and publishes the GitHub Release. The release is not yet
+signed: Kenny signs it with `~/Projects/workstation/bin/sign-releases
+homelab:v<version>`, and `homelab release-update` refuses it until he has.
+GitHub Actions runs nothing for this repository (Kenny, 2026-09-29); `make
+check` gives the verdict CI used to give. The toolchain is pinned in
 `rust-toolchain.toml`.
 
 More in [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md).

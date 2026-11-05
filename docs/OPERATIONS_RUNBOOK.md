@@ -2,15 +2,14 @@
 
 The recurring work on the homelab orchestrator, as numbered procedures.
 Every procedure says which terminal each step runs in, where its point of
-no return is, and how to check the result. Behaviour is cited as
-`file:line` against the release commit of v3.58.3 on `main` (`5bebcf6`,
-`Cargo.toml:6`), so a changed line leads straight to the paragraph that
-depends on it. The parts that describe the declarative cleanup of
-2026-09-27 (op-2 step 1, op-4, op-5's diagram, op-6, op-7's last part, the
-retired rows in op-17 and op-19) cite commit `ad03664` instead; that code
-is newer than the v3.58.10 release, so the host needs a build that contains
-it before `homelab apply`, `homelab wipe` and the removals below exist
-there.
+no return is, and how to check the result. Behaviour is cited by file and
+function, or as `file:line` against the release commit of v3.58.3 on `main`
+(`5bebcf6`). The `file:line` numbers have drifted since: files were split
+and moved, so follow the file or function name and search for it when a
+line number does not match. The procedures about `homelab apply`,
+`homelab wipe` and the removals (op-2 step 1, op-4, op-5's diagram, op-6,
+op-7's last part, the retired rows in op-17 and op-19) describe the host
+that runs the current release.
 
 Not in this document:
 
@@ -115,10 +114,11 @@ hour waits for the batch, and says so at once:
 (fix-104). `check`, `doctor` and `today` print a `CHECK` line per phase while
 they read, one per container they probe.
 
-**Client newer than host.** A mutating command against an older host is
-refused and the message ends in `"run 'homelab release-update' first"`
-(`client/src/commands/new_stack.rs::cmd_template_build`). `release-update` itself is exempt
-(`client/src/version.rs:15-30`).
+**Client newer than host.** A mutating command is refused only against a host
+older than `UNKNOWN_FIELD_CHECK_SINCE` (`client/src/link.rs`), and the message
+ends in `"run 'homelab release-update' first"`
+(`client/src/link.rs::refuse_older_host`). `release-update` itself is exempt
+(`client/src/version.rs::mutates`). Against a newer host nothing is refused.
 
 **Questions.** A step that must ask (for example, an app is in use) is
 raised as an urgent notice and waits `ask_timeout_s`, default 600 s, then
@@ -840,33 +840,39 @@ Workstation, repository root, on `main`, after `make hooks` once per clone
 (`Makefile:25-29`).
 
 1. **Rehearse.** `make release VERSION=x.y.z DRY=1`. Checks the version
-   format, a clean tree, that the tag is new, and the CI verdict on `HEAD`;
-   ends with `"version and tag checks passed; the gate (fmt, clippy, tests)
-   was NOT run; nothing tagged or pushed"` (`Makefile`; it said "every check
-   passed" until gap-29, while the gate never ran). Refusals: `"working tree not clean"`,
+   format, a clean tree, that the tag is new, the register and the host
+   drift (`make host-drift`, which reads the host), then the scanners and the
+   MSRV check; ends with `"✓ dry run for vx.y.z: version, tag, advisories,
+   secrets and MSRV checks passed; the gate (fmt, clippy, tests) was NOT run;
+   nothing tagged or pushed"` (`Makefile`, `release`). Refusals: `"working tree not clean"`,
    `"already exists"`, `"refusing: releases are cut from main"`, and the
    scanners' own output (`cargo deny`, gitleaks, the MSRV check).
-2. **Release.** `make release VERSION=x.y.z`. Runs the scanners and `make
-   gate`, stamps the version, commits `release: vx.y.z [meta]`, tags, builds
-   `homelab-host`, `homelab`, `homelab-admin` and `SHA256SUMS` in
-   `rust:1-bookworm` on this machine (`make release-binaries`), pushes and
-   publishes them with `gh release create --verify-tag` (`Makefile`,
-   `release`). **Point of no return:** the push. Nothing runs on GitHub.
+2. **Release.** `make release VERSION=x.y.z`. Runs the same checks, then `make
+   gate` (skipped when `.githooks/gate-stamp` says it already passed for this
+   tree), stamps the version, commits `release: vx.y.z [meta]`, tags, builds
+   `homelab-host`, `homelab`, `homelab-admin` and `SHA256SUMS` in a
+   `rust:*-bookworm` docker image on this machine (`make release-binaries`,
+   `DEBIAN_IMAGE` in the `Makefile`), pushes and publishes them with `gh
+   release create --verify-tag` (`Makefile`, `release`). **Point of no
+   return:** the push. Nothing runs on GitHub.
+   **Sign it.** Kenny signs the release with
+   `~/Projects/workstation/bin/sign-releases homelab:vx.y.z`, which adds
+   `SHA256SUMS.minisig`. Until then step 3 refuses the release.
 3. **Roll out to the host.** `homelab release-update` (newest) or
    `homelab release-update vx.y.z`; or the TUI palette's "host update" entry
    (Ctrl+K, fix-102 moved it off a bare key) when the dashboard shows
    `"HOST UPDATE <tag> available"` (`client/src/commands/restore.rs::cmd_restore_native`,
    `client/src/tui/model.rs`, `client/src/tui/view/mod.rs:601-605`).
-   The client downloads with `gh`, checks the checksum, and ships the
-   binary over the line. There is no signature on the orchestrator's own
-   releases, only the checksum (`client/src/release.rs:55-62`).
+   The client downloads with `gh`, checks the minisign signature over
+   `SHA256SUMS` and then the checksum, and ships the binary over the line. An
+   unsigned release is refused (`client/src/release.rs::stage_release`).
 4. On the host: the candidate must pass `--selfcheck` before anything is
    replaced; then the live binary is copied to
    `/usr/local/bin/homelab-host.prev`, the new one installed, a rollback
    marker armed and a restart scheduled 2 s later
    (`core/src/ops/selfupdate.rs:39-131`). The new daemon removes the marker
    once it has answered its first authenticated request and logs
-   `"self-update accepted"` (fix-121). `homelab release-update` waits up to
+   `"self-update accepted"` (fix-121; `host/src/http.rs::accept_pending_update`). `homelab release-update` waits up to
    150 s for the shipped version to answer, pings it (that is the request
    that accepts it) and exits non-zero when the old version came back (a
    rollback) or nothing answered.
@@ -899,11 +905,12 @@ sequenceDiagram
     W->>W: gate, stamp the version, commit, tag
     W->>G: push with the tag
     Note over W,G: point of no return
-    G->>G: release.yml checks the tag, runs the gate, builds, writes SHA256SUMS
+    Note over W: builds the binaries and SHA256SUMS locally, publishes the release
+    O->>W: sign-releases homelab:vx.y.z (adds SHA256SUMS.minisig)
     O->>W: homelab release-update
     W->>G: gh release download
-    G-->>W: homelab-host and SHA256SUMS
-    W->>W: check the checksum, no signature on these releases
+    G-->>W: homelab-host, SHA256SUMS and SHA256SUMS.minisig
+    W->>W: check the signature and the checksum
     W->>H: SelfUpdateHost over the TLS line
     H->>H: candidate runs --selfcheck
     alt selfcheck fails
@@ -923,7 +930,7 @@ sequenceDiagram
     O->>W: homelab ping
 ```
 
-<sub>Source: `Makefile:51-119` (`release`), `.github/workflows/release.yml:6-40`, `client/src/commands/restore.rs::cmd_restore_native`, `client/src/release.rs:55-62`, `core/src/ops/selfupdate.rs:51-131`, `host/src/tests/support.rs::config_from_text`.</sub>
+<sub>Source: `Makefile:51-119` (`release`), `client/src/commands/restore.rs::cmd_restore_native`, `client/src/release.rs:55-62`, `core/src/ops/selfupdate.rs:51-131`, `host/src/tests/support.rs::config_from_text`.</sub>
 
 **Rollback.** `core/src/ops/selfupdate.rs:1-7` describes an `OnFailure=`
 unit on the host that restores `.prev` while the marker is still there.
@@ -1430,18 +1437,20 @@ backup of every stack and `homelab backup-host-meta`.
 
 ### lost-2 · The TLS key or certificate is gone
 
-**What happens.** The daemon makes a new pair whenever either file is
-missing (`host/src/tls.rs:21`), at start and also whenever a client asks
-for the fleet state, which the TUI does on refresh with `r`
-(`host/src/tests/support.rs::scoped_state`, `client/src/tui/model.rs:779`). The next start serves it; every workstation then
+**What happens.** The daemon makes a new pair whenever the pair is not whole
+(a file missing, a certificate that does not decode, a key that is not a PEM
+private key; `host/src/tls.rs::pair_is_whole`), at start and also whenever a
+client asks for the fleet state, which the TUI does on refresh with `r`
+(`host/src/fleet_state/mod.rs`, `client/src/tui/model.rs`). The next start serves it; every workstation then
 refuses with `"certificate fingerprint mismatch"`
 (`client/src/tls.rs:49-67`).
 
-**Restore or remove the pair together.** With the certificate missing and
-the key present, generation overwrites the certificate, then fails to
-create the key file (`host/src/tls.rs:31-43`), and the daemon stops at
-start (`host/src/tests/support.rs::parsed`). From then on both files exist and do
-not belong together, and nothing regenerates them.
+**Restore or remove the pair together.** A half pair is replaced whole
+(fix-128): the daemon logs `"are not a whole pair — making a new
+certificate"`, writes the key first and the certificate last, and serves
+the new identity. It does not stop. That is why lost-2a stops the daemon
+first: while it runs, a client asking for the fleet state would replace
+a half-restored pair.
 
 **lost-2a · Put the old identity back** (every pin stays valid). Host; needs
 the restic password (lost-1):

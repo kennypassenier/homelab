@@ -171,19 +171,22 @@ in the repository.
 
 ### 0.3 The version gate
 
-When the host is older than the client, the command line refuses to send any
-command except `ping`, `status`, `doctor`, `incidents`, a state request and a
-host update (`client/src/version.rs:15-30`, `client/src/commands/new_stack.rs::cmd_template_build`).
-Read-only verbs such as `homelab check` and `homelab config` are refused too.
-The message ends with `run 'homelab release-update' first`. The reason is in
-the message: a host that predates a field ignores it, and the operation
-quietly does less than asked. The TUI holds the same gate since fix-67.
+A version check informs; it blocks only one case (fix-199, Kenny 2026-10-02).
+A command that changes something is refused when the host is older than
+`UNKNOWN_FIELD_CHECK_SINCE` (`client/src/link.rs`), the release from which the
+host itself names a field it has no room for. Below that, a host silently
+ignores a field it predates and the operation quietly does less than asked, so
+the message is
+`host is v<x> and cannot yet tell an unknown field from one its own build simply has no room for ... run 'homelab release-update' first`
+(`client/src/link.rs::refuse_older_host`). `ping`, `status`, `doctor`,
+`incidents`, a state request and a host update are never refused
+(`client/src/version.rs::mutates`).
 
-The other direction holds too (fix-105): when this client is older than the
-host, the same set of commands is refused with
-`... — run 'homelab self-install' first`, and the ones let through print
-`this client is v<x> and the host is v<y> — 'homelab self-install' updates it`
-first. `homelab self-install [tag]` downloads the release's `homelab`
+The other direction never blocks: when this client is older than the host, the
+command goes ahead and first prints
+`this client is v<x> and the host is v<y> — 'homelab self-install' updates it ...`
+(`client/src/link.rs::older_client_notice`).
+`homelab self-install [tag]` downloads the release's `homelab`
 (newest when no tag is given), checks the release's minisign signature over
 `SHA256SUMS` (`SHA256SUMS.minisig`, the ecosystem key 1C88AB06D43C0B16) and
 the binary against that list, and puts it where the running client lives; an
@@ -1531,7 +1534,12 @@ firewall:
 - On the gateway, a rule or `policy_in` that opens tcp port 80 is refused:
   Traefik answers a forged Host header with the Proxmox and OPNsense logins,
   and the tunnel reaches port 80 over the gateway's own docker network, which
-  the container's firewall never sees.
+  the container's firewall never sees. The check ignores the trusted-source
+  rules below. The home route reaches Traefik on port 443 instead.
+- `trusted_sources` in host.toml is a list of addresses (Kenny's own machine)
+  that every stack's firewall lets in on every port: one inbound ACCEPT per
+  address, written first in the rules (`core/src/firewall.rs::trusted_rules`).
+  It is applied by the next deploy of each stack. Unset means none.
 - The step `firewall` runs before `provision container`, logs `unchanged` or
   `written: +N -M` with every line that came and went, and switches net0 to
   `firewall=1` when it is off; without that flag Proxmox applies none of the
@@ -1684,7 +1692,8 @@ The verbs:
 | `homelab rollback-native <stack>[/<unit>]` | goes back to the one previous binary every healthy install or update keeps beside the program (`<binary>.homelab-prev`, fix-114), under the same health check, and parks the stack's automatic updates until `homelab enable <stack>`; running it again returns to the version rolled back from | `core/src/ops/native/rollback.rs::rollback_native` |
 
 `backup-native`, `update-native` and `release-update-native` act on the copy
-of the service files the host recorded at adoption, and on every service of
+of the service files the host recorded at adoption or at the latest deploy
+of the stack, and on every service of
 the stack in turn (`host/src/tests/reads.rs::fix_180_a_cache_miss_backup_calendar_does_not_block_the_queue_behind_it`). A stack the host does not
 know answers `adopt it first`, followed by the adopt command
 (`host/src/tests/support.rs::asking_handler_with`).
@@ -1748,7 +1757,9 @@ services are left alone at night, neither release-updated nor self-updated
 (fix-58, `NativeServiceManifest::nightly_updates`). `update_policy: auto` without a
 `release_repo` fails validation (`core/src/native.rs:163-167`). The host reads
 the policy from its own copy, so after changing it run
-`homelab adopt stacks/<name>` to refresh that copy
+`homelab adopt stacks/<name>`, or deploy the stack (a deploy records the
+manifest its stack files describe, `core/src/ops/deploy/record.rs::kept_natives`),
+to refresh that copy
 (`core/src/ops/native/update.rs::skip_without_update_cmd` says the same for `update_cmd`).
 
 **A deploy never replaces an installed native binary.** `homelab deploy` of a
@@ -3054,8 +3065,9 @@ The client sends the file (`▶ self-update :: shipping <path> (<n> KiB)`,
 5. `schedule restart`: restarts the service in 2 seconds, so the answer still
    reaches you.
 
-The new binary removes the marker after 5 seconds of serving and logs
-`self-update accepted — now running v<version>` (`host/src/tests/support.rs::config_from_text`).
+The new binary removes the marker when it has answered its first authenticated
+request and logs `self-update accepted — v<version> answered an authenticated
+request` (`host/src/http.rs::accept_pending_update`).
 Normally you use H7 instead, which fetches and verifies a release first.
 
 #### H6 · Fleet OS patching
@@ -3404,6 +3416,25 @@ deploy, right above), so there is nothing to migrate and no `replaces:`
 field exists for probes. Giving one an id is purely so `homelab checks`
 and the nightly findings name it the same way every time, independent of a
 later rewording.
+
+### Opening the dashboard: the two locks
+
+The dashboard (CT 120, port 8090) answers only after two locks, both run
+before its own login (`admin/src/shell/guard.rs`): lock 1, a valid Cloudflare
+Access token (`Cf-Access-Jwt-Assertion`); lock 2, a client address
+(`Cf-Connecting-IP`, believed only from the trusted proxy, Traefik) equal to
+the house's public address, which the host reads from the router. Refusals
+come as a page naming the lock (`admin/src/core/access.rs`, `Refusal::alarm`).
+
+A request from a `trusted_sources` address (host.toml, the same list the
+firewalls use) passes both locks (`Guard::trusted`). That holds for a direct
+peer, and for a request that came through Traefik without a
+`Cf-Connecting-IP` header, meaning it did not come through the Cloudflare
+tunnel: then the last `X-Forwarded-For` entry, the address Traefik itself
+saw, is checked against the list (`access::trusted_forwarded`). At home,
+`*.kp-soft.dev` reaches Traefik on port 443 (`websecure`, Let's Encrypt
+wildcard certificate, `stacks/gateway/traefik/docker-compose.yml`), so a
+trusted workstation opens the dashboard that way without the tunnel.
 
 ### The dashboard: Apps, Metrics and the minute watch
 

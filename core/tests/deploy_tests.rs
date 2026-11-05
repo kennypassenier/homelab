@@ -3835,6 +3835,57 @@ mod native_from_zero {
             );
         }
     }
+
+    /// 2026-11-05: Almanac's `service.yml` said `backup_pause: chassis` for a
+    /// month while its nightly tar ran live, because a deploy kept the manifest
+    /// the host had recorded at install.
+    #[tokio::test]
+    async fn a_deploy_records_the_manifest_the_stack_files_now_describe() {
+        let exec = MockExecutor::new();
+        native_ready(&exec);
+        let manifest = |pause: &str| -> homelab_core::native::NativeServiceManifest {
+            serde_yaml::from_str(&format!(
+                "stack_name: drill\nvmid: 118\nhostname: 118-app-drill\nunit: kyu\n\
+                 binary: /usr/local/bin/kyu\nbackup_pause: {pause}\n"
+            ))
+            .unwrap()
+        };
+        let mut hs = homelab_core::state::HostState::default();
+        hs.stacks.insert(
+            "drill".into(),
+            homelab_core::state::StackState {
+                pushed_file_hashes: std::collections::BTreeMap::new(),
+                component_digests: Default::default(),
+                extra_route_files: Vec::new(),
+                applied_source: None,
+                vmid: 118,
+                hostname: "118-app-drill".into(),
+                apps: vec!["kyu".into()],
+                applied_at: 0,
+                last_backup: 0,
+                applied_hash: String::new(),
+                manifest: None,
+                enabled: true,
+                route_file: None,
+                natives: vec![manifest("false")],
+                incomplete_step: None,
+            },
+        );
+        let store = homelab_core::state::StateStore::new(&exec, "/var/lib/homelab");
+        store.save(hs).await.unwrap();
+        let mut sp = native_spec();
+        sp.native_manifests
+            .insert("kyu".into(), manifest("chassis"));
+        let sink = VecSink::new();
+        let j = NullJournal;
+        let report = deploy(&ctx(&exec, &sink, &j), &sp).await;
+        assert!(report.ok, "{:?}", report.error);
+        let st = store.load().await.unwrap();
+        assert_eq!(
+            st.stacks["drill"].natives[0].backup_pause,
+            homelab_core::native::BackupPause::Chassis
+        );
+    }
 }
 
 /// F307: the security matcher must key on the codename, never on the archive

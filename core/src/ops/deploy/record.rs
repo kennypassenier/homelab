@@ -56,6 +56,11 @@ impl Run<'_, '_> {
     /// containers got a manifest — so the nightly backup of four services
     /// would simply have stopped, quietly, with nothing to see.
     ///
+    /// A unit the stack files still describe takes the deploy's manifest: a
+    /// `backup_pause` added to `service.yml` sat unread on the host until the
+    /// next `install-native` (2026-11-05: Almanac's nightly tar ran live, with
+    /// `chassis` in the file since 2026-10-01).
+    ///
     /// ask-8: except a unit the stack FILE dropped from `natives:` — the
     /// step "retire dropped" stopped it, and it leaves the record here.
     fn kept_natives(&self, state: &HostState) -> Vec<NativeServiceManifest> {
@@ -66,7 +71,7 @@ impl Run<'_, '_> {
                 s.natives
                     .iter()
                     .filter(|n| !self.dropped_natives.contains(&n.unit))
-                    .cloned()
+                    .map(|n| self.spec.native_manifests.get(&n.unit).unwrap_or(n).clone())
                     .collect()
             })
             .unwrap_or_default()

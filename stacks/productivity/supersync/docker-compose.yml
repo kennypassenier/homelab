@@ -51,6 +51,9 @@ services:
       - JWT_SECRET=${SUPERSYNC_JWT_SECRET}
       # The database lives in its own compose file on the shared network, so
       # it is reached by container name.
+      # The image applies its Prisma migrations only with this set. Without it
+      # four migrations sat unapplied until 2026-11-06 and the nightly cleanup failed.
+      - RUN_MIGRATIONS_ON_STARTUP=true
       - DATABASE_URL=postgresql://supersync:${SUPERSYNC_POSTGRES_PASSWORD}@supersync-db:5432/supersync
       - PUBLIC_URL=${SUPERSYNC_PUBLIC_URL}
       - HOST=${SUPERSYNC_HOST}

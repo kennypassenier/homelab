@@ -100,6 +100,29 @@ pub fn load_history(w: &mut WatchState, db: AppDb, now: i64) {
     w.history_db = Some(db);
 }
 
+/// Read the history from the app database once it is open. `mount_watch`
+/// runs before the database opens (its read then fails and the history
+/// starts empty), so the watch retries here until the first read succeeds,
+/// then replaces the empty history (nothing is flushed before that: only
+/// dirty cells are written and none exist yet).
+async fn load_history_when_open(watched: &Watched, clock: &Clock) {
+    let Some(db) = watched.lock().await.history_db.clone() else {
+        return;
+    };
+    for _ in 0..120 {
+        let now = clock().max(0);
+        let oldest = (now.div_euclid(3600) - uptime::KEEP_HOURS) * 3600;
+        if let Ok(cells) = db.read(move |c| cells_since(c, oldest)).await {
+            let mut s = Store::from_cells(cells);
+            s.trim(now);
+            watched.lock().await.history = s;
+            return;
+        }
+        tokio::time::sleep(Duration::from_secs(1)).await;
+    }
+    tracing::warn!("uptime history not read: the app database did not open");
+}
+
 /// The stored cells after `oldest_at` (unix seconds, exclusive), per key
 /// oldest first.
 pub(crate) fn cells_since(
@@ -279,6 +302,8 @@ pub fn spawn(
     clock: Clock,
 ) {
     let flusher = watched.clone();
+    let loader = watched.clone();
+    let load_clock = clock.clone();
     tokio::spawn(async move {
         let mut t = tokio::time::interval(FLUSH_EVERY);
         t.tick().await;
@@ -294,6 +319,7 @@ pub fn spawn(
         // container readings cost nothing (they come from the fleet state
         // already read) and down-after is time-based, so a faster tick only
         // makes the dots more current.
+        load_history_when_open(&loader, &load_clock).await;
         let mut t = tokio::time::interval(TICK);
         loop {
             t.tick().await;

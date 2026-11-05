@@ -844,6 +844,50 @@ mod tests {
     }
 
     #[test]
+    fn uptime_history_comes_back_whole_after_a_restart() {
+        use crate::core::uptime::{self, Cell};
+        let db = memory_db();
+        // Two weeks of hourly cells for three keys, as the watch flushed them.
+        let now = 400 * 86_400i64 + 15 * 3600 + 120;
+        let first_hour = now.div_euclid(3600) - 14 * 24;
+        db.write_blocking(|tx| {
+            let mut cells = Vec::new();
+            for key in ["stack:kyu", "tile:kyu.kp-soft.dev", "ping:host"] {
+                for h in first_hour..=now.div_euclid(3600) {
+                    cells.push((
+                        key.to_string(),
+                        Cell {
+                            h,
+                            up: 60,
+                            ..Default::default()
+                        },
+                    ));
+                }
+            }
+            crate::shell::watch::put_cells(tx, &cells)
+        })
+        .unwrap();
+        // The restart: the history is read back into a fresh watch.
+        let mut w = crate::shell::watch::WatchState::default();
+        crate::shell::watch::load_history(&mut w, db.clone(), now);
+        // The watch goes on recording after the load (a new hour opens).
+        w.history
+            .record("stack:kyu", now + 3600, uptime::Sample::Up);
+        w.history.record_ping("ping:host", now + 3600, Some(3));
+        let now = now + 3600;
+        let v = uptime::view(&w.history, now, 24 * 90, 86_400, 3600);
+        for key in ["stack:kyu", "tile:kyu.kp-soft.dev", "ping:host"] {
+            let days = v["keys"][key]["periods"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .filter(|p| p["state"] != "none")
+                .count();
+            assert!(days >= 14, "{key}: {days} days with readings after the restart");
+        }
+    }
+
+    #[test]
     fn stored_rows_are_never_dropped_by_age_or_count() {
         use crate::core::trend::{Bucket, Mean};
         use crate::core::updateflow::UpdateRecord;

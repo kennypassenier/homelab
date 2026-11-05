@@ -931,9 +931,20 @@ where
         return Err(format!("{} has no lxc-compose.yml", dir.display()));
     }
     collect(dir, dir, &mut files, &mut env, &mut checks)?;
+    let manifest_path = dir.join("lxc-compose.yml");
+    let raw = std::fs::read_to_string(&manifest_path)
+        .map_err(|e| format!("cannot read {}: {}", manifest_path.display(), e))?;
+    drop_latch_file_copies(&mut files, &parse_stack_file(&raw, &manifest_path)?);
     let _notes = resolve_compose_digests_with(&mut files, resolve);
     files.sort_by(|a, b| a.path.cmp(&b.path));
     Ok(files)
+}
+
+/// A `latch_files` entry lives in latch. A copy a `latch pull` left in the
+/// stack directory is not one of the stack's files: only the machine holding
+/// it would count it, so the dashboard, whose clone has none, called it gone.
+fn drop_latch_file_copies(files: &mut Vec<FileBlob>, stack_file: &StackFile) {
+    files.retain(|f| !stack_file.latch_files.iter().any(|l| l.from == f.path));
 }
 
 /// Everything of the deploy spec but the native programs.
@@ -957,6 +968,7 @@ fn spec_without_binaries(
     let mut env: BTreeMap<String, String> = BTreeMap::new();
     let mut checks: BTreeMap<String, homelab_core::checks::ServiceChecks> = BTreeMap::new();
     collect(dir, dir, &mut files, &mut env, &mut checks)?;
+    drop_latch_file_copies(&mut files, &stack_file);
     // MR1 (Kenny, 2026-09-05): which source wins, and saying so out loud.
     //
     // A local `.env` beats latch. The rule it replaces refused the deploy

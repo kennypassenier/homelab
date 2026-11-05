@@ -66,6 +66,31 @@ const ENTRY: &str = "latch_files:\n  - from: switch/config.toml\n    \
                      dest: /appdata/lftest/switch-config/config.toml\n    \
                      mode: \"640\"\n    owner: root:switch\n    restarts: switch\n";
 
+/// 2026-11-05: the dashboard's clone has no such copy, and called it gone.
+#[test]
+fn a_copy_of_a_latch_file_in_the_stack_directory_is_not_a_stack_file() {
+    let root = std::env::temp_dir().join(format!("homelab-lf-copy-{}", std::process::id()));
+    let dir = stack_dir(&root, ENTRY);
+    write(
+        &dir.join("switch").join("config.toml"),
+        "url = \"secret\"\n",
+    );
+    let paths: Vec<String> = homelab_client::spec::stack_files(&dir)
+        .unwrap()
+        .into_iter()
+        .map(|f| f.path)
+        .collect();
+    let _ = std::fs::remove_dir_all(&root);
+    assert!(
+        paths.iter().any(|p| p == "switch/switch.service"),
+        "{paths:?}"
+    );
+    assert!(
+        !paths.iter().any(|p| p == "switch/config.toml"),
+        "{paths:?}"
+    );
+}
+
 /// One test fn on purpose: PATH and HOMELAB_LATCH_ENV are process-global.
 #[test]
 fn latch_files_are_read_from_latch_and_checked_before_any_call() {

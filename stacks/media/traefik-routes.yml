@@ -21,6 +21,15 @@ http:
       rule: "Host(`baz.kp-soft.dev`)"
       entryPoints: [web, websecure]
       service: bazarr
+    # 2026-11-05: Sonarr, Radarr and Prowlarr ignore X-Forwarded-Proto from a
+    # proxy that is not on loopback, so an https visit is sent to an http://
+    # login. Only a request that really is plain http takes this redirect: the
+    # tunnel arrives on web with X-Forwarded-Proto: https and is left alone.
+    arr-login-https:
+      rule: "(Host(`son.kp-soft.dev`) || Host(`rad.kp-soft.dev`) || Host(`prowl.kp-soft.dev`)) && HeaderRegexp(`X-Forwarded-Proto`, `^http$`)"
+      entryPoints: [web]
+      middlewares: [arr-login-https]
+      service: noop@internal
     prowlarr:
       rule: "Host(`prowl.kp-soft.dev`)"
       entryPoints: [web, websecure]
@@ -29,6 +38,11 @@ http:
       rule: "Host(`seerr.kp-soft.dev`)"
       entryPoints: [web, websecure]
       service: seerr
+
+  middlewares:
+    arr-login-https:
+      redirectScheme:
+        scheme: https
 
   services:
     jellyfin:

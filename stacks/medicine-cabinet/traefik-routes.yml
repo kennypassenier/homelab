@@ -9,7 +9,7 @@ http:
   routers:
     medicine-cabinet:
       rule: "Host(`meds.kp-soft.dev`)"
-      entryPoints: [web]
+      entryPoints: [web, websecure]
       service: medicine-cabinet
 
   services:

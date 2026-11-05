@@ -82,7 +82,7 @@ probes:
     command: |
       K=$(sed -n 's/^WebUI\\APIKey=//p;/^\[WebUI\]/,/^\[/{s/^APIKey=//p}' /appdata/downloader/qbittorrent-config/qBittorrent/qBittorrent.conf)
       P=$(printf 'header = "Authorization: Bearer %s"\n' "$K" | docker exec -i qbittorrent curl -sf -K - http://localhost:8080/api/v2/app/preferences) || exit 1
-      printf "%s" "$P" | jq -r 'if (.excluded_file_names_enabled // true) and (.excluded_file_names|test("\\*\\.7z")) and (.excluded_file_names|test("\\*\\.iso")) then "ok" else "missing" end'
+      printf "%s" "$P" | jq -r 'if (.excluded_file_names_enabled == true) and (.excluded_file_names|test("\\*\\.7z")) and (.excluded_file_names|test("\\*\\.iso")) and (.excluded_file_names|test("\\*\\.scr")) then "ok" else "missing" end'
     healthy: {equals: "ok"}
     layer: application
     id: qbittorrent-fake-release-types-excluded
@@ -101,4 +101,13 @@ settings:
     section: BitTorrent
     key: 'Session\ExcludedFileNames'
     value: "*.exe, *.bat, *.cmd, *.scr, *.lnk, *.7z, *.iso, *.zipx, *.vbs, *.ps1, *.msi"
+    stop_app: true
+  # 2026-11-05: the list above did nothing while this stayed off, its default:
+  # two .scr fake releases finished downloading on 2026-10-31 (Kenny: "sonarr
+  # mag nooit .scr downloaden").
+  - file: /appdata/downloader/qbittorrent-config/qBittorrent/qBittorrent.conf
+    format: ini
+    section: BitTorrent
+    key: 'Session\ExcludedFileNamesEnabled'
+    value: "true"
     stop_app: true

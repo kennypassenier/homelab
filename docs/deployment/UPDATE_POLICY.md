@@ -95,6 +95,7 @@ fails while this section is stale.
 | kyu | http-switchboard | `manual` | nothing; updated on request | `kennypassenier/http-switchboard` |
 | kyu | kyu | `auto` | installs a newer release | `kennypassenier/kyu` |
 | kyu | kyu-runner | `auto` | installs a newer release | `kennypassenier/kyu-runner` |
+| medicine-cabinet | medicine-cabinet | `manual` | nothing; updated on request | `kennypassenier/medicine-cabinet` |
 <!-- END generated -->
 
 ## What an automatic update actually does

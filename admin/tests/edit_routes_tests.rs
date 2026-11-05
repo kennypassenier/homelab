@@ -398,12 +398,12 @@ async fn feat_stacks_3_a_new_stack_is_scaffolded_committed_and_only_its_director
     // Clones on the way (the repo route or a plan clones it first).
     let v = p["suggest_vmid"].as_u64().unwrap();
     assert!(v >= 104 && ![104, 116, 120].contains(&v));
-    let req = serde_json::json!({ "name": "recipes", "vmid": 122, "preset": "mealie", "ram_mb": 512, "cores": 1, "disk_gb": 8 });
+    let req = serde_json::json!({ "name": "recipes", "vmid": 124, "preset": "mealie", "ram_mb": 512, "cores": 1, "disk_gb": 8 });
     let (st, paths) = call(
         &w.app,
         "POST",
         "/data/stacks-new/appdata",
-        Some(serde_json::json!({ "preset": "mealie", "name": "recipes", "vmid": 122 })),
+        Some(serde_json::json!({ "preset": "mealie", "name": "recipes", "vmid": 124 })),
     )
     .await;
     assert_eq!(st, StatusCode::OK);
@@ -422,7 +422,7 @@ async fn feat_stacks_3_a_new_stack_is_scaffolded_committed_and_only_its_director
         plan["effects"][0]["what"]
             .as_str()
             .unwrap()
-            .contains("creates CT 122")
+            .contains("creates CT 124")
     );
     let (st, v) = call(
         &w.app,
@@ -754,12 +754,12 @@ async fn redesign_stacks_8_an_empty_stack_is_scaffolded_with_no_apps_and_no_pres
     let w = world("empty").await;
     let (st, _) = call(&w.app, "GET", "/data/presets", None).await;
     assert_eq!(st, StatusCode::OK);
-    let req = serde_json::json!({ "name": "blank", "vmid": 122, "preset": "", "ram_mb": 1024, "cores": 1, "disk_gb": 8 });
+    let req = serde_json::json!({ "name": "blank", "vmid": 124, "preset": "", "ram_mb": 1024, "cores": 1, "disk_gb": 8 });
     let (st, paths) = call(
         &w.app,
         "POST",
         "/data/stacks-new/appdata",
-        Some(serde_json::json!({ "preset": "", "name": "blank", "vmid": 122 })),
+        Some(serde_json::json!({ "preset": "", "name": "blank", "vmid": 124 })),
     )
     .await;
     assert_eq!(st, StatusCode::OK);

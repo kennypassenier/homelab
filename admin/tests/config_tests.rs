@@ -235,6 +235,9 @@ fn native_units_start_on_a_fresh_container() {
         // KITCHEN_TOKEN and KITCHEN_SECRET_KEY: without them kitchen
         // refuses to start, so the file is required on purpose.
         "stacks/kitchen/kitchen/kitchen.service",
+        // first_secret_cmd writes its secrets at the first install, so the file is
+        // required on purpose.
+        "stacks/medicine-cabinet/medicine-cabinet/medicine-cabinet.service",
         // HABITS_TOKEN and HABITS_SECRET_KEY: same as kitchen, the file is
         // required on purpose.
         "stacks/habits/habits/habits.service",

@@ -31,7 +31,7 @@ fn the_routes_in_the_repository_pass_and_cover_every_public_hostname() {
         .collect();
     hosts.sort();
     hosts.dedup();
-    assert_eq!(hosts.len(), 25, "{:?}", hosts);
+    assert_eq!(hosts.len(), 26, "{:?}", hosts);
     for h in [
         "admin.kp-soft.dev",
         "almanac.kp-soft.dev",

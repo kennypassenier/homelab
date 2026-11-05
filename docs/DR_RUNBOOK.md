@@ -446,6 +446,18 @@ One section per directory under `stacks/`, read from its `lxc-compose.yml` and, 
 - Host directory mounted in, never created or backed up by this suite: `/HDD12TB/subvol-103-disk-0` at `/mnt/data/12TB` (CT 103's dataset; the 12 TB library).
 - Host directory mounted in, never created or backed up by this suite: `/HDD4TB/jellyfin-metadata` at `/mnt/jellyfin-metadata` (Jellyfin's artwork — regenerable, deliberately outside the backup (Kenny, M1)).
 
+### medicine-cabinet (vmid 122)
+
+- Container: hostname `122-app-medicine-cabinet`, ip `CT 122 (medicine-cabinet)` on `vmbr0` VLAN 10, 1 core(s), 512 MiB RAM, 0 MiB swap, 4 GiB disk on `local-lvm`, unprivileged, template `clone:996`, boot order 50.
+- Runs no docker: native systemd services only.
+- Unit `medicine-cabinet`:
+  - program `/opt/medicine-cabinet/bin/medicine-cabinet`, from the GitHub release `kennypassenier/medicine-cabinet` (asset `medicine-cabinet`); update policy manual.
+  - unit file `stacks/medicine-cabinet/medicine-cabinet/medicine-cabinet.service` in the repository; the container's copy is `/etc/systemd/system/medicine-cabinet.service`.
+  - data: repository `rclone:gdrive:homelab-backups/medicine-cabinet-config`, archive `/medicine-cabinet-data.tar` holding a tar of `/appdata/medicine-cabinet/medicine-cabinet-config`.
+  - vault copy of medicine-cabinet (`/appdata/medicine-cabinet/medicine-cabinet-config/medicine-cabinet.env`): `/var/lib/homelab/secrets/medicine-cabinet/medicine-cabinet-config/medicine-cabinet.env`.
+  - re-register a running unit after the daemon lost its state (needs the daemon): `homelab adopt stacks/medicine-cabinet`. Adoption only records a service that is already active; it never starts one.
+- Rebuild: the native route in Layer 2, then this stack's data by Layer 4 (native services).
+
 ### metrics (vmid 113)
 
 - Container: hostname `113-app-metrics`, ip `CT 113 (metrics)` on `vmbr0` VLAN 10, 2 core(s), 2560 MiB RAM, 0 MiB swap, 16 GiB disk on `local-lvm`, unprivileged, template `clone:996`, boot order 60.
@@ -500,4 +512,4 @@ One section per directory under `stacks/`, read from its `lxc-compose.yml` and, 
 4. Put back the `homelab-host` program and its unit file, start it, and check the certificate fingerprint against the pin (Layer 1).
 5. Restore the guests this suite never touches (vmid 100, 101, 102, 103) from Proxmox's own backups: `qmrestore` for a VM, `pct restore` for a container.
 6. Rebuild the templates the stacks clone: `clone:995` (privileged), `clone:996` (unprivileged). `homelab template-build <vmid> <version>` builds an unprivileged one at that vmid, and `homelab template-build <vmid> <version> --privileged` a privileged one.
-7. Rebuild every stack (Layer 2; with the daemon, `homelab deploy stacks/<stack>`), in boot order: gateway (104), registry (117), syncthing (108), kyu (109), almanac (112), kitchen (121), habits (123), metrics (113), admin (120), productivity (111), paperwork (114), kp-soft (116), downloader (105), media (106). A compose stack refills its empty data directories from restic while it deploys; a native stack's data comes back by Layer 4 afterwards.
+7. Rebuild every stack (Layer 2; with the daemon, `homelab deploy stacks/<stack>`), in boot order: gateway (104), registry (117), syncthing (108), kyu (109), almanac (112), kitchen (121), medicine-cabinet (122), habits (123), metrics (113), admin (120), productivity (111), paperwork (114), kp-soft (116), downloader (105), media (106). A compose stack refills its empty data directories from restic while it deploys; a native stack's data comes back by Layer 4 afterwards.

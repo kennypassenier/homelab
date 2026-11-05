@@ -244,6 +244,33 @@ pub fn trusted_peer(peer: std::net::IpAddr, via_proxy: bool, trusted: &[String])
             .any(|t| t == peer)
 }
 
+/// Kenny, 2026-11-05: a LAN browser reaches the dashboard through Traefik, so
+/// its direct peer is the proxy. A request through the trusted proxy that
+/// carries no `Cf-Connecting-IP` did not come through the Cloudflare tunnel
+/// (Cloudflare always adds it), and the last `X-Forwarded-For` entry is the
+/// address the proxy itself saw, which a client cannot choose. That address
+/// counts when it is one of `trusted`.
+pub fn trusted_forwarded(
+    via_proxy: bool,
+    cf_connecting_ip: Option<&str>,
+    forwarded_for: Option<&str>,
+    trusted: &[String],
+) -> bool {
+    if !via_proxy || cf_connecting_ip.is_some() {
+        return false;
+    }
+    let Some(seen) = forwarded_for
+        .and_then(|v| v.rsplit(',').next())
+        .and_then(|v| v.trim().parse::<std::net::IpAddr>().ok())
+    else {
+        return false;
+    };
+    trusted
+        .iter()
+        .filter_map(|t| t.trim().parse::<std::net::IpAddr>().ok())
+        .any(|t| t == seen)
+}
+
 /// The RS256 signature of `signed` under `key` (PKCS#1 v1.5, SHA-256,
 /// 2048-8192 bit keys). Pure: aws-lc-rs computes, nothing is fetched.
 pub fn verify_rs256(key: &RsaKey, signed: &[u8], signature: &[u8]) -> Result<(), Refusal> {

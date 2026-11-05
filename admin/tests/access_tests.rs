@@ -173,3 +173,30 @@ fn trusted_peer_passes_only_straight_from_a_listed_address() {
     assert!(!trusted_peer(pc, false, &[]));
     assert!(!trusted_peer(pc, false, &["not an address".to_string()]));
 }
+
+#[test]
+fn trusted_forwarded_needs_the_proxy_no_cloudflare_header_and_a_listed_last_hop() {
+    use homelab_admin::core::access::trusted_forwarded;
+    let list = vec!["10.10.10.10".to_string()];
+    assert!(trusted_forwarded(true, None, Some("10.10.10.10"), &list));
+    assert!(trusted_forwarded(
+        true,
+        None,
+        Some("1.2.3.4, 10.10.10.10"),
+        &list
+    ));
+    assert!(
+        !trusted_forwarded(true, None, Some("10.10.10.10, 1.2.3.4"), &list),
+        "the client cannot choose the last hop"
+    );
+    assert!(
+        !trusted_forwarded(true, Some("1.2.3.4"), Some("10.10.10.10"), &list),
+        "came through the tunnel"
+    );
+    assert!(
+        !trusted_forwarded(false, None, Some("10.10.10.10"), &list),
+        "not through the proxy"
+    );
+    assert!(!trusted_forwarded(true, None, None, &list));
+    assert!(!trusted_forwarded(true, None, Some("garbage"), &list));
+}

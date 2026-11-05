@@ -127,7 +127,14 @@ impl Guard {
     /// `trusted_sources` passes both locks.
     async fn trusted(&self, r: &GuardRequest) -> bool {
         let trusted = self.shared.read().await.trusted_sources.clone();
+        let header = |n: &str| r.headers.get(n).and_then(|v| v.to_str().ok());
         access::trusted_peer(r.peer.ip(), r.from_trusted_proxy, &trusted)
+            || access::trusted_forwarded(
+                r.from_trusted_proxy,
+                header("cf-connecting-ip"),
+                header("x-forwarded-for"),
+                &trusted,
+            )
     }
 
     /// Lock 1.

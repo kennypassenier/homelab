@@ -48,11 +48,11 @@ fails while this section is stale.
 | Stack | App | Service | Policy | Image | Note |
 |---|---|---|---|---|---|
 | downloader | qbittorrent | gluetun | `manual` | `qmcgaw/gluetun@sha256:89e3cbe22e0d…` |  |
-| downloader | qbittorrent | qbittorrent | `manual` | `lscr.io/linuxserver/qbittorrent:5.3.0_v2.1.2-ls484@sha256:e887804fa9de…` |  |
-| gateway | cloudflared | cloudflared | `manual` | `cloudflare/cloudflared:2026.10.3@sha256:faa8e0a1475f…` |  |
-| gateway | crowdsec | crowdsec | `manual` | `crowdsecurity/crowdsec:v1.8.1@sha256:0f2523fa61ef…` |  |
+| downloader | qbittorrent | qbittorrent | `manual` | `lscr.io/linuxserver/qbittorrent:5.3.0_v2.1.2-ls486@sha256:05c1454f9a32…` |  |
+| gateway | cloudflared | cloudflared | `manual` | `cloudflare/cloudflared:2026.10.7@sha256:4955524aeaa3…` |  |
+| gateway | crowdsec | crowdsec | `manual` | `crowdsecurity/crowdsec:v1.8.2@sha256:65b74942f7e7…` |  |
 | gateway | socket-proxy | socket-proxy | `manual` | `tecnativa/docker-socket-proxy:v0.5.0@sha256:1f5038b54f06…` |  |
-| gateway | traefik | traefik | `manual` | `traefik:v3.7.16@sha256:c8a121e4bb13…` |  |
+| gateway | traefik | traefik | `manual` | `traefik:v3.7.17@sha256:321153f6f732…` |  |
 | kp-soft | jobtracker | jobtracker | `auto` | `ghcr.io/kennypassenier/jobtracker:latest` |  |
 | kp-soft | kp-soft | kp-soft | `manual` | `ghcr.io/kennypassenier/kp-soft:v0.4.0@sha256:b9fd7be0bd3e…` |  |
 | media | bazarr | bazarr | `auto` | `lscr.io/linuxserver/bazarr:latest` |  |
@@ -60,16 +60,16 @@ fails while this section is stale.
 | media | jellyfin | jellyfin | `manual` | `jellyfin/jellyfin:12.3@sha256:2038fe038ab3…` |  |
 | media | prowlarr | prowlarr | `auto` | `lscr.io/linuxserver/prowlarr:latest` |  |
 | media | radarr | radarr | `auto` | `lscr.io/linuxserver/radarr:latest` |  |
-| media | recyclarr | recyclarr | `manual` | `ghcr.io/recyclarr/recyclarr:8.8.0@sha256:b1fbb929ba71…` |  |
+| media | recyclarr | recyclarr | `manual` | `ghcr.io/recyclarr/recyclarr:8.8.1@sha256:3e9c41b9ec29…` |  |
 | media | seerr | seerr | `auto` | `ghcr.io/seerr-team/seerr:latest` |  |
 | media | sonarr | sonarr | `auto` | `lscr.io/linuxserver/sonarr:latest` |  |
-| metrics | alertmanager | alertmanager | `manual` | `prom/alertmanager:v0.34.1@sha256:e9733bafb1bd…` |  |
+| metrics | alertmanager | alertmanager | `manual` | `prom/alertmanager:v0.34.2@sha256:39d8bb3966c6…` |  |
 | metrics | loki | loki | `manual` | `grafana/loki:3.7.8@sha256:1107dd5274e0…` |  |
 | metrics | loki-push | loki-push | `auto` | `nginx:alpine` |  |
 | metrics | prometheus | prometheus | `manual` | `prom/prometheus:v3.15.1@sha256:fa3302279710…` |  |
-| metrics | pve-exporter | pve-exporter | `manual` | `prompve/prometheus-pve-exporter:3.10.1@sha256:5678b230735a…` |  |
-| paperwork | actual | actual | `manual` | `actualbudget/actual-server:26.10.0@sha256:24645e971da6…` |  |
-| paperwork | paperless | paperless | `manual` | `ghcr.io/paperless-ngx/paperless-ngx:3.3.4@sha256:9bc6e8248891…` |  |
+| metrics | pve-exporter | pve-exporter | `manual` | `prompve/prometheus-pve-exporter:3.11.0@sha256:290756c34fd1…` |  |
+| paperwork | actual | actual | `manual` | `actualbudget/actual-server:26.11.0@sha256:06cf186569cf…` |  |
+| paperwork | paperless | paperless | `manual` | `ghcr.io/paperless-ngx/paperless-ngx:3.4.2@sha256:d704e84f8830…` |  |
 | paperwork | paperless-db | paperless-db | `manual` | `postgres:17.11-alpine@sha256:18cfe3ef5e68…` | mixed: the update reads one label for the whole app, the first container's |
 | paperwork | paperless-db | paperless-redis | `auto` | `redis:7-alpine` | mixed: the update reads one label for the whole app, the first container's |
 | paperwork | stirling | stirling | `auto` | `stirlingtools/stirling-pdf:2.14.3` |  |

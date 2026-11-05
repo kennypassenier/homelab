@@ -883,7 +883,10 @@ mod tests {
                 .iter()
                 .filter(|p| p["state"] != "none")
                 .count();
-            assert!(days >= 14, "{key}: {days} days with readings after the restart");
+            assert!(
+                days >= 14,
+                "{key}: {days} days with readings after the restart"
+            );
         }
     }
 

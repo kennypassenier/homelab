@@ -108,6 +108,6 @@ settings:
   - file: /appdata/downloader/qbittorrent-config/qBittorrent/qBittorrent.conf
     format: ini
     section: BitTorrent
-    key: 'Session\ExcludedFileNamesEnabled'
+    key: 'ExcludedFileNamesEnabled'
     value: "true"
     stop_app: true

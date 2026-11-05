@@ -11,7 +11,7 @@ services:
     # fix-82 (manual-images-latest-unpinned, 2026-09-27): the version and
     # digest CT 104 ran that day. `:latest` let a rebuild pull whatever was
     # newest; moving it is an edit of this line.
-    image: traefik:v3.7.16@sha256:c8a121e4bb1347e8fd52657fab12f2cb70b68f8a018895e2068f92c9e519b9c2
+    image: traefik:v3.7.17@sha256:321153f6f732f912cf5c6f0597fe38743fc7895d482d7d8804a479ae0403e151
     container_name: traefik
     networks:
       - gateway_net

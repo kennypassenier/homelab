@@ -69,3 +69,68 @@ pub fn check_tones(msg: &str) -> Vec<(Tone, &str)> {
         })
         .collect()
 }
+
+/// The host's reply to `command` as a person reads it: the checks listing
+/// without the blank line that left "✓ " alone on a row, and the tool status
+/// as a table instead of its JSON. Anything else, and a reply that does not
+/// parse, comes back as it was.
+pub fn readable_reply(command: &homelab_proto::Command, message: &str) -> String {
+    use homelab_proto::Command;
+    match command {
+        Command::ListManualChecks { json: false } => message.trim_start_matches('\n').to_string(),
+        Command::ToolStatus => tool_table(message).unwrap_or_else(|| message.to_string()),
+        _ => message.to_string(),
+    }
+}
+
+/// What the follow rule says about one tool, in words.
+fn tool_verdict(v: &serde_json::Value) -> String {
+    let version = v["version"].as_str().unwrap_or("?");
+    match v["state"].as_str() {
+        Some("current") => "up to date".into(),
+        Some("install") => format!("update to {version}"),
+        Some("hold") if v["major"].as_bool() == Some(true) => {
+            format!("{version} held back (new major)")
+        }
+        Some("hold") => format!("{version} held back"),
+        _ => "unknown".into(),
+    }
+}
+
+/// `{"tools":[...]}` as aligned rows; None when it is not that shape.
+fn tool_table(message: &str) -> Option<String> {
+    let doc: serde_json::Value = serde_json::from_str(message).ok()?;
+    let tools = doc["tools"].as_array()?;
+    let mut rows = vec![["TOOL", "INSTALLED", "NEWEST", "FOLLOW", "STATE"].map(String::from)];
+    for t in tools {
+        let text = |k: &str| t[k].as_str().unwrap_or("-").to_string();
+        rows.push(match t["error"].as_str() {
+            Some(e) => [
+                text("name"),
+                "-".into(),
+                "-".into(),
+                "-".into(),
+                format!("error: {e}"),
+            ],
+            None => [
+                text("name"),
+                text("installed"),
+                text("newest"),
+                text("follow"),
+                tool_verdict(&t["verdict"]),
+            ],
+        });
+    }
+    let width = |c: usize| rows.iter().map(|r| r[c].chars().count()).max().unwrap_or(0);
+    let widths: Vec<usize> = (0..4).map(width).collect();
+    let lines: Vec<String> = rows
+        .iter()
+        .map(|r| {
+            let cells: Vec<String> = (0..4)
+                .map(|c| format!("{:<w$}", r[c], w = widths[c]))
+                .collect();
+            format!("{}  {}", cells.join("  "), r[4])
+        })
+        .collect();
+    Some(lines.join("\n  "))
+}

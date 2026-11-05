@@ -20,6 +20,50 @@ pub struct GetBackupsReply {
 /// as a human list: one repository per block, newest snapshot first, the id
 /// `homelab restore stacks/<name> <id>` takes.
 pub fn render(native: bool, repos: &[RepoStatus]) -> String {
+    render_at(native, repos, now_unix(), &crate::humanize::local_datetime)
+}
+
+fn now_unix() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0)
+}
+
+/// One snapshot as a line: id, local time and age, then size and trigger
+/// where the host recorded them.
+fn snapshot_line(
+    s: &homelab_core::ops::backup::SnapRun,
+    now: u64,
+    local: &dyn Fn(u64) -> String,
+) -> String {
+    use crate::humanize::{ago, human_bytes};
+    let mut line = format!(
+        "  {}  {} ({})",
+        s.short_id,
+        local(s.time),
+        ago(now.saturating_sub(s.time))
+    );
+    if let Some(b) = s.size_bytes {
+        line.push_str(&format!("  {}", human_bytes(b)));
+    }
+    if let Some(t) = &s.trigger {
+        line.push_str(&format!("  {t}"));
+    }
+    if let Some(r) = s.run {
+        line.push_str(&format!("  run {r}"));
+    }
+    line.push('\n');
+    line
+}
+
+/// [`render`] with the clock and the local-time formatter handed in.
+pub fn render_at(
+    native: bool,
+    repos: &[RepoStatus],
+    now: u64,
+    local: &dyn Fn(u64) -> String,
+) -> String {
     let mut out = String::new();
     if repos.is_empty() {
         out.push_str("no repositories (nothing has backed up this stack yet)\n");
@@ -40,8 +84,7 @@ pub fn render(native: bool, repos: &[RepoStatus]) -> String {
             continue;
         }
         for s in &r.snapshots {
-            let run = s.run.map(|r| format!(" run {}", r)).unwrap_or_default();
-            out.push_str(&format!("  {}  {}{}\n", s.short_id, s.time, run));
+            out.push_str(&snapshot_line(s, now, local));
         }
     }
     out

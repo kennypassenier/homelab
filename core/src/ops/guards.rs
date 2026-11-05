@@ -46,6 +46,19 @@ pub const CADVISOR_RETIRE: &str = "if [ -d /opt/cadvisor ]; then \
 (cd /opt/cadvisor && docker compose down >/dev/null 2>&1); \
 mv /opt/cadvisor /opt/cadvisor.retired-$(date +%Y%m%d%H%M%S) && echo retired; fi; true";
 
+/// Remove the weekly prune unit and timer from a container without docker.
+/// Releases before the `docker` flag installed them on native-only CTs (kyu
+/// CT 109, almanac CT 112), where `docker-prune.service` failed with 203/EXEC
+/// every run. Exits 0 whether or not they were there; echoes `retired` when
+/// something was removed.
+pub const PRUNE_RETIRE: &str = "if [ -e /etc/systemd/system/docker-prune.service ] \
+|| [ -e /etc/systemd/system/docker-prune.timer ]; then \
+systemctl disable --now docker-prune.timer >/dev/null 2>&1; \
+rm -f /etc/systemd/system/docker-prune.service /etc/systemd/system/docker-prune.timer \
+/usr/local/sbin/homelab-image-prune; \
+systemctl daemon-reload; systemctl reset-failed docker-prune.service docker-prune.timer \
+>/dev/null 2>&1; echo retired; fi; true";
+
 /// cAdvisor, on every managed docker host.
 ///
 /// H4. It was a per-stack app directory in seven of thirteen stacks, while
@@ -460,6 +473,11 @@ pub async fn apply(
             )
             .await?;
             log("[guard] weekly docker prune timer armed".into());
+        }
+    } else {
+        let out = pct_sh(exec, vmid, PRUNE_RETIRE, 60).await?;
+        if out.stdout.contains("retired") {
+            log("[guard] docker prune unit removed — no docker runs here".into());
         }
     }
 

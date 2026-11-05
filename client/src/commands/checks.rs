@@ -14,11 +14,15 @@ pub(crate) async fn dispatch(c: &Ctx, cmd: &str) -> bool {
     true
 }
 
-/// The stacks directory a check reads: the argument, else the repository's.
-fn base_arg(args: &[String]) -> String {
-    args.get(2)
+/// What a check reads: the argument as a stacks directory (else the
+/// repository's) or as one stack's directory, which limits the comparison
+/// to that stack.
+fn scope_arg(args: &[String]) -> homelab_client::check_scope::CheckScope {
+    let arg = args
+        .get(2)
         .cloned()
-        .unwrap_or_else(|| stacks_base().display().to_string())
+        .unwrap_or_else(|| stacks_base().display().to_string());
+    homelab_client::check_scope::check_scope(&arg)
 }
 
 /// Kenny ran this from inside `stacks/` on 2026-09-02 and it said
@@ -130,10 +134,17 @@ fn check_pins(base: &str) -> bool {
 
 pub(crate) async fn cmd_check(c: &Ctx) {
     let (host, token) = (&c.host, &c.token);
-    let base = base_arg(&c.args);
+    let scope = scope_arg(&c.args);
+    let base = scope.base.clone();
     let stack_files = spec::stack_files_with_vmids(&base);
-    let digests = stack_digests(&stack_files);
+    let digests = stack_digests(&scope.digest_files(&stack_files));
     print_check_banner(&base, &stack_files);
+    if let Some(only) = &scope.only {
+        println!(
+            "{}  scoped to stack '{}': only its files are compared with the host{}",
+            C_DIM, only, C_RESET
+        );
+    }
     let command = Command::FleetCheck {
         json: false,
         stack_files,
@@ -188,9 +199,10 @@ fn print_today(today: &homelab_core::ops::today::Today, text: &str) {
 /// head; this asks the host for all of it and prints one verdict.
 pub(crate) async fn cmd_today(c: &Ctx) {
     let (host, token) = (&c.host, &c.token);
-    let base = base_arg(&c.args);
+    let scope = scope_arg(&c.args);
+    let base = scope.base.clone();
     let stack_files = spec::stack_files_with_vmids(&base);
-    let digests = stack_digests(&stack_files);
+    let digests = stack_digests(&scope.digest_files(&stack_files));
     print_today_banner(&base, &stack_files);
     let command = Command::Today {
         stack_files,

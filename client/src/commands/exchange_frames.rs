@@ -138,7 +138,8 @@ impl Exchange<'_> {
             return self.outcome(false, Some(resp));
         }
         if homelab_client::rpc_can_exit(self.awaits_payload, self.payload_seen, true) {
-            println!("{}✓ {}{}", C_GREEN, resp.message, C_RESET);
+            let body = homelab_client::output::readable_reply(&self.req.command, &resp.message);
+            println!("{}✓ {}{}", C_GREEN, body, C_RESET);
             return self.outcome(true, Some(resp));
         }
         self.done = Some(true);

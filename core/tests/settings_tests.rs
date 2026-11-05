@@ -256,10 +256,16 @@ fn qbittorrents_stack_file_declares_its_exclusion_list() {
     )
     .unwrap();
     let sc: ServiceChecks = serde_yaml::from_str(&text).unwrap();
-    assert_eq!(sc.settings.len(), 1);
+    assert_eq!(sc.settings.len(), 2);
     let s = &sc.settings[0];
     assert!(s.problems().is_empty(), "{:?}", s.problems());
     assert!(s.stop_app, "qBittorrent rewrites its config on exit");
     assert_eq!(s.key, r"Session\ExcludedFileNames");
     assert_eq!(s.value, NEW);
+    // The list does nothing without its switch, which has no Session prefix.
+    let switch = &sc.settings[1];
+    assert!(switch.problems().is_empty(), "{:?}", switch.problems());
+    assert!(switch.stop_app, "qBittorrent rewrites its config on exit");
+    assert_eq!(switch.key, "ExcludedFileNamesEnabled");
+    assert_eq!(switch.value, "true");
 }

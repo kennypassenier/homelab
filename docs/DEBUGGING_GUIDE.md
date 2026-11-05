@@ -13,7 +13,8 @@ altogether is [DR_RUNBOOK.md](DR_RUNBOOK.md); routine procedures are in
 [OPERATIONS_RUNBOOK.md](OPERATIONS_RUNBOOK.md).
 
 Every statement here cites the code or test that makes it true, as
-`file:line`. Messages in the symptom columns are quoted verbatim from the
+`file:line` or file and function; the line numbers drift when files move, so
+search for the function name when one does not match. Messages in the symptom columns are quoted verbatim from the
 source and were checked against it by script (appendix A). Two conventions
 in those quotes: `<name>` stands for a value filled in at run time, and ` … `
 marks source text left out of the quote.
@@ -177,7 +178,7 @@ which is fixed per class (`core/src/error.rs:48-94`):
 | `Fix the manifest or compose file and re-run` | validation | the stack file does not validate |
 | `Check host load and network, then re-run the operation` | timeout | the why reads `no result within <n>s` (`core/src/error.rs:64`) |
 | `See the transcript in the incident bundle for the exact` | command failed | a command exited non-zero; the why is its stderr |
-| `Run doctor (F6) to compare recorded state with reality.` | state error | state.json or another state file could not be read or written |
+| ``Run `homelab doctor` to compare recorded state with reality.`` | state error | state.json or another state file could not be read or written |
 | `Nothing is broken and nothing was changed.` | deferred | the operation stood aside on purpose (section 8.5) |
 | `See transcript for context.` | other | anything else |
 
@@ -452,7 +453,7 @@ reaches curl through a mode-600 header file,
 
 | Log line | Level | Meaning | Source |
 |---|---|---|---|
-| `homelab-host v<v> listening on <addr> (TLS)` | info | started and bound | `host/src/tests/refusals.rs::fix_211_a_command_with_only_known_fields_is_never_refused` |
+| `homelab-host v<v> (<build>) listening on <addr> (TLS)` | info | started and bound | `host/src/tests/refusals.rs::fix_211_a_command_with_only_known_fields_is_never_refused` |
 | `TLS fingerprint SHA256:<fp>` | info | the fingerprint clients must pin; compare with `config/client.toml` | `host/src/tests/refusals.rs::fix_211_a_read_only_command_is_never_refused_for_an_unknown_field` |
 | `interrupted operation '<op>' at step '<step>'` | warn | see section 4 | `host/src/tests/refusals.rs::fix_55_an_unparseable_frame_is_logged_without_its_body` |
 | `scheduler armed: daily backup + auto-updates at <hh>:00` | info | nightly round configured | `host/src/tests/refusals.rs::fix_211_a_field_the_host_does_not_know_is_refused_by_name` |
@@ -460,7 +461,7 @@ reaches curl through a mode-600 header file,
 | `self-update accepted` | info | a new binary answered its first authenticated request and cleared the rollback marker (fix-121) | `host/src/tests/support.rs::parsed` |
 | `<label> failed: <what>` | error | a mutating operation failed; a bundle was written | `host/src/tests/support.rs::serve_state_on_loopback` |
 | `<label> stood aside: <why>` | info | deferred, no bundle | `host/src/tests/support.rs::serve_on_loopback` |
-| `unparseable request dropped :: <e> :: <text>` | error | the host could not parse a client frame; the client waits forever for a reply | `host/src/tests/doctor.rs::doctor_probes_surface_stale_backup_and_dead_offsite` |
+| `unparseable request dropped :: cmd=<c> · <n> bytes · <kind> error at line <l> column <col>` | error | the host could not parse a client frame; the client waits forever for a reply | `host/src/tests/doctor.rs::doctor_probes_surface_stale_backup_and_dead_offsite` |
 | `scheduler: cannot determine local hour ('date' failed)` | error | this 20-minute tick did nothing | `host/src/tests/config_save.rs::a_settings_save_writes_back_the_file_it_read` |
 | `scheduler: state unreadable` | error | the nightly round skipped this tick; see section 6 | `host/src/tests/config_save.rs::a_settings_save_writes_back_the_file_it_read` |
 | `scheduler: nightly update for <stack> FAILED` | warn | the stack's automatic updates were parked; its backups continue (H8, fix-59) | `park_after_night` in `host/src/main.rs` |
@@ -468,22 +469,24 @@ reaches curl through a mode-600 header file,
 | `scheduler: stack <name> has no stored manifest` | warn | nothing to back up or update from | `host/src/tests/config.rs::fix_false_alarm_watch_url_to_check` |
 | `scheduler: backup for <stack> stood aside` | info | a nightly backup deferred | `host/src/tests/config.rs::misplaced_keys_are_reported_not_swallowed` |
 | `fleet check: repo and reality agree` | info | the nightly check found nothing alarming | `host/src/tests/config_save.rs::feat_settings_1_a_change_is_checked_like_a_start` |
-| `fleet check: <b> broken · <d> drift · ...` | warn | the nightly check found something; it also went out as a notification | `host/src/tests/config_save.rs::feat_settings_1_a_change_is_checked_like_a_start` |
-| `notification route <scheme>://<host:port>/<path withheld> failed: <why>` | warn | the kyu route did not answer 2xx; the path is withheld since fix-123, the full URL is `notify_webhook` in `host.toml` | `host/src/main.rs`, `notify_raw` |
+| `fleet check: <summary>` | warn | the nightly check found something (the summary reads like `2 broken · 1 drift`, then each finding); it also went out as a notification | `host/src/tests/config_save.rs::feat_settings_1_a_change_is_checked_like_a_start` |
+| `notification route <route> failed: <why>` | warn | the kyu route did not answer 2xx; the path is withheld since fix-123, the full URL is `notify_webhook` in `host.toml` | `host/src/main.rs`, `notify_raw` |
 | `a client lagged: <n> message(s) to it dropped` | warn | a connected client read slower than the host wrote; it was told so and sent every open question again (fix-127) | `host/src/main.rs`, `serve_ws` |
 | `401 on <path> from <address>: missing or wrong bearer token (<n> refused since this daemon started)` | warn | a connection without the right token; `homelab doctor` counts them under `refused connections` (fix-120) | `host/src/main.rs`, `log_refused` |
 | `mirror push failed (will retry): <e>` | warn | the intent repo did not reach its mirror; retried every tick | `host/src/tests/support.rs::config_from_text`, `2250` |
-| `A6 exec vmid=<n> cmd=<cmd>` | info | a `homelab exec` ran | `host/src/tests/history.rs::redesign_371_a_reveal_is_audited_in_history_without_the_value` |
+| `exec vmid=<n> cmd=<cmd>` | info | a `homelab exec` ran | `host/src/tests/history.rs::redesign_371_a_reveal_is_audited_in_history_without_the_value` |
 
 ### Logs in Loki
 
 Every managed container ships its logs to Loki on CT 113
 (`http://metrics (CT 113):3100`; on CT 104 until fix-90 moved it on 2026-09-27)
 through Grafana Alloy, from a config the deploy
-renders (`core/src/ops/logshipper.rs`). Grafana's Explore view reads the same
-data. That LAN address is `loki-push`, an nginx front that passes on pushes
-and `/ready` and answers 403 to everything else (fix-93): reading is Grafana's
-job, over `metrics_net`, or yours from inside CT 113 on the loopback port:
+renders (`core/src/ops/logshipper.rs`). That LAN address is `loki-push`, an
+nginx front that passes on pushes and `/ready` and answers 403 to everything
+else, with one exception: `GET /loki/api/v1/query_range` from the dashboard
+(CT 120) is passed on, which is what the dashboard's log tab uses
+(`stacks/metrics/loki-push/nginx.conf`). Grafana is retired, so there is no
+Explore view. Your own reading goes from inside CT 113 on the loopback port:
 
 ```sh
 ssh pve 'pct exec 113 -- curl -s -G http://127.0.0.1:3101/loki/api/v1/query --data-urlencode "query=sum by (job) (count_over_time({job=~\".+\"}[1h]))"'
@@ -499,7 +502,7 @@ Deleting lines through the API is off (`deletion_mode: disabled`). Three jobs ar
 | `systemd-journal` | the journal of each container; on the native stacks (kyu, almanac) this IS the service log | `stack`, `host`, `unit` |
 | `syslog` | devices that send syslog to the gateway (OPNsense, from the router; since fix-93 a line from any other sender is dropped by the receiver's `allow_from`), and `/var/log/syslog` on a container that has one | `stack`, `host`, `app`, `level`, `facility` |
 
-Five queries that answer most questions (paste into Grafana → Explore → Loki):
+Five queries that answer most questions (LogQL):
 
 ```logql
 {stack="media", container_name="jellyfin"}                  # one container
@@ -623,7 +626,7 @@ The client's own refusals print as `error: <message>` and exit 1
 | `the host certificate pinned on this machine (~/.config/homelab/pin: <m>) is not the` … | this machine pinned a different fingerprint than `config/client.toml` names | see worked example A | `client/src/repo_config.rs:143-153` |
 | `certificate fingerprint mismatch` | the daemon presented a certificate other than the pinned one | see worked example A | `client/src/tls.rs:59-65` |
 | `connect <url>: <e>` | TLS or network failure; the host answered 401 because the token did not match; or the server could not prove it holds the key of the pinned certificate (the handshake signature is checked, `client/src/tls.rs:69-90`, test `fix_34_an_impostor_replaying_the_pinned_certificate_is_refused` at `client/tests/tls_pin_tests.rs:146`) | check the address with `homelab ping`; compare tokens on both sides | `client/src/commands/stacks.rs::cmd_export`, `host/src/tests/doctor.rs::doctor_probes_surface_stale_backup_and_dead_offsite` |
-| `host is v<h> and this client is v<c> :: a host that predates a field ignores it silently` | the client refuses to send a mutating command to an older host | update the host first; read-only verbs (ping, status, doctor, incidents) and the self-update itself still work | `client/src/commands/new_stack.rs::cmd_template_build`, `client/src/version.rs:15-30` |
+| `host is v<h> and cannot yet tell an unknown field from one its own build simply has no room for` | the client refuses to send a mutating command to a host older than `UNKNOWN_FIELD_CHECK_SINCE` | update the host first (`homelab release-update`); read-only verbs (ping, status, doctor, incidents) and the self-update itself still work | `client/src/link.rs::refuse_older_host` |
 | `connection closed before RPC completed` | the link closed before the host answered; the operation may or may not have finished | look in the daemon log for the operation's outcome before re-running | `client/src/commands/new_stack.rs::cmd_new` |
 | `payload is <n> MiB and the link carries at most <m> MiB` | the message is bigger than the 256 MiB frame limit | not a network fault; the payload has to shrink | `client/src/version.rs:59`, `73-84`, `client/src/commands/manual_checks.rs::checks_answer` |
 | `staging the binary of <unit> failed` | a native binary could not be staged; the deploy never started | read the line above it, which is the host's reason | `client/src/commands/checks.rs::print_today_banner` |
@@ -650,7 +653,7 @@ flowchart TD
     fp{"Certificate matches the pin?<br/>(no pin yet: trusted and saved)"}
     sig{"Server proves it holds<br/>the certificate's key?"}
     auth{"Host accepts the token?"}
-    ver{"Mutating command to<br/>a host older than the client?"}
+    ver{"Mutating command to<br/>a host older than UNKNOWN_FIELD_CHECK_SINCE?"}
     ok(["Link up: request sent"])
 
     fix_tok["HOMELAB_TOKEN is not set<br/>add it to ~/.config/homelab/env"]
@@ -659,7 +662,7 @@ flowchart TD
     fix_fp["certificate fingerprint mismatch<br/>worked example A, section 9.2"]
     fix_sig["connect error from TLS<br/>impostor or wrong host: stop"]
     fix_auth["connect error, HTTP 401<br/>compare the tokens on both sides"]
-    fix_ver["host is vH and this client is vC<br/>run homelab release-update"]
+    fix_ver["host is vH and cannot yet tell an unknown field ...<br/>run homelab release-update"]
 
     start --> tok
     tok -->|yes| pin
@@ -739,8 +742,9 @@ round, the answer is immediately unattended
 | `FATAL: <path> is not a valid host config: <e>` | a key has the wrong type | fix the value | `host/src/config/tokens.rs::validate_tokens` |
 | `FATAL: token must be set (>=16 chars) via <path> or HOMELAB_TOKEN` | no token, or one shorter than 16 characters | section 9.1 | `host/src/config/tokens.rs::validate_tokens` |
 | `listen must be host:port` | `listen` or `HOMELAB_LISTEN` is not an address; the daemon panics | fix the value | `host/src/config/tokens.rs::validate_tokens` |
-| `tls cert` | the certificate could not be created. One way to get here: `tls-cert.pem` is missing while `tls-key.pem` is present, because the key file is created with create-new and refuses to overwrite. The new certificate was already written by then, so the next start finds a certificate that does not belong to the key | fix both files together, section 9.2 | `host/src/tests/refusals.rs::fix_211_a_command_with_only_known_fields_is_never_refused`, `host/src/tls.rs:21-43` |
-| `load tls` | the certificate or key file exists but could not be loaded | restore both files together, section 9.2 | `host/src/tests/refusals.rs::fix_211_a_read_only_command_is_never_refused_for_an_unknown_field` |
+| `FATAL: cannot make or read the TLS certificate in <dir> :: <e> — check that the directory is writable and the disk is not full` | the daemon could not create or read the pair in its state directory and exits 1; systemd restarts it | check the directory and the disk, then section 9.2 | `host/src/startup.rs::tls_config`, `host/src/tls.rs::ensure_cert` |
+| `FATAL: <cert> and <key> do not load as a TLS pair :: <e> — move both aside and restart; the daemon makes a new pair (clients must then re-pin)` | both files exist and pass the shape check but the TLS library rejects them | restore both files together or move both aside, section 9.2 | `host/src/startup.rs::tls_config` |
+| `are not a whole pair — making a new certificate` | a warning, not a stop: one file is missing or does not look like a certificate or key, so the daemon replaced the whole pair; every client that pinned the old one now refuses it | re-pin the clients (section 9.2, recipe 2), or restore the old pair from host-meta (recipe 1) | `host/src/tls.rs::ensure_cert` |
 | `is not a setting this daemon reads and is being ignored.` | a key the daemon does not know; usually a key written below a `[table]` header, which makes it part of that table | move the key above the first header | `host/src/gather_capacity.rs::gather_host_capacity`, test `misplaced_keys_are_reported_not_swallowed` at `host/src/config/warnings.rs::warn_at_load` |
 
 The last one is a warning, not a fatal error: the daemon starts, without the
@@ -776,14 +780,15 @@ remedy starts `This gate exists to protect unmanaged guests.`
 
 ### 8.4 Deploy failures by step
 
-The deploy's steps, in order: validate, safety gates, baseline,
-registry cache, hardware readiness, host storage, auto-restore check,
-metrics discovery, provision container, wait for systemd, bootstrap docker,
-runaway guards, log rotation, retire dropped, commit intent, push files,
-start apps, storage ownership, verify health, then the optional gateway
-route, retire gateway route, grafana dashboard, homepage services and uptime
-monitors, then orphan files, garbage collect, log shipper, native units,
-record state, reconcile and service checks (`core/src/ops/deploy/restore_checks.rs::record_restore_checks`).
+The deploy's steps, in order (`STEPS` in `core/src/ops/deploy/plan.rs`):
+validate, safety gates, baseline, registry cache, hardware readiness,
+host storage, auto-restore check, metrics discovery, firewall, provision
+container, firewall after create, refresh the tile watcher's firewall, wait
+for systemd, bootstrap docker, runaway guards, log rotation, retire dropped,
+commit intent, push files, start apps, storage ownership, verify health,
+gateway route, retire gateway route, orphan files, garbage collect, log
+shipper, native units, record state, reconcile, app settings and service
+checks (`core/src/ops/deploy/restore_checks.rs::record_restore_checks`).
 
 A deploy that fails at any step except validate, safety gates, registry
 cache and hardware readiness (the four that run before anything changes) is
@@ -800,7 +805,7 @@ recorded in state.json with `incomplete_step` set
 | `the step reported success but the change is not there: <why>` | any verified step | the command succeeded but reading back showed no change | treat as a real fault in that step | `core/src/runner.rs:123-157` |
 | `the deploy reported success but the container does not match` | reconcile | the live container differs from the stack file | the why lists the differences | `core/src/ops/deploy/storage_ownership.rs::is_running` |
 | `stopped by the operator` | service checks | you answered stop | nothing | `core/src/ops/deploy/mod.rs::deploy` |
-| `nobody answered within <n>s` | service checks | see worked example B | run it from the TUI | `host/src/tests/commands.rs::fix_51_concurrent_writes_of_one_path_all_succeed_and_stay_whole` |
+| `nobody answered within <wait>` | service checks | see worked example B | run it from the TUI | `host/src/tests/commands.rs::fix_51_concurrent_writes_of_one_path_all_succeed_and_stay_whole` |
 | `stack declares native unit '<u>' but <u>/<u>.service is not in the stack` | native units | the unit file is missing from the stack directory | add it | `core/src/ops/deploy/push_verify.rs::run` |
 | `could not place <path> on the container (<e>)` | native units | moving the binary into place failed; nothing was replaced | the why carries the shell's stderr | `core/src/ops/deploy/start_pull.rs::pull_plan` |
 
@@ -837,7 +842,7 @@ upgrade a binary that is already installed. The transcript says
 | `<label> deferred` followed by `is in use, so nothing was stopped and no snapshot was taken: <reason>` | an app was in use, so the backup stood aside. The client still prints `✗` and exits 1, but no bundle is written and nothing changed | nothing; it runs next night. If it keeps standing aside, the backup-age finding in `homelab check` says so | `core/src/ops/backup/gates.rs::refuse_when_in_use`, `host/src/tests/support.rs::serve_on_loopback` |
 | `stack '<s>' would back up into the repository '<o>-config', which stack '<b>'` … | two stacks name the same owning app, so they would share one restic repository | rename the app in the newer stack's file | `core/src/ops/backup/gates.rs::owner_conflict` |
 | `<app> unhealthy after update` … `ROLLED BACK to previous image, now healthy.` | the new image failed its health check and the previous one was restored. This is still reported as a failure | the app runs on the old image; check the new image's release notes | `core/src/ops/update.rs:229-260` |
-| `<app> unhealthy after update AND after rollback` | the rollback did not bring it back either | hands on the container now | `core/src/ops/update.rs:262-265` |
+| `<app> unhealthy after update … AND after rollback` | the rollback did not bring it back either | hands on the container now | `core/src/ops/update.rs:262-265` |
 | `<app> unhealthy after update and no captured image to roll back to` | there was nothing to roll back to | hands on the container now | `core/src/ops/update.rs:235-240` |
 | `app '<a>' is not part of stack <s>` | `homelab update stacks/<name> <app>` named an app the stack does not have | check the app name | `core/src/ops/update.rs:103-112` |
 
@@ -923,7 +928,6 @@ A selection. Every finding carries its own remedy line.
 | `somebody looked and said no: "<question>"` | a person answered a manual check "not ok"; fix it, then answer again (`homelab checks`). Open, reopened or unanswered manual checks raise no finding since manual-checks-as-info-1: they are information on the stack's page ("When something goes wrong, check this") | `core/src/ops/manualchecks.rs` |
 | `but has no stack file in the repository` | `drift`: the stack runs and is in state, but `stacks/<stack>/` is gone. `homelab apply` destroys it after its name is typed; put the directory back to keep it | `core/src/ops/fleetcheck/stack_record.rs::deleted_stack_findings` |
 | `retired <date> (<kind>, vmid <n>) — kept: restic <repos>; /appdata <dirs>; vault <paths>` | `noted`: data a retired stack, app or unit keeps on purpose; `homelab wipe <key>` deletes it | `core/src/ops/retired.rs:199-216` |
-| `monitor(s) watch a stack the fleet no longer has` | `drift`: the Uptime Kuma seeder left undeclared monitors in place because removing them all would have taken more than a quarter of the monitors at once; `refused` in `last-seed.json` says why | no fleetcheck code produces this finding (not found in `core/src/ops/fleetcheck/`) |
 
 ### 8.10 Removal, apply and wipe
 
@@ -941,23 +945,6 @@ A wipe that fails part-way stops at that step and keeps the retired record
 (`core/src/ops/retired.rs:357-362`); what was already deleted stays deleted,
 and running `homelab wipe <key>` again lists what is left. The operation
 runs as label `wipe` (section 1), so a failure leaves an incident bundle.
-
-The Uptime Kuma seeder prints its own lines in the log of the `kuma-seeder`
-container of the uptime stack, vmid 107 (`stacks/uptime/lxc-compose.yml:11`),
-one run per hour (`SEED_INTERVAL_SECONDS=3600` in its compose file):
-
-```sh
-# Proxmox host
-pct exec 107 -- docker logs --tail 50 kuma-seeder
-```
-
-
-| Seeder line (verbatim) | Meaning | Source |
-|---|---|---|
-| `(no file declares it)` | a monitor no file declares was removed | `stacks/uptime/kuma-seeder/seed.py:331` |
-| `now points at` | a monitor's URL or hostname was corrected to the file's | `stacks/uptime/kuma-seeder/seed.py:326` |
-| `the desired list looks truncated, so nothing is removed` | more than `max(3, a quarter of all monitors)` would have gone; nothing was removed | `stacks/uptime/kuma-seeder/seed.py:260-263` |
-| `no generated host-monitor list, so nothing is judged` | `host-monitors.json` is missing or unreadable; nothing was removed | `stacks/uptime/kuma-seeder/seed.py:257-258` |
 
 ## 9. When the daemon cannot start: its keys and their other copies
 
@@ -1056,12 +1043,14 @@ the same value in `~/.config/homelab/env` on every workstation.
 
 - **Read from**: `tls-cert.pem` and `tls-key.pem` in the state directory
   (`host/src/tls.rs:16-19`).
-- **When either is missing**, the daemon generates a new pair at start
-  (`host/src/tls.rs:21-44`). The new certificate has a new fingerprint, so
-  every client refuses it with `certificate fingerprint mismatch`
-  (`client/src/tls.rs:59-65`). When only the certificate is missing and the
-  key is present, generation fails on the existing key file and the daemon
-  panics with `tls cert` (8.2).
+- **When the pair is not whole**, the daemon replaces it whole, at start and
+  whenever the fleet state is read (`host/src/tls.rs::ensure_cert`,
+  `host/src/fleet_state/mod.rs`). Not whole means: a file is missing, the
+  certificate does not decode, or the key is not a PEM private key
+  (`pair_is_whole`). It logs a `WARNING` first (8.2). The new certificate has a
+  new fingerprint, so every client refuses it with
+  `certificate fingerprint mismatch` (`client/src/tls.rs`). A half pair no
+  longer stops the daemon (fix-128).
 - **Copy in the host-meta backup**: both files are in the snapshot
   (`core/src/ops/backup/host_meta.rs::snapshot_sources`).
 - **Clients hold only the fingerprint**, in `config/client.toml` and
@@ -1084,7 +1073,7 @@ The fingerprint in that last line must equal `pin` in `config/client.toml`.
 
 Recipe 2, no copy: let the daemon make a new pair and re-pin every client.
 
-1. Move both files aside together, so the panic case cannot happen:
+1. Move both files aside together:
    `mv /var/lib/homelab/tls-cert.pem /var/lib/homelab/tls-key.pem /root/`
    (Proxmox host, as root).
 2. `systemctl restart homelab-host`, then read the new
@@ -1130,9 +1119,7 @@ covers keeping one.
 
 In every table row whose first cell starts with a backtick span, every
 backtick span in that first cell is a verbatim fragment of the source in
-`client/src`, `core/src` or `host/src`, or of the Uptime Kuma seeder
-`stacks/uptime/kuma-seeder/seed.py`: a message, a file name or a field
-name. This script checks them. It joins Rust's `\`-continued string lines,
+`client/src`, `core/src` or `host/src`, : a message, a file name or a field name. This script checks them. It joins Rust's `\`-continued string lines,
 unescapes `\"`, turns each `<name>` into "any format placeholder", splits
 on ` … `, and looks every fragment up in the source. Run it from the
 repository root; it prints the document lines that no longer match and
@@ -1144,7 +1131,6 @@ src = ""
 for d in ("client/src", "core/src", "host/src"):
     for p in pathlib.Path(d).rglob("*.rs"):
         src += p.read_text() + "\n"
-src += pathlib.Path("stacks/uptime/kuma-seeder/seed.py").read_text() + "\n"
 src = re.sub(r"\\\n\s*", "", src).replace('\\"', '"')
 bad = 0
 for n, line in enumerate(pathlib.Path("docs/DEBUGGING_GUIDE.md").read_text().splitlines(), 1):

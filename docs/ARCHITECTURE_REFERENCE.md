@@ -3,10 +3,9 @@
 For the maintainer who comes back after months. Every statement names the
 file and line that makes it true; the reasons live in
 [ARCHITECTURE_DECISIONS.md](ARCHITECTURE_DECISIONS.md) (AR1 to AR19). Read at
-v3.58.2 (`Cargo.toml:6`) on 2026-09-27; the commands behind the numbers are at
-the end. The paragraph "Declarative registration" in section 3 and the rows
-that mention `apply`, `wipe` or retired data were added at commit `ad03664`
-(after v3.58.10) and cite that commit.
+v3.58.2 on 2026-09-27; the commands behind the numbers are at the end. Line
+numbers have drifted since (files were split and moved): follow the file or
+function name. The current version is `Cargo.toml`'s workspace version.
 
 ## 1. Shape
 

@@ -1,7 +1,9 @@
 # homelab v2
 
-Two-binary Rust homelab orchestrator: CLIENT (CLI + TUI) on the desktop,
-HOST daemon on Proxmox (pve), one TLS-pinned WS line between them.
+Rust homelab orchestrator in three programs: CLIENT (CLI + TUI) on the
+desktop, HOST daemon on Proxmox (pve), one TLS-pinned WS line between them,
+and the ADMIN dashboard (`admin/`, `homelab-admin`), a native chassis-rs
+service on CT 120. The released version is `version` in `Cargo.toml`.
 
 This project follows the dev procedure in `~/Projects/dev-procedure/`
 (`/project-flow`). Standing rules apply to every change:
@@ -79,13 +81,13 @@ Two projects live in this repo, each with its own phase track.
 | | Orchestrator (homelab v3) | **Deployment project** |
 |---|---|---|
 | Docs | `docs/*.md` | `docs/deployment/*.md` |
-| Phase | **10 · Retrospective — done 2026-09-26** (`docs/RETROSPECTIVE.md`); **v3.57.1** released 2026-09-27 (client fixes from the part-A run; the host still runs v3.57.0, host code unchanged) | **9 · Release & lifecycle — entered 2026-09-27** (Phase 8 documentation closed the same day). Read `docs/deployment/RESUME.md` for what is in flight |
+| Phase | **10 · Retrospective — done 2026-09-26** (`docs/RETROSPECTIVE.md`); releases continue after it; the current version is in `Cargo.toml` | **9 · Release & lifecycle — entered 2026-09-27** (Phase 8 documentation closed the same day). Read `docs/deployment/RESUME.md` for what is in flight |
 | Frozen | features, architecture | scope, features, tech choices, architecture |
 | Resume from | `docs/REALIZATION_PLAN.md` | **`docs/deployment/REGISTER.md`** — every decision, finding and task is numbered there; the Phase-7 gate log lives in `REALIZATION_PLAN.md` |
 
 | | |
 |---|---|
-| Next action | **waiting on Kenny: sign v3.70.5** (`~/Projects/workstation/bin/sign-releases homelab:v3.70.5`; released and pushed 2026-10-02 19:45, gate green). Host, client and dashboard run 3.70.4 (measured). main holds fix-209..224 (each "doing: release 3.70.5" in `docs/deployment/REGISTER.md`), commit gate only so far. After the Go: full gate once, `make release VERSION=3.70.5`, Kenny signs, `homelab release-update v3.70.5`, `homelab self-install`, dashboard via Live view; then measure the rows live, close the 16 stale Proxmox/OPNsense notices once a recovery is measured, and last wipe the retired home and uptime backups via Live view.** **3.70.0 release in progress (Kenny's Go 2026-10-01 18:45; drill-restore: permission to copy restic.pw + rclone.conf to a throwaway nested VM; TUI host-settings tab removed; the ~/Projects cap failed and moved to chassis-rs).** **3.70.0 is the last feature release** (Kenny, 2026-10-01): it closes every open item from today's batch — fix-62..169 (release, restore-drill coverage, firewall and token fixes), gap-23/26/31/34, T62, the admin dashboard's backup-secrets and visuals milestones, the chassis-rs 3.1.0 nav rewrite, and rule 20 (nothing may balloon, see `docs/deployment/REGISTER.md` ask-10). **What follows 3.70.0:** release it, roll it out to the host and CT 120, turn on firewalls on the eleven stacks still without one, then measure (fix-66/68/70/142/143/146 and the rest of today's batch all carry a "doing: release" style residual that the rollout must close out in `REGISTER.md`). **After that, this project takes bugfixes only** — no further feature rounds are planned. See `docs/deployment/REGISTER.md` for the row-by-row state and `docs/deployment/CORRECTIONS.md` for today's ratified corrections (O10-twice, the two-sessions fault, fix-161). |
+| Next action | Not tracked in this file. Open work is in `docs/deployment/REGISTER.md` and `docs/deployment/RESUME.md`. A release is `make release VERSION=x.y.z`, then Kenny signs it with `~/Projects/workstation/bin/sign-releases homelab:v<version>`, then `homelab release-update` (Makefile, `release` target) |
 
 
 **The deployment project is the active work.** It brings the whole fleet under
@@ -95,8 +97,9 @@ it is the resume point and is kept current as part of the work, not afterwards.
 
 ## Project state (resume here)
 
-- **v3.69.0 is live; v3.70.0 is the last feature release for this project**
-  (Kenny, 2026-10-01) — it bundles today's batch (fix-62..169, gap-23/26/31/34,
+- **Historical (2026-10-01):** v3.70.0 was announced as the last feature
+  release for this project; releases went on after it (see `Cargo.toml`).
+  It bundled today's batch (fix-62..169, gap-23/26/31/34,
   T62, the admin dashboard's backup-secrets and visuals milestones, the
   chassis-rs 3.1.0 nav rewrite, rule 20). What follows is the release itself,
   the rollout to host and CT 120, firewalls on the eleven stacks that still
@@ -149,7 +152,7 @@ it is the resume point and is kept current as part of the work, not afterwards.
   Kenny's open decision. This note said otherwise until 2026-09-01, and a form went out
   recommending drills on a live service because of it. When something has to
   be created and destroyed for real, make a throwaway stack on a free vmid
-  (`stacks/drill`, vmid 119 since 118 went to inbox) and destroy it in the same sitting — Kenny's
+  (`stacks/drill`, vmid 119) and destroy it in the same sitting — Kenny's
   form B1. There is no host-OS rollback net: the two invalid LVM
   snapshots were removed 2026-09-26 (see below).
 - **No-touch list is law**: `core/src/safety.rs` (VM 100 OPNsense, VM 101
@@ -247,10 +250,10 @@ elsewhere, where layer 2 silently did not load.
 ## Build & ship
 
 ```bash
-cargo test --workspace                       # 211 tests
-docker run --rm -v "$PWD":/w -w /w -e CARGO_TARGET_DIR=/w/target-debian \
-  rust:1-bookworm cargo build --release -p homelab-host
-make release VERSION=x.y.z                   # scan, gate, tag, build, push, publish
-homelab release-update                       # roll out to the host (H7)
+cargo test --workspace
+make host-binary                             # homelab-host for Debian 12, via docker
+make release VERSION=x.y.z                   # checks, gate, tag, build, push, publish
+~/Projects/workstation/bin/sign-releases homelab:vX.Y.Z   # Kenny signs
+homelab release-update                       # roll out to the host (H7), signed releases only
 ```
 `.env` holds HOMELAB_HOST/HOMELAB_TOKEN (source it: `set -a; . ./.env; set +a`).

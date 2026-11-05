@@ -58,6 +58,7 @@
   }
   body .kp-icon-button,
   body .nx-icon-btn,
+  body .kp-datatable__group-toggle,
   body .kp-nav > .kp-nav__search > .nx-search-trigger,
   body .kp-nav__search-trigger.nx-search-trigger {
     inline-size: var(--kp-touch-min);

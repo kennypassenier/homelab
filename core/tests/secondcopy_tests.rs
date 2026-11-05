@@ -66,6 +66,7 @@ fn manifest(
         home_address_whitelist: None,
         tiles: Default::default(),
         log_files: Vec::new(),
+        log_drop: Vec::new(),
         firewall: None,
         registry_login: None,
         retention,

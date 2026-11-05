@@ -53,12 +53,13 @@ impl Run<'_, '_> {
 
     async fn push_alloy_config(&self, loki: &str) -> Result<bool, CoreError> {
         let (_, _, m, exec) = self.parts();
-        let body = ls::config(
+        let body = ls::config_with_drops(
             &m.stack_name,
             &m.hostname,
             loki,
             &m.syslog_receivers,
             &m.log_files,
+            &m.log_drop,
         );
         push_content(exec, m.vmid, ls::CONFIG_PATH, &body, "644").await
     }

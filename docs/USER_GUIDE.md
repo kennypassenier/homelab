@@ -2166,6 +2166,33 @@ app (feat-stacks-11, section 1.4's driving table).
 
 ### E · Backup and recovery
 
+#### log_drop · Log lines the shipper does not forward
+
+A stack can list log lines that must not reach Loki, for a known-harmless
+message that is written so often it drowns real errors:
+
+```yaml
+log_drop:
+  - "deletion is not available for this tenant"
+```
+
+Each entry is a regular expression in Alloy's (RE2) syntax, matched anywhere
+in a single log line, so a plain phrase is a substring match; write
+`\.` for a literal dot. The generated shipper config for that container
+gets one `loki.process "drop"` with a `stage.drop` per entry, and every
+source (docker, journal, syslog, declared log files) forwards through it.
+The dropped line is never sent; nothing else about the container changes.
+A stack without the key renders the shipper config it always did, so its
+shipper is not restarted by a deploy of this feature; adding or changing
+the list changes the config and the deploy restarts that container's shipper
+once.
+
+Refused before anything is sent: an empty or blank entry, an entry with a
+newline or other control character, an entry that is not a valid regular
+expression (Alloy would refuse the whole config), and a duplicate. Tests:
+`core/tests/log_drop_tests.rs`, `core/tests/stack_files_tests.rs`
+(`declared_log_drop_entries_*`).
+
 #### latch-files · Secret files from latch
 
 **Status:** Built (2026-09-30).

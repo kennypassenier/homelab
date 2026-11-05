@@ -25,6 +25,9 @@ futures-util.workspace = true
 # directly — host.toml's own format, shared with the host and the dashboard
 # so all three build the same text from the same JSON changes.
 toml.workspace = true
+# log_drop: an entry must compile, because Alloy refuses the whole config for
+# one bad regex.
+regex = "1"
 
 [features]
 # mock-executor-weak-assertions (expert panel, 2026-09-27): the scripted
@@ -37,6 +40,9 @@ homelab-core = { path = ".", features = ["test-support"] }
 serde_yaml.workspace = true
 tempfile = "3"
 toml.workspace = true
+# log_drop: an entry must compile, because Alloy refuses the whole config for
+# one bad regex.
+regex = "1"
 tokio = { version = "1", features = ["macros", "rt", "time"] }
 
 [lints]

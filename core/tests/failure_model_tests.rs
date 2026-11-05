@@ -21,6 +21,7 @@ fn spec(vmid: u16, stack: &str) -> DeploySpec {
             home_address_whitelist: None,
             tiles: Default::default(),
             log_files: Vec::new(),
+            log_drop: Vec::new(),
             registry_login: None,
             retention: None,
             data_mounts: Vec::new(),

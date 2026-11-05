@@ -1054,3 +1054,34 @@ fn fix_242_no_stack_command_opens_a_live_database_with_sqlite3() {
         bad.join("\n  ")
     );
 }
+
+/// log_drop · every declared entry in the repository's stack files is one the
+/// validator accepts (a bad regex would make Alloy refuse the stack's whole
+/// shipper config), and the metrics stack's shipper config really drops the
+/// declared lines.
+#[test]
+fn declared_log_drop_entries_are_valid_and_reach_the_shipper_config() {
+    let mut declared = 0;
+    for (name, m) in compose_stacks() {
+        let problems = homelab_core::ops::logdrop::problems(&m.log_drop);
+        assert!(problems.is_empty(), "{name}: {problems:?}");
+        if m.log_drop.is_empty() {
+            continue;
+        }
+        declared += 1;
+        let cfg = homelab_core::ops::logshipper::config_with_drops(
+            &m.stack_name,
+            &m.hostname,
+            "http://loki.invalid:3100",
+            &m.syslog_receivers,
+            &m.log_files,
+            &m.log_drop,
+        );
+        assert_eq!(
+            cfg.matches("stage.drop").count(),
+            m.log_drop.len(),
+            "{name}"
+        );
+    }
+    assert!(declared > 0, "at least one stack declares log_drop");
+}

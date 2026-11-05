@@ -37,6 +37,13 @@ pub struct StackManifest {
     /// each under the `job` it names (Traefik's access log, `job=access`).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub log_files: Vec<LogFile>,
+    /// Regular expressions (Alloy/RE2, unanchored, a plain phrase works) for
+    /// log lines the shipper must not forward, e.g. a known-harmless message
+    /// that drowns real errors. Empty = nothing dropped, and the key is not
+    /// serialized, so a stack without it keeps its manifest hash and its
+    /// shipper config. Rendering and rules: `ops::logdrop`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub log_drop: Vec<String>,
     /// A container that runs no docker at all: its services are native
     /// systemd units, adopted with C7 and supervised through their own
     /// `service.yml`. CT 109 (kyu, kyu-runner, http-switchboard) and CT 112
@@ -1038,6 +1045,7 @@ fn collect_manifest_problems(m: &StackManifest, problems: &mut Vec<String>) {
     if let Some(fw) = &m.firewall {
         problems.extend(crate::firewall::problems(fw));
     }
+    problems.extend(crate::ops::logdrop::problems(&m.log_drop));
     // gap-11: a receiver the shipper could not open would pass the deploy —
     // Alloy logs a bind failure and keeps running — and the device's lines
     // would vanish with every step reporting success. So the manifest is

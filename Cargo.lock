@@ -1356,6 +1356,7 @@ dependencies = [
  "futures-util",
  "homelab-core",
  "minisign-verify",
+ "regex",
  "serde",
  "serde_json",
  "serde_norway",

@@ -77,6 +77,13 @@ storage:
     # sent while it was down. Its configuration is in the repository.
     no_backup: "Loki log chunks and index; not restored, configuration is in the repository"
     app: loki
+# Log lines the shipper does not forward (regex, matched anywhere in the
+# line). Loki runs with `deletion_mode: disabled` on purpose (fix-93: nobody
+# may delete log lines through the API), and it complains about that about
+# 16000 times a day; those lines were re-ingested and drowned real errors.
+# The setting stays, the complaint is not shipped.
+log_drop:
+  - "deletion is not available for this tenant"
 # alertmanager was deployed by hand on 2026-08-30 and was missing here, so a
 # deploy of this stack would not have started it. loki-push is
 # Loki's front on the LAN port (fix-93): pushes and /ready, nothing else.

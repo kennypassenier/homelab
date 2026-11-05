@@ -52,6 +52,7 @@ pub mod homeaddress;
 pub mod hostcpu;
 pub mod keep;
 pub mod livestatus;
+pub mod logdrop;
 pub mod logshipper;
 pub mod manualchecks;
 pub mod mirror;

@@ -8931,10 +8931,19 @@ const AUDIT_DIALOGS = [
   { path: "/inbox", drive: "inbox-fix" },
   { path: "/stacks", drive: "stacks-new" },
   { path: "/settings", drive: "issue-token" },
-  { path: "/stacks/kp-soft/overview", drive: "stack-head" },
+  // kp-soft's first head button is Back up, which runs at once since
+  // ux-stackhub-4: this entry then opened no dialog and spent 5 s per width
+  // waiting for one. Its dialog is Deploy, on a stack that is already running.
+  { path: "/stacks/kp-soft/overview", drive: "stack-head", text: /^Deploy/ },
   { path: "/stacks/films/overview", drive: "stack-head", text: /^Deploy/ },
   { path: "/stacks/kp-soft/apps", drive: "stack-app-publish" },
-  { path: "/stacks/kp-soft/backups", drive: "stack-backups-card" },
+  // The Backups card opens no dialog any more (Back up now runs at once, Restore
+  // is a page of its own); a row's Verify is the tab's dialog.
+  {
+    path: "/stacks/kp-soft/backups",
+    drive: "stack-backup-row",
+    text: /^Verify/,
+  },
   // The running-job drawer: a back up confirmed, then the running pill.
   {
     path: "/stacks/kp-soft/overview",
@@ -9179,12 +9188,24 @@ async function genWalk(entry) {
         await btn.first().click();
         // A `then` step owns the wait: a click that opens no dialog (Back up
         // runs at once) must not spend 5 s here while the job it started ends.
-        if (!d.then)
-          await page
+        if (!d.then) {
+          const opened = await page
             .locator("dialog[open]")
             .last()
             .waitFor({ timeout: 5000 })
-            .catch(() => {});
+            .then(
+              () => true,
+              () => false,
+            );
+          // An entry that audits nothing is no pass.
+          if (!opened) {
+            mine.a.push(
+              `${d.path} @${width}: ${d.drive ?? d.text} opened no dialog`,
+            );
+            await context.close();
+            continue;
+          }
+        }
         if (d.then) await d.then(page);
         await page.waitForTimeout(700);
         await markDialog();

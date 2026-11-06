@@ -244,7 +244,9 @@ export function layoutAudit(rootSel) {
         continue;
       const sr = s.getBoundingClientRect();
       const nextRow = sr.top > ar.top + 2;
-      const sideBySide = sr.left < lr.right && sr.right > lr.left;
+      // Under a pixel of overlap is rounding, not a collision: "kp-soft" and
+      // its hint "- already chosen" stand on one line, their boxes touching.
+      const sideBySide = sr.left < lr.right - 1 && sr.right > lr.left + 1;
       if (nextRow && sideBySide && bottom > sr.top + 2) {
         const key = `${say(a)}>${say(s)}`;
         if (!seen.has(key)) {

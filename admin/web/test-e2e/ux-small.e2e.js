@@ -5,6 +5,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { launch } from "./harness.js";
+import { smallControlsOnceSettled, trackRequests } from "./settle.js";
 
 const BASE = process.env.INVARIANTS_BASE_URL ?? "http://127.0.0.1:8099";
 const TOKEN = process.env.INVARIANTS_TOKEN ?? "test-invariants-token-1234";
@@ -27,49 +28,64 @@ async function login(context) {
 const CONTROLS =
   "button.kp-button, a.kp-button, .kp-segmented__item, .kp-icon-button, .kp-nav__search-trigger, .kp-anchor, .kp-contents__link, .fw-stackbtn, .bk-group__name";
 
+/** The pages ux-small-1 reads. */
+const PHONE_PAGES = [
+  "/backups",
+  "/settings",
+  "/charts",
+  "/host",
+  "/firewall",
+  "/stacks",
+  "/needs-you",
+];
+
+// Tabs read side by side. Every tab holds one EventSource open and Firefox
+// gives a host six connections, so seven tabs left no connection for the data
+// their pages ask for (measured: requests still in flight after 25 s and a
+// page load of 12 s, until another tab closed). One tab after the other needs
+// 19-20 s of the 20 s deadline at load 20.
+const PHONE_LANES = 3;
+
+/**
+ * Show another page in this tab through the app's own router.
+ * @param {import("playwright").Page} page
+ * @param {string} path
+ */
+const showInApp = (page, path) =>
+  page.evaluate((p) => {
+    history.pushState(null, "", p);
+    window.dispatchEvent(new PopStateEvent("popstate"));
+  }, path);
+
 test("ux-small-1: on a phone every button, chip, tab and segmented item is a 44 px target", async () => {
   const browser = await launch();
   try {
     const context = await browser.newContext({
       viewport: { width: 390, height: 900 },
     });
-    await login(context);
-    const small = [];
-    // The seven pages are read side by side: one after the other their
-    // 2.5 s settling waits alone took 17.5 s of the 20 s case deadline.
-    const paths = [
-      "/backups",
-      "/settings",
-      "/charts",
-      "/host",
-      "/firewall",
-      "/stacks",
-      "/needs-you",
-    ];
+    const landing = await login(context);
+    const queue = [...PHONE_PAGES];
+    /** @param {number} lane */
+    const walkLane = async (lane) => {
+      const page = lane === 0 ? landing : await context.newPage();
+      const inFlight = trackRequests(page);
+      const hits = [];
+      let opened = false;
+      for (let path; (path = queue.shift()); opened = true) {
+        // The first page loads whole, the rest change inside
+        // the app the way a click on a link does.
+        if (opened) await showInApp(page, path);
+        else await page.goto(`${BASE}${path}`);
+        const found = await smallControlsOnceSettled(page, inFlight, CONTROLS);
+        hits.push(...found.map((f) => `${path}: ${f}`));
+      }
+      await page.close();
+      return hits;
+    };
     const found = await Promise.all(
-      paths.map(async (path) => {
-        const page = await context.newPage();
-        await page.goto(`${BASE}${path}`);
-        await page.waitForTimeout(2500);
-        const hits = await page.$$eval(CONTROLS, (els) =>
-          els
-            .filter((e) => {
-              const b = e.getBoundingClientRect();
-              const s = getComputedStyle(e);
-              return (
-                b.width > 0 &&
-                s.visibility !== "hidden" &&
-                !e.closest("[hidden], .kp-sr-only") &&
-                (b.height < 43.5 || b.width < 43.5)
-              );
-            })
-            .map((e) => `${e.className} ${e.textContent?.trim().slice(0, 20)}`),
-        );
-        await page.close();
-        return hits.map((f) => `${path}: ${f}`);
-      }),
+      Array.from({ length: PHONE_LANES }, (_, lane) => walkLane(lane)),
     );
-    for (const hits of found) small.push(...hits);
+    const small = found.flat();
     assert.deepEqual(small, [], "controls under 44 px on a phone");
     await context.close();
   } finally {

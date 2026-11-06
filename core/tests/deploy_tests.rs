@@ -979,7 +979,13 @@ async fn a_native_only_container_is_never_given_docker() {
     }
     // And no weekly prune timer for a docker that is not there. CT 109 and
     // CT 112 have been failing that unit every week.
-    assert!(exec.calls_containing("docker-prune").is_empty());
+    // Only the step that removes what an older release left may name it.
+    let prune: Vec<_> = exec
+        .calls_containing("docker-prune")
+        .into_iter()
+        .filter(|c| !c.contains(homelab_core::ops::guards::PRUNE_RETIRE))
+        .collect();
+    assert!(prune.is_empty(), "{prune:?}");
     assert!(exec.calls_containing("/etc/docker/daemon.json").is_empty());
 }
 

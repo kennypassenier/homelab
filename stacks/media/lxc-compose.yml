@@ -196,6 +196,12 @@ firewall:
       proto: tcp
       dport: "22,8096,8989,7878,6767,9696,5055"
       note: Kenny's desktop (ssh and the web ports the dashboard tiles link to)
+    - dir: in
+      action: ACCEPT
+      source: 10.10.10.1
+      proto: tcp
+      dport: "8096"
+      note: Jellyfin for the Tailscale televisions, source-NATed by OPNsense; its rule Tailscale_TVs decides who
 
 # replace-homepage (Kenny, 2026-09-30): this stack's tiles on the dashboard's
 # start page, keyed by the hostname they open (or an id with `url:`). Moved

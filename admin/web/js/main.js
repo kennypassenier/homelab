@@ -315,6 +315,12 @@ function render() {
   // and every part is detached there, where nothing is laid out.
   const leaving = document.createDocumentFragment();
   leaving.append(...page.childNodes);
+  // settings-leave-hang-1 (kp-gaps/homelab.md item 98): a link-anchor box the
+  // kit's own boot attached has no owner to detach it, and on a box out of the
+  // document its scan adds and removes every mark for ever (tab frozen, 2.8 GB
+  // in 15 s, leaving Settings after loading it by address). "off" ends the scan.
+  for (const box of leaving.querySelectorAll("[data-kp-anchors]"))
+    box.setAttribute("data-kp-anchors", "off");
   cleanup();
   cleanup = () => {};
   leaving.replaceChildren();

@@ -86,16 +86,16 @@ function pageState({ selector }) {
  * @returns {Promise<string[]>}
  */
 export async function smallControlsOnceSettled(page, inFlight, selector) {
-  const deadline = Date.now() + SETTLE_MS;
+  const deadline = performance.now() + SETTLE_MS;
   /** @type {number | null} */
   let quietSince = null;
   for (;;) {
     const s = await page.evaluate(pageState, { selector });
     const still = s.drawn > 0 && !s.busy && !s.moving && inFlight.size === 0;
-    quietSince = still ? (quietSince ?? Date.now()) : null;
-    if (quietSince !== null && Date.now() - quietSince >= QUIET_MS)
+    quietSince = still ? (quietSince ?? performance.now()) : null;
+    if (quietSince !== null && performance.now() - quietSince >= QUIET_MS)
       return s.small;
-    if (Date.now() > deadline)
+    if (performance.now() > deadline)
       throw new Error(
         `${new URL(page.url()).pathname} did not settle in ${SETTLE_MS} ms: ${s.drawn} controls, ${s.busy} busy on screen, ${s.moving} resizing, ${inFlight.size} requests in flight`,
       );

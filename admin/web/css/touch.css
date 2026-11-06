@@ -92,6 +92,12 @@
   body .kp-anchor {
     margin-inline: calc(0.4em - 0.75rem) -0.75rem;
   }
+  /* A table drawn as cards lets its cells' text wrap down to nothing (app.css,
+     `min-inline-size: 0` on every link in a cell). A link drawn as a button is
+     still a target: the Firewall's Edit measured 42.3 px wide without this. */
+  body .kp-datatable[data-kp-cards] .kp-table td a.kp-button {
+    min-inline-size: var(--kp-touch-min);
+  }
   /* Controls that stand in a list or a header take the room (a row is a
      row: neighbours must not share a hit area). */
   body .kp-contents__link,
